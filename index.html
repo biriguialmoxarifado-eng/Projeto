@@ -15,11 +15,20 @@
  * Único lugar do projeto onde o endereço do Core aparece.
  * Nenhum módulo deve repetir este endereço.
  * ============================================================ */
+/* ============================================================
+ * CONFIGURAÇÃO CENTRAL DA API
+ * Único lugar do projeto onde o endereço do Core aparece.
+ * Nenhum módulo deve repetir este endereço.
+ * ============================================================ */
 var ALMOXA_CONFIG = {
     API_URL: "https://script.google.com/macros/s/AKfycbwWahYJywIsbRGc3t8taMWTXNgLd_1JtFJ93VmGNfAA-bXcgMlUoW6OZszZWEWMULA1/exec",
     API_CHAVE: ""
 };
 
+var PONTE = {
+    url: ALMOXA_CONFIG.API_URL,
+    chave: ALMOXA_CONFIG.API_CHAVE
+};
 :root{
   --azul-principal:#0B2A55;
   --azul-profundo:#061A36;
