@@ -1,0 +1,2376 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ALMOXA PRO · Central de Biometria</title>
+<style>
+:root{
+  --navy:#0B2A55; --navy2:#14243D; --azul:#0B5FFF; --azul-claro:#EAF2FF;
+  --laranja:#FF7A00; --verde:#1B7F4C; --verde-claro:#E9F7EF;
+  --vermelho:#C42B1C; --vermelho-claro:#FDECEA; --amarelo:#B8860B; --amarelo-claro:#FFF6E5;
+  --fundo:#F4F7FB; --card:#fff; --linha:#E3E9F2;
+  --t1:#0B2A55; --t2:#3D4B5F; --t3:#8A94A6;
+  --r:14px; --sombra:0 2px 14px rgba(11,42,85,.07);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  background:var(--fundo);color:var(--t1);-webkit-font-smoothing:antialiased;font-size:14px}
+button{font-family:inherit}
+
+/* ---------- topo ---------- */
+.topo{background:linear-gradient(110deg,var(--navy),var(--navy2));color:#fff;
+  padding:14px 22px;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.marca{display:flex;align-items:center;gap:12px}
+.logo{width:44px;height:44px;border-radius:12px;background:var(--laranja);display:grid;
+  place-items:center;font-weight:800;font-size:20px;flex:none}
+.marca h1{margin:0;font-size:16px;letter-spacing:.3px}
+.marca h1 span{color:var(--laranja)}
+.marca p{margin:1px 0 0;font-size:10.5px;color:#8FA6C4;letter-spacing:.6px}
+.tit-central{border-left:1px solid rgba(255,255,255,.18);padding-left:18px}
+.tit-central b{display:block;font-size:17px}
+.tit-central span{font-size:11.5px;color:#8FA6C4}
+.topo-dir{margin-left:auto;display:flex;align-items:center;gap:12px}
+.chip-core{display:flex;align-items:center;gap:9px;background:rgba(255,255,255,.1);
+  padding:8px 14px;border-radius:24px;font-size:12px}
+.chip-core.on{background:#12603A}
+.chip-core.off{background:#7A241A}
+.pt{width:9px;height:9px;border-radius:50%;background:#8A94A6}
+.pt.on{background:#38D07A;box-shadow:0 0 0 3px rgba(56,208,122,.25)}
+.pt.off{background:#FF6B5A}
+.chip-core b{display:block;font-size:12.5px}
+.chip-core small{font-size:10px;opacity:.75}
+.av-topo{width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.15);
+  display:grid;place-items:center;font-weight:800;font-size:13px}
+
+/* ---------- corpo ---------- */
+.corpo{display:grid;grid-template-columns:250px 1fr 320px;gap:16px;padding:16px;
+  max-width:1560px;margin:0 auto;align-items:start}
+@media(max-width:1200px){.corpo{grid-template-columns:220px 1fr}.col-dir{grid-column:1/-1}}
+@media(max-width:860px){.corpo{grid-template-columns:1fr}.menu{display:flex;overflow-x:auto;gap:8px}
+  .menu .mi{flex:none;min-width:150px}}
+
+.card{background:var(--card);border:1px solid var(--linha);border-radius:var(--r);
+  box-shadow:var(--sombra);padding:18px;margin-bottom:16px}
+.card h2{margin:0 0 3px;font-size:17px;display:flex;align-items:center;gap:9px}
+.card .sub{margin:0 0 16px;font-size:12.5px;color:var(--t3)}
+.ic-tit{width:34px;height:34px;border-radius:10px;background:var(--azul-claro);color:var(--azul);
+  display:grid;place-items:center;flex:none}
+.ic-tit svg{width:19px;height:19px}
+
+/* ---------- menu ---------- */
+.menu{background:var(--card);border:1px solid var(--linha);border-radius:var(--r);
+  padding:8px;box-shadow:var(--sombra)}
+.mi{width:100%;display:flex;align-items:center;gap:11px;padding:11px 12px;border:0;
+  background:none;border-radius:10px;cursor:pointer;text-align:left;color:var(--t2);margin-bottom:2px}
+.mi:hover{background:var(--fundo)}
+.mi.on{background:var(--azul);color:#fff}
+.mi .mic{width:32px;height:32px;border-radius:9px;background:var(--fundo);display:grid;
+  place-items:center;flex:none;color:var(--azul)}
+.mi.on .mic{background:rgba(255,255,255,.18);color:#fff}
+.mi .mic svg{width:17px;height:17px}
+.mi b{display:block;font-size:13.5px}
+.mi span{display:block;font-size:10.5px;opacity:.72}
+
+.aviso-menu{background:var(--card);border:1px solid var(--linha);border-radius:var(--r);
+  padding:16px;box-shadow:var(--sombra);margin-top:16px}
+.aviso-menu b{display:flex;align-items:center;gap:9px;font-size:13.5px;margin-bottom:7px}
+.aviso-menu p{margin:0;font-size:11.5px;color:var(--t3);line-height:1.55}
+.faixa-sync{background:var(--azul-claro);color:#123A82;border-radius:10px;padding:10px 12px;
+  font-size:11px;margin-top:12px;display:flex;gap:8px;align-items:center}
+
+/* ---------- câmera ---------- */
+.grade-auth{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:960px){.grade-auth{grid-template-columns:1fr}}
+.palco{position:relative;background:linear-gradient(160deg,#C8D3E2,#9FB0C6);border-radius:12px;
+  aspect-ratio:4/3;overflow:hidden;display:grid;place-items:center}
+.palco video,.palco img{width:100%;height:100%;object-fit:cover;display:block}
+.silhueta{width:120px;height:120px;color:rgba(255,255,255,.5)}
+.mira{position:absolute;inset:16% 22%;pointer-events:none}
+.mira i{position:absolute;width:32px;height:32px;border:3px solid var(--azul)}
+.mira i:nth-child(1){top:0;left:0;border-right:0;border-bottom:0;border-radius:8px 0 0 0}
+.mira i:nth-child(2){top:0;right:0;border-left:0;border-bottom:0;border-radius:0 8px 0 0}
+.mira i:nth-child(3){bottom:0;left:0;border-right:0;border-top:0;border-radius:0 0 0 8px}
+.mira i:nth-child(4){bottom:0;right:0;border-left:0;border-top:0;border-radius:0 0 8px 0}
+.faixa-palco{position:absolute;left:14px;bottom:14px;right:14px;background:rgba(11,42,85,.78);
+  color:#fff;border-radius:10px;padding:10px 13px;display:flex;gap:10px;align-items:center;font-size:12px}
+.faixa-palco b{display:block;font-size:13px}
+.faixa-palco svg{width:20px;height:20px;flex:none}
+
+.btn{padding:13px 16px;border:0;border-radius:11px;font-size:14.5px;font-weight:700;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;gap:9px;transition:filter .15s}
+.btn:hover{filter:brightness(.95)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn svg{width:18px;height:18px}
+.btn-p{background:var(--azul);color:#fff}
+.btn-l{background:var(--laranja);color:#fff}
+.btn-v{background:var(--verde);color:#fff}
+.btn-g{background:#fff;color:var(--t2);border:1px solid var(--linha)}
+.btn-bloco{width:100%;margin-top:12px}
+
+.luzes{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.luz{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--t2);
+  background:var(--fundo);border-radius:20px;padding:6px 12px}
+
+/* ---------- identidade ---------- */
+.painel-id{background:var(--fundo);border-radius:12px;padding:16px}
+.id-topo{display:flex;gap:13px;align-items:center;margin-bottom:14px}
+.id-av{width:56px;height:56px;border-radius:50%;background:#D5DEEA;display:grid;place-items:center;
+  color:var(--t3);flex:none;overflow:hidden}
+.id-av img{width:100%;height:100%;object-fit:cover}
+.id-av svg{width:28px;height:28px}
+.id-topo b{display:block;font-size:14.5px}
+.id-topo span{font-size:11.5px;color:var(--t3);line-height:1.45}
+.id-linha{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--linha);
+  font-size:12.5px}
+.id-linha:last-of-type{border:0}
+.id-linha svg{width:16px;height:16px;color:var(--t3);flex:none}
+.id-linha .rot{color:var(--t2);flex:1}
+.id-linha .val{font-weight:700;text-align:right}
+
+/* ---------- finalidade ---------- */
+.fin{display:flex;align-items:center;gap:12px;padding:12px;border:1.5px solid var(--linha);
+  border-radius:12px;margin-bottom:9px;cursor:pointer;background:#fff;width:100%;text-align:left}
+.fin.on{border-color:var(--azul);background:var(--azul-claro)}
+.fin .fi{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;flex:none}
+.fin .fi svg{width:18px;height:18px}
+.fin b{display:block;font-size:13.5px;color:var(--t1)}
+.fin span{display:block;font-size:11px;color:var(--t3)}
+.fin .radio{width:19px;height:19px;border-radius:50%;border:2px solid var(--linha);flex:none}
+.fin.on .radio{border-color:var(--azul);background:var(--azul);box-shadow:inset 0 0 0 3.5px #fff}
+
+/* ---------- etapas ---------- */
+.etapas{display:flex;align-items:center;gap:6px;overflow-x:auto;padding:4px 0}
+.et{display:flex;align-items:center;gap:9px;flex:none}
+.et-n{width:28px;height:28px;border-radius:50%;background:var(--azul);color:#fff;display:grid;
+  place-items:center;font-size:12px;font-weight:800;flex:none}
+.et.espera .et-n{background:#C8D3E2}
+.et.feito .et-n{background:var(--verde)}
+.et-i{width:34px;height:34px;border-radius:10px;background:var(--fundo);display:grid;place-items:center;color:var(--t2)}
+.et-i svg{width:17px;height:17px}
+.et b{display:block;font-size:12.5px}
+.et span{display:block;font-size:10px;color:var(--t3)}
+.et-seta{color:#C8D3E2;flex:none}
+
+/* ---------- tabela ---------- */
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;padding:9px 10px;background:var(--fundo);color:var(--t2);font-size:10.5px;
+  letter-spacing:.5px;text-transform:uppercase}
+th:first-child{border-radius:8px 0 0 8px}th:last-child{border-radius:0 8px 8px 0}
+td{padding:11px 10px;border-bottom:1px solid var(--linha)}
+tr:last-child td{border:0}
+.tag{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}
+.t-ok{background:var(--verde-claro);color:#14603A}
+.t-no{background:#F1F4F8;color:var(--t3)}
+.t-er{background:var(--vermelho-claro);color:#8B241A}
+.t-at{background:var(--amarelo-claro);color:#7A5A00}
+.mini-ic{width:26px;height:26px;border-radius:7px;display:grid;place-items:center}
+.mini-ic svg{width:14px;height:14px}
+
+/* ---------- avisos ---------- */
+.aviso{border-radius:11px;padding:13px 15px;font-size:12.5px;line-height:1.55;margin-bottom:12px;
+  display:flex;gap:11px;align-items:flex-start}
+.aviso svg{width:19px;height:19px;flex:none;margin-top:1px}
+.aviso b{display:block;margin-bottom:3px;font-size:13px}
+.a-ok{background:var(--verde-claro);color:#14603A}
+.a-er{background:var(--vermelho-claro);color:#8B241A}
+.a-at{background:var(--amarelo-claro);color:#7A5A00}
+.a-in{background:var(--azul-claro);color:#123A82}
+
+/* ---------- formulários ---------- */
+label.lbl{display:block;font-size:11.5px;font-weight:700;color:var(--t2);margin-bottom:5px}
+input,select,textarea{width:100%;padding:11px 13px;border:1px solid var(--linha);border-radius:10px;
+  font-size:14px;font-family:inherit;background:#fff;color:var(--t1)}
+input:focus,select:focus{outline:none;border-color:var(--azul);box-shadow:0 0 0 3px rgba(11,95,255,.1)}
+.campo{margin-bottom:12px}
+.dupla{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:600px){.dupla{grid-template-columns:1fr}}
+
+/* ---------- botões de cadastro ---------- */
+.grade-cad{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+@media(max-width:600px){.grade-cad{grid-template-columns:1fr}}
+.bcad{display:flex;align-items:center;gap:11px;padding:14px;border:1px solid var(--linha);
+  border-radius:12px;background:#fff;cursor:pointer;text-align:left}
+.bcad:hover{border-color:var(--azul);background:var(--azul-claro)}
+.bcad .bi{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;flex:none}
+.bcad .bi svg{width:18px;height:18px}
+.bcad b{font-size:13px}
+.i-azul{background:var(--azul-claro);color:var(--azul)}
+.i-verde{background:var(--verde-claro);color:var(--verde)}
+.i-laranja{background:#FFF0E0;color:var(--laranja)}
+.i-roxo{background:#F0EBFF;color:#6B46C1}
+.i-verm{background:var(--vermelho-claro);color:var(--vermelho)}
+
+.anel{width:150px;height:150px;border-radius:50%;margin:0 auto 14px;display:grid;place-items:center;
+  border:3px dashed var(--linha);overflow:hidden;background:var(--fundo)}
+.anel svg{width:56px;height:56px;color:var(--azul)}
+.anel img,.anel video{width:100%;height:100%;object-fit:cover}
+.anel.lendo{border-style:solid;border-color:var(--azul);animation:pulsa 1.3s infinite}
+.anel.ok{border-style:solid;border-color:var(--verde);background:var(--verde-claro)}
+.anel.erro{border-style:solid;border-color:var(--vermelho);background:var(--vermelho-claro)}
+@keyframes pulsa{0%,100%{box-shadow:0 0 0 0 rgba(11,95,255,.3)}50%{box-shadow:0 0 0 16px rgba(11,95,255,0)}}
+
+.spin{width:15px;height:15px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;
+  border-radius:50%;animation:gira .7s linear infinite;display:inline-block}
+@keyframes gira{to{transform:rotate(360deg)}}
+.oculto{display:none!important}
+.rodape{text-align:center;font-size:11px;color:var(--t3);padding:18px}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+.pill{display:inline-block;font-size:10.5px;background:var(--fundo);color:var(--t2);
+  padding:3px 9px;border-radius:20px}
+pre.cru{background:var(--navy);color:#CFE0FF;padding:12px;border-radius:10px;font-size:11px;
+  overflow:auto;max-height:220px;margin:0}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--navy);
+  color:#fff;padding:13px 18px;border-radius:12px;font-size:13px;box-shadow:0 8px 30px rgba(11,42,85,.3);
+  z-index:90;display:flex;gap:10px;align-items:center;max-width:90vw}
+.toast.ok{background:var(--verde)}.toast.er{background:var(--vermelho)}
+.jan{position:fixed;inset:0;background:rgba(11,42,85,.45);z-index:100;display:grid;place-items:center;padding:18px}
+.jan-c{background:#fff;border-radius:16px;max-width:480px;width:100%;max-height:88vh;overflow:auto;padding:22px}
+.jan-c h3{margin:0 0 14px;font-size:18px}
+</style>
+</head>
+<body>
+
+<div class="topo">
+  <div class="marca">
+    <div class="logo">A</div>
+    <div><h1>ALMOXA <span>PRO</span></h1><p>GESTÃO INTELIGENTE PARA OBRAS</p></div>
+  </div>
+  <div class="tit-central">
+    <b>Central de Biometria</b>
+    <span>Módulo de Autenticação · Identidade única para todo o sistema</span>
+  </div>
+  <div class="topo-dir">
+    <div class="chip-core" id="chipCore">
+      <span class="pt" id="ptCore"></span>
+      <div><b id="txtCore">Verificando…</b><small id="subCore">conectando ao Core</small></div>
+    </div>
+    <div class="av-topo" id="avOperador">—</div>
+  </div>
+</div>
+
+<div class="corpo">
+
+  <!-- ================= MENU ================= -->
+  <div>
+    <div class="menu" id="menu"></div>
+
+    <div class="aviso-menu">
+      <b><span style="color:var(--azul)" id="icCel"></span> Mesma identidade no celular e no computador</b>
+      <p>O colaborador usa a mesma biometria e as mesmas credenciais em todas as
+      telas do ALMOXA PRO.</p>
+      <div class="faixa-sync"><span id="icSync"></span> Sincronização automática pelo Core</div>
+    </div>
+  </div>
+
+  <!-- ================= CENTRO ================= -->
+  <div id="centro"></div>
+
+  <!-- ================= DIREITA ================= -->
+  <div class="col-dir" id="direita"></div>
+
+</div>
+
+<p class="rodape">
+  A biometria identifica quem está operando. Quem autoriza a operação é o Core.
+</p>
+<script>
+/* ============================================================
+   ALMOXA PRO · CENTRAL DE BIOMETRIA
+   ------------------------------------------------------------
+   Módulo do ALMOXA PRO, não um sistema separado.
+
+     BIOMETRIA IDENTIFICA
+     CORE AUTORIZA
+     MÓDULO EXECUTA
+     AUDITORIA REGISTRA
+
+   Caminhos reaproveitados, nada inventado:
+     Core         biometria.daPessoa · biometria.registrar
+                  usuarios.listar · usuarios.salvar
+                  auth.login · auth.autorizar · auditoria.registrar
+     Ponte USB    http://127.0.0.1:8787
+                  /status /capturar /cadastrar /identificar
+   ============================================================ */
+
+var CFG = { url:'', sessao:null, operador:null, aba:'identidade',
+            finalidade:'RETIRADA', pessoa:null, camera:null };
+var CHAVE_URL = 'ALMOXA_CENTRAL_URL';
+
+var PONTE = { url:'http://127.0.0.1:8787', info:null, capturas:[] };
+
+/* ---------------- utilidades ---------------- */
+function $(id){ return document.getElementById(id); }
+function esc(t){ return String(t==null?'':t).replace(/[&<>"]/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function iniciais(n){ return String(n||'').trim().split(/\s+/).slice(0,2)
+  .map(function(p){return p.charAt(0).toUpperCase();}).join('') || '—'; }
+function agora(){ return new Date().toLocaleString('pt-BR'); }
+
+function listaSegura(v){
+  if(!v) return [];
+  if(Array.isArray(v)) return v;
+  if(typeof v==='object'){
+    if(v.ok===false) return [];
+    var ch=['lista','itens','dados','registros','credenciais','usuarios','eventos'];
+    for(var i=0;i<ch.length;i++) if(Array.isArray(v[ch[i]])) return v[ch[i]];
+    return [v];
+  }
+  return [];
+}
+
+var ICONES = {
+  usuario:'<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  facial:'<path d="M7 3H5a2 2 0 0 0-2 2v2M17 3h2a2 2 0 0 1 2 2v2M7 21H5a2 2 0 0 1-2-2v-2M17 21h2a2 2 0 0 0 2-2v-2"/><circle cx="12" cy="10" r="1.6"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/>',
+  digital:'<path d="M12 11v3M8 9a4 4 0 0 1 8 0v6M5 12a7 7 0 0 1 14 0v3M12 18v2"/>',
+  cadeado:'<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+  cracha:'<rect x="3" y="5" width="18" height="15" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M14 10h4M14 14h4M6 17h6"/>',
+  historico:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  camera:'<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>',
+  nuvem:'<path d="M18 10h-1.3A7 7 0 1 0 5 16h13a4 4 0 0 0 0-8z"/>',
+  escudo:'<path d="M12 2l8 4v6c0 5-3.4 9.4-8 10-4.6-.6-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/>',
+  doc:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/>',
+  check:'<path d="M20 6L9 17l-5-5"/>',
+  checkC:'<circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>',
+  alerta:'<path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+  info:'<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>',
+  dir:'<path d="M9 18l6-6-6-6"/>',
+  caixa:'<path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/>',
+  calendario:'<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  prancheta:'<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/>',
+  capacete:'<path d="M4 15a8 8 0 0 1 16 0v1H4z"/><path d="M3 18h18v2H3z"/><path d="M9 15V8a3 3 0 0 1 6 0v7"/>',
+  grade:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+  engrenagem:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  celular:'<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/>',
+  sync:'<path d="M21 2v6h-6M3 22v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.9-3.4L21 8M21 15a9 9 0 0 1-14.9 3.4L3 16"/>',
+  relogio:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  mais:'<path d="M12 5v14M5 12h14"/>',
+  imprimir:'<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>'
+};
+
+function ic(n, cls){
+  var d = ICONES[n] || ICONES.info;
+  return '<svg class="' + (cls||'') + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+    'stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>';
+}
+
+function toast(tipo, texto){
+  var t = document.createElement('div');
+  t.className = 'toast ' + (tipo||'');
+  t.innerHTML = ic(tipo==='er'?'alerta':'checkC') + '<span>' + esc(texto) + '</span>';
+  document.body.appendChild(t);
+  setTimeout(function(){ t.remove(); }, 3800);
+}
+
+function janela(titulo, corpo){
+  fecharJanela();
+  var j = document.createElement('div');
+  j.className = 'jan'; j.id = 'janAtual';
+  j.innerHTML = '<div class="jan-c"><h3>' + esc(titulo) + '</h3>' + corpo + '</div>';
+  j.onclick = function(e){ if(e.target===j) fecharJanela(); };
+  document.body.appendChild(j);
+  return j;
+}
+function fecharJanela(){ var j=$('janAtual'); if(j) j.remove(); }
+
+/* ---------------- conversa com o Core ---------------- */
+function API_call(modulo, acao, payload){
+  if(!CFG.url) return Promise.resolve({ ok:false, codigo:'SEM_URL',
+    mensagem:'Endereço do sistema não informado.' });
+
+  var corpo = { modulo:modulo, acao:acao, payload:payload||{}, origem:'CENTRAL_BIOMETRIA' };
+  if(CFG.sessao) corpo.sessao = CFG.sessao;
+
+  return fetch(CFG.url, {
+    method:'POST',
+    headers:{ 'Content-Type':'text/plain;charset=utf-8' },
+    body: JSON.stringify(corpo),
+    redirect:'follow'
+  }).then(function(r){ return r.text(); })
+    .then(function(t){
+      try { return JSON.parse(t); }
+      catch(e){ return { ok:false, codigo:'RESPOSTA_INVALIDA',
+        mensagem:'O sistema respondeu em formato inesperado.' }; }
+    })
+    .catch(function(e){
+      return { ok:false, codigo:'SEM_CONEXAO',
+        mensagem:'Não foi possível falar com o sistema: ' + e.message };
+    });
+}
+var API = { call: API_call };
+
+/** Tenta vários nomes de ação até um responder. */
+function chamarAlternativas(tentativas, payload){
+  var i=0, tentadas=[];
+  function proxima(){
+    if(i>=tentativas.length) return Promise.resolve({ ok:false,
+      codigo:'NENHUMA_ACAO', mensagem:'Nenhuma das ações existe no Core.', tentadas:tentadas });
+    var t = tentativas[i++];
+    tentadas.push(t[0]+'.'+t[1]);
+    return API.call(t[0], t[1], payload).then(function(r){
+      if(r && r.ok){ r.acaoUsada = t[0]+'.'+t[1]; return r; }
+      var c = String((r && (r.codigo||r.erro))||'');
+      if(/ACAO_DESCONHECIDA|MODULO_AUSENTE|NAO_ENCONTRAD|NOT_FOUND/i.test(c)) return proxima();
+      if(r) r.tentadas = tentadas;
+      return r;
+    });
+  }
+  return proxima();
+}
+
+/* ---------------- ponte do leitor ---------------- */
+function chamarPonte(metodo, caminho, corpo){
+  return fetch(PONTE.url + caminho, {
+    method: metodo,
+    headers: { 'Content-Type':'application/json' },
+    body: corpo ? JSON.stringify(corpo) : undefined
+  }).then(function(r){ return r.json(); })
+    .catch(function(){
+      return { ok:false, codigo:'PONTE_OFFLINE',
+               mensagem:'A ponte do leitor não está rodando neste computador.' };
+    });
+}
+function verificarPonte(){
+  return chamarPonte('GET','/status').then(function(r){ PONTE.info = r; return r; });
+}
+var DetectorLocal = (function () {
+  'use strict';
+
+  var LADO = 160;   /* trabalha reduzido, por velocidade */
+
+  function preparar(dataUrl) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      img.onload = function () {
+        var c = document.createElement('canvas');
+        c.width = LADO; c.height = LADO;
+        var ctx = c.getContext('2d', { willReadFrequently: true });
+        var corte = Math.min(img.width, img.height);
+        ctx.drawImage(img, (img.width - corte) / 2, (img.height - corte) / 2,
+                      corte, corte, 0, 0, LADO, LADO);
+        resolve(ctx.getImageData(0, 0, LADO, LADO));
+      };
+      img.onerror = function () { reject(new Error('imagem inválida')); };
+      img.src = dataUrl;
+    });
+  }
+
+  /** Faixa de tom de pele em YCbCr. Vale para pele clara e escura. */
+  function ehPele(r, g, b) {
+    var y  =  0.299 * r + 0.587 * g + 0.114 * b;
+    var cb = -0.169 * r - 0.331 * g + 0.500 * b + 128;
+    var cr =  0.500 * r - 0.419 * g - 0.081 * b + 128;
+    return y > 40 && y < 250 &&
+           cb > 77 && cb < 135 &&
+           cr > 133 && cr < 180;
+  }
+
+  /** Marca os pixels de pele e devolve o mapa. */
+  function mapaDePele(dados) {
+    var mapa = new Uint8Array(LADO * LADO);
+    var total = 0;
+    for (var i = 0, p = 0; i < dados.length; i += 4, p++) {
+      if (ehPele(dados[i], dados[i + 1], dados[i + 2])) { mapa[p] = 1; total++; }
+    }
+    return { mapa: mapa, proporcao: total / (LADO * LADO) };
+  }
+
+  /** Agrupa os pixels conectados e devolve a maior região. */
+  function maiorRegiao(mapa) {
+    var visto = new Uint8Array(LADO * LADO);
+    var melhor = null;
+    var fila = new Int32Array(LADO * LADO);
+
+    for (var inicio = 0; inicio < mapa.length; inicio++) {
+      if (!mapa[inicio] || visto[inicio]) continue;
+
+      var n = 0, fim = 0;
+      fila[fim++] = inicio;
+      visto[inicio] = 1;
+      var minX = LADO, maxX = 0, minY = LADO, maxY = 0;
+
+      while (n < fim) {
+        var k = fila[n++];
+        var x = k % LADO, y = (k / LADO) | 0;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+
+        var viz = [k - 1, k + 1, k - LADO, k + LADO];
+        for (var v = 0; v < 4; v++) {
+          var j = viz[v];
+          if (j < 0 || j >= mapa.length || visto[j] || !mapa[j]) continue;
+          /* não atravessa a borda lateral */
+          if ((v === 0 && x === 0) || (v === 1 && x === LADO - 1)) continue;
+          visto[j] = 1;
+          fila[fim++] = j;
+        }
+      }
+
+      if (!melhor || fim > melhor.pixels) {
+        melhor = { pixels: fim, minX: minX, maxX: maxX, minY: minY, maxY: maxY };
+      }
+    }
+    return melhor;
+  }
+
+  /**
+   * Procura duas manchas escuras lado a lado na metade de cima.
+   * É o que separa rosto de qualquer outra coisa cor de pele.
+   */
+  function acharOlhos(dados, reg) {
+    var larg = reg.maxX - reg.minX;
+    var alt = reg.maxY - reg.minY;
+    if (larg < 20 || alt < 20) return { achou: false, motivo: 'regiao_pequena' };
+
+    /* faixa dos olhos: entre 20% e 55% da altura do rosto */
+    var y0 = reg.minY + Math.floor(alt * 0.20);
+    var y1 = reg.minY + Math.floor(alt * 0.55);
+
+    /* brilho médio da faixa, para saber o que é "escuro" aqui */
+    var soma = 0, n = 0;
+    for (var y = y0; y < y1; y++) {
+      for (var x = reg.minX; x < reg.maxX; x++) {
+        var i = (y * LADO + x) * 4;
+        soma += 0.299 * dados[i] + 0.587 * dados[i + 1] + 0.114 * dados[i + 2];
+        n++;
+      }
+    }
+    if (!n) return { achou: false, motivo: 'faixa_vazia' };
+    var media = soma / n;
+    var limite = media * 0.72;
+
+    /* soma de pixels escuros por coluna */
+    var colunas = new Float32Array(larg);
+    for (var yy = y0; yy < y1; yy++) {
+      for (var xx = 0; xx < larg; xx++) {
+        var idx = (yy * LADO + (reg.minX + xx)) * 4;
+        var g = 0.299 * dados[idx] + 0.587 * dados[idx + 1] + 0.114 * dados[idx + 2];
+        if (g < limite) colunas[xx]++;
+      }
+    }
+
+    /* suaviza para não pegar ruído */
+    var suave = new Float32Array(larg);
+    for (var s = 0; s < larg; s++) {
+      var acc = 0, c = 0;
+      for (var d = -2; d <= 2; d++) {
+        var p = s + d;
+        if (p >= 0 && p < larg) { acc += colunas[p]; c++; }
+      }
+      suave[s] = acc / c;
+    }
+
+    /* dois picos, um em cada metade */
+    var meio = Math.floor(larg / 2);
+    var picoE = 0, posE = -1, picoD = 0, posD = -1;
+    for (var e = Math.floor(larg * 0.08); e < meio; e++) {
+      if (suave[e] > picoE) { picoE = suave[e]; posE = e; }
+    }
+    for (var dd = meio; dd < Math.floor(larg * 0.92); dd++) {
+      if (suave[dd] > picoD) { picoD = suave[dd]; posD = dd; }
+    }
+
+    if (posE < 0 || posD < 0) return { achou: false, motivo: 'sem_picos' };
+
+    var alturaFaixa = y1 - y0;
+    var minimoPico = alturaFaixa * 0.18;
+    if (picoE < minimoPico || picoD < minimoPico) {
+      return { achou: false, motivo: 'picos_fracos', picoE: picoE, picoD: picoD };
+    }
+
+    /* separação entre os olhos: entre 25% e 70% da largura */
+    var sep = (posD - posE) / larg;
+    if (sep < 0.22 || sep > 0.72) {
+      return { achou: false, motivo: 'separacao_errada', separacao: sep };
+    }
+
+    /* vale entre eles: o nariz é mais claro que os olhos */
+    var vale = Infinity;
+    for (var v2 = posE + 1; v2 < posD; v2++) if (suave[v2] < vale) vale = suave[v2];
+    if (vale > Math.min(picoE, picoD) * 0.75) {
+      return { achou: false, motivo: 'sem_vale' };
+    }
+
+    return {
+      achou: true,
+      separacao: Math.round(sep * 100),
+      forca: Math.round(Math.min(picoE, picoD) / alturaFaixa * 100),
+      olhoEsquerdo: reg.minX + posE,
+      olhoDireito: reg.minX + posD,
+      linhaOlhos: Math.round((y0 + y1) / 2)
+    };
+  }
+
+  /**
+   * Detecta rosto na imagem.
+   * @return Promise<{detectou, confianca, motivo, caixa, olhos}>
+   */
+  function detectar(dataUrl) {
+    return preparar(dataUrl).then(function (imageData) {
+      var dados = imageData.data;
+      var pele = mapaDePele(dados);
+
+      if (pele.proporcao < 0.06) {
+        return { detectou: false, confianca: 0, motivo: 'SEM_PELE',
+                 explicacao: 'Não há área com tom de pele suficiente na imagem.' };
+      }
+
+      var reg = maiorRegiao(pele.mapa);
+      if (!reg) {
+        return { detectou: false, confianca: 0, motivo: 'SEM_REGIAO',
+                 explicacao: 'Nenhuma região contínua de pele foi encontrada.' };
+      }
+
+      var larg = reg.maxX - reg.minX;
+      var alt = reg.maxY - reg.minY;
+      var area = (larg * alt) / (LADO * LADO);
+      var proporcao = larg / (alt || 1);
+
+      if (area < 0.05) {
+        return { detectou: false, confianca: 0, motivo: 'ROSTO_PEQUENO',
+                 explicacao: 'A área de pele é pequena demais. Aproxime o rosto.' };
+      }
+      if (proporcao < 0.55 || proporcao > 1.7) {
+        return { detectou: false, confianca: 0, motivo: 'FORMATO_ERRADO',
+                 explicacao: 'A região de pele não tem formato de rosto.',
+                 proporcao: Math.round(proporcao * 100) / 100 };
+      }
+
+      var olhos = acharOlhos(dados, reg);
+      if (!olhos.achou) {
+        return { detectou: false, confianca: 0, motivo: 'SEM_OLHOS',
+                 explicacao: 'Encontrei pele, mas não os olhos. ' +
+                   'Olhe para a câmera, sem óculos escuros e com o rosto de frente.',
+                 detalhe: olhos.motivo };
+      }
+
+      /* confiança: quanto cada indício contribuiu */
+      var conf = 40;
+      conf += Math.min(20, olhos.forca);
+      if (proporcao > 0.65 && proporcao < 1.3) conf += 15;
+      if (area > 0.12 && area < 0.75) conf += 15;
+      if (olhos.separacao > 28 && olhos.separacao < 60) conf += 10;
+      conf = Math.min(99, conf);
+
+      return {
+        detectou: true,
+        confianca: conf,
+        caixa: { x: reg.minX / LADO, y: reg.minY / LADO,
+                 largura: larg / LADO, altura: alt / LADO },
+        olhos: olhos,
+        area: Math.round(area * 100),
+        proporcao: Math.round(proporcao * 100) / 100
+      };
+    }).catch(function (e) {
+      return { detectou: false, confianca: 0, motivo: 'FALHA',
+               explicacao: String(e) };
+    });
+  }
+
+  return { detectar: detectar, ehPele: ehPele };
+})();
+
+
+
+
+function identificadorFacial(modelo, geo) {
+  if (!modelo || !modelo.length) return '';
+
+  /* quantiza o modelo em faixas grossas, para que pequenas
+     variações de luz não mudem o identificador */
+  var bits = '';
+  for (var i = 0; i < modelo.length; i += 4) {
+    var m = (modelo[i] + (modelo[i+1] || 0) + (modelo[i+2] || 0) + (modelo[i+3] || 0)) / 4;
+    bits += m > 0 ? '1' : '0';
+  }
+
+  /* junta com as medidas geométricas arredondadas */
+  var g = geo || {};
+  var chave = bits +
+    '|' + Math.round((g.separacaoOlhos || 0) / 5) * 5 +
+    '|' + Math.round((g.proporcaoRosto || 0) / 10) * 10;
+
+  /* resumo estável de 16 caracteres */
+  var h1 = 0, h2 = 0;
+  for (var k = 0; k < chave.length; k++) {
+    var c = chave.charCodeAt(k);
+    h1 = ((h1 << 5) - h1 + c) | 0;
+    h2 = ((h2 << 7) - h2 + c * 31) | 0;
+  }
+  function hex(n) { return ('00000000' + (n >>> 0).toString(16)).slice(-8); }
+  return 'FACE-' + hex(h1) + hex(h2);
+}
+
+
+var ProvaDeVida = (function () {
+  'use strict';
+
+  var DESAFIOS = [
+    { id:'PISCAR',         texto:'Pisque os olhos',              icone:'facial' },
+    { id:'VIRAR_DIREITA',  texto:'Vire o rosto para a direita',  icone:'dir' },
+    { id:'VIRAR_ESQUERDA', texto:'Vire o rosto para a esquerda', icone:'esq' },
+    { id:'APROXIMAR',      texto:'Aproxime o rosto da câmera',   icone:'mais' }
+  ];
+
+  /** Sorteia dois desafios diferentes, para não virar decoreba. */
+  function sortear() {
+    var copia = DESAFIOS.slice();
+    var saida = [];
+    for (var i = 0; i < 2 && copia.length; i++) {
+      saida.push(copia.splice(Math.floor(Math.random() * copia.length), 1)[0]);
+    }
+    return saida;
+  }
+
+  /** Mede o que interessa num quadro: posição, tamanho e olhos. */
+  function medirQuadro(video) {
+    var c = document.createElement('canvas');
+    var L = 120;
+    c.width = L; c.height = L;
+    var ctx = c.getContext('2d', { willReadFrequently: true });
+    var vw = video.videoWidth || 480, vh = video.videoHeight || 480;
+    var corte = Math.min(vw, vh);
+    ctx.drawImage(video, (vw - corte) / 2, (vh - corte) / 2, corte, corte, 0, 0, L, L);
+
+    var d = ctx.getImageData(0, 0, L, L).data;
+    var somaX = 0, somaY = 0, n = 0;
+    var minY = L, maxY = 0;
+
+    for (var y = 0; y < L; y += 2) {
+      for (var x = 0; x < L; x += 2) {
+        var i = (y * L + x) * 4;
+        if (DetectorLocal.ehPele(d[i], d[i + 1], d[i + 2])) {
+          somaX += x; somaY += y; n++;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    if (!n) return null;
+
+    var cx = somaX / n / L;
+    var cy = somaY / n / L;
+    var area = n / ((L / 2) * (L / 2));
+
+    /* brilho da faixa dos olhos: cai quando a pessoa pisca */
+    var alt = maxY - minY;
+    var y0 = Math.max(0, Math.floor(minY + alt * 0.22));
+    var y1 = Math.min(L, Math.floor(minY + alt * 0.48));
+    var esc = 0, tot = 0;
+    for (var yy = y0; yy < y1; yy++) {
+      for (var xx = Math.floor(L * 0.25); xx < Math.floor(L * 0.75); xx++) {
+        var k = (yy * L + xx) * 4;
+        var g = 0.299 * d[k] + 0.587 * d[k + 1] + 0.114 * d[k + 2];
+        if (g < 90) esc++;
+        tot++;
+      }
+    }
+
+    return {
+      centroX: cx, centroY: cy, area: area,
+      escurosOlhos: tot ? esc / tot : 0,
+      ts: Date.now()
+    };
+  }
+
+  /** Verifica se o desafio foi cumprido, olhando a série de medidas. */
+  function verificar(desafio, serie) {
+    var s = serie.filter(function (m) { return m; });
+    if (s.length < 8) {
+      return { ok: false, motivo: 'POUCOS_QUADROS',
+               texto: 'Não consegui ler quadros suficientes. Fique de frente para a câmera.' };
+    }
+
+    var xs = s.map(function (m) { return m.centroX; });
+    var areas = s.map(function (m) { return m.area; });
+    var olhos = s.map(function (m) { return m.escurosOlhos; });
+
+    function amplitude(a) { return Math.max.apply(null, a) - Math.min.apply(null, a); }
+
+    if (desafio === 'PISCAR') {
+      /* piscar faz a região dos olhos clarear e voltar a escurecer */
+      var varOlhos = amplitude(olhos);
+      var base = olhos[0];
+      var caiu = olhos.some(function (v) { return v < base * 0.62; });
+      if (varOlhos > 0.10 && caiu) {
+        return { ok: true, medida: Math.round(varOlhos * 100) };
+      }
+      return { ok: false, motivo: 'SEM_PISCADA',
+               texto: 'Não vi a piscada. Olhe para a câmera e pisque com mais firmeza.',
+               medida: Math.round(varOlhos * 100) };
+    }
+
+    if (desafio === 'VIRAR_DIREITA' || desafio === 'VIRAR_ESQUERDA') {
+      var desloc = xs[xs.length - 1] - xs[0];
+      var amp = amplitude(xs);
+      var esperado = desafio === 'VIRAR_DIREITA' ? 1 : -1;
+      /* a imagem é espelhada: virar para a direita move o centro para a esquerda */
+      var certo = (desloc * esperado) < -0.05;
+      if (amp > 0.06 && certo) {
+        return { ok: true, medida: Math.round(amp * 100) };
+      }
+      if (amp > 0.06 && !certo) {
+        return { ok: false, motivo: 'LADO_ERRADO',
+                 texto: 'Você virou para o outro lado.', medida: Math.round(amp * 100) };
+      }
+      return { ok: false, motivo: 'SEM_MOVIMENTO',
+               texto: 'Não vi o rosto virar. Gire a cabeça, sem sair do quadro.',
+               medida: Math.round(amp * 100) };
+    }
+
+    if (desafio === 'APROXIMAR') {
+      var cresceu = (areas[areas.length - 1] - areas[0]) / (areas[0] || 1);
+      if (cresceu > 0.18) return { ok: true, medida: Math.round(cresceu * 100) };
+      return { ok: false, motivo: 'SEM_APROXIMACAO',
+               texto: 'O rosto não chegou mais perto da câmera.',
+               medida: Math.round(cresceu * 100) };
+    }
+
+    return { ok: false, motivo: 'DESAFIO_DESCONHECIDO', texto: 'Desafio não reconhecido.' };
+  }
+
+  return { DESAFIOS:DESAFIOS, sortear:sortear, medirQuadro:medirQuadro, verificar:verificar };
+})();
+
+
+
+var ReconhecimentoFacial = (function () {
+  'use strict';
+
+  var LADO = 96;    /* rosto normalizado */
+
+  /** Recorta e alinha o rosto pelos olhos. */
+  function normalizar(dataUrl, deteccao) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      img.onload = function () {
+        var c = document.createElement('canvas');
+        c.width = LADO; c.height = LADO;
+        var ctx = c.getContext('2d', { willReadFrequently: true });
+
+        var corte = Math.min(img.width, img.height);
+        var offX = (img.width - corte) / 2;
+        var offY = (img.height - corte) / 2;
+
+        /* posição dos olhos em fração da imagem quadrada */
+        var o = deteccao.olhos;
+        var escalaDet = 160;   /* o detector trabalha em 160 */
+        var ex = (o.olhoEsquerdo / escalaDet);
+        var dx = (o.olhoDireito / escalaDet);
+        var ey = (o.linhaOlhos / escalaDet);
+
+        var meioOlhos = (ex + dx) / 2;
+        var distOlhos = Math.abs(dx - ex);
+        if (distOlhos < 0.05) { reject(new Error('olhos muito próximos')); return; }
+
+        /* queremos os olhos ocupando 40% da largura, na altura 38% */
+        var escala = 0.40 / distOlhos;
+        var largura = corte * escala;
+        var px = offX + (meioOlhos * corte) - (largura / 2);
+        var py = offY + (ey * corte) - (largura * 0.38);
+
+        ctx.fillStyle = '#808080';
+        ctx.fillRect(0, 0, LADO, LADO);
+        ctx.drawImage(img, px, py, largura, largura, 0, 0, LADO, LADO);
+
+        resolve(ctx.getImageData(0, 0, LADO, LADO));
+      };
+      img.onerror = function () { reject(new Error('imagem inválida')); };
+      img.src = dataUrl;
+    });
+  }
+
+  /** Equaliza o histograma: tira o efeito da iluminação. */
+  function equalizar(cinza) {
+    var hist = new Uint32Array(256);
+    for (var i = 0; i < cinza.length; i++) hist[cinza[i] | 0]++;
+
+    var acum = new Uint32Array(256);
+    var soma = 0;
+    for (var h = 0; h < 256; h++) { soma += hist[h]; acum[h] = soma; }
+
+    var total = cinza.length;
+    var saida = new Float32Array(cinza.length);
+    for (var p = 0; p < cinza.length; p++) {
+      saida[p] = (acum[cinza[p] | 0] / total) * 255;
+    }
+    return saida;
+  }
+
+  /** Extrai o modelo do rosto: 256 valores mais as medidas. */
+  function extrair(imageData, deteccao) {
+    var d = imageData.data;
+    var cinza = new Float32Array(LADO * LADO);
+    for (var i = 0, p = 0; i < d.length; i += 4, p++) {
+      cinza[p] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    }
+    var eq = equalizar(cinza);
+
+    /* modelo: média de blocos 6x6 = 256 valores */
+    var n = 16, passo = LADO / n;
+    var modelo = new Float32Array(n * n);
+    for (var by = 0; by < n; by++) {
+      for (var bx = 0; bx < n; bx++) {
+        var s = 0, c = 0;
+        for (var y = by * passo; y < (by + 1) * passo; y++) {
+          for (var x = bx * passo; x < (bx + 1) * passo; x++) {
+            s += eq[(y | 0) * LADO + (x | 0)]; c++;
+          }
+        }
+        modelo[by * n + bx] = c ? s / c : 0;
+      }
+    }
+
+    /* normaliza para média zero e desvio um: tira brilho e contraste */
+    var media = 0;
+    for (var m = 0; m < modelo.length; m++) media += modelo[m];
+    media /= modelo.length;
+    var desv = 0;
+    for (var v = 0; v < modelo.length; v++) desv += (modelo[v] - media) * (modelo[v] - media);
+    desv = Math.sqrt(desv / modelo.length) || 1;
+    for (var w = 0; w < modelo.length; w++) modelo[w] = (modelo[w] - media) / desv;
+
+    /* medidas geométricas, que independem de luz */
+    var o = deteccao.olhos || {};
+    var geo = {
+      separacaoOlhos: o.separacao || 0,
+      proporcaoRosto: Math.round((deteccao.proporcao || 1) * 100),
+      area: deteccao.area || 0
+    };
+
+    return { modelo: Array.prototype.slice.call(modelo), geo: geo };
+  }
+
+  /**
+   * Gera o modelo do rosto a partir da foto.
+   * @return Promise<{ok, modelo, geo} | {ok:false, motivo}>
+   */
+  function modelar(dataUrl) {
+    return DetectorLocal.detectar(dataUrl).then(function (det) {
+      if (!det.detectou) {
+        return { ok: false, motivo: det.motivo || 'SEM_ROSTO',
+                 texto: det.explicacao || 'Nenhum rosto encontrado.' };
+      }
+      return normalizar(dataUrl, det)
+        .then(function (img) {
+          var e = extrair(img, det);
+          return { ok: true, modelo: e.modelo, geo: e.geo, confiancaDeteccao: det.confianca };
+        })
+        .catch(function (err) {
+          return { ok: false, motivo: 'FALHA_ALINHAMENTO', texto: String(err.message || err) };
+        });
+    });
+  }
+
+  /** Distância entre dois modelos. Menor é mais parecido. */
+  function distancia(a, b) {
+    if (!a || !b || a.length !== b.length) return 999;
+    var s = 0;
+    for (var i = 0; i < a.length; i++) {
+      var d = a[i] - b[i];
+      s += d * d;
+    }
+    return Math.sqrt(s / a.length);
+  }
+
+  /**
+   * Compara com uma lista de cadastrados.
+   * @param cadastrados [{matricula, nome, modelo, geo}]
+   */
+  function comparar(modeloAtual, geoAtual, cadastrados) {
+    var resultados = listaSegura(cadastrados).map(function (c) {
+      var dist = distancia(modeloAtual, c.modelo);
+
+      /* penaliza quando a geometria é muito diferente */
+      var penal = 0;
+      if (c.geo && geoAtual) {
+        var ds = Math.abs((c.geo.separacaoOlhos || 0) - (geoAtual.separacaoOlhos || 0));
+        var dp = Math.abs((c.geo.proporcaoRosto || 0) - (geoAtual.proporcaoRosto || 0));
+        penal = (ds / 100) * 0.4 + (dp / 100) * 0.3;
+      }
+
+      var total = dist + penal;
+      return {
+        matricula: c.matricula, nome: c.nome,
+        distancia: Math.round(total * 1000) / 1000,
+        semelhanca: Math.max(0, Math.round((1 - total / 1.4) * 100))
+      };
+    }).sort(function (x, y) { return x.distancia - y.distancia; });
+
+    if (!resultados.length) {
+      return { reconheceu: false, motivo: 'SEM_CADASTRO',
+               texto: 'Nenhum rosto cadastrado para comparar.' };
+    }
+
+    var melhor = resultados[0];
+    var segundo = resultados[1];
+
+    /* limiar: abaixo disto é a mesma pessoa */
+    var LIMIAR = 0.62;
+    /* e precisa estar claramente à frente do segundo colocado */
+    var margem = segundo ? (segundo.distancia - melhor.distancia) : 1;
+
+    if (melhor.distancia > LIMIAR) {
+      return { reconheceu: false, motivo: 'NAO_RECONHECIDO',
+               texto: 'Nenhum cadastro se parece o suficiente.',
+               maisProximo: melhor, todos: resultados.slice(0, 3) };
+    }
+    if (segundo && margem < 0.08) {
+      return { reconheceu: false, motivo: 'AMBIGUO',
+               texto: 'Dois cadastros ficaram parecidos demais: ' +
+                      melhor.nome + ' e ' + segundo.nome + '.',
+               maisProximo: melhor, todos: resultados.slice(0, 3) };
+    }
+
+    return { reconheceu: true, identidade: melhor,
+             semelhanca: melhor.semelhanca, margem: Math.round(margem * 1000) / 1000,
+             todos: resultados.slice(0, 3) };
+  }
+
+  return { modelar:modelar, comparar:comparar, distancia:distancia, LADO:LADO };
+})();
+
+/* ============================================================
+   MENU E NAVEGAÇÃO
+   ============================================================ */
+var ABAS = [
+  { id:'identidade', icone:'usuario',   titulo:'Identidade', sub:'Autenticar operação' },
+  { id:'facial',     icone:'facial',    titulo:'Facial',     sub:'Cadastro e reconhecimento' },
+  { id:'digital',    icone:'digital',   titulo:'Digital',    sub:'Leitor biométrico' },
+  { id:'senha',      icone:'cadeado',   titulo:'Senha / PIN', sub:'Definir e gerenciar' },
+  { id:'cracha',     icone:'cracha',    titulo:'Crachá / QR Code', sub:'Vincular credencial' },
+  { id:'colaborador',icone:'doc',       titulo:'Colaborador', sub:'Cadastro e ficha' },
+  { id:'auditoria',  icone:'historico', titulo:'Auditoria',  sub:'Histórico de autenticações' },
+  { id:'diagnostico',icone:'engrenagem',titulo:'Diagnóstico', sub:'Situação dos módulos' }
+];
+
+function pintarMenu(){
+  $('menu').innerHTML = ABAS.map(function(a){
+    return '<button class="mi' + (CFG.aba===a.id?' on':'') + '" data-aba="' + a.id + '">' +
+      '<span class="mic">' + ic(a.icone) + '</span>' +
+      '<span><b>' + a.titulo + '</b><span>' + a.sub + '</span></span></button>';
+  }).join('');
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-aba]'), function(b){
+    b.onclick = function(){ irPara(b.getAttribute('data-aba')); };
+  });
+}
+
+function irPara(aba){
+  pararCamera();
+  CFG.aba = aba;
+  pintarMenu();
+  var t = TELAS[aba];
+  if(t){ $('centro').innerHTML = t.centro(); $('direita').innerHTML = t.direita?t.direita():''; 
+         if(t.ligar) t.ligar(); }
+  window.scrollTo(0,0);
+}
+
+function pararCamera(){
+  if(CFG.camera){ CFG.camera.getTracks().forEach(function(t){t.stop();}); CFG.camera = null; }
+}
+
+/* ============================================================
+   FINALIDADES
+   ============================================================ */
+var FINALIDADES = [
+  { id:'RETIRADA',   icone:'caixa',      cor:'i-laranja', titulo:'Retirada / Baixa',  sub:'Liberação de materiais' },
+  { id:'RESERVA',    icone:'calendario', cor:'i-azul',    titulo:'Reserva',           sub:'Confirmação de reservas' },
+  { id:'APROVACAO',  icone:'checkC',     cor:'i-verde',   titulo:'Aprovação',         sub:'Autorizar solicitações' },
+  { id:'INVENTARIO', icone:'prancheta',  cor:'i-azul',    titulo:'Inventário',        sub:'Contagem e conferência' },
+  { id:'EPI',        icone:'capacete',   cor:'i-laranja', titulo:'EPI / Ferramentas', sub:'Retirada e devolução' },
+  { id:'OUTRAS',     icone:'grade',      cor:'i-roxo',    titulo:'Outras operações',  sub:'Utilização geral' }
+];
+
+function painelFinalidade(){
+  return '<div class="card">' +
+    '<h2><span class="ic-tit">' + ic('escudo') + '</span>Finalidade da autenticação</h2>' +
+    '<p class="sub">Selecione para qual operação será realizada a autenticação.</p>' +
+    FINALIDADES.map(function(f){
+      return '<button class="fin' + (CFG.finalidade===f.id?' on':'') + '" data-fin="' + f.id + '">' +
+        '<span class="fi ' + f.cor + '">' + ic(f.icone) + '</span>' +
+        '<span style="flex:1"><b>' + f.titulo + '</b><span>' + f.sub + '</span></span>' +
+        '<span class="radio"></span></button>';
+    }).join('') + '</div>';
+}
+
+function ligarFinalidade(){
+  Array.prototype.forEach.call(document.querySelectorAll('[data-fin]'), function(b){
+    b.onclick = function(){
+      CFG.finalidade = b.getAttribute('data-fin');
+      Array.prototype.forEach.call(document.querySelectorAll('[data-fin]'), function(o){
+        o.classList.toggle('on', o===b);
+      });
+    };
+  });
+}
+
+/* ============================================================
+   ETAPAS
+   ============================================================ */
+function barraEtapas(atual){
+  var e = [
+    { n:1, i:'camera',  t:'Capturar',   s:'Coletar a biometria' },
+    { n:2, i:'engrenagem', t:'Reconhecer', s:'Motor biométrico' },
+    { n:3, i:'nuvem',   t:'CORE',       s:'Validar identidade' },
+    { n:4, i:'escudo',  t:'Autorizar',  s:'Verificar permissões' },
+    { n:5, i:'doc',     t:'Registrar',  s:'Gravar no histórico' }
+  ];
+  return '<div class="card"><div class="etapas">' + e.map(function(x, k){
+    var cls = x.n < atual ? 'feito' : (x.n === atual ? '' : 'espera');
+    return '<div class="et ' + cls + '"><span class="et-n">' +
+      (x.n < atual ? '✓' : x.n) + '</span>' +
+      '<span class="et-i">' + ic(x.i) + '</span>' +
+      '<span><b>' + x.t + '</b><span>' + x.s + '</span></span></div>' +
+      (k < e.length-1 ? '<span class="et-seta">' + ic('dir') + '</span>' : '');
+  }).join('') + '</div></div>';
+}
+
+/* ============================================================
+   AS TELAS
+   ============================================================ */
+var TELAS = {};
+var ID_ATUAL = null;
+
+/* ---------------- IDENTIDADE ---------------- */
+TELAS.identidade = {
+  centro: function(){
+    return '<div class="card">' +
+      '<h2><span class="ic-tit">' + ic('usuario') + '</span>Autenticar identidade</h2>' +
+      '<p class="sub">Use a biometria para confirmar quem está realizando a operação.</p>' +
+
+      '<div class="grade-auth">' +
+        '<div>' +
+          '<div class="palco" id="palco">' +
+            '<span class="silhueta">' + ic('usuario') + '</span>' +
+            '<div class="mira"><i></i><i></i><i></i><i></i></div>' +
+            '<div class="faixa-palco" id="faixaPalco">' + ic('camera') +
+              '<div><b>Aguardando leitura facial</b>Posicione o rosto no centro da imagem</div>' +
+            '</div>' +
+          '</div>' +
+          '<button class="btn btn-p btn-bloco" id="btnLerRosto">' + ic('facial') + 'Ler rosto</button>' +
+          '<div class="luzes" id="luzes"></div>' +
+        '</div>' +
+
+        '<div>' +
+          '<h2 style="font-size:15px;margin-bottom:12px"><span class="ic-tit" ' +
+            'style="width:28px;height:28px">' + ic('usuario') + '</span>Identidade reconhecida</h2>' +
+          '<div class="painel-id" id="painelId">' + painelIdentidadeVazio() + '</div>' +
+          '<div class="aviso a-in" style="margin-top:12px">' + ic('info') +
+            '<div>Depois da identificação, o Core verifica as permissões para a ' +
+            'operação selecionada.</div></div>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+
+    barraEtapas(1) +
+    '<div class="card">' +
+      '<h2 style="font-size:15px"><span class="ic-tit" style="width:28px;height:28px">' +
+        ic('relogio') + '</span>Últimos eventos de autenticação</h2>' +
+      '<div id="ultimosEventos"><p class="sub">Carregando…</p></div>' +
+    '</div>';
+  },
+
+  direita: function(){
+    return painelFinalidade() +
+      '<div class="card">' +
+        '<h2 style="font-size:15px"><span class="ic-tit" style="width:28px;height:28px">' +
+          ic('mais') + '</span>Cadastro de colaborador</h2>' +
+        '<p class="sub">Gerencie as credenciais biométricas do colaborador.</p>' +
+        '<div class="grade-cad">' +
+          '<button class="bcad" data-ir="facial"><span class="bi i-azul">' + ic('facial') +
+            '</span><b>Cadastrar rosto</b></button>' +
+          '<button class="bcad" data-ir="digital"><span class="bi i-roxo">' + ic('digital') +
+            '</span><b>Cadastrar digital</b></button>' +
+          '<button class="bcad" data-ir="senha"><span class="bi i-verde">' + ic('cadeado') +
+            '</span><b>Definir senha</b></button>' +
+          '<button class="bcad" data-ir="colaborador"><span class="bi i-laranja">' + ic('doc') +
+            '</span><b>Ficha do colaborador</b></button>' +
+        '</div>' +
+        '<div class="aviso a-in" style="margin-top:12px">' + ic('info') +
+          '<div>Todas as credenciais ficam ligadas à mesma identidade no Core, e podem ' +
+          'ser usadas em qualquer módulo do ALMOXA PRO.</div></div>' +
+      '</div>';
+  },
+
+  ligar: function(){
+    ligarFinalidade();
+    pintarLuzes();
+    carregarUltimosEventos();
+
+    $('btnLerRosto').onclick = lerRostoParaAutenticar;
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-ir]'), function(b){
+      b.onclick = function(){ irPara(b.getAttribute('data-ir')); };
+    });
+  }
+};
+
+function painelIdentidadeVazio(){
+  return '<div class="id-topo">' +
+      '<div class="id-av">' + ic('usuario') + '</div>' +
+      '<div><b>Aguardando identificação</b>' +
+      '<span>Olhe para a câmera e toque em "Ler rosto" para começar</span></div>' +
+    '</div>' +
+    ['usuario|Nome','cracha|Matrícula','facial|Método','doc|Credencial',
+     'relogio|Data e hora','celular|Dispositivo'].map(function(l){
+      var p = l.split('|');
+      return '<div class="id-linha">' + ic(p[0]) +
+        '<span class="rot">' + p[1] + '</span><span class="val">—</span></div>';
+    }).join('');
+}
+
+function painelIdentidadeCheia(r){
+  var aut = r.autorizado;
+  return '<div class="id-topo">' +
+      '<div class="id-av">' + (r.foto ? '<img src="' + esc(r.foto) + '">' : ic('usuario')) + '</div>' +
+      '<div><b>' + esc(r.identidade.nome || 'Identificado') + '</b>' +
+      '<span>' + (aut===true ? 'Identidade confirmada e autorizada'
+                : aut===null ? 'Identidade confirmada · autorização não verificada'
+                : 'Identidade confirmada · sem autorização') + '</span></div>' +
+    '</div>' +
+    linhaId('usuario','Nome', r.identidade.nome) +
+    linhaId('cracha','Matrícula', r.identidade.matricula) +
+    linhaId('facial','Método', r.metodoRotulo || r.metodo) +
+    linhaId('doc','Credencial', (r.credencialId||'').slice(0,22)) +
+    linhaId('relogio','Data e hora', new Date(r.dataHora).toLocaleString('pt-BR')) +
+    linhaId('celular','Dispositivo', r.dispositivo) +
+    '<div class="aviso ' + (aut===true?'a-ok':aut===null?'a-at':'a-er') + '" style="margin-top:12px">' +
+      ic(aut===true?'checkC':aut===null?'info':'alerta') +
+      '<div><b>' + (aut===true ? 'Operação autorizada'
+                  : aut===null ? 'Autorização não verificada'
+                  : 'Operação não autorizada') + '</b>' +
+      esc(r.mensagemAut || '') + '</div></div>';
+}
+
+function linhaId(icone, rot, val){
+  return '<div class="id-linha">' + ic(icone) + '<span class="rot">' + rot + '</span>' +
+    '<span class="val">' + esc(val || '—') + '</span></div>';
+}
+
+function pintarLuzes(){
+  var temCam = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  var temMotor = typeof ReconhecimentoFacial !== 'undefined';
+  var coreOn = !!CFG.sessao || !!CFG.url;
+
+  $('luzes').innerHTML = [
+    ['Câmera', temCam],
+    ['Motor facial', temMotor],
+    ['Core', coreOn]
+  ].map(function(l){
+    return '<span class="luz"><span class="pt ' + (l[1]?'on':'off') + '"></span>' +
+      l[0] + ' ' + (l[1]?'disponível':'indisponível') + '</span>';
+  }).join('');
+}
+
+/* ---------------- leitura para autenticar ---------------- */
+function lerRostoParaAutenticar(){
+  var palco = $('palco'), faixa = $('faixaPalco'), botao = $('btnLerRosto');
+
+  if(CFG.camera){ capturarEIdentificar(); return; }
+
+  botao.innerHTML = '<span class="spin"></span> Abrindo a câmera…';
+  botao.disabled = true;
+
+  navigator.mediaDevices.getUserMedia({ video:{ facingMode:'user', width:640 }, audio:false })
+    .then(function(s){
+      CFG.camera = s;
+      palco.innerHTML = '<video autoplay playsinline muted></video>' +
+        '<div class="mira"><i></i><i></i><i></i><i></i></div>' +
+        '<div class="faixa-palco" id="faixaPalco">' + ic('facial') +
+        '<div><b>Câmera ligada</b>Centralize o rosto e toque em capturar</div></div>';
+      palco.querySelector('video').srcObject = s;
+      botao.disabled = false;
+      botao.innerHTML = ic('camera') + 'Capturar e identificar';
+    })
+    .catch(function(e){
+      botao.disabled = false;
+      botao.innerHTML = ic('facial') + 'Ler rosto';
+      faixa.className = 'faixa-palco';
+      faixa.innerHTML = ic('alerta') + '<div><b>A câmera não abriu</b>' +
+        esc(/NotAllowed|denied/i.test(String(e.message))
+          ? 'Libere a câmera para este endereço.' : e.message) + '</div>';
+    });
+}
+
+function capturarEIdentificar(){
+  var palco = $('palco'), botao = $('btnLerRosto');
+  var video = palco.querySelector('video');
+  if(!video) return;
+
+  var c = document.createElement('canvas');
+  var lado = Math.min(video.videoWidth, video.videoHeight) || 480;
+  c.width = 480; c.height = 480;
+  c.getContext('2d').drawImage(video, (video.videoWidth-lado)/2, (video.videoHeight-lado)/2,
+    lado, lado, 0, 0, 480, 480);
+  var foto = c.toDataURL('image/jpeg', 0.88);
+  pararCamera();
+
+  palco.innerHTML = '<img src="' + foto + '">' +
+    '<div class="faixa-palco">' + ic('engrenagem') +
+    '<div><b>Reconhecendo…</b>Comparando com os cadastros do Core</div></div>';
+
+  botao.innerHTML = '<span class="spin"></span> Reconhecendo…';
+  botao.disabled = true;
+
+  autenticarPeloRosto(foto).then(function(r){
+    botao.disabled = false;
+    botao.innerHTML = ic('facial') + 'Ler outro rosto';
+    ID_ATUAL = r;
+    $('painelId').innerHTML = painelIdentidadeCheia(r);
+    $('centro').querySelector('.etapas').parentNode.outerHTML = barraEtapas(5);
+    carregarUltimosEventos();
+
+    palco.innerHTML = '<img src="' + esc(r.foto||foto) + '">' +
+      '<div class="faixa-palco" style="background:' +
+      (r.autorizado===false?'rgba(196,43,28,.85)':'rgba(27,127,76,.85)') + '">' +
+      ic(r.autorizado===false?'alerta':'checkC') +
+      '<div><b>' + esc(r.identidade.nome) + '</b>' +
+      (r.autorizado===false?'Sem autorização para esta operação':'Identidade confirmada') +
+      '</div></div>';
+  }).catch(function(e){
+    botao.disabled = false;
+    botao.innerHTML = ic('facial') + 'Tentar de novo';
+    palco.innerHTML = '<img src="' + foto + '">' +
+      '<div class="faixa-palco" style="background:rgba(196,43,28,.85)">' + ic('alerta') +
+      '<div><b>' + esc(rotuloErro(e.codigo)) + '</b>' + esc(e.mensagem||'') + '</div></div>';
+    $('painelId').innerHTML = painelIdentidadeVazio() +
+      '<div class="aviso a-er" style="margin-top:12px">' + ic('alerta') +
+      '<div><b>' + esc(rotuloErro(e.codigo)) + '</b>' + esc(e.mensagem||'') + '</div></div>';
+  });
+}
+
+function rotuloErro(codigo){
+  return {
+    NAO_IDENTIFICADO:'Identidade não reconhecida',
+    SEM_CADASTRO:'Nenhum rosto cadastrado',
+    MOTOR_NAO_CONFIGURADO:'Motor facial não configurado',
+    CORE_INDISPONIVEL:'Core indisponível',
+    SEM_ROSTO:'Nenhum rosto na imagem',
+    AMBIGUO:'Dois cadastros parecidos demais',
+    IDENTIFICADO_SEM_AUTORIZACAO:'Identificado, mas sem autorização'
+  }[codigo] || 'Não foi possível identificar';
+}
+
+/* ============================================================
+   AUTENTICAÇÃO — identifica, o Core autoriza
+   ============================================================ */
+function autenticarPeloRosto(foto){
+  if(typeof ReconhecimentoFacial === 'undefined'){
+    return Promise.reject({ codigo:'MOTOR_NAO_CONFIGURADO',
+      mensagem:'Não há motor de reconhecimento neste ambiente.' });
+  }
+
+  return ReconhecimentoFacial.modelar(foto).then(function(m){
+    if(!m.ok) return Promise.reject({ codigo: m.motivo||'SEM_ROSTO',
+      mensagem: m.texto || 'Não consegui ler o rosto.' });
+
+    return API.call('usuarios','credenciais',{}).then(function(r){
+      if(!r || !r.ok) return Promise.reject({ codigo:'CORE_INDISPONIVEL',
+        mensagem:(r&&r.mensagem)||'O Core não respondeu.' });
+
+      var base = listaSegura(r.dados).filter(function(c){
+        return String(c.tipo||'').toLowerCase()==='facial' && (c.template||c.modelo);
+      }).map(function(c){
+        var mo = c.template || c.modelo, g = c.geo;
+        try{ if(typeof mo==='string') mo = JSON.parse(mo); }catch(e){ mo=null; }
+        try{ if(typeof g==='string') g = JSON.parse(g); }catch(e){ g=null; }
+        return { matricula:c.matricula, nome:c.nome, credencialId:c.credencialId||c.id,
+                 modelo:mo, geo:g };
+      }).filter(function(c){ return c.modelo && c.modelo.length; });
+
+      if(!base.length) return Promise.reject({ codigo:'SEM_CADASTRO',
+        mensagem:'Nenhum rosto com modelo comparável no Core. Cadastre em Facial.' });
+
+      var res = ReconhecimentoFacial.comparar(m.modelo, m.geo, base);
+      if(!res.reconheceu) return Promise.reject({ codigo:res.motivo||'NAO_IDENTIFICADO',
+        mensagem:res.texto||'Nenhum cadastro corresponde.' });
+
+      var ident = {
+        identidade:{ matricula:res.identidade.matricula, nome:res.identidade.nome },
+        metodo:'facial', metodoRotulo:'Reconhecimento facial',
+        credencialId: identificadorFacial(m.modelo, m.geo),
+        semelhanca: res.semelhanca, foto: foto,
+        dataHora: new Date().toISOString(),
+        dispositivo: 'computador · ' + (navigator.platform||'')
+      };
+
+      return autorizarNoCore(ident);
+    });
+  });
+}
+
+/** Etapa 2: o Core decide. */
+function autorizarNoCore(ident){
+  return API.call('auth','autorizar',{
+    matricula: ident.identidade.matricula,
+    nome: ident.identidade.nome,
+    metodo: ident.metodo,
+    credencialId: ident.credencialId,
+    finalidade: CFG.finalidade,
+    dispositivo: ident.dispositivo,
+    dataHora: ident.dataHora
+  }).then(function(r){
+    var semAcao = r && /ACAO_DESCONHECIDA|NENHUMA_ACAO|MODULO_AUSENTE/i.test(String(r.codigo||''));
+
+    if(semAcao){
+      ident.autorizado = null;
+      ident.mensagemAut = 'O Core não tem a ação auth.autorizar. A identidade foi ' +
+        'confirmada, mas a permissão não foi verificada.';
+    } else if(!r || !r.ok){
+      ident.autorizado = false;
+      ident.mensagemAut = (r&&r.mensagem) || 'Sem permissão para esta operação.';
+    } else {
+      ident.autorizado = true;
+      ident.mensagemAut = 'O Core confirmou a permissão para ' + CFG.finalidade + '.';
+      var d = r.dados||{};
+      if(d.perfil) ident.perfil = d.perfil;
+    }
+
+    registrarAuditoria(ident);
+    return ident;
+  });
+}
+
+function registrarAuditoria(ident){
+  API.call('auditoria','registrar',{
+    acao:'Autenticação biométrica',
+    modulo:'Central de Biometria',
+    registro:(ident.identidade.nome||'') + ' · matrícula ' + (ident.identidade.matricula||'') +
+      ' · ' + ident.metodo + ' · ' + CFG.finalidade + ' · ' +
+      (ident.autorizado===true?'AUTORIZADO':ident.autorizado===null?'NAO_VERIFICADO':'NEGADO'),
+    usuario:(CFG.operador&&CFG.operador.nome) || 'central',
+    origem:'CENTRAL_BIOMETRIA',
+    dispositivo: ident.dispositivo,
+    resultado: ident.autorizado===false ? 'NEGADO' : 'OK'
+  });
+}
+
+function carregarUltimosEventos(){
+  var alvo = $('ultimosEventos');
+  if(!alvo) return;
+
+  API.call('auditoria','listar',{ limite:8, modulo:'Central de Biometria' }).then(function(r){
+    var lista = (r&&r.ok) ? listaSegura(r.dados).slice(0,6) : [];
+
+    if(!lista.length){
+      alvo.innerHTML = '<p class="sub" style="margin:0">Nenhuma autenticação registrada ainda.</p>';
+      return;
+    }
+
+    alvo.innerHTML = '<table><thead><tr><th>Data e hora</th><th>Método</th>' +
+      '<th>Evento</th><th>Resultado</th></tr></thead><tbody>' +
+      lista.map(function(e){
+        var reg = String(e.registro||'');
+        var negado = /NEGADO/i.test(reg);
+        var metodo = /facial/i.test(reg)?'Facial':/digital/i.test(reg)?'Digital':
+                     /cracha|crachá/i.test(reg)?'Crachá':'Senha';
+        return '<tr><td class="mono" style="font-size:11.5px">' +
+          esc(e.data ? new Date(e.data).toLocaleString('pt-BR') : (e.dataHora||'—')) + '</td>' +
+          '<td>' + metodo + '</td>' +
+          '<td>' + esc(reg.split('·').slice(0,2).join('·')) + '</td>' +
+          '<td><span class="tag ' + (negado?'t-er':'t-ok') + '">' +
+            (negado?'Negado':'Autorizado') + '</span></td></tr>';
+      }).join('') + '</tbody></table>';
+  });
+}
+
+/* ---------------- FACIAL ---------------- */
+var FACIAL = { pessoa:null, foto:null, modelo:null, det:null };
+
+TELAS.facial = {
+  centro: function(){
+    var p = FACIAL.pessoa;
+    return '<div class="card">' +
+      '<h2><span class="ic-tit">' + ic('facial') + '</span>Reconhecimento facial</h2>' +
+      '<p class="sub">Cadastro e conferência. O rosto cadastrado aqui vale no celular também.</p>' +
+      (p ? cartaoPessoa(p) : '') +
+      (!p
+        ? '<div class="aviso a-in">' + ic('info') +
+          '<div><b>Escolha o colaborador</b>Busque pela matrícula ou pelo nome.</div></div>' +
+          buscaColaborador('fc')
+        : '<div class="anel" id="fcAnel">' + ic('facial') + '</div>' +
+          '<p class="sub" style="text-align:center" id="fcTexto">' +
+            'Enquadre o rosto no círculo, com boa luz e sem boné.</p>' +
+          '<div id="fcAviso"></div>' +
+          '<button class="btn btn-p btn-bloco" id="fcAcao">' + ic('camera') + 'Abrir câmera</button>' +
+          '<button class="btn btn-g btn-bloco" id="fcTrocar">Trocar de colaborador</button>') +
+    '</div>';
+  },
+  direita: function(){
+    return '<div class="card">' +
+      '<h2 style="font-size:15px"><span class="ic-tit" style="width:28px;height:28px">' +
+        ic('info') + '</span>Como funciona</h2>' +
+      '<div class="aviso a-in">' + ic('escudo') +
+        '<div><b>O que é guardado</b>O modelo do rosto alinhado pelos olhos, não a foto. ' +
+        'A comparação é feita sobre esse modelo.</div></div>' +
+      '<div class="aviso a-at">' + ic('alerta') +
+        '<div><b>O que este motor não faz</b>Ele reconhece pessoas de uma equipe com luz ' +
+        'razoável e rosto de frente. Não é reconhecimento de nível bancário e não deve ser ' +
+        'a única barreira de operação de valor alto.</div></div>' +
+    '</div>';
+  },
+  ligar: function(){
+    if(!FACIAL.pessoa){ ligarBusca('fc', function(u){ FACIAL.pessoa = u; irPara('facial'); }); return; }
+    $('fcTrocar').onclick = function(){ FACIAL.pessoa = null; FACIAL.foto = null; irPara('facial'); };
+    $('fcAcao').onclick = acaoFacial;
+  }
+};
+
+function acaoFacial(){
+  var anel = $('fcAnel'), botao = $('fcAcao'), texto = $('fcTexto');
+
+  if(FACIAL.foto){ salvarFacial(); return; }
+
+  if(!CFG.camera){
+    botao.innerHTML = '<span class="spin"></span> Abrindo…';
+    botao.disabled = true;
+    navigator.mediaDevices.getUserMedia({ video:{facingMode:'user',width:640}, audio:false })
+      .then(function(s){
+        CFG.camera = s;
+        anel.className = 'anel lendo';
+        anel.innerHTML = '<video autoplay playsinline muted></video>';
+        anel.querySelector('video').srcObject = s;
+        botao.disabled = false;
+        botao.innerHTML = ic('camera') + 'Capturar';
+        texto.textContent = 'Centralize o rosto e capture.';
+      })
+      .catch(function(e){
+        botao.disabled = false;
+        botao.innerHTML = ic('camera') + 'Abrir câmera';
+        $('fcAviso').innerHTML = '<div class="aviso a-er">' + ic('alerta') +
+          '<div><b>A câmera não abriu</b>' + esc(e.message) + '</div></div>';
+      });
+    return;
+  }
+
+  var v = anel.querySelector('video');
+  var c = document.createElement('canvas');
+  var lado = Math.min(v.videoWidth, v.videoHeight) || 480;
+  c.width = 480; c.height = 480;
+  c.getContext('2d').drawImage(v, (v.videoWidth-lado)/2, (v.videoHeight-lado)/2,
+    lado, lado, 0, 0, 480, 480);
+  FACIAL.foto = c.toDataURL('image/jpeg', 0.88);
+  pararCamera();
+
+  anel.className = 'anel';
+  anel.innerHTML = '<img src="' + FACIAL.foto + '">';
+  botao.innerHTML = '<span class="spin"></span> Analisando…';
+  botao.disabled = true;
+
+  DetectorLocal.detectar(FACIAL.foto).then(function(det){
+    if(!det.detectou){
+      anel.className = 'anel erro';
+      FACIAL.foto = null;
+      botao.disabled = false;
+      botao.innerHTML = ic('camera') + 'Tentar de novo';
+      $('fcAviso').innerHTML = '<div class="aviso a-er">' + ic('alerta') +
+        '<div><b>Rosto não reconhecido na imagem</b>' + esc(det.explicacao||'') + '</div></div>';
+      return;
+    }
+    FACIAL.det = det;
+    ReconhecimentoFacial.modelar(FACIAL.foto).then(function(m){
+      botao.disabled = false;
+      if(!m.ok){
+        anel.className = 'anel erro';
+        FACIAL.foto = null;
+        botao.innerHTML = ic('camera') + 'Tentar de novo';
+        $('fcAviso').innerHTML = '<div class="aviso a-er">' + ic('alerta') +
+          '<div><b>Não gerei a representação facial</b>' + esc(m.texto||m.motivo) + '</div></div>';
+        return;
+      }
+      FACIAL.modelo = m;
+      anel.className = 'anel ok';
+      botao.innerHTML = ic('check') + 'Salvar cadastro';
+      $('fcAviso').innerHTML = '<div class="aviso a-ok">' + ic('checkC') +
+        '<div><b>Rosto detectado</b>Confiança ' + det.confianca + '% · olhos separados ' +
+        (det.olhos?det.olhos.separacao:'—') + '%.</div></div>';
+    });
+  });
+}
+
+function salvarFacial(){
+  var botao = $('fcAcao'), u = FACIAL.pessoa, m = FACIAL.modelo;
+  botao.innerHTML = '<span class="spin"></span> Salvando…';
+  botao.disabled = true;
+
+  var idF = identificadorFacial(m.modelo, m.geo);
+
+  chamarAlternativas([['biometria','registrar'],['usuarios','vincularCredencial']], {
+    matricula:u.matricula, nome:u.nome, tipo:'facial',
+    credencialId:idF, referencia:idF, credencial:idF,
+    template:JSON.stringify(m.modelo), geo:JSON.stringify(m.geo),
+    chavePublica:'', aparelho:'Central de Biometria', plataforma:'DESKTOP',
+    origem:'CENTRAL_BIOMETRIA', qualidade:FACIAL.det.confianca,
+    imagem:FACIAL.foto, leituraReal:true, etapaCumprida:'ROSTO_DETECTADO',
+    registradoPor:(CFG.operador&&CFG.operador.nome)||'central',
+    leitura:{ origem:'camera', etapa:'ROSTO_DETECTADO', motorFacial:'local',
+              rostosDetectados:1, qualidade:FACIAL.det.confianca, assinatura:idF }
+  }).then(function(r){
+    botao.disabled = false;
+    if(!r || !r.ok){
+      var dup = /JA_CADASTRAD|DUPLICAD|EXISTE/i.test(String(r&&r.codigo||''));
+      botao.innerHTML = ic('check') + 'Salvar cadastro';
+      $('fcAviso').innerHTML = '<div class="aviso ' + (dup?'a-in':'a-er') + '">' +
+        ic(dup?'info':'alerta') +
+        '<div><b>' + (dup?'Já estava cadastrado':'O Core recusou') + '</b>' +
+        esc((r&&r.mensagem)||'') +
+        ((r&&r.codigo)?'<br><span class="mono">' + esc(r.codigo) + '</span>':'') +
+        ((r&&r.tentadas)?'<br><span class="mono" style="font-size:10.5px">tentei: ' +
+          esc(r.tentadas.join(', ')) + '</span>':'') +
+        '</div></div>';
+      return;
+    }
+    toast('ok','Reconhecimento facial cadastrado para ' + u.nome);
+    FACIAL.foto = null; FACIAL.modelo = null;
+    irPara('facial');
+  });
+}
+
+/* ---------------- DIGITAL ---------------- */
+var DIG = { pessoa:null, dedo:'indicador-direito', dedoSimulado:'dedo-simulado-1',
+            ultimaLeitura:null };
+
+TELAS.digital = {
+  centro: function(){
+    var p = DIG.pessoa, i = PONTE.info;
+    return '<div class="card">' +
+      '<h2><span class="ic-tit">' + ic('digital') + '</span>Biometria digital</h2>' +
+      '<p class="sub">Leitor USB ligado a este computador, pela ponte local.</p>' +
+
+      (i===null
+        ? '<div class="aviso a-in">' + ic('info') + '<div>Procurando a ponte…</div></div>'
+        : i && i.ok
+          ? '<div class="aviso a-ok">' + ic('checkC') +
+            '<div><b>Leitor conectado</b>' + esc(i.driver||'') +
+            (i.simulado?' — MODO TESTE, sem leitor real':'') +
+            (i.cadastrados!==undefined?'<br>' + i.cadastrados + ' pessoa(s) cadastrada(s) nesta máquina.':'') +
+            '</div></div>'
+          : '<div class="aviso a-er">' + ic('alerta') +
+            '<div><b>Ponte do leitor não encontrada</b>' +
+            'Abra o programa <b>ALMOXA PONTE</b> neste computador e deixe a janela aberta. ' +
+            'O navegador não fala com leitor USB sem ela — não existe API de navegador ' +
+            'para isso.</div></div>') +
+
+      (!p ? buscaColaborador('dg')
+          : cartaoPessoa(p) +
+            '<div class="anel" id="dgAnel">' + ic('digital') + '</div>' +
+            '<p class="sub" style="text-align:center" id="dgTexto">' +
+              'Encoste o dedo no leitor quando a luz acender.</p>' +
+            ((i&&i.simulado)
+              ? '<div class="aviso a-at">' + ic('alerta') +
+                '<div><b>MODO TESTE — nenhum dedo está sendo lido</b>' +
+                'Sem leitor, escolha abaixo qual <b>dedo simulado</b> você está encostando. ' +
+                'Dedos simulados diferentes geram leituras diferentes de verdade: ' +
+                'cadastre um e teste com o outro para ver o sistema recusar.</div></div>' +
+                '<div class="campo"><label class="lbl">Dedo simulado que estou encostando</label>' +
+                '<select id="dgSim">' +
+                [1,2,3,4].map(function(n){
+                  var v = 'dedo-simulado-' + n;
+                  return '<option value="' + v + '"' + (v===DIG.dedoSimulado?' selected':'') +
+                    '>Dedo simulado ' + n + '</option>'; }).join('') +
+                '</select></div>'
+              : '') +
+
+            '<div class="campo"><label class="lbl">Qual dedo (rótulo do cadastro)</label>' +
+              '<select id="dgDedo">' +
+              [['indicador-direito','Indicador direito'],['polegar-direito','Polegar direito'],
+               ['medio-direito','Médio direito'],['indicador-esquerdo','Indicador esquerdo'],
+               ['polegar-esquerdo','Polegar esquerdo']].map(function(d){
+                return '<option value="' + d[0] + '"' + (d[0]===DIG.dedo?' selected':'') +
+                  '>' + d[1] + '</option>'; }).join('') +
+              '</select></div>' +
+            '<div class="id-linha"><span class="rot">Capturas deste dedo</span>' +
+              '<span class="tag ' + (PONTE.capturas.length>=3?'t-ok':'t-no') + '">' +
+              PONTE.capturas.length + ' de 3</span></div>' +
+            '<div id="dgAviso"></div>' +
+            (PONTE.capturas.length>=3
+              ? '<button class="btn btn-v btn-bloco" id="dgSalvar">' + ic('check') + 'Salvar cadastro</button>'
+              : '<button class="btn btn-l btn-bloco" id="dgCapturar"' +
+                ((i&&i.ok)?'':' disabled') + '>' + ic('digital') +
+                'Capturar (' + (PONTE.capturas.length+1) + ' de 3)</button>') +
+            '<button class="btn btn-g btn-bloco" id="dgTestar"' + ((i&&i.ok)?'':' disabled') + '>' +
+              ic('escudo') + 'Testar identificação</button>' +
+            '<button class="btn btn-g btn-bloco" id="dgTrocar">Trocar de colaborador</button>') +
+    '</div>';
+  },
+  direita: function(){
+    return '<div class="card">' +
+      '<h2 style="font-size:15px"><span class="ic-tit" style="width:28px;height:28px">' +
+        ic('alerta') + '</span>Leitor USB e Windows Hello</h2>' +
+      '<div class="aviso a-at">' + ic('alerta') +
+        '<div><b>Não são a mesma coisa</b>O Windows Hello aceita <b>qualquer dedo cadastrado ' +
+        'no Windows</b>. Ele identifica o dono do computador, não um dedo específico.</div></div>' +
+      '<div class="aviso a-ok">' + ic('checkC') +
+        '<div><b>O leitor USB distingue</b>Os traços são comparados de verdade, dedo a dedo. ' +
+        'É o único caminho que separa uma pessoa da outra.</div></div>' +
+      '<div class="aviso a-in">' + ic('doc') +
+        '<div><b>O que a ponte precisa expor</b>' +
+        '<span class="mono" style="font-size:10.5px;display:block;margin-top:6px">' +
+        'GET&nbsp; /status<br>POST /capturar<br>POST /cadastrar<br>POST /identificar' +
+        '</span></div></div>' +
+      '<button class="btn btn-g btn-bloco" id="dgReprocurar">' + ic('sync') +
+        'Procurar a ponte de novo</button>' +
+    '</div>';
+  },
+  ligar: function(){
+    var rp = $('dgReprocurar');
+    if(rp) rp.onclick = function(){ PONTE.info = null; irPara('digital');
+      verificarPonte().then(function(){ irPara('digital'); }); };
+
+    if(PONTE.info === null){ verificarPonte().then(function(){ irPara('digital'); }); return; }
+    if(!DIG.pessoa){ ligarBusca('dg', function(u){ DIG.pessoa = u; PONTE.capturas=[]; irPara('digital'); }); return; }
+
+    $('dgTrocar').onclick = function(){ DIG.pessoa=null; PONTE.capturas=[]; irPara('digital'); };
+    var sel = $('dgDedo');
+    if(sel) sel.onchange = function(){ DIG.dedo = sel.value; PONTE.capturas=[]; irPara('digital'); };
+    var sim = $('dgSim');
+    if(sim) sim.onchange = function(){ DIG.dedoSimulado = sim.value; PONTE.capturas=[];
+      DIG.ultimaLeitura = null; irPara('digital'); };
+
+    var cap = $('dgCapturar');
+    if(cap) cap.onclick = capturarDedo;
+    var sal = $('dgSalvar');
+    if(sal) sal.onclick = salvarDedo;
+    var tes = $('dgTestar');
+    if(tes) tes.onclick = testarDedo;
+  }
+};
+
+
+/** Mostra o que foi lido de verdade: código e desenho. */
+function blocoLeitura(d, titulo){
+  if(!d || !d.resumo) return '';
+  return '<div class="painel-id" style="margin-top:10px">' +
+    '<div class="id-linha"><span class="rot">' + esc(titulo||'Leitura capturada') + '</span>' +
+      '<span class="val mono">' + esc(d.resumo) + '</span></div>' +
+    (d.qualidade ? '<div class="id-linha"><span class="rot">Qualidade</span>' +
+      '<span class="val">' + d.qualidade + '</span></div>' : '') +
+    (d.desenho
+      ? '<pre class="cru" style="margin-top:10px;font-size:13px;line-height:1.1;' +
+        'letter-spacing:2px;text-align:center">' + esc(d.desenho) + '</pre>' +
+        '<p class="sub" style="margin:8px 0 0;font-size:11px">Este é o desenho do template ' +
+        'lido. Dedos diferentes desenham diferente. Não é a imagem da digital: ela não sai ' +
+        'do leitor, e não deve sair.</p>'
+      : '') +
+  '</div>';
+}
+
+function capturarDedo(){
+  var b = $('dgCapturar'), anel = $('dgAnel');
+  b.innerHTML = '<span class="spin"></span> Encoste o dedo…';
+  b.disabled = true;
+  anel.className = 'anel lendo';
+
+  /* A semente representa o DEDO encostado, nunca a pessoa.
+     Derivar da matrícula fazia o teste passar sempre. */
+  chamarPonte('POST','/capturar',{
+    semente: (PONTE.info && PONTE.info.simulado) ? DIG.dedoSimulado : null,
+    matricula: DIG.pessoa.matricula
+  })
+    .then(function(r){
+      if(!r.ok){
+        anel.className = 'anel erro';
+        b.disabled = false;
+        b.innerHTML = ic('digital') + 'Tentar de novo';
+        $('dgAviso').innerHTML = '<div class="aviso a-er">' + ic('alerta') +
+          '<div><b>' + (r.codigo==='QUALIDADE_BAIXA'?'Leitura fraca':'Não deu certo') + '</b>' +
+          esc(r.mensagem||'') + '</div></div>';
+        return;
+      }
+      PONTE.capturas.push(r.dados.template);
+      DIG.ultimaLeitura = r.dados;
+
+      /* média das amostras: é o template que representa o dedo */
+      if(PONTE.capturas.length){
+        var n = PONTE.capturas[0].length, media = [];
+        for(var k=0;k<n;k++){
+          var soma=0;
+          PONTE.capturas.forEach(function(a){ soma += (a[k]||0); });
+          media.push(Math.round((soma/PONTE.capturas.length)*1000)/1000);
+        }
+        PONTE.capturasSalvas = media;
+      }
+      irPara('digital');
+      var av = $('dgAviso');
+      if(av) av.innerHTML = '<div class="aviso a-ok">' + ic('checkC') +
+        '<div><b>Leitura ' + PONTE.capturas.length + ' registrada</b>' +
+        (PONTE.capturas.length>=3
+          ? 'As três leituras foram feitas. Salve o cadastro.'
+          : 'Levante o dedo e encoste de novo, um pouco diferente.') + '</div></div>' +
+        blocoLeitura(r.dados);
+    });
+}
+
+function salvarDedo(){
+  var b = $('dgSalvar');
+  b.innerHTML = '<span class="spin"></span> Salvando…';
+  b.disabled = true;
+
+  chamarPonte('POST','/cadastrar',{
+    matricula:DIG.pessoa.matricula, nome:DIG.pessoa.nome, cargo:DIG.pessoa.cargo||'',
+    dedo:DIG.dedo, amostras:PONTE.capturas, qualidade:85,
+    cadastradoPor:(CFG.operador&&CFG.operador.nome)||'central'
+  }).then(function(r){
+    if(!r.ok){
+      b.disabled = false;
+      b.innerHTML = ic('check') + 'Salvar cadastro';
+      $('dgAviso').innerHTML = '<div class="aviso a-er">' + ic('alerta') +
+        '<div><b>A ponte recusou</b>' + esc(r.mensagem||'') + '</div></div>';
+      return;
+    }
+
+    /* O credencialId passa a conter o CÓDIGO DA LEITURA.
+       Antes era só matrícula + dedo, ou seja: nada provava que
+       houve leitura. Agora o código vem do template lido, e dois
+       dedos diferentes geram códigos diferentes na planilha. */
+    var resumo = (r.dados && r.dados.resumo) || '';
+    var idC = 'IDBIO-' + (resumo || (DIG.pessoa.matricula + '-' + DIG.dedo));
+
+    chamarAlternativas([['biometria','registrar'],['usuarios','vincularCredencial']], {
+      matricula:DIG.pessoa.matricula, nome:DIG.pessoa.nome, tipo:'digital',
+      credencialId:idC, referencia:idC, credencial:idC, chavePublica:'',
+      codigoLeitura: resumo,
+      desenhoLeitura: (r.dados && r.dados.desenho) || '',
+      variacaoAmostras: (r.dados && r.dados.variacaoEntreAmostras) || null,
+      qualidade: 85,
+      aparelho:'Leitor USB · ' + ((PONTE.info&&PONTE.info.driver)||'iDBio') +
+        ((PONTE.info&&PONTE.info.simulado) ? ' · MODO TESTE' : ''),
+      plataforma:'IDBIO', origem:'CENTRAL_BIOMETRIA',
+      observacao:'dedo ' + DIG.dedo.replace('-',' ') + ' · 3 amostras · código ' +
+        (resumo || 'sem código') +
+        ((PONTE.info&&PONTE.info.simulado) ? ' · LEITURA SIMULADA' : ''),
+      leituraReal: !(PONTE.info && PONTE.info.simulado),
+      registradoPor:(CFG.operador&&CFG.operador.nome)||'central'
+    }).then(function(rc){
+
+      /* O template vai para o Core, numa aba própria. É isto que
+         permite o celular e qualquer outro aparelho compararem
+         depois — sem isso, só este computador conseguiria. */
+      API.call('biometria','salvarTemplate',{
+        matricula:DIG.pessoa.matricula, nome:DIG.pessoa.nome,
+        tipo:'digital', dedo:DIG.dedo,
+        template: JSON.stringify(PONTE.capturasSalvas || []),
+        desenho: (r.dados && r.dados.desenho) || '',
+        codigo: resumo, qualidade:85, amostras:3,
+        origem:'CENTRAL_BIOMETRIA',
+        registradoPor:(CFG.operador&&CFG.operador.nome)||'central'
+      }).then(function(rt){
+        var av2 = $('dgAviso');
+        if(av2 && rt && !rt.ok){
+          av2.innerHTML += '<div class="aviso a-at" style="margin-top:8px">' + ic('alerta') +
+            '<div><b>O template não subiu para o Core</b>' +
+            esc(rt.mensagem||'') +
+            '<br>Sem ele, só este computador consegue validar esta digital. ' +
+            'Instale o 07_BIOMETRIA_TEMPLATES no Apps Script.</div></div>';
+        }
+      });
+
+      PONTE.capturas = [];
+      verificarPonte().then(function(){
+        irPara('digital');
+        var av = $('dgAviso');
+        if(av) av.innerHTML = (rc&&rc.ok)
+          ? '<div class="aviso a-ok">' + ic('checkC') + '<div><b>Dedo cadastrado</b>' +
+            esc(DIG.pessoa.nome) + ' · ' + esc(DIG.dedo.replace('-',' ')) +
+            (r.dados.resumo ? '<br>Código da leitura: <b class="mono">' +
+              esc(r.dados.resumo) + '</b>' : '') +
+            (r.dados.variacaoEntreAmostras!==undefined
+              ? '<br><small>variação entre as três leituras: ' +
+                r.dados.variacaoEntreAmostras + '</small>' : '') +
+            '</div></div>' + blocoLeitura(r.dados, 'Template gravado')
+          : '<div class="aviso a-at">' + ic('alerta') +
+            '<div><b>Gravado na ponte, mas o Core recusou</b>' + esc((rc&&rc.mensagem)||'') +
+            '</div></div>';
+      });
+    });
+  });
+}
+
+function testarDedo(){
+  var b = $('dgTestar');
+  b.innerHTML = '<span class="spin"></span> Encoste o dedo…';
+  b.disabled = true;
+
+  chamarPonte('POST','/identificar',{
+    semente: (PONTE.info && PONTE.info.simulado) ? DIG.dedoSimulado : null
+  })
+    .then(function(r){
+      b.disabled = false;
+      b.innerHTML = ic('escudo') + 'Testar identificação';
+      var av = $('dgAviso');
+
+      if(!r.ok){
+        var dg = r.diagnostico || {};
+        av.innerHTML = '<div class="aviso a-er">' + ic('alerta') +
+          '<div><b>Não identificado</b>' + esc(r.mensagem||'') +
+          (dg.score!==undefined
+            ? '<br>semelhança ' + dg.score + ' · distância ' + dg.distancia +
+              ' · o limite para aceitar é ' + dg.limiar
+            : '') +
+          (dg.maisProximo ? '<br>mais parecido foi ' + esc(dg.maisProximo) +
+            ', e mesmo assim ficou longe' : '') +
+          '</div></div>' +
+          (dg.resumoLido
+            ? '<div class="painel-id" style="margin-top:10px">' +
+              '<div class="id-linha"><span class="rot">Lido agora</span>' +
+                '<span class="val mono">' + esc(dg.resumoLido) + '</span></div>' +
+              '<div class="id-linha"><span class="rot">Cadastrado</span>' +
+                '<span class="val mono">' + esc(dg.resumoMaisProximo||'—') + '</span></div>' +
+              '<p class="sub" style="margin:8px 0 0;font-size:11px">' +
+                'Códigos diferentes significam dedos diferentes. É por isso que recusou.' +
+              '</p></div>'
+            : '');
+        return;
+      }
+      var certo = String(r.dados.matricula)===String(DIG.pessoa.matricula);
+      av.innerHTML = '<div class="aviso ' + (certo?'a-ok':'a-at') + '">' +
+        ic(certo?'checkC':'alerta') +
+        '<div><b>' + (certo?'Reconhecido corretamente':'Reconheceu OUTRA pessoa') + '</b>' +
+        esc(r.dados.nome) + ' · ' + esc(String(r.dados.dedo).replace('-',' ')) +
+        '<br>semelhança ' + r.dados.score + ' · distância ' + r.dados.distancia +
+        ' · margem para o segundo colocado ' + r.dados.margem + '</div></div>' +
+        '<div class="painel-id" style="margin-top:10px">' +
+          '<div class="id-linha"><span class="rot">Lido agora</span>' +
+            '<span class="val mono">' + esc(r.dados.resumoLido||'') + '</span></div>' +
+          '<div class="id-linha"><span class="rot">Cadastrado</span>' +
+            '<span class="val mono">' + esc(r.dados.resumoCadastrado||'') + '</span></div>' +
+        '</div>';
+    });
+}
+
+/* ---------------- SENHA / PIN ---------------- */
+var SEN = { pessoa:null };
+
+TELAS.senha = {
+  centro: function(){
+    var p = SEN.pessoa;
+    return '<div class="card">' +
+      '<h2><span class="ic-tit">' + ic('cadeado') + '</span>Senha e PIN</h2>' +
+      '<p class="sub">Senha inicial para o colaborador. Ele troca no primeiro acesso.</p>' +
+      (!p ? buscaColaborador('sn')
+          : cartaoPessoa(p) +
+            '<div class="campo"><label class="lbl">Senha temporária</label>' +
+              '<div style="display:flex;gap:8px">' +
+              '<input id="snValor" class="mono" style="font-size:20px;letter-spacing:3px;text-align:center" readonly>' +
+              '<button class="btn btn-g" id="snGerar" style="flex:none">' + ic('sync') + '</button>' +
+              '</div></div>' +
+            '<div class="aviso a-at">' + ic('alerta') +
+              '<div><b>Anote antes de salvar</b>A senha não é guardada em texto na planilha. ' +
+              'Depois de salvar, não dá para consultá-la de novo.</div></div>' +
+            '<div id="snAviso"></div>' +
+            '<button class="btn btn-p btn-bloco" id="snSalvar">' + ic('check') + 'Definir esta senha</button>' +
+            '<button class="btn btn-g btn-bloco" id="snTrocar">Trocar de colaborador</button>') +
+    '</div>';
+  },
+  ligar: function(){
+    if(!SEN.pessoa){ ligarBusca('sn', function(u){ SEN.pessoa=u; irPara('senha'); }); return; }
+    $('snTrocar').onclick = function(){ SEN.pessoa=null; irPara('senha'); };
+    function gerar(){ $('snValor').value = String(Math.floor(100000+Math.random()*900000)); }
+    gerar();
+    $('snGerar').onclick = gerar;
+    $('snSalvar').onclick = function(){
+      var b=this; b.innerHTML='<span class="spin"></span> Salvando…'; b.disabled=true;
+      chamarAlternativas([['usuarios','definirSenha'],['auth','definirSenha'],['usuarios','salvar']], {
+        matricula:SEN.pessoa.matricula, nome:SEN.pessoa.nome,
+        senha:$('snValor').value, senhaTemporaria:true, trocarNoPrimeiroAcesso:true,
+        definidaPor:(CFG.operador&&CFG.operador.nome)||'central'
+      }).then(function(r){
+        b.disabled=false; b.innerHTML=ic('check')+'Definir esta senha';
+        $('snAviso').innerHTML = (r&&r.ok)
+          ? '<div class="aviso a-ok">' + ic('checkC') + '<div><b>Senha definida</b>' +
+            'Entregue ' + esc($('snValor').value) + ' ao colaborador. Ele troca no primeiro acesso.</div></div>'
+          : '<div class="aviso a-er">' + ic('alerta') + '<div><b>Não foi definida</b>' +
+            esc((r&&r.mensagem)||'') + '</div></div>';
+      });
+    };
+  }
+};
+
+/* ---------------- CRACHÁ ---------------- */
+var CRA = { pessoa:null };
+
+TELAS.cracha = {
+  centro: function(){
+    var p = CRA.pessoa;
+    return '<div class="card">' +
+      '<h2><span class="ic-tit">' + ic('cracha') + '</span>Crachá e QR Code</h2>' +
+      '<p class="sub">Passe o crachá no leitor ou digite o código.</p>' +
+      (!p ? buscaColaborador('cr')
+          : cartaoPessoa(p) +
+            '<div class="campo"><label class="lbl">Código do crachá</label>' +
+              '<input id="crCod" placeholder="Passe no leitor ou digite" ' +
+              'style="text-transform:uppercase"></div>' +
+            '<div id="crAviso"></div>' +
+            '<button class="btn btn-p btn-bloco" id="crSalvar">' + ic('check') + 'Vincular crachá</button>' +
+            '<button class="btn btn-g btn-bloco" id="crTrocar">Trocar de colaborador</button>') +
+    '</div>';
+  },
+  ligar: function(){
+    if(!CRA.pessoa){ ligarBusca('cr', function(u){ CRA.pessoa=u; irPara('cracha'); }); return; }
+    $('crTrocar').onclick = function(){ CRA.pessoa=null; irPara('cracha'); };
+    var campo = $('crCod');
+    campo.focus();
+    campo.onkeydown = function(e){ if(e.key==='Enter') $('crSalvar').click(); };
+    $('crSalvar').onclick = function(){
+      var cod = campo.value.trim().toUpperCase();
+      if(!cod) return;
+      var b=this; b.innerHTML='<span class="spin"></span> Vinculando…'; b.disabled=true;
+      chamarAlternativas([['biometria','registrar'],['usuarios','vincularCredencial']], {
+        matricula:CRA.pessoa.matricula, nome:CRA.pessoa.nome, tipo:'cracha',
+        credencialId:'CRACHA-'+cod, referencia:'CRACHA-'+cod, credencial:'CRACHA-'+cod,
+        aparelho:'Central de Biometria', plataforma:'DESKTOP', origem:'CENTRAL_BIOMETRIA',
+        registradoPor:(CFG.operador&&CFG.operador.nome)||'central'
+      }).then(function(r){
+        b.disabled=false; b.innerHTML=ic('check')+'Vincular crachá';
+        $('crAviso').innerHTML = (r&&r.ok)
+          ? '<div class="aviso a-ok">' + ic('checkC') + '<div><b>Crachá vinculado</b>' +
+            esc(cod) + ' agora identifica ' + esc(CRA.pessoa.nome) + '.</div></div>'
+          : '<div class="aviso a-er">' + ic('alerta') + '<div><b>Não foi vinculado</b>' +
+            esc((r&&r.mensagem)||'') + '</div></div>';
+      });
+    };
+  }
+};
+
+/* ---------------- COLABORADOR E FICHA ---------------- */
+var COL = { pessoa:null, credenciais:[] };
+
+TELAS.colaborador = {
+  centro: function(){
+    var p = COL.pessoa;
+    if(!p) return '<div class="card">' +
+      '<h2><span class="ic-tit">' + ic('doc') + '</span>Ficha do colaborador</h2>' +
+      '<p class="sub">Veja todas as credenciais de uma pessoa em um lugar só.</p>' +
+      buscaColaborador('cl') + '</div>';
+
+    var tem = {};
+    COL.credenciais.forEach(function(c){ tem[String(c.tipo||'').toLowerCase()] = c; });
+
+    return '<div class="card" id="fichaImp">' +
+      '<h2><span class="ic-tit">' + ic('doc') + '</span>Ficha do colaborador</h2>' +
+      cartaoPessoa(p) +
+      '<table><tbody>' +
+      [['facial','Reconhecimento facial','facial'],
+       ['digital','Biometria digital','digital'],
+       ['senha','Senha / PIN','cadeado'],
+       ['cracha','Crachá / QR Code','cracha']].map(function(l){
+        var c = tem[l[0]];
+        return '<tr><td style="width:40px"><span class="mini-ic ' +
+          (c?'i-verde':'i-azul') + '">' + ic(l[2]) + '</span></td>' +
+          '<td><b>' + l[1] + '</b>' + (c&&c.aparelho?'<br><small style="color:var(--t3)">' +
+            esc(c.aparelho) + '</small>':'') + '</td>' +
+          '<td style="text-align:right"><span class="tag ' + (c?'t-ok':'t-no') + '">' +
+            (c?'cadastrada':'não cadastrada') + '</span></td></tr>';
+      }).join('') + '</tbody></table>' +
+      '<div class="aviso a-in" style="margin-top:14px">' + ic('escudo') +
+        '<div>Todas as credenciais pertencem à mesma identidade no Core.</div></div>' +
+      '<div style="display:flex;gap:10px;margin-top:14px">' +
+        '<button class="btn btn-g" style="flex:1" id="clImprimir">' + ic('imprimir') + 'Imprimir</button>' +
+        '<button class="btn btn-g" style="flex:1" id="clTrocar">Outro colaborador</button>' +
+      '</div>' +
+    '</div>';
+  },
+  ligar: function(){
+    if(!COL.pessoa){ ligarBusca('cl', function(u){
+      COL.pessoa = u;
+      API.call('biometria','daPessoa',{ matricula:u.matricula }).then(function(r){
+        COL.credenciais = (r&&r.ok&&r.dados) ? listaSegura(r.dados.credenciais) : [];
+        irPara('colaborador');
+      });
+    }); return; }
+    $('clTrocar').onclick = function(){ COL.pessoa=null; COL.credenciais=[]; irPara('colaborador'); };
+    $('clImprimir').onclick = function(){ window.print(); };
+  }
+};
+
+/* ---------------- AUDITORIA ---------------- */
+TELAS.auditoria = {
+  centro: function(){
+    return '<div class="card">' +
+      '<h2><span class="ic-tit">' + ic('historico') + '</span>Auditoria</h2>' +
+      '<p class="sub">Histórico das autenticações feitas por esta central.</p>' +
+      '<div id="audLista"><p class="sub">Carregando…</p></div>' +
+    '</div>';
+  },
+  ligar: function(){
+    API.call('auditoria','listar',{ limite:60, modulo:'Central de Biometria' }).then(function(r){
+      var l = (r&&r.ok) ? listaSegura(r.dados) : [];
+      $('audLista').innerHTML = !l.length
+        ? '<div class="aviso a-in">' + ic('info') +
+          '<div>Nenhum registro ainda. Cada autenticação aparece aqui.</div></div>'
+        : '<table><thead><tr><th>Data e hora</th><th>Registro</th><th>Resultado</th>' +
+          '</tr></thead><tbody>' + l.slice(0,50).map(function(e){
+            var neg = /NEGADO/i.test(String(e.registro||'')) || /NEGADO/i.test(String(e.resultado||''));
+            return '<tr><td class="mono" style="font-size:11.5px">' +
+              esc(e.data?new Date(e.data).toLocaleString('pt-BR'):'—') + '</td>' +
+              '<td>' + esc(e.registro||'') + '</td>' +
+              '<td><span class="tag ' + (neg?'t-er':'t-ok') + '">' +
+              (neg?'Negado':'OK') + '</span></td></tr>';
+          }).join('') + '</tbody></table>';
+    });
+  }
+};
+
+/* ---------------- DIAGNÓSTICO ---------------- */
+TELAS.diagnostico = {
+  centro: function(){
+    return '<div class="card">' +
+      '<h2><span class="ic-tit">' + ic('engrenagem') + '</span>Diagnóstico da biometria</h2>' +
+      '<p class="sub">Cada linha é testada de verdade contra o Core e o aparelho.</p>' +
+      '<div id="diagLista"><p class="sub">Testando…</p></div>' +
+      '<button class="btn btn-g btn-bloco" id="diagDeNovo">' + ic('sync') + 'Testar de novo</button>' +
+    '</div>';
+  },
+  ligar: rodarDiagnostico
+};
+
+function rodarDiagnostico(){
+  var alvo = $('diagLista');
+  alvo.innerHTML = '<p class="sub">Testando…</p>';
+  var bt = $('diagDeNovo');
+  if(bt) bt.onclick = rodarDiagnostico;
+
+  var seguro = window.isSecureContext===true;
+  var temCam = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  var temMotor = typeof ReconhecimentoFacial !== 'undefined';
+
+  Promise.all([
+    API.call('doutor','ping',{}),
+    API.call('usuarios','listar',{}),
+    API.call('usuarios','credenciais',{}),
+    API.call('auditoria','listar',{limite:1}),
+    verificarPonte()
+  ]).then(function(res){
+    var ping=res[0], usu=res[1], cre=res[2], aud=res[3], pon=res[4];
+    var creds = (cre&&cre.ok) ? listaSegura(cre.dados) : [];
+    var faciais = creds.filter(function(c){ return String(c.tipo||'').toLowerCase()==='facial'; });
+    var comModelo = faciais.filter(function(c){ return c.template||c.modelo; });
+
+    var linhas = [
+      ['Core', ping&&ping.ok, ping&&ping.ok?'conectado':'não respondeu', ping&&ping.mensagem],
+      ['Google Sheets · usuários', usu&&usu.ok,
+        usu&&usu.ok?listaSegura(usu.dados).length+' usuário(s)':'não respondeu', usu&&usu.mensagem],
+      ['Credenciais', cre&&cre.ok, cre&&cre.ok?creds.length+' credencial(is)':'não respondeu', cre&&cre.mensagem],
+      ['Auditoria', aud&&aud.ok, aud&&aud.ok?'gravando':'não respondeu', aud&&aud.mensagem],
+      ['Endereço seguro', seguro, seguro?'https':'não é https — câmera e leitor podem ser bloqueados'],
+      ['Câmera', temCam, temCam?'disponível':'não exposta pelo navegador'],
+      ['Motor facial', temMotor, temMotor?'detector e reconhecimento locais':'não carregado'],
+      ['Rostos comparáveis', comModelo.length>0,
+        comModelo.length + ' de ' + faciais.length + ' com modelo',
+        (faciais.length>comModelo.length)
+          ? 'Os antigos foram cadastrados antes do motor existir e precisam ser refeitos.' : ''],
+      ['Ponte do leitor', pon&&pon.ok,
+        pon&&pon.ok ? ((pon.driver||'conectada') + (pon.simulado?' · MODO TESTE':''))
+                    : 'não encontrada em ' + PONTE.url,
+        (pon&&pon.ok)?'':'Abra o programa ALMOXA PONTE neste computador.']
+    ];
+
+    alvo.innerHTML = '<table><tbody>' + linhas.map(function(l){
+      return '<tr><td style="width:34px"><span class="pt ' + (l[1]?'on':'off') + '"></span></td>' +
+        '<td><b>' + esc(l[0]) + '</b>' + (l[3]?'<br><small style="color:var(--t3)">' +
+          esc(l[3]) + '</small>':'') + '</td>' +
+        '<td style="text-align:right"><span class="tag ' + (l[1]?'t-ok':'t-er') + '">' +
+          esc(l[2]) + '</span></td></tr>';
+    }).join('') + '</tbody></table>' +
+    '<p class="sub" style="margin-top:12px">Testado em ' + agora() + '</p>';
+  });
+}
+
+/* ---------------- busca de colaborador ---------------- */
+var CACHE_USU = null;
+
+function buscaColaborador(pref){
+  return '<div class="campo"><label class="lbl">Buscar colaborador</label>' +
+    '<input id="' + pref + 'Busca" placeholder="Nome, matrícula ou setor…"></div>' +
+    '<div id="' + pref + 'Lista"><p class="sub">Carregando a lista…</p></div>';
+}
+
+function ligarBusca(pref, aoEscolher){
+  var campo = $(pref+'Busca'), lista = $(pref+'Lista');
+  if(!campo) return;
+
+  function pintar(){
+    var t = campo.value.trim().toLowerCase();
+    var vis = (CACHE_USU||[]).filter(function(u){
+      if(!t) return true;
+      return [u.nome,u.matricula,u.cargo,u.setor].some(function(c){
+        return String(c||'').toLowerCase().indexOf(t)>-1; });
+    }).slice(0,40);
+
+    lista.innerHTML = !vis.length
+      ? '<div class="aviso a-at">' + ic('alerta') + '<div>Ninguém encontrado.</div></div>'
+      : '<table><tbody>' + vis.map(function(u){
+          return '<tr style="cursor:pointer" data-' + pref + '="' + esc(u.matricula) + '">' +
+            '<td style="width:44px"><span class="id-av" style="width:34px;height:34px;font-size:12px;' +
+              'font-weight:800;color:var(--navy)">' + esc(iniciais(u.nome)) + '</span></td>' +
+            '<td><b>' + esc(u.nome||'—') + '</b><br><small style="color:var(--t3)">' +
+              esc(u.cargo||u.perfil||'') + ' · matrícula ' + esc(u.matricula||'') + '</small></td>' +
+            '<td style="text-align:right;color:var(--t3)">' + ic('dir') + '</td></tr>';
+        }).join('') + '</tbody></table>';
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-'+pref+']'), function(tr){
+      tr.onclick = function(){
+        var u = CACHE_USU.filter(function(x){
+          return String(x.matricula)===tr.getAttribute('data-'+pref); })[0];
+        if(u) aoEscolher(u);
+      };
+    });
+  }
+
+  campo.oninput = pintar;
+
+  if(CACHE_USU){ pintar(); return; }
+  API.call('usuarios','listar',{}).then(function(r){
+    CACHE_USU = (r&&r.ok) ? listaSegura(r.dados) : [];
+    if(!CACHE_USU.length){
+      lista.innerHTML = '<div class="aviso a-er">' + ic('alerta') +
+        '<div><b>Nenhum usuário</b>' + esc((r&&r.mensagem)||'O Core não devolveu usuários.') +
+        '</div></div>';
+      return;
+    }
+    pintar();
+  });
+}
+
+function cartaoPessoa(p){
+  return '<div class="painel-id" style="margin-bottom:14px">' +
+    '<div class="id-topo" style="margin:0">' +
+      '<div class="id-av" style="background:var(--navy);color:#fff;font-weight:800">' +
+        esc(iniciais(p.nome)) + '</div>' +
+      '<div><b>' + esc(p.nome||'—') + '</b>' +
+      '<span>matrícula ' + esc(p.matricula||'—') +
+      (p.cargo?' · ' + esc(p.cargo):'') + '</span></div>' +
+    '</div></div>';
+}
+
+/* ============================================================
+   CONEXÃO E ENTRADA
+   ============================================================ */
+function telaConexao(){
+  $('centro').innerHTML = '<div class="card">' +
+    '<h2><span class="ic-tit">' + ic('nuvem') + '</span>Conectar ao ALMOXA PRO</h2>' +
+    '<p class="sub">Endereço do sistema publicado. Termina em /exec.</p>' +
+    '<div class="campo"><label class="lbl">Endereço do Core</label>' +
+      '<input id="cxUrl" placeholder="https://script.google.com/macros/s/.../exec"></div>' +
+    '<div id="cxAviso"></div>' +
+    '<button class="btn btn-p btn-bloco" id="cxOk">' + ic('nuvem') + 'Conectar</button>' +
+  '</div>';
+  $('direita').innerHTML = '<div class="card">' +
+    '<h2 style="font-size:15px"><span class="ic-tit" style="width:28px;height:28px">' +
+      ic('info') + '</span>Onde achar o endereço</h2>' +
+    '<p class="sub" style="margin:0">É o mesmo endereço que você usa para abrir o ALMOXA PRO ' +
+    'no navegador. Copie da barra de endereços, até o /exec.</p></div>';
+
+  var salvo = '';
+  try { salvo = localStorage.getItem(CHAVE_URL) || ''; } catch(e){}
+  var naUrl = new URLSearchParams(location.search).get('core');
+  if(naUrl) salvo = naUrl;
+  if(salvo) $('cxUrl').value = salvo;
+
+  $('cxOk').onclick = function(){
+    var u = $('cxUrl').value.trim();
+    if(!u){ $('cxAviso').innerHTML = '<div class="aviso a-er">' + ic('alerta') +
+      '<div>Informe o endereço.</div></div>'; return; }
+
+    CFG.url = u;
+    try { localStorage.setItem(CHAVE_URL, u); } catch(e){}
+
+    var b = this;
+    b.innerHTML = '<span class="spin"></span> Conectando…';
+    b.disabled = true;
+
+    API.call('doutor','ping',{}).then(function(r){
+      b.disabled = false;
+      b.innerHTML = ic('nuvem') + 'Conectar';
+
+      if(!r || !r.ok){
+        $('ptCore').className = 'pt off';
+        $('chipCore').className = 'chip-core off';
+        $('txtCore').textContent = 'Sem conexão';
+        $('subCore').textContent = 'confira o endereço';
+        $('cxAviso').innerHTML = '<div class="aviso a-er">' + ic('alerta') +
+          '<div><b>Não conectou</b>' + esc((r&&r.mensagem)||'') + '</div></div>';
+        return;
+      }
+
+      $('ptCore').className = 'pt on';
+      $('chipCore').className = 'chip-core on';
+      $('txtCore').textContent = 'CORE ONLINE';
+      $('subCore').textContent = 'todos os serviços operacionais';
+      telaEntrar();
+    });
+  };
+
+  if(salvo) $('cxOk').click();
+}
+
+function telaEntrar(){
+  $('centro').innerHTML = '<div class="card">' +
+    '<h2><span class="ic-tit">' + ic('usuario') + '</span>Quem está operando</h2>' +
+    '<p class="sub">A central registra quem cadastrou cada credencial.</p>' +
+    '<div class="campo"><label class="lbl">Matrícula, login ou e-mail</label>' +
+      '<input id="enUser"></div>' +
+    '<div class="campo"><label class="lbl">Senha</label>' +
+      '<input id="enSenha" type="password"></div>' +
+    '<div id="enAviso"></div>' +
+    '<button class="btn btn-p btn-bloco" id="enOk">Entrar</button>' +
+  '</div>';
+  $('direita').innerHTML = '';
+
+  $('enUser').focus();
+  $('enSenha').onkeydown = function(e){ if(e.key==='Enter') $('enOk').click(); };
+
+  $('enOk').onclick = function(){
+    var b = this;
+    b.innerHTML = '<span class="spin"></span> Entrando…';
+    b.disabled = true;
+
+    API.call('auth','login',{ usuario:$('enUser').value.trim(), senha:$('enSenha').value })
+      .then(function(r){
+        b.disabled = false;
+        b.innerHTML = 'Entrar';
+
+        if(!r || !r.ok){
+          $('enAviso').innerHTML = '<div class="aviso a-er">' + ic('alerta') +
+            '<div><b>Não foi possível entrar</b>' + esc((r&&r.mensagem)||'') + '</div></div>';
+          return;
+        }
+
+        var d = r.dados || {};
+        CFG.sessao = (d.sessao && d.sessao.token) || d.token || null;
+        CFG.operador = d.usuario || d;
+        $('avOperador').textContent = iniciais(CFG.operador.nome);
+        $('avOperador').title = CFG.operador.nome || '';
+
+        pintarMenu();
+        irPara('identidade');
+      });
+  };
+}
+
+/* ============================================================
+   INÍCIO
+   ============================================================ */
+(function(){
+  $('icCel').innerHTML = ic('celular');
+  $('icSync').innerHTML = ic('sync');
+  pintarMenu();
+
+  /* o menu só funciona depois de entrar */
+  Array.prototype.forEach.call(document.querySelectorAll('[data-aba]'), function(b){
+    b.onclick = function(){
+      if(!CFG.url){ toast('er','Conecte ao sistema primeiro.'); return; }
+      irPara(b.getAttribute('data-aba'));
+    };
+  });
+
+  verificarPonte();
+  telaConexao();
+})();
+</script>
+</body>
+</html>
