@@ -1,0 +1,252 @@
+/**
+ * ALMOXA PRO — CORRIGIR A CHAVE DO APLICATIVO
+ *
+ * Para o erro:   CHAVE_INVALIDA   /   CHAVE_APP_INVALIDA
+ * "A chave do aplicativo desta publicação não confere com a que o
+ *  servidor espera."
+ *
+ * Isto NÃO tem relação com a senha de ninguém nem com a CHAVE DO CRACHÁ.
+ * É só o aperto de mão entre a página publicada e o Apps Script.
+ *
+ * ------------------------------------------------------------------
+ * COMO USAR
+ * ------------------------------------------------------------------
+ *  1. Cole este arquivo num arquivo novo do Apps Script  ( + > Script ).
+ *  2. Rode  ALMOXA_DIAGNOSTICO_DA_PORTA
+ *     Ele lê o registro de execução e diz, em português, o que está
+ *     errado e exatamente o que fazer.
+ *  3. Siga o que ele mandar.
+ *
+ * NADA aqui apaga usuários, crachás, notas ou qualquer dado da planilha.
+ * Só mexe na propriedade PONTE_CHAVE do próprio script.
+ *
+ * Nenhuma função daqui tem nome repetido com os módulos da ponte,
+ * então este arquivo pode conviver com eles sem atrapalhar.
+ */
+
+var ALMOXA_PROP_CHAVE = 'PONTE_CHAVE';
+
+
+/* ============================================================
+   1. O DIAGNÓSTICO — comece por aqui
+   ============================================================ */
+
+function ALMOXA_DIAGNOSTICO_DA_PORTA() {
+  var props = PropertiesService.getScriptProperties();
+  var chave = props.getProperty(ALMOXA_PROP_CHAVE) || '';
+
+  var temConfere = (typeof PONTE_chaveConfere_ === 'function');
+  var temGuardada = (typeof PONTE_chaveGuardada_ === 'function');   // só existe na v2
+  var temRemover = (typeof PONTE_removerChave === 'function');      // só existe na v2
+  var temPost = (typeof doPost === 'function');
+
+  /* Qual versão está REALMENTE valendo?
+     Só dá para saber pelo comportamento: sem chave guardada, a ponte
+     nova deixa passar e a antiga barra. Testamos sem alterar nada. */
+  var versaoAtiva = 'não sei';
+  if (temConfere) {
+    var tinha = chave;
+    try {
+      if (tinha) props.deleteProperty(ALMOXA_PROP_CHAVE);
+      versaoAtiva = PONTE_chaveConfere_('') ? 'NOVA (v2)' : 'ANTIGA';
+    } catch (e) {
+      versaoAtiva = 'não sei (' + e.message + ')';
+    } finally {
+      if (tinha) props.setProperty(ALMOXA_PROP_CHAVE, tinha);
+    }
+  }
+
+  var l = [];
+  l.push('================================================');
+  l.push('  PORTA DO ALMOXA PRO  (ponte com a publicação)');
+  l.push('================================================');
+  l.push('');
+  l.push('Chave guardada no servidor : ' + (chave ? chave : '(nenhuma)'));
+  l.push('Versão da ponte valendo    : ' + versaoAtiva);
+  l.push('Arquivo da v2 presente     : ' + ((temGuardada || temRemover) ? 'SIM' : 'não'));
+  l.push('doPost existe              : ' + (temPost ? 'SIM' : 'NÃO'));
+  l.push('');
+
+  if (!temPost) {
+    l.push('>>> A página publicada NÃO consegue falar com este script:');
+    l.push('    não existe doPost. Instale o ALMOXA_PRO_Modulo_Ponte_v2.');
+    return ALMOXA_LOG_(l);
+  }
+
+  if (versaoAtiva === 'ANTIGA' && (temGuardada || temRemover)) {
+    l.push('>>> ESTE É O SEU PROBLEMA <<<');
+    l.push('');
+    l.push('Os DOIS arquivos de ponte estão neste script ao mesmo tempo.');
+    l.push('Eles têm funções de mesmo nome (doPost, PONTE_chaveConfere_),');
+    l.push('e a ANTIGA está ganhando. Por isso o erro sai como');
+    l.push('CHAVE_INVALIDA, que só existe na versão antiga.');
+    l.push('');
+    l.push('A ponte antiga fecha a porta mesmo sem chave nenhuma —');
+    l.push('não adianta apagar a chave enquanto ela estiver aí.');
+    l.push('');
+    l.push('FAÇA ASSIM:');
+    l.push('  1. Ache o arquivo que contém  PONTE_encaminhar_');
+    l.push('     (é a ponte antiga; a nova tem PONTE_rotear_);');
+    l.push('  2. APAGUE esse arquivo inteiro (os três pontinhos > Excluir);');
+    l.push('  3. Rode  ALMOXA_LIBERAR_FASE1  aqui deste arquivo;');
+    l.push('  4. Implantar > Gerenciar implantações > lápis >');
+    l.push('     Versão: Nova versão > Implantar.');
+    l.push('  5. Recarregue a página do ALMOXA PRO com Ctrl+Shift+R.');
+    return ALMOXA_LOG_(l);
+  }
+
+  if (versaoAtiva === 'ANTIGA') {
+    l.push('>>> Só a ponte ANTIGA está instalada.');
+    l.push('');
+    l.push('Nela, "sem chave" quer dizer "porta fechada": ela exige chave');
+    l.push('sempre. Isso contraria a fase 1 combinada.');
+    l.push('');
+    l.push('CAMINHO DEFINITIVO:');
+    l.push('  1. Cole o arquivo ALMOXA_PRO_Modulo_Ponte_v2;');
+    l.push('  2. APAGUE o arquivo da ponte antiga (o que tem PONTE_encaminhar_);');
+    l.push('  3. Rode  ALMOXA_LIBERAR_FASE1;');
+    l.push('  4. Publique nova versão.');
+    l.push('');
+    l.push('PARA ENTRAR AGORA, sem mexer em mais nada:');
+    l.push('  Rode  ALMOXA_CRIAR_CHAVE  e cole a chave que aparecer');
+    l.push('  no campo que a tela de login mostra. Publique nova versão.');
+    return ALMOXA_LOG_(l);
+  }
+
+  if (versaoAtiva === 'NOVA (v2)') {
+    if (chave) {
+      l.push('A ponte nova está valendo e EXIGE esta chave:');
+      l.push('');
+      l.push('    ' + chave);
+      l.push('');
+      l.push('Ou você cola essa chave na tela de login do ALMOXA PRO,');
+      l.push('ou roda  ALMOXA_LIBERAR_FASE1  para dispensar a exigência.');
+      l.push('Nos dois casos, publique nova versão depois.');
+    } else {
+      l.push('TUDO CERTO AQUI: fase 1 ativa, a porta aceita a publicação');
+      l.push('sem chave nenhuma.');
+      l.push('');
+      l.push('Se a tela ainda acusa CHAVE_INVALIDA, então:');
+      l.push('  a) falta PUBLICAR NOVA VERSÃO (o /exec continua servindo');
+      l.push('     a versão velha até você publicar), ou');
+      l.push('  b) a página está apontando para outro endereço /exec.');
+      l.push('');
+      l.push('Confira o endereço em ALMOXA_CONFIG.API_URL, dentro do HTML,');
+      l.push('e compare com o /exec desta implantação.');
+    }
+    return ALMOXA_LOG_(l);
+  }
+
+  l.push('Não consegui identificar a versão da ponte.');
+  l.push('Confira se existe algum arquivo com doPost neste script.');
+  return ALMOXA_LOG_(l);
+}
+
+
+/* ============================================================
+   2. AS AÇÕES
+   ============================================================ */
+
+/** Fase 1: apaga a chave, para a porta deixar a publicação passar. */
+function ALMOXA_LIBERAR_FASE1() {
+  PropertiesService.getScriptProperties().deleteProperty(ALMOXA_PROP_CHAVE);
+  var l = [];
+  l.push('Chave apagada do servidor.');
+  l.push('');
+  if (typeof PONTE_chaveConfere_ === 'function' && !PONTE_chaveConfere_('')) {
+    l.push('ATENÇÃO: a ponte ANTIGA ainda está valendo e continua');
+    l.push('recusando tudo. Apague o arquivo que contém PONTE_encaminhar_');
+    l.push('e rode ALMOXA_DIAGNOSTICO_DA_PORTA de novo.');
+  } else {
+    l.push('A porta agora aceita a publicação sem chave.');
+    l.push('');
+    l.push('FALTA PUBLICAR:');
+    l.push('  Implantar > Gerenciar implantações > lápis >');
+    l.push('  Versão: Nova versão > Implantar.');
+    l.push('');
+    l.push('Sem esse passo, o endereço /exec continua servindo a versão antiga.');
+  }
+  return ALMOXA_LOG_(l);
+}
+
+/** Mostra a chave que o servidor guarda hoje, para colar na tela. */
+function ALMOXA_VER_CHAVE() {
+  var chave = PropertiesService.getScriptProperties().getProperty(ALMOXA_PROP_CHAVE) || '';
+  if (!chave) {
+    return ALMOXA_LOG_([
+      'NÃO existe chave guardada neste servidor.',
+      '',
+      'Se a tela mesmo assim acusa CHAVE_INVALIDA, é a ponte antiga:',
+      'ela fecha a porta quando não há chave nenhuma.',
+      'Rode ALMOXA_DIAGNOSTICO_DA_PORTA.'
+    ]);
+  }
+  return ALMOXA_LOG_([
+    'CHAVE DO APLICATIVO:',
+    '',
+    '    ' + chave,
+    '',
+    'Cole exatamente isto no campo que a tela de login mostra,',
+    'ou em ALMOXA_CONFIG.API_CHAVE dentro do HTML.'
+  ]);
+}
+
+/** Cria uma chave nova. Use só se quiser mesmo exigir chave. */
+function ALMOXA_CRIAR_CHAVE() {
+  var chave = Utilities.getUuid().replace(/-/g, '').slice(0, 20);
+  PropertiesService.getScriptProperties().setProperty(ALMOXA_PROP_CHAVE, chave);
+  return ALMOXA_LOG_([
+    'CHAVE NOVA:',
+    '',
+    '    ' + chave,
+    '',
+    'Cole no campo da tela de login do ALMOXA PRO.',
+    'Depois: Implantar > Gerenciar implantações > lápis >',
+    'Versão: Nova versão > Implantar.'
+  ]);
+}
+
+
+/* ============================================================
+   3. QUEM ATENDE A PORTA — para achar arquivo repetido
+   ============================================================ */
+
+/**
+ * Lista as funções de ponte que existem neste script e diz de qual
+ * versão cada uma é. Serve para achar o arquivo que precisa sumir.
+ */
+function ALMOXA_QUEM_ATENDE() {
+  var marcas = [
+    ['doPost', 'as duas versões'],
+    ['doGet', 'as duas versões'],
+    ['PONTE_encaminhar_', 'SÓ a versão ANTIGA  <-- apague o arquivo que tem esta'],
+    ['PONTE_rotear_', 'só a versão NOVA (v2)'],
+    ['PONTE_chaveGuardada_', 'só a versão NOVA (v2)'],
+    ['PONTE_removerChave', 'só a versão NOVA (v2)'],
+    ['PONTE_chaveConfere_', 'as duas versões'],
+    ['AP_NF_direto', 'módulo de notas fiscais'],
+    ['AP_TAREFAS_direto', 'módulo de tarefas'],
+    ['AP_EMAIL_direto', 'módulo de e-mail'],
+    ['AP_CRACHA_login', 'módulo de login por crachá']
+  ];
+  var l = ['FUNÇÕES ENCONTRADAS NESTE SCRIPT:', ''];
+  marcas.forEach(function (m) {
+    var existe = false;
+    try { existe = (typeof this[m[0]] === 'function'); } catch (e) { existe = false; }
+    if (!existe) { try { existe = eval('typeof ' + m[0]) === 'function'; } catch (e) { existe = false; } }
+    l.push((existe ? '  [x] ' : '  [ ] ') + m[0] + '   — ' + m[1]);
+  });
+  l.push('');
+  l.push('Se PONTE_encaminhar_ e PONTE_rotear_ aparecerem os DOIS marcados,');
+  l.push('as duas pontes estão instaladas e brigando. Apague a antiga.');
+  return ALMOXA_LOG_(l);
+}
+
+
+/* ============================================================ */
+
+function ALMOXA_LOG_(linhas) {
+  var txt = linhas.join('\n');
+  Logger.log(txt);
+  return txt;
+}
