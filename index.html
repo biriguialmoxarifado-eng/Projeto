@@ -6246,6 +6246,18 @@ var voltar = el.querySelector("#lgVoltar");
 if (voltar) voltar.addEventListener("click", function() {
 LOGIN.fechar();
 });
+var bt1 = el.querySelector("[data-base-tentar]");
+if (bt1) bt1.addEventListener("click", function() {
+var b = this;
+b.innerHTML = '<span class="spinner"></span> Consultando…';
+b.disabled = true;
+verificarExisteUsuario().then(function() {
+LOGIN.montar();
+if (baseConsultada()) toast("ok", "Cadastro consultado", (ST.totalUsuarios || 0) + " usuário(s) na base oficial.");
+});
+});
+var bt2 = el.querySelector("[data-base-diag]");
+if (bt2) bt2.addEventListener("click", modalDiagnosticoDeConexao);
 var novo = el.querySelector("#lgNovoCadastro");
 if (novo) novo.addEventListener("click", function() {
 if (typeof precisaPrimeiroAcesso === "function" && precisaPrimeiroAcesso()) {
@@ -6276,7 +6288,7 @@ return '<button class="auth-tab ' + (metodo === id ? "active" : "") + '" data-me
 function area() {
 var a = document.getElementById("authArea");
 if (metodo === "senha") {
-a.innerHTML = '<div class="field"><label>Matrícula ou e-mail <span class="req">*</span></label>' + '<input class="input" id="lgUser" placeholder="000458" autocomplete="username"></div>' + '<div class="field"><label>Senha <span class="req">*</span></label>' + '<input class="input" id="lgPass" type="password" placeholder="••••••••" autocomplete="current-password"></div>' + '<div class="flex between center mb16"><label class="flex center gap8" style="cursor:pointer;font-size:12.5px">' + '<span class="check on" id="lgLembrar"></span> Manter conectado nesta estação</label>' + '<button class="btn-link" id="lgEsqueci">Esqueci minha senha</button></div>' + '<button class="btn btn-orange btn-lg btn-block" id="lgEntrar">Entrar</button>' + '<div id="lgErro" class="mt12"></div>' + '<div class="login-rodape mt16">' + (semUsuarioCadastrado() ? '<div class="alert a-blue mb12">' + ic("info") + "<div><b>Ainda não existe administrador</b>O primeiro cadastro cria o acesso e entra no sistema.</div></div>" : "") + '<div class="txt-c small">' + (semUsuarioCadastrado() ? "Comece por aqui:" : "Ainda não tem cadastro?") + "</div>" + '<button class="btn ' + (semUsuarioCadastrado() ? "btn-primary" : "btn-ghost") + ' btn-block mt8" id="lgNovoCadastro">' + ic("usuario") + (semUsuarioCadastrado() ? "Criar o primeiro administrador" : "Criar novo cadastro") + "</button>" + "</div>";
+a.innerHTML = '<div class="field"><label>Matrícula ou e-mail <span class="req">*</span></label>' + '<input class="input" id="lgUser" placeholder="000458" autocomplete="username"></div>' + '<div class="field"><label>Senha <span class="req">*</span></label>' + '<input class="input" id="lgPass" type="password" placeholder="••••••••" autocomplete="current-password"></div>' + '<div class="flex between center mb16"><label class="flex center gap8" style="cursor:pointer;font-size:12.5px">' + '<span class="check on" id="lgLembrar"></span> Manter conectado nesta estação</label>' + '<button class="btn-link" id="lgEsqueci">Esqueci minha senha</button></div>' + '<button class="btn btn-orange btn-lg btn-block" id="lgEntrar">Entrar</button>' + '<div id="lgErro" class="mt12"></div>' + avisoDaBaseOficial() + '<div class="login-rodape mt16">' + (semUsuarioCadastrado() ? '<div class="alert a-blue mb12">' + ic("info") + "<div><b>Ainda não existe administrador</b>O primeiro cadastro cria o acesso e entra no sistema.</div></div>" : "") + (baseConsultada() ? '<div class="txt-c small">' + (semUsuarioCadastrado() ? "Comece por aqui:" : "Ainda não tem cadastro?") + "</div>" + '<button class="btn ' + (semUsuarioCadastrado() ? "btn-primary" : "btn-ghost") + ' btn-block mt8" id="lgNovoCadastro">' + ic("usuario") + (semUsuarioCadastrado() ? "Criar o primeiro administrador" : "Criar novo cadastro") + "</button>" : "") + "</div>";
 a.querySelector("#lgLembrar").addEventListener("click", function() {
 this.classList.toggle("on");
 });
@@ -6326,6 +6338,13 @@ setTimeout(entrar, 500);
 function semUsuarioCadastrado() {
 return typeof precisaPrimeiroAcesso === "function" ? precisaPrimeiroAcesso() : false;
 }
+/* Enquanto o Core não confirmar a base oficial, o sistema não diz que
+   falta administrador — diz que não conseguiu consultar, com o erro real. */
+function avisoDaBaseOficial() {
+if (typeof baseConsultada !== "function" || baseConsultada()) return "";
+var e = (typeof erroDaBase === "function" && erroDaBase()) || null;
+return '<div class="alert a-yellow mt12" id="lgBase">' + ic("alerta") + "<div><b>Não consegui consultar o cadastro de usuários</b>" + U.esc(e && e.mensagem || "O servidor não respondeu.") + (e && e.codigo ? '<div class="small mt8" style="opacity:.8">Código: <b class="mono">' + U.esc(e.codigo) + "</b></div>" : "") + "<div class=\"small mt8\">Você ainda pode tentar entrar com matrícula e senha. " + "O cadastro existente não foi alterado.</div>" + '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' + '<button class="btn btn-ghost btn-sm" data-base-tentar>' + ic("sync") + "Tentar de novo</button>" + '<button class="btn btn-ghost btn-sm" data-base-diag>' + ic("doutor") + "Ver diagnóstico</button></div>" + "</div></div>";
+}
 function esqueciSenha() {
 UI.modal({
 titulo: "Recuperar acesso",
@@ -6361,7 +6380,9 @@ senha: senhaDigitada,
 metodo: metodo
 }).then(function(r) {
 if (!r.ok) {
-erro.innerHTML = '<div class="alert a-red">' + ic("alerta") + "<div><b>Não foi possível entrar</b>" + U.esc(r.mensagem || "Verifique os dados informados.") + "</div></div>";
+erro.innerHTML = avisoDeFalhaNoLogin(r);
+var bd = erro.querySelector("[data-diag-login]");
+if (bd) bd.addEventListener("click", modalDiagnosticoDeConexao);
 if (btn) {
 btn.innerHTML = "Entrar";
 btn.disabled = false;
@@ -6369,6 +6390,84 @@ btn.disabled = false;
 return;
 }
 concluirLogin(r);
+});
+}
+/* Distingue três coisas que hoje apareciam como a mesma mensagem:
+   chave do aplicativo, falha de comunicação e credencial errada.
+   A chave do APLICATIVO não tem relação com a chave do CRACHÁ. */
+function avisoDeFalhaNoLogin(r) {
+var codigo = String(r && (r.codigo || r.erro) || "");
+var recado = String(r && r.mensagem || "");
+var titulo = "Não foi possível entrar";
+var texto = recado || "Confira os dados informados.";
+var extra = "";
+
+if (/CHAVE_APP_INVALIDA|CHAVE_INVALIDA|NAO_E_PONTE/i.test(codigo) && !/cracha|crachá/i.test(recado)) {
+titulo = "A publicação não está conversando com o servidor";
+texto = "A chave do aplicativo desta publicação não confere com a que o servidor espera. " + "Isto não tem nada a ver com a sua senha nem com a chave do crachá.";
+extra = "chave";
+} else if (/TIMEOUT|CORE_FALHA|FALHA_CONEXAO|RESPOSTA_ESTRANHA|SEM_RESPOSTA|PRECISA_PUBLICAR/i.test(codigo)) {
+titulo = "O servidor do ALMOXA PRO não respondeu";
+texto = recado || "Não consegui falar com o servidor. Tente de novo em instantes.";
+extra = "conexao";
+} else if (/USUARIO_BLOQUEADO|USUARIO_INATIVO/i.test(codigo)) {
+titulo = "Usuário inativo";
+} else if (/SEM_SESSAO|SESSAO/i.test(codigo)) {
+titulo = "Sua sessão expirou";
+}
+
+return '<div class="alert a-red">' + ic("alerta") + "<div><b>" + U.esc(titulo) + "</b>" + U.esc(texto) + (codigo ? '<div class="small mt8" style="opacity:.8">Código: <b class="mono">' + U.esc(codigo) + "</b></div>" : "") + (extra ? '<div style="margin-top:10px"><button class="btn btn-ghost btn-sm" data-diag-login>' + ic("doutor") + "Ver diagnóstico da conexão</button></div>" : "") + "</div></div>";
+}
+/* Mostra o que o sistema realmente sabe: endereço, chave e base oficial. */
+function modalDiagnosticoDeConexao() {
+var linha = function(rot, val, bom) {
+return '<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--linha)">' + '<span class="small" style="color:var(--texto-3)">' + rot + "</span>" + '<b class="small" style="text-align:right;color:' + (bom === true ? "#1FA971" : bom === false ? "#E5484D" : "inherit") + '">' + U.esc(val) + "</b></div>";
+};
+UI.modal({
+titulo: "Diagnóstico da conexão",
+sub: "O que esta publicação está usando para falar com o servidor",
+tamanho: "md",
+corpo: '<div id="dcCorpo"><div class="muted small"><span class="spinner"></span> Conferindo…</div></div>',
+rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' + '<button class="btn btn-primary" data-refazer>Conferir de novo</button>',
+aoAbrir: function(w, fechar) {
+w.querySelector("[data-x]").addEventListener("click", fechar);
+function conferir() {
+var alvo = w.querySelector("#dcCorpo");
+alvo.innerHTML = '<div class="muted small"><span class="spinner"></span> Conferindo…</div>';
+var url = (API.PONTE && API.PONTE.url) || "";
+var chave = (API.PONTE && API.PONTE.chave) || "";
+var dentroDoGoogle = typeof google !== "undefined" && google.script && google.script.run;
+function pintar(ping) {
+var base = ST.existeUsuario;
+alvo.innerHTML = linha("Ambiente", dentroDoGoogle ? "dentro do Apps Script" : "hospedado (ponte)") + linha("Endereço do servidor", url ? url.slice(0, 48) + "…" : "não configurado", !!url || dentroDoGoogle) + linha("Chave do aplicativo enviada", chave ? "sim (" + chave.slice(0, 4) + "…)" : "vazia") + linha("Servidor exige chave", ping && ping.dados ? (ping.dados.exigeChave ? "SIM" : "não") : "não sei") + linha("Chave confere", ping && ping.dados ? (ping.dados.exigeChave ? (ping.dados.chaveConfere ? "sim" : "NÃO") : "não se aplica") : "não sei", ping && ping.dados && ping.dados.exigeChave ? !!ping.dados.chaveConfere : undefined) + linha("Servidor respondeu", ping && ping.ok ? "sim" : "NÃO", !!(ping && ping.ok)) + linha("Base de usuários consultada", base === true || base === false ? "sim" : "NÃO", base === true || base === false) + linha("Usuários na base oficial", ST.totalUsuarios === undefined ? "não consultado" : String(ST.totalUsuarios)) + (ST.erroBase ? '<div class="alert a-yellow mt12">' + ic("alerta") + "<div><b>" + U.esc(ST.erroBase.codigo) + "</b>" + U.esc(ST.erroBase.mensagem) + "</div></div>" : "") + '<div class="alert a-blue mt12">' + ic("info") + "<div>A <b>chave do aplicativo</b> protege a comunicação desta publicação com o servidor. " + "Ela é outra coisa, e não substitui, a <b>chave do crachá</b>.<br><br>" + "Se o servidor exige chave e esta publicação está sem ela, rode <b>PONTE_removerChave</b> no Apps Script " + "para voltar à fase sem chave, ou informe a chave abaixo.</div></div>" + (dentroDoGoogle ? "" : '<button class="btn btn-ghost btn-sm mt8" data-por-chave>Informar a chave do aplicativo</button>');
+var bp = alvo.querySelector("[data-por-chave]");
+if (bp) bp.addEventListener("click", function() {
+var v = window.prompt("Chave do aplicativo (deixe em branco para não enviar nenhuma):", chave);
+if (v === null) return;
+API.PONTE.chave = String(v).trim();
+if (API.PONTE.lembrar) API.PONTE.lembrar();
+conferir();
+});
+}
+if (dentroDoGoogle || !url) {
+pintar(null);
+return;
+}
+fetch(url + (url.indexOf("?") > -1 ? "&" : "?") + "ponte=ping" + (chave ? "&chave=" + encodeURIComponent(chave) : "") + "&t=" + Date.now()).then(function(x) {
+return x.text();
+}).then(function(t) {
+var d = null;
+try {
+d = JSON.parse(t);
+} catch (e) {}
+pintar(d);
+}).catch(function() {
+pintar(null);
+});
+}
+w.querySelector("[data-refazer]").addEventListener("click", conferir);
+conferir();
+}
 });
 }
 function concluirLogin(r) {
@@ -8986,13 +9085,304 @@ status: "",
 busca: ""
 };
 
+/* ============================================================
+ * NOTA FISCAL — FORNECEDOR, DATA DE ENTRADA E AGRUPAMENTO
+ * O fornecedor de uma nota de ENTRADA é sempre quem vendeu.
+ * A nossa própria empresa nunca pode ocupar esse lugar.
+ * ============================================================ */
+function NF_SO_NUMEROS(v) {
+return String(v == null ? "" : v).replace(/\D/g, "");
+}
+function NF_NORMAL(v) {
+return String(v == null ? "" : v).trim().toUpperCase().replace(/\s+/g, " ").replace(/[.,]/g, "");
+}
+function NF_MESMO_NOME(a, b) {
+var x = NF_NORMAL(a), y = NF_NORMAL(b);
+return !!x && !!y && x === y;
+}
+/* Quem somos nós: os dados salvos em "Dados da empresa". */
+function NF_MINHA_EMPRESA() {
+var d = {};
+try {
+d = JSON.parse(localStorage.getItem("almoxa_empresa") || "{}") || {};
+} catch (e) {
+d = {};
+}
+return {
+nome: d.nome || "",
+cnpj: NF_SO_NUMEROS(d.cnpj)
+};
+}
+function NF_EH_MINHA_EMPRESA(nome, cnpj) {
+var eu = NF_MINHA_EMPRESA();
+var c = NF_SO_NUMEROS(cnpj);
+if (eu.cnpj && c && eu.cnpj === c) return true;
+return NF_MESMO_NOME(nome, eu.nome);
+}
+/* O fornecedor que a tela vai gravar: o digitado, limpo.
+   Se vier em branco ou vier a nossa própria empresa, devolve vazio —
+   a tela avisa em vez de inventar. */
+function NF_FORNECEDOR_LIMPO(nome, cnpj) {
+var n = String(nome == null ? "" : nome).trim();
+if (!n) return "";
+if (/^(n[ãa]o informado|sem fornecedor|-+)$/i.test(n)) return "";
+if (NF_EH_MINHA_EMPRESA(n, cnpj)) return "";
+return n;
+}
+/* ---- QUEM EMITIU A NOTA, LIDO DO XML --------------------------------
+ * Numa NF-e o vendedor está em <emit> e o comprador em <dest>.
+ * Procurar <xNome> solto no arquivo pegava um ou outro conforme o
+ * layout, e a nota terminava com o nome da nossa própria empresa.
+ * -------------------------------------------------------------------- */
+function NF_FORNECEDOR_DO_XML(texto) {
+var txt = String(texto || "");
+function bloco(nome) {
+var m = txt.match(new RegExp("<" + nome + "\\b[^>]*>[\\s\\S]*?</" + nome + ">"));
+return m ? m[0] : "";
+}
+function dentro(escopo, nome) {
+var m = String(escopo || "").match(new RegExp("<" + nome + "[^>]*>([^<]*)</" + nome + ">"));
+return m ? String(m[1]).trim() : "";
+}
+var emit = bloco("emit"), dest = bloco("dest");
+var out = {
+fornecedor: dentro(emit, "xNome") || dentro(emit, "xFant") || "",
+cnpj: dentro(emit, "CNPJ") || dentro(emit, "CPF") || "",
+destinatario: dentro(dest, "xNome") || "",
+cnpjDestinatario: dentro(dest, "CNPJ") || "",
+ie: dentro(emit, "IE") || "",
+motivo: ""
+};
+/* sem bloco <emit>: tenta o primeiro nome do arquivo, mas descarta
+   se for o destinatário ou a nossa própria empresa */
+if (!out.fornecedor) {
+var alt = dentro(txt, "xNome");
+var altCnpj = dentro(txt, "CNPJ");
+if (alt && !NF_MESMO_NOME(alt, out.destinatario) && !NF_EH_MINHA_EMPRESA(alt, altCnpj)) {
+out.fornecedor = alt;
+out.cnpj = altCnpj;
+} else {
+out.motivo = "SEM_EMITENTE";
+}
+}
+/* rede de segurança final: fornecedor NUNCA é nós nem o destinatário */
+if (out.fornecedor && (NF_EH_MINHA_EMPRESA(out.fornecedor, out.cnpj) || NF_MESMO_NOME(out.fornecedor, out.destinatario))) {
+out.motivo = "ERA_O_DESTINATARIO";
+out.fornecedor = "";
+out.cnpj = "";
+}
+return out;
+}
+function NF_DATA_DE_HOJE() {
+var d = new Date;
+return new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+}
+/* Cadastra o fornecedor que ainda não existe. Funciona com CNPJ ou
+   só com o nome — nota de entrada sem CNPJ também tem fornecedor. */
+function NF_GARANTIR_FORNECEDOR(nome, cnpj, extra) {
+var limpo = NF_FORNECEDOR_LIMPO(nome, cnpj);
+if (!limpo) return Promise.resolve(null);
+var doc = NF_SO_NUMEROS(cnpj);
+var extras = extra || {};
+function cadastrar() {
+return API.call("fornecedores", "salvar", {
+razaoSocial: limpo,
+nome: limpo,
+cnpj: cnpj || "",
+inscricaoEstadual: extras.inscricaoEstadual || "",
+endereco: extras.endereco || "",
+telefone: extras.telefone || "",
+origem: extras.origem || "Cadastrado pela entrada de nota fiscal"
+}).then(function(novo) {
+if (novo && novo.ok) {
+toast("ok", "Fornecedor cadastrado", limpo + " entrou no cadastro de fornecedores.");
+return novo.dados || null;
+}
+return null;
+}, function() {
+return null;
+});
+}
+if (doc) {
+return API.call("fornecedores", "porCnpj", {
+cnpj: cnpj
+}).then(function(r) {
+if (r && r.ok && r.dados) return r.dados;
+return cadastrar();
+}, cadastrar);
+}
+/* sem CNPJ: procura pelo nome na lista antes de criar outro igual */
+return API.call("fornecedores", "listar", {}).then(function(r) {
+var achado = listaSegura(r && r.dados).filter(function(f) {
+return NF_MESMO_NOME(f.razaoSocial || f.nome, limpo);
+})[0];
+if (achado) return achado;
+return cadastrar();
+}, cadastrar);
+}
+
+/* ---- AGRUPAMENTO ----------------------------------------------------
+ * A mesma nota lançada em dias diferentes (10 itens hoje, 10 na sexta)
+ * é UMA nota só. A identidade é a chave da NF-e; sem chave, o número +
+ * série + CNPJ do fornecedor. Os itens se somam, nunca se substituem.
+ * -------------------------------------------------------------------- */
+function NF_IDENTIDADE(n) {
+if (!n) return "";
+var chave = NF_SO_NUMEROS(n.chave);
+if (chave.length >= 20) return "NFE:" + chave;
+return "NF:" + NF_NORMAL(n.numero) + "-" + NF_NORMAL(n.serie) + "-" + NF_SO_NUMEROS(n.cnpj);
+}
+function NF_CHAVE_ITEM(i) {
+if (!i) return "";
+var id = i.sku || i.codigo || "";
+return (id ? "P:" + NF_NORMAL(id) : "D:" + NF_NORMAL(i.descricao)) + "#" + NF_NORMAL(i.tamanho || i.unidade || "");
+}
+/* Junta as notas repetidas da lista em uma só, somando os itens. */
+function NF_AGRUPAR(lista) {
+var ordem = [], porId = {};
+listaSegura(lista).forEach(function(n) {
+var id = NF_IDENTIDADE(n);
+if (!id) return;
+if (!porId[id]) {
+var copia = JSON.parse(JSON.stringify(n));
+copia.listaItens = itensDaNotaSalva(n);
+copia.__lancamentos = [ {
+entrada: n.entrada || n.emissao || "",
+itens: copia.listaItens.length
+} ];
+copia.__partes = 1;
+porId[id] = copia;
+ordem.push(id);
+return;
+}
+var alvo = porId[id];
+var novos = itensDaNotaSalva(n);
+novos.forEach(function(i) {
+var ch = NF_CHAVE_ITEM(i);
+var igual = alvo.listaItens.filter(function(x) {
+return NF_CHAVE_ITEM(x) === ch;
+})[0];
+/* item repetido no mesmo lançamento soma quantidade;
+   item novo entra na lista */
+if (igual && String(igual.__de || "") !== String(n.entrada || "")) {
+igual.qtd = (Number(igual.qtd) || 0) + (Number(i.qtd) || 0);
+igual.recebido = (Number(igual.recebido) || 0) + (Number(i.recebido) || 0);
+igual.valorTotal = Math.round((Number(igual.qtd) || 0) * (Number(igual.valorUnitario) || 0) * 100) / 100;
+} else {
+i.__de = n.entrada || "";
+alvo.listaItens.push(i);
+}
+});
+alvo.__partes += 1;
+alvo.__lancamentos.push({
+entrada: n.entrada || n.emissao || "",
+itens: novos.length
+});
+/* o cabeçalho fica com a informação mais completa que existir */
+if (!NF_FORNECEDOR_LIMPO(alvo.fornecedor, alvo.cnpj) && NF_FORNECEDOR_LIMPO(n.fornecedor, n.cnpj)) alvo.fornecedor = n.fornecedor;
+if (!alvo.cnpj && n.cnpj) alvo.cnpj = n.cnpj;
+if (!alvo.chave && n.chave) alvo.chave = n.chave;
+if (!alvo.emissao && n.emissao) alvo.emissao = n.emissao;
+if (n.entrada && (!alvo.entrada || String(n.entrada) < String(alvo.entrada))) alvo.entrada = n.entrada;
+if (n.entrada && (!alvo.ultimaEntrada || String(n.entrada) > String(alvo.ultimaEntrada))) alvo.ultimaEntrada = n.entrada;
+if (String(n.status || "").toUpperCase() === "DIVERGENCIA") alvo.status = n.status;
+});
+return ordem.map(function(id) {
+var n = porId[id];
+n.itens = n.listaItens.length;
+/* o valor do grupo é a soma dos itens quando veio partido */
+if (n.__partes > 1) {
+n.valor = Math.round(n.listaItens.reduce(function(sm, i) {
+return sm + (Number(i.valorTotal) || (Number(i.qtd) || 0) * (Number(i.valorUnitario) || 0));
+}, 0) * 100) / 100;
+}
+return n;
+});
+}
+
+
+/* ============================================================
+ * NOTAS FISCAIS — FONTE OFICIAL
+ * O histórico vem do Core, nunca do MOCK. Se o módulo novo não
+ * estiver instalado, cai no caminho antigo sem quebrar nada.
+ * ============================================================ */
+var NF_CORE = function() {
+var temModulo = null;
+function direto(acao, payload) {
+if (!(typeof google !== "undefined" && google.script && google.script.run)) return null;
+if (temModulo === false) return null;
+return new Promise(function(resolve) {
+try {
+google.script.run.withSuccessHandler(function(r) {
+var d = r;
+if (typeof r === "string") {
+try {
+d = JSON.parse(r);
+} catch (e) {
+d = null;
+}
+}
+temModulo = !!(d && d.ok !== undefined);
+resolve(temModulo ? d : null);
+}).withFailureHandler(function(e) {
+var msg = e && e.message ? e.message : String(e);
+if (/not defined|AP_NF_direto/i.test(msg)) temModulo = false;
+resolve(null);
+}).AP_NF_direto(JSON.stringify({
+acao: acao,
+payload: payload || {},
+token: APP.STATE.sessao ? APP.STATE.sessao.token : null
+}));
+} catch (e) {
+resolve(null);
+}
+});
+}
+function chamar(acao, payload) {
+var pelaPorta = direto(acao, payload);
+if (!pelaPorta) return API.call("nf", acao, payload || {});
+return pelaPorta.then(function(r) {
+if (r) return r;
+return API.call("nf", acao, payload || {});
+});
+}
+return {
+listar: function(filtro) {
+return chamar("listar", filtro || {});
+},
+obter: function(p) {
+return chamar("obter", p);
+},
+itens: function(p) {
+return chamar("itens", p);
+},
+salvar: function(nota) {
+return chamar("salvar", nota);
+},
+excluir: function(p) {
+return chamar("excluir", p);
+},
+diagnostico: function() {
+return chamar("diagnostico", {});
+},
+recuperar: function() {
+return chamar("recuperar", {});
+},
+instalado: function() {
+return temModulo === true;
+}
+};
+}();
+
 SCREENS["nf"] = {
 titulo: "Notas Fiscais de Entrada",
 modulo: "nf",
 render: function() {
-return API.call("nf", "listar", {}).then(function(r) {
+return NF_CORE.listar({}).then(function(r) {
 if (!r.ok) return UI.estado("erro", "Não foi possível carregar as notas", r.mensagem);
-var todas = listaSegura(r.dados);
+/* A mesma nota lançada em dias diferentes aparece UMA vez, com todos
+   os itens juntos. Nada é apagado: o agrupamento é só na leitura. */
+var todas = NF_AGRUPAR(r.dados);
 var porStatus = {};
 todas.forEach(function(n) {
 var st = String(n.status || "SEM_STATUS").toUpperCase();
@@ -9004,7 +9394,11 @@ return String(n.status || "").toUpperCase() === NFP.status;
 if (NFP.busca) {
 var t = NFP.busca.toLowerCase();
 lista = lista.filter(function(n) {
-return [ n.numero, n.fornecedor, n.chave, n.cnpj, n.serie ].some(function(c) {
+var alvo = [ n.numero, n.fornecedor, n.chave, n.cnpj, n.serie, n.origem, n.status ];
+listaSegura(n.itens || n.listaItens).forEach(function(i) {
+alvo.push(i.descricao, i.sku, i.codigo, i.tamanho, i.ncm);
+});
+return alvo.some(function(c) {
 return String(c || "").toLowerCase().indexOf(t) > -1;
 });
 });
@@ -9056,7 +9450,9 @@ return '<div class="strong">' + n.numero + '</div><div class="muted">série ' + 
 }, {
 rotulo: "Fornecedor",
 render: function(n) {
-return U.esc(n.fornecedor);
+var f = NF_FORNECEDOR_LIMPO(n.fornecedor, n.cnpj);
+if (!f) return '<span class="badge b-yellow">sem fornecedor</span>';
+return '<div class="strong">' + U.esc(f) + "</div>" + (n.cnpj ? '<div class="muted mono small">' + U.esc(n.cnpj) + "</div>" : "");
 }
 }, {
 rotulo: "Origem",
@@ -9071,6 +9467,9 @@ return U.data(n.emissao);
 }, {
 rotulo: "Entrada",
 render: function(n) {
+if (n.__partes > 1) {
+return U.data(n.entrada) + '<div class="muted small">+ ' + (n.__partes - 1) + " lançamento(s) até " + U.data(n.ultimaEntrada || n.entrada) + "</div>";
+}
 return U.data(n.entrada);
 }
 }, {
@@ -9095,7 +9494,7 @@ return UI.badge(n.status);
 rotulo: "",
 acts: true,
 render: function(n) {
-return '<button class="btn-icon" data-nfver="' + n.numero + '" title="Conferência">' + ic("olho") + "</button>";
+return '<button class="btn-icon" data-nfdet="' + U.esc(NF_IDENTIDADE(n)) + '" title="Ver a nota inteira">' + ic("olho") + "</button>" + '<button class="btn-icon" data-nfver="' + n.numero + '" title="Conferência">' + ic("checkC") + "</button>";
 }
 } ]
 }) + "</div>";
@@ -9107,6 +9506,11 @@ if (o) o.addEventListener("click", modalOCR);
 document.querySelectorAll("[data-nfver]").forEach(function(b) {
 b.addEventListener("click", function() {
 modalConferenciaNF(b.getAttribute("data-nfver"));
+});
+});
+document.querySelectorAll("[data-nfdet]").forEach(function(b) {
+b.addEventListener("click", function() {
+modalDetalheNF(b.getAttribute("data-nfdet"));
 });
 });
 document.querySelectorAll("[data-nf-status]").forEach(function(b) {
@@ -15044,7 +15448,7 @@ SCREENS["nf-conferencia"] = {
 titulo: "Conferência de Notas",
 modulo: "nf",
 render: function() {
-return API.call("nf", "listar", {}).then(function(r) {
+return NF_CORE.listar({}).then(function(r) {
 var lista = (r.dados || []).filter(function(n) {
 return n.status === "EM_CONFERENCIA" || n.status === "DIVERGENCIA";
 });
@@ -18539,6 +18943,18 @@ DADOS.limpar();
 
 var SETUP = function() {
 function montar() {
+/* trava de segurança: o primeiro administrador só pode ser criado
+   depois que o Core CONFIRMAR que a base oficial está vazia. */
+if (typeof baseConsultada === "function" && !baseConsultada()) {
+toast("warn", "Não dá para criar administrador agora", "O sistema ainda não conseguiu consultar o cadastro oficial de usuários. " + "Confira a conexão e tente de novo.", 7e3);
+if (typeof modalDiagnosticoDeConexao === "function") modalDiagnosticoDeConexao();
+return;
+}
+if (typeof precisaPrimeiroAcesso === "function" && !precisaPrimeiroAcesso()) {
+toast("info", "Já existe administrador", "Entre com o seu usuário. Novos cadastros são feitos em Configurações → Usuários.");
+LOGIN.abrir();
+return;
+}
 var kiosk = document.getElementById("kioskScreen");
 if (kiosk) {
 kiosk.classList.add("hidden");
@@ -20353,7 +20769,11 @@ var m2 = texto.match(new RegExp("<" + nome + "[^>]*>([^<]*)</" + nome + ">"));
 return m2 ? m2[1] : null;
 }
 var numero = tag("nNF"), serie = tag("serie"), emissao = tag("dhEmi") || tag("dEmi");
-var fornecedor = tag("xNome"), cnpj = tag("CNPJ"), total = tag("vNF");
+/* fornecedor = emitente. Nunca o destinatário, nunca a nossa empresa. */
+var quem = NF_FORNECEDOR_DO_XML(texto);
+var fornecedor = quem.fornecedor;
+var cnpj = quem.cnpj;
+var total = tag("vNF");
 var chave = (texto.match(/Id="NFe(\d{44})"/) || [])[1] || null;
 var itens = [];
 var blocos = texto.match(/<det[\s\S]*?<\/det>/g) || [];
@@ -21045,33 +21465,24 @@ MOCK.notas.unshift(nota);
 var semVinculo = itens.filter(function(i) {
 return !i.sku;
 }).length;
+/* O fornecedor da nota é quem emitiu. Se o arquivo devolveu a nossa
+   própria empresa, o campo fica vazio e a tela pede para informar —
+   melhor em branco do que errado. */
 function garantirFornecedor() {
-var cnpj = String(nota.cnpj || "").trim();
-if (!cnpj) return Promise.resolve(null);
-return API.call("fornecedores", "porCnpj", {
-cnpj: cnpj
-}).then(function(r) {
-if (r && r.ok && r.dados) return r.dados;
-return API.call("fornecedores", "salvar", {
-razaoSocial: nota.fornecedor || "Fornecedor da NF " + nota.numero,
-nome: nota.fornecedor || "",
-cnpj: cnpj,
+var limpo = NF_FORNECEDOR_LIMPO(nota.fornecedor, nota.cnpj);
+if (!limpo) {
+if (nota.fornecedor) nota.fornecedor = "";
+return Promise.resolve(null);
+}
+nota.fornecedor = limpo;
+return NF_GARANTIR_FORNECEDOR(limpo, nota.cnpj, {
 inscricaoEstadual: (NF_LIDA.fornecedorExtra || {}).inscricaoEstadual || "",
 endereco: (NF_LIDA.fornecedorExtra || {}).endereco || "",
 origem: "Nota fiscal " + nota.numero
-}).then(function(novo) {
-if (novo && novo.ok) {
-toast("ok", "Fornecedor cadastrado", (nota.fornecedor || cnpj) + " entrou no cadastro de fornecedores.");
-return novo.dados;
-}
-return null;
-});
-}, function() {
-return null;
 });
 }
 garantirFornecedor().then(function() {
-return API.call("nf", "salvar", nota);
+return NF_CORE.salvar(nota);
 }).then(function(r) {
 if (r && r.ok === false) {
 if (botao) {
@@ -21088,7 +21499,7 @@ block: "center"
 toast("err", "A nota não foi gravada", r.mensagem || "O Core recusou o registro.");
 return;
 }
-return API.call("nf", "listar", {}).then(function(lista) {
+return NF_CORE.listar({}).then(function(lista) {
 var achou = lista && lista.ok && listaSegura(lista.dados).some(function(x) {
 return String(x.numero) === String(nota.numero);
 });
@@ -21110,7 +21521,7 @@ modalConferenciaNF(nota.numero);
 return;
 }
 nota.status = "CONFERIDA";
-API.call("nf", "salvar", nota);
+NF_CORE.salvar(nota);
 toast("ok", "Nota " + nota.numero + " conferida", "Quantidades e vínculos batem — não precisou conferir de novo.");
 location.hash = "#/nf";
 ROUTER.render();
@@ -22939,10 +23350,39 @@ nfEmissao: "emissao",
 nfValor: "valor"
 };
 var pre = ST.nfCabecalho && ST.nfCabecalho[id] || (ST.nfPreenchida && mapa[id] ? ST.nfPreenchida[mapa[id]] || "" : "");
+/* A entrada é o dia em que a mercadoria chegou: o sistema marca sozinho. */
+if (id === "nfEntrada") {
+return '<div class="field"><label>' + rot + ' <span class="badge b-blue">automática</span></label>' + '<input class="input" id="nfEntrada" readonly value="' + U.esc(U.data(NF_DATA_DE_HOJE())) + '" ' + 'style="background:var(--fundo);cursor:default"></div>';
+}
+if (id === "nfForn") {
+return '<div class="field"><label>' + rot + ' <span class="req">*</span>' + (pre ? ' <span class="badge b-green">do documento</span>' : "") + "</label>" + '<input class="input" id="nfForn" value="' + U.esc(pre) + '" placeholder="' + U.esc(ph) + '">' + '<div class="small muted mt8">Quem <b>vendeu</b> para nós. Fornecedor novo entra no cadastro sozinho.</div></div>';
+}
 return '<div class="field"><label>' + rot + (pre ? ' <span class="badge b-green">do documento</span>' : "") + "</label>" + '<input class="input" id="' + id + '" value="' + U.esc(pre) + '" placeholder="' + U.esc(ph) + '"></div>';
 }
 },
 mount: function() {
+/* A data de entrada é sempre de hoje: quem lança não digita. */
+var elEntrada = document.getElementById("nfEntrada");
+if (elEntrada) elEntrada.value = U.data(NF_DATA_DE_HOJE());
+/* O fornecedor é quem vendeu. Se digitarem a nossa empresa, avisa na hora. */
+var fornEl = document.getElementById("nfForn");
+if (fornEl) fornEl.addEventListener("blur", function() {
+var alvoF = document.getElementById("nfFornecStatus");
+if (!alvoF) return;
+var nome = fornEl.value.trim();
+if (!nome) return;
+var doc = (document.getElementById("nfCnpj") || {}).value || "";
+if (NF_EH_MINHA_EMPRESA(nome, doc)) {
+alvoF.innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div><b>Esta é a nossa empresa</b>Numa nota de <b>entrada</b>, o fornecedor é quem vendeu para nós. " + "Escreva a razão social do fornecedor.</div></div>";
+return;
+}
+API.call("fornecedores", "listar", {}).then(function(r) {
+var achado = listaSegura(r && r.dados).filter(function(f) {
+return NF_MESMO_NOME(f.razaoSocial || f.nome, nome);
+})[0];
+alvoF.innerHTML = achado ? '<div class="alert a-green mt12">' + ic("checkC") + "<div><b>Fornecedor cadastrado</b>" + U.esc(achado.razaoSocial || achado.nome) + "</div></div>" : '<div class="alert a-blue mt12">' + ic("info") + "<div><b>Fornecedor novo</b>" + U.esc(nome) + " ainda não existe no cadastro. Ele entra automaticamente quando você registrar a nota.</div></div>";
+});
+});
 var cnpj = document.getElementById("nfCnpj");
 if (cnpj) cnpj.addEventListener("blur", function() {
 if (!cnpj.value.trim()) return;
@@ -22972,12 +23412,25 @@ document.getElementById("nfNumero").classList.add("err");
 toast("warn", "Informe o número da nota", "Sem o número não dá para registrar a entrada.");
 return;
 }
+var fornDigitado = ((document.getElementById("nfForn") || {}).value || "").trim();
+var cnpjDigitado = ((document.getElementById("nfCnpj") || {}).value || "").trim();
+var fornOk = NF_FORNECEDOR_LIMPO(fornDigitado, cnpjDigitado);
+if (!fornOk) {
+var elF = document.getElementById("nfForn");
+if (elF) {
+elF.classList.add("err");
+elF.focus();
+}
+toast("warn", fornDigitado ? "Este fornecedor não serve" : "Informe o fornecedor", fornDigitado ? "Numa nota de entrada o fornecedor é quem vendeu para nós, não a nossa empresa." : "Escreva a razão social de quem emitiu a nota.");
+return;
+}
 var nota = {
 numero: numero.trim(),
 serie: (document.getElementById("nfSerie") || {}).value || "",
-fornecedor: (document.getElementById("nfForn") || {}).value || "Não informado",
-emissao: (document.getElementById("nfEmissao") || {}).value || (new Date).toISOString().slice(0, 10),
-entrada: (new Date).toISOString().slice(0, 10),
+fornecedor: fornOk,
+cnpj: cnpjDigitado,
+emissao: (document.getElementById("nfEmissao") || {}).value || NF_DATA_DE_HOJE(),
+entrada: NF_DATA_DE_HOJE(),
 valor: Number(String((document.getElementById("nfValor") || {}).value || "0").replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".")) || 0,
 itens: 0,
 status: "EM_CONFERENCIA",
@@ -22995,16 +23448,23 @@ nota.valor = nfItens.reduce(function(s2, i) {
 return s2 + i.qtd * i.valorUnitario;
 }, 0);
 }
-var jaExiste = (MOCK.notas || []).filter(function(n) {
-return n.numero === nota.numero;
-})[0];
-if (jaExiste) Object.keys(nota).forEach(function(k) {
-jaExiste[k] = nota[k];
-}); else MOCK.notas.unshift(nota);
+/* Grava no Core (fonte oficial) e cadastra o fornecedor se for novo.
+   A tela local só espelha o que o Core aceitou. */
+guardarNotaNaTela(nota);
+NF_GARANTIR_FORNECEDOR(nota.fornecedor, nota.cnpj, {
+origem: "Entrada manual da NF " + nota.numero
+}).then(function() {
+return NF_CORE.salvar(nota);
+}).then(function(r) {
+if (r && r.ok === false) {
+toast("err", "A nota NÃO foi gravada", (r.mensagem || r.codigo || "O Core recusou o registro.") + " Nada foi perdido nesta tela — corrija e tente de novo.");
+return;
+}
 if (typeof CACHE !== "undefined") CACHE.invalidar("nf");
 toast("ok", "Nota registrada", nfItens.length + " item(ns) · confira antes de lançar no estoque.");
 limparCabecalhoNF();
 modalConferenciaNF(nota.numero);
+});
 });
 }
 };
@@ -23024,9 +23484,12 @@ if (obra) ST.nfCabecalho.nfObra = obra.value;
 function restaurarCabecalhoNF() {
 var guardado = ST.nfCabecalho || {};
 Object.keys(guardado).forEach(function(id) {
+if (id === "nfEntrada") return;
 var el = document.getElementById(id);
 if (el && !el.value) el.value = guardado[id];
 });
+var ent = document.getElementById("nfEntrada");
+if (ent) ent.value = U.data(NF_DATA_DE_HOJE());
 }
 
 function limparCabecalhoNF() {
@@ -23035,19 +23498,42 @@ ST.nfPreenchida = null;
 if (typeof nfItens !== "undefined") nfItens = [];
 }
 
+/* Só existe "primeiro acesso" depois que o Core CONFIRMOU que a base
+   oficial de usuários está vazia. Enquanto não houver confirmação, o
+   sistema não afirma nada — falha de conexão não é ausência de admin. */
 function precisaPrimeiroAcesso() {
-if (ST.existeUsuario === true) return false;
-if (ST.existeUsuario === false) return true;
-return typeof DADOS !== "undefined" && DADOS.vazio();
+return ST.existeUsuario === false;
+}
+
+/* Guarda por que a consulta falhou, para a tela mostrar o erro REAL. */
+function baseConsultada() {
+return ST.existeUsuario === true || ST.existeUsuario === false;
+}
+function erroDaBase() {
+return ST.erroBase || null;
 }
 
 function verificarExisteUsuario() {
 return API.call("usuarios", "contar", {}).then(function(r) {
-if (r.ok && r.dados && typeof r.dados.total === "number") {
+if (r && r.ok && r.dados && typeof r.dados.total === "number") {
 ST.existeUsuario = r.dados.total > 0;
+ST.erroBase = null;
+ST.totalUsuarios = r.dados.total;
 return ST.existeUsuario;
 }
+/* não deu para consultar: não se conclui nada sobre administrador */
 ST.existeUsuario = null;
+ST.erroBase = {
+codigo: r && (r.codigo || r.erro) || "SEM_RESPOSTA",
+mensagem: r && r.mensagem || "O servidor não respondeu à consulta de usuários."
+};
+return null;
+}).catch(function(e) {
+ST.existeUsuario = null;
+ST.erroBase = {
+codigo: "FALHA_CONEXAO",
+mensagem: e && e.message ? e.message : String(e)
+};
 return null;
 });
 }
@@ -26023,6 +26509,152 @@ guardarNotaNaTela(n);
 abrirConferenciaNF_(n);
 });
 return null;
+}
+
+/* ============================================================
+ * DETALHE DA NOTA — o "olhinho"
+ * Mostra a nota inteira: cada produto, a unidade de medida, a
+ * quantidade, o valor de cada um e a soma. Sem editar nada.
+ * Se a nota foi lançada em dias diferentes, tudo aparece junto,
+ * com a data de cada lançamento ao lado do item.
+ * ============================================================ */
+function modalDetalheNF(identidade) {
+toast("info", "Abrindo a nota", "Buscando os itens no Core…");
+NF_CORE.listar({}).then(function(r) {
+var grupo = NF_AGRUPAR(r && r.ok ? r.dados : []).filter(function(n) {
+return NF_IDENTIDADE(n) === identidade;
+})[0];
+if (!grupo) {
+toast("err", "Nota não localizada", "O Core não devolveu nenhum registro com esta identidade.");
+return;
+}
+/* os itens podem estar em outra aba: busca antes de desenhar */
+if (listaSegura(grupo.listaItens).length) return abrirDetalheNF_(grupo);
+return NF_CORE.itens({
+numero: grupo.numero,
+chave: grupo.chave || ""
+}).then(function(ri) {
+grupo.listaItens = ri && ri.ok ? listaSegura(ri.dados).map(normalizarItemDaNota) : [];
+abrirDetalheNF_(grupo);
+});
+});
+}
+
+function abrirDetalheNF_(n) {
+var itens = listaSegura(n.listaItens).map(normalizarItemDaNota);
+var forn = NF_FORNECEDOR_LIMPO(n.fornecedor, n.cnpj);
+var soma = Math.round(itens.reduce(function(sm, i) {
+return sm + (Number(i.valorTotal) || (Number(i.qtd) || 0) * (Number(i.valorUnitario) || 0));
+}, 0) * 100) / 100;
+var gravado = Number(n.valor) || 0;
+var unidades = itens.reduce(function(sm, i) {
+return sm + (Number(i.qtd) || 0);
+}, 0);
+function linhaCab(rot, val, mono) {
+return '<div class="info-row"><span>' + rot + "</span><b" + (mono ? ' class="mono"' : "") + ">" + val + "</b></div>";
+}
+var lancamentos = listaSegura(n.__lancamentos);
+var corpo = '<div class="grid g2 mb16" style="gap:16px">' + '<div class="card" style="margin:0"><div class="card-body">' + '<div class="small muted mb8">FORNECEDOR</div>' + (forn ? '<b style="font-size:15px">' + U.esc(forn) + "</b>" + (n.cnpj ? '<div class="muted mono small mt8">CNPJ ' + U.esc(n.cnpj) + "</div>" : "") : '<div class="alert a-yellow" style="margin:0">' + ic("alerta") + "<div><b>Esta nota está sem fornecedor</b>" + "Abra a entrada e preencha quem vendeu. A nota de entrada nunca leva o nome da nossa empresa.</div></div>") + "</div></div>" + '<div class="card" style="margin:0"><div class="card-body">' + linhaCab("Número", U.esc(n.numero) + (n.serie ? " · série " + U.esc(n.serie) : "")) + linhaCab("Emissão", U.data(n.emissao)) + linhaCab("Entrada", U.data(n.entrada) + (n.ultimaEntrada && String(n.ultimaEntrada) !== String(n.entrada) ? " até " + U.data(n.ultimaEntrada) : "")) + linhaCab("Origem", U.esc(n.origem || "Manual")) + linhaCab("Situação", UI.badge(n.status)) + (n.chave ? linhaCab("Chave", '<span style="font-size:10.5px">' + U.esc(n.chave) + "</span>", true) : "") + "</div></div>" + "</div>" + (n.__partes > 1 ? '<div class="alert a-blue mb16">' + ic("info") + "<div><b>Esta nota foi lançada em " + n.__partes + " momentos</b>" + lancamentos.map(function(l) {
+return U.data(l.entrada) + " — " + l.itens + " item(ns)";
+}).join(" · ") + "<br>Os " + itens.length + " itens aparecem juntos aqui embaixo, como uma nota só. " + "Nada foi duplicado nem apagado na planilha.</div></div>" : "") + '<div class="grid g4 mb16">' + UI.kpi({
+icone: "caixa",
+cor: "ico-blue",
+valor: itens.length,
+rotulo: "Produtos na nota"
+}) + UI.kpi({
+icone: "estoque",
+cor: "ico-navy",
+valor: Math.round(unidades * 100) / 100,
+rotulo: "Unidades somadas"
+}) + UI.kpi({
+icone: "banco",
+cor: "ico-navy",
+valor: U.moeda(soma),
+rotulo: "Soma dos itens"
+}) + UI.kpi({
+icone: "nota",
+cor: gravado && Math.abs(gravado - soma) > .02 ? "ico-red" : "ico-green",
+valor: U.moeda(gravado || soma),
+rotulo: gravado ? "Valor da nota" : "Valor (pela soma)",
+hint: gravado && Math.abs(gravado - soma) > .02 ? "difere " + U.moeda(Math.abs(gravado - soma)) + " da soma" : ""
+}) + "</div>" + '<div class="tbl-wrap"><table class="tbl"><thead><tr>' + "<th>#</th><th>Produto</th><th>Unidade</th>" + '<th class="num">Quantidade</th><th class="num">Valor unitário</th><th class="num">Total do item</th>' + (n.__partes > 1 ? "<th>Lançado em</th>" : "") + "</tr></thead><tbody>" + (itens.length ? itens.map(function(i, k) {
+var tot = Number(i.valorTotal) || (Number(i.qtd) || 0) * (Number(i.valorUnitario) || 0);
+return "<tr>" + '<td class="muted mono">' + (k + 1) + "</td>" + '<td><div class="strong">' + U.esc(i.descricao) + "</div>" + '<div class="muted mono small">' + U.esc(i.sku || i.codigo || "sem código") + (i.ncm ? " · NCM " + U.esc(i.ncm) : "") + "</div></td>" + "<td>" + U.esc(i.unidade || "un") + "</td>" + '<td class="num">' + (Number(i.qtd) || 0) + "</td>" + '<td class="num">' + U.moeda(Number(i.valorUnitario) || 0) + "</td>" + '<td class="num"><b>' + U.moeda(tot) + "</b></td>" + (n.__partes > 1 ? '<td class="muted small">' + (i.__de ? U.data(i.__de) : U.data(n.entrada)) + "</td>" : "") + "</tr>";
+}).join("") : '<tr><td colspan="7" class="muted" style="padding:20px;text-align:center">Esta nota não tem itens gravados.</td></tr>') + "</tbody>" + (itens.length ? '<tfoot><tr><td colspan="' + (n.__partes > 1 ? 5 : 5) + '" class="num"><b>Soma dos itens</b></td>' + '<td class="num"><b style="font-size:15px">' + U.moeda(soma) + "</b></td>" + (n.__partes > 1 ? "<td></td>" : "") + "</tr></tfoot>" : "") + "</table></div>" + (n.observacoes ? '<div class="alert a-gray mt16">' + ic("info") + "<div><b>Observações</b>" + U.esc(n.observacoes) + "</div></div>" : "");
+UI.modal({
+titulo: "NF " + n.numero + (n.serie ? " · série " + n.serie : ""),
+sub: (forn || "sem fornecedor") + " · entrada em " + U.data(n.entrada) + " · " + itens.length + " produto(s) · " + U.moeda(gravado || soma),
+tamanho: "xl",
+corpo: corpo,
+rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' + (forn ? "" : '<button class="btn btn-ghost" data-forn>' + ic("editar") + "Informar fornecedor</button>") + '<button class="btn btn-ghost" data-imp>' + ic("impressora") + "Imprimir</button>" + '<button class="btn btn-primary" data-conf>' + ic("checkC") + "Ir para a conferência</button>",
+aoAbrir: function(w, fechar) {
+w.querySelector("[data-x]").addEventListener("click", fechar);
+w.querySelector("[data-conf]").addEventListener("click", function() {
+fechar();
+modalConferenciaNF(n.numero);
+});
+w.querySelector("[data-imp]").addEventListener("click", function() {
+window.print();
+});
+var bf = w.querySelector("[data-forn]");
+if (bf) bf.addEventListener("click", function() {
+fechar();
+modalFornecedorDaNota(n);
+});
+}
+});
+}
+
+/* Preenche o fornecedor de uma nota que ficou sem, e já cadastra
+   esse fornecedor se ele ainda não existir. */
+function modalFornecedorDaNota(n) {
+UI.modal({
+titulo: "Fornecedor da NF " + n.numero,
+sub: "Quem vendeu — nunca a nossa própria empresa",
+tamanho: "sm",
+corpo: '<div class="field"><label>Fornecedor <span class="req">*</span></label>' + '<input class="input" id="nfdForn" value="' + U.esc(NF_FORNECEDOR_LIMPO(n.fornecedor, n.cnpj)) + '" placeholder="Razão social de quem emitiu a nota"></div>' + '<div class="field"><label>CNPJ</label>' + '<input class="input" id="nfdCnpj" value="' + U.esc(n.cnpj || "") + '" placeholder="00.000.000/0001-00"></div>' + '<div id="nfdAviso"></div>' + '<div class="small muted mt8">Se este fornecedor ainda não estiver cadastrado, ' + "ele entra sozinho no cadastro de fornecedores.</div>",
+rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' + '<button class="btn btn-primary" data-ok>' + ic("salvar") + "Salvar</button>",
+aoAbrir: function(w, fechar) {
+w.querySelector("[data-x]").addEventListener("click", fechar);
+w.querySelector("[data-ok]").addEventListener("click", function() {
+var nome = w.querySelector("#nfdForn").value.trim();
+var cnpj = w.querySelector("#nfdCnpj").value.trim();
+var aviso = w.querySelector("#nfdAviso");
+if (!nome) {
+aviso.innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div>Escreva quem vendeu.</div></div>";
+return;
+}
+if (NF_EH_MINHA_EMPRESA(nome, cnpj)) {
+aviso.innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div><b>Esta é a nossa empresa</b>Numa nota de entrada, o fornecedor é quem vendeu para nós.</div></div>";
+return;
+}
+var bt = w.querySelector("[data-ok]");
+bt.disabled = true;
+bt.innerHTML = '<span class="spinner"></span> Salvando…';
+NF_GARANTIR_FORNECEDOR(nome, cnpj, {
+origem: "Informado na NF " + n.numero
+}).then(function() {
+var copia = JSON.parse(JSON.stringify(n));
+copia.fornecedor = nome;
+copia.cnpj = cnpj;
+delete copia.__partes;
+delete copia.__lancamentos;
+return NF_CORE.salvar(copia);
+}).then(function(r) {
+bt.disabled = false;
+bt.innerHTML = ic("salvar") + "Salvar";
+if (r && r.ok === false) {
+aviso.innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div><b>O Core não gravou</b>" + U.esc(r.mensagem || r.codigo || "") + "</div></div>";
+return;
+}
+if (typeof CACHE !== "undefined") CACHE.invalidar("nf");
+toast("ok", "Fornecedor gravado", nome + " agora é o fornecedor da NF " + n.numero + ".");
+fechar();
+ROUTER.render();
+});
+});
+}
+});
 }
 
 function itensDaNotaSalva(n) {
@@ -34617,6 +35249,15 @@ testarApiEEntrar(true);
 function seguirComOSistema() {
 try {
 document.getElementById("bootScreen").classList.add("hidden");
+/* consulta a base OFICIAL de usuários antes de qualquer conclusão */
+if (typeof verificarExisteUsuario === "function") {
+verificarExisteUsuario().then(function() {
+try {
+LOGIN.montar();
+ROUTER.render();
+} catch (x) {}
+});
+}
 LOGIN.montar();
 document.getElementById("loginScreen").classList.add("hidden");
 MODO.publico();
@@ -38086,7 +38727,7 @@ return '<div class="lf-cab"><div class="lf-marca">ALMOXA <i>PRO</i>' + "<small>G
 };
 
 (function estiloDoCracha() {
-var css = ".cr-palco{display:flex;flex-direction:column;align-items:center;gap:12px}" + ".cr-video{width:100%;max-width:380px;aspect-ratio:4/3;background:#0B1220;border-radius:12px;" + "object-fit:cover;display:block}" + ".cr-mira{position:relative;width:100%;max-width:380px}" + '.cr-mira:after{content:"";position:absolute;inset:16% 16%;border:3px solid rgba(255,255,255,.85);' + "border-radius:14px;box-shadow:0 0 0 999px rgba(0,0,0,.28);pointer-events:none}" + ".cr-dica{font-size:12.5px;color:var(--texto-3,#9AA4B2);text-align:center;line-height:1.6;max-width:400px}" + ".cr-ou{display:flex;align-items:center;gap:10px;width:100%;max-width:380px;color:var(--texto-3,#9AA4B2);" + "font-size:11.5px;text-transform:uppercase;letter-spacing:.06em}" + '.cr-ou:before,.cr-ou:after{content:"";flex:1;height:1px;background:var(--linha,#E3E8EF)}' + ".cr-cracha{width:280px;min-height:440px;border-radius:16px;overflow:hidden;background:#fff;" + "box-shadow:0 10px 30px rgba(11,42,85,.18);display:flex;flex-direction:column;" + "border:1px solid #E3E8EF;font-family:inherit}" + ".cr-cracha .cr-topo{background:linear-gradient(135deg,#0B2A55,#0F5BD8);color:#fff;padding:16px;text-align:center}" + ".cr-cracha .cr-topo b{display:block;font-size:17px;letter-spacing:.04em}" + ".cr-cracha .cr-topo small{display:block;font-size:9.5px;opacity:.82;letter-spacing:.12em;text-transform:uppercase;margin-top:2px}" + ".cr-foto{width:108px;height:108px;flex:none;border-radius:50%;margin:16px auto 10px;" + "background:#EEF2F7;border:4px solid #fff;box-shadow:0 2px 10px rgba(0,0,0,.14);overflow:hidden;" + "display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:700;color:#5F6B7A}" + ".cr-foto img{width:100%;height:100%;object-fit:cover}" + ".cr-nome{text-align:center;font-size:15px;font-weight:700;color:#0B2A55;padding:0 12px;line-height:1.3}" + ".cr-funcao{text-align:center;font-size:11.5px;color:#5F6B7A;margin-top:3px;padding:0 12px}" + ".cr-dados{margin:12px 16px 0;font-size:10.5px;color:#5F6B7A;line-height:1.7}" + ".cr-dados div{display:flex;justify-content:space-between;gap:8px;border-bottom:1px dashed #EEF2F7;padding:2px 0}" + ".cr-dados b{color:#0B2A55;font-weight:600;text-align:right}" + ".cr-qr{margin-top:auto;flex:none;padding:10px;text-align:center;background:#F7F9FC;" + "border-top:1px solid #EEF2F7}" + ".cr-qr svg{width:92px;height:92px}" + ".cr-qr span{display:block;font-size:9px;letter-spacing:.12em;color:#9AA4B2;margin-top:3px;font-family:ui-monospace,monospace}" + ".cr-verso{padding:16px;font-size:10px;color:#5F6B7A;line-height:1.65;flex:1}" + ".cr-verso h5{font-size:11px;color:#0B2A55;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}" + ".cr-verso ul{margin:0 0 10px 14px}" + ".cr-grade{display:flex;flex-wrap:wrap;gap:20px;justify-content:center}" + ".cr-res{text-align:center;padding:10px 4px}" + ".cr-res .cr-marca{width:72px;height:72px;border-radius:50%;margin:0 auto 14px;display:flex;" + "align-items:center;justify-content:center;font-size:34px;color:#fff}" + ".cr-res h4{font-size:17px;color:var(--texto-1,#0B2A55);margin-bottom:6px}" + ".cr-res p{font-size:13px;color:var(--texto-2,#5F6B7A);line-height:1.6;max-width:380px;margin:0 auto}" + ".cr-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;" + "background:#EEF2F7;color:#0B2A55;font-size:11.5px;font-weight:600;margin-top:12px}" + ".cr-selo{display:inline-flex;align-items:center;gap:8px;padding:5px 10px 5px 5px;border-radius:999px;" + "background:var(--fundo-2,#F7F9FC);border:1px solid var(--linha,#E3E8EF);cursor:pointer}" + ".cr-selo .cr-av{width:26px;height:26px;border-radius:50%;background:#0F5BD8;color:#fff;display:flex;" + "align-items:center;justify-content:center;font-size:11px;font-weight:700;overflow:hidden;flex:none}" + ".cr-selo .cr-av img{width:100%;height:100%;object-fit:cover}" + ".cr-selo b{font-size:12px;color:var(--texto-1,#0B2A55);line-height:1.2}" + ".cr-selo small{display:block;font-size:10px;color:var(--texto-3,#9AA4B2)}" + "@media print{body *{visibility:hidden!important}" + "#crImpressao,#crImpressao *{visibility:visible!important}" + "#crImpressao{position:absolute;left:0;top:0;width:100%}" + ".cr-cracha{box-shadow:none;page-break-inside:avoid;margin:6mm}}";
+var css = ".cr-palco{display:flex;flex-direction:column;align-items:center;gap:12px}" + ".cr-video{width:100%;max-width:380px;aspect-ratio:4/3;background:#0B1220;border-radius:12px;" + "object-fit:cover;display:block}" + ".cr-mira{position:relative;width:100%;max-width:380px}" + '.cr-mira:after{content:"";position:absolute;inset:16% 16%;border:3px solid rgba(255,255,255,.85);' + "border-radius:14px;box-shadow:0 0 0 999px rgba(0,0,0,.28);pointer-events:none}" + ".cr-dica{font-size:12.5px;color:var(--texto-3,#9AA4B2);text-align:center;line-height:1.6;max-width:400px}" + ".cr-ou{display:flex;align-items:center;gap:10px;width:100%;max-width:380px;color:var(--texto-3,#9AA4B2);" + "font-size:11.5px;text-transform:uppercase;letter-spacing:.06em}" + '.cr-ou:before,.cr-ou:after{content:"";flex:1;height:1px;background:var(--linha,#E3E8EF)}' + ".cr-cracha{width:280px;min-height:440px;border-radius:16px;overflow:hidden;background:#fff;" + "box-shadow:0 10px 30px rgba(11,42,85,.18);display:flex;flex-direction:column;" + "border:1px solid #E3E8EF;font-family:inherit}" + ".cr-cracha .cr-topo{background:linear-gradient(135deg,#0B2A55,#0F5BD8);color:#fff;padding:16px;text-align:center}" + ".cr-cracha .cr-topo b{display:block;font-size:17px;letter-spacing:.04em}" + ".cr-cracha .cr-topo small{display:block;font-size:9.5px;opacity:.82;letter-spacing:.12em;text-transform:uppercase;margin-top:2px}" + ".cr-foto{width:108px;height:108px;flex:none;border-radius:50%;margin:16px auto 10px;" + "background:#EEF2F7;border:4px solid #fff;box-shadow:0 2px 10px rgba(0,0,0,.14);overflow:hidden;" + "display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:700;color:#5F6B7A}" + ".cr-foto img{width:100%;height:100%;object-fit:cover}" + ".cr-nome{text-align:center;font-size:15px;font-weight:700;color:#0B2A55;padding:0 12px;line-height:1.3}" + ".cr-funcao{text-align:center;font-size:11.5px;color:#5F6B7A;margin-top:3px;padding:0 12px}" + ".cr-dados{margin:12px 16px 0;font-size:10.5px;color:#5F6B7A;line-height:1.7}" + ".cr-dados div{display:flex;justify-content:space-between;gap:8px;border-bottom:1px dashed #EEF2F7;padding:2px 0}" + ".cr-dados b{color:#0B2A55;font-weight:600;text-align:right}" + ".cr-qr{margin-top:auto;flex:none;padding:10px;text-align:center;background:#F7F9FC;" + "border-top:1px solid #EEF2F7}" + ".cr-qr svg{width:92px;height:92px}" + ".cr-qr span{display:block;font-size:9px;letter-spacing:.12em;color:#9AA4B2;margin-top:3px;font-family:ui-monospace,monospace}" + ".cr-verso{padding:16px;font-size:10px;color:#5F6B7A;line-height:1.65;flex:1}" + ".cr-verso-limpo{display:flex;flex-direction:column;align-items:center;padding:8px 14px 12px}" + ".cr-par{display:flex;gap:14px;align-items:flex-start}" + ".cr-qr-alto{margin-top:8px!important}" + ".cr-qr-so-codigo{padding:6px 10px!important;background:transparent!important}" + ".cr-linha-sangue b{color:#B42318!important;font-weight:800}" + ".cr-nrs{width:100%;border-collapse:collapse;font-size:9.5px}" + ".cr-nrs td{padding:1.5px 0;border-bottom:1px dotted #EEF2F7;vertical-align:top}" + ".cr-nrs td.cr-nr-d{text-align:right;white-space:nowrap;color:#5F6B7A;font-weight:600;padding-left:6px}" + ".cr-nrs td.cr-nr-venceu{color:#E5484D;font-weight:800}" + ".cr-nrs td.cr-nr-vazio{color:#C3CBD6;font-weight:500}" + ".cr-verso-qr{background:#fff;border-radius:10px;padding:2px;text-align:center;" + "margin:0 0 8px;flex:none}" + ".cr-verso-qr svg{width:150px;height:150px;display:block}" + ".cr-verso-cod{display:block;font-size:9.5px;letter-spacing:.14em;color:#9AA4B2;" + "margin-top:6px;font-family:ui-monospace,monospace}" + ".cr-sangue{width:100%;text-align:center;border:1.5px solid #0B2A55;border-radius:10px;" + "padding:6px 10px;margin-bottom:10px}" + ".cr-sangue span{display:block;font-size:8.5px;letter-spacing:.14em;color:#5F6B7A}" + ".cr-sangue b{display:block;font-size:22px;line-height:1.1;color:#0B2A55;letter-spacing:.04em}" + ".cr-verso-limpo h5,.cr-verso-limpo table,.cr-verso-limpo p,.cr-verso-limpo ul{width:100%}" + "@media print{.cr-verso-qr{padding:4mm!important;background:#fff!important;" + "break-inside:avoid;page-break-inside:avoid;print-color-adjust:exact;-webkit-print-color-adjust:exact}" + ".cr-verso-qr svg{width:34mm!important;height:34mm!important}" + ".cr-sangue{print-color-adjust:exact;-webkit-print-color-adjust:exact}}" + ".cr-verso h5{font-size:10.5px;color:#0B2A55;text-transform:uppercase;letter-spacing:.07em;margin:0 0 4px}" + ".cr-verso ul{margin:0 0 10px 14px}" + ".cr-grade{display:flex;flex-wrap:wrap;gap:20px;justify-content:center}" + ".cr-res{text-align:center;padding:10px 4px}" + ".cr-res .cr-marca{width:72px;height:72px;border-radius:50%;margin:0 auto 14px;display:flex;" + "align-items:center;justify-content:center;font-size:34px;color:#fff}" + ".cr-res h4{font-size:17px;color:var(--texto-1,#0B2A55);margin-bottom:6px}" + ".cr-res p{font-size:13px;color:var(--texto-2,#5F6B7A);line-height:1.6;max-width:380px;margin:0 auto}" + ".cr-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;" + "background:#EEF2F7;color:#0B2A55;font-size:11.5px;font-weight:600;margin-top:12px}" + ".cr-selo{display:inline-flex;align-items:center;gap:8px;padding:5px 10px 5px 5px;border-radius:999px;" + "background:var(--fundo-2,#F7F9FC);border:1px solid var(--linha,#E3E8EF);cursor:pointer}" + ".cr-selo .cr-av{width:26px;height:26px;border-radius:50%;background:#0F5BD8;color:#fff;display:flex;" + "align-items:center;justify-content:center;font-size:11px;font-weight:700;overflow:hidden;flex:none}" + ".cr-selo .cr-av img{width:100%;height:100%;object-fit:cover}" + ".cr-selo b{font-size:12px;color:var(--texto-1,#0B2A55);line-height:1.2}" + ".cr-selo small{display:block;font-size:10px;color:var(--texto-3,#9AA4B2)}" + ".cr-cracha{}";
 var s = document.createElement("style");
 s.setAttribute("data-cracha", "1");
 s.appendChild(document.createTextNode(css));
@@ -40311,21 +40952,123 @@ sessao = v;
 };
 }();
 
-function crachaFrente(d, comQR) {
-var qr = "";
-if (comQR && d.qr && typeof QR !== "undefined") {
+/* ============================================================
+ * LAYOUT DO CRACHÁ — o que aparece em cada lado.
+ * Tudo aqui é opcional e fica guardado; nada é apagado do cadastro,
+ * só deixa de ser impresso.
+ * ============================================================ */
+var CRACHA_LAYOUT_PADRAO = {
+cpf: true,
+matricula: false,
+setor: true,
+obra: true,
+acesso: true,
+unidade: false,
+sangueFrente: true,
+sangueVerso: true,
+qr: "frente"
+};
+var CRACHA_LAYOUT_CHAVE = "almoxa_cracha_layout";
+var CRACHA_LAYOUT_CHAVE_POR = "almoxa_cracha_layout_por";
+function CRACHA_LAYOUT_GLOBAL_CRU() {
 try {
-qr = QR.svg(d.qr, 190, 2) || "";
+return JSON.parse(localStorage.getItem(CRACHA_LAYOUT_CHAVE) || "{}") || {};
+} catch (e) {
+return {};
+}
+}
+function CRACHA_LAYOUT_MAPA() {
+try {
+return JSON.parse(localStorage.getItem(CRACHA_LAYOUT_CHAVE_POR) || "{}") || {};
+} catch (e) {
+return {};
+}
+}
+/* O layout de um crachá específico manda mais que o layout geral.
+   Sem nada guardado, vale o padrão. */
+function CRACHA_LAYOUT(codigo) {
+var g = CRACHA_LAYOUT_GLOBAL_CRU();
+var p = codigo ? CRACHA_LAYOUT_MAPA()[codigo] || {} : {};
+var out = {};
+Object.keys(CRACHA_LAYOUT_PADRAO).forEach(function(k) {
+out[k] = p[k] !== undefined ? p[k] : g[k] !== undefined ? g[k] : CRACHA_LAYOUT_PADRAO[k];
+});
+out.__codigo = codigo || "";
+out.__proprio = !!(codigo && Object.keys(p).length);
+return out;
+}
+function CRACHA_LAYOUT_TEM_PROPRIO(codigo) {
+return !!(codigo && Object.keys(CRACHA_LAYOUT_MAPA()[codigo] || {}).length);
+}
+function CRACHA_LAYOUT_GUARDAR(d, codigo) {
+var limpo = {};
+Object.keys(CRACHA_LAYOUT_PADRAO).forEach(function(k) {
+if (d[k] !== undefined) limpo[k] = d[k];
+});
+try {
+if (codigo) {
+var m = CRACHA_LAYOUT_MAPA();
+m[codigo] = limpo;
+localStorage.setItem(CRACHA_LAYOUT_CHAVE_POR, JSON.stringify(m));
+} else {
+localStorage.setItem(CRACHA_LAYOUT_CHAVE, JSON.stringify(limpo));
+}
+} catch (e) {}
+}
+/* Volta o crachá para o layout geral, sem apagar nada do cadastro. */
+function CRACHA_LAYOUT_SOLTAR(codigo) {
+if (!codigo) return;
+try {
+var m = CRACHA_LAYOUT_MAPA();
+delete m[codigo];
+localStorage.setItem(CRACHA_LAYOUT_CHAVE_POR, JSON.stringify(m));
+} catch (e) {}
+}
+function CRACHA_QR_NA_FRENTE(L) {
+var q = (L && L.qr ? L : CRACHA_LAYOUT()).qr;
+return q === "frente" || q === "ambos";
+}
+function CRACHA_QR_NO_VERSO(L) {
+var q = (L && L.qr ? L : CRACHA_LAYOUT()).qr;
+return q === "verso" || q === "ambos";
+}
+/* Tipagem sanguínea do verso, para reaproveitar na frente. */
+function CRACHA_SANGUE(d) {
+try {
+return versoLer(d.observacao).sangue || "";
+} catch (e) {
+return "";
+}
+}
+function crachaFrente(d, comQR) {
+var L = CRACHA_LAYOUT(d.codigo);
+var qr = "";
+if (comQR && CRACHA_QR_NA_FRENTE(L) && d.qr && typeof QR !== "undefined") {
+try {
+qr = QR.svg(d.qr, 190, 3) || "";
 } catch (e) {
 qr = "";
 }
 }
-return '<div class="cr-cracha">' + '<div class="cr-topo"><b>' + U.esc(CRACHA_MARCA()) + "</b><small>" + U.esc(d.unidade || "") + "</small></div>" + '<div class="cr-foto">' + (d.foto ? '<img src="' + U.esc(d.foto) + '" alt="">' : U.esc(CRACHA.iniciais(d.colaborador))) + "</div>" + '<div class="cr-nome">' + U.esc(d.colaborador) + "</div>" + '<div class="cr-funcao">' + U.esc(d.funcao || d.tipoAcesso || "Colaborador") + "</div>" + '<div class="cr-dados">' + (CRACHA_MOSTRAR_CPF() && d.cpf ? "<div><span>CPF</span><b>" + U.esc(CRACHA_CPF(d.cpf)) + "</b></div>" : "<div><span>Matrícula</span><b>" + U.esc(d.matricula) + "</b></div>") + (d.setor ? "<div><span>Setor</span><b>" + U.esc(d.setor) + "</b></div>" : "") + (d.obra ? "<div><span>Obra</span><b>" + U.esc(d.obra) + "</b></div>" : "") + "<div><span>Acesso</span><b>" + U.esc(d.nomeNivel || "") + "</b></div>" + "</div>" + '<div class="cr-qr">' + (qr || '<div style="height:92px;display:flex;align-items:center;' + 'justify-content:center;color:#9AA4B2;font-size:11px">QR gerado na emissão</div>') + "<span>" + U.esc(d.codigo) + (d.via > 1 ? " · " + d.via + "ª via" : "") + "</span></div>" + "</div>";
+var sangue = L.sangueFrente ? CRACHA_SANGUE(d) : "";
+function campo(rot, val) {
+return val ? "<div><span>" + rot + "</span><b>" + U.esc(val) + "</b></div>" : "";
+}
+var dados = "";
+if (L.cpf && d.cpf) dados += campo("CPF", CRACHA_CPF(d.cpf));
+if (L.matricula && d.matricula) dados += campo("Matrícula", d.matricula);
+if (L.setor) dados += campo("Setor", d.setor);
+if (L.obra) dados += campo("Obra", d.obra);
+if (L.acesso) dados += campo("Acesso", d.nomeNivel);
+if (sangue) dados += '<div class="cr-linha-sangue"><span>Sangue</span><b>' + U.esc(sangue) + "</b></div>";
+
+return '<div class="cr-cracha cr-frente">' + '<div class="cr-topo"><b>' + U.esc(CRACHA_MARCA()) + "</b>" + (L.unidade && d.unidade ? "<small>" + U.esc(d.unidade) + "</small>" : "") + "</div>" + '<div class="cr-foto">' + (d.foto ? '<img src="' + U.esc(d.foto) + '" alt="">' : U.esc(CRACHA.iniciais(d.colaborador))) + "</div>" + '<div class="cr-nome">' + U.esc(d.colaborador) + "</div>" + '<div class="cr-funcao">' + U.esc(d.funcao || d.tipoAcesso || "Colaborador") + "</div>" + (dados ? '<div class="cr-dados">' + dados + "</div>" : "") + '<div class="cr-qr' + (CRACHA_QR_NA_FRENTE(L) ? " cr-qr-alto" : " cr-qr-so-codigo") + '">' + (CRACHA_QR_NA_FRENTE(L) ? qr || '<div style="height:92px;display:flex;align-items:center;' + 'justify-content:center;color:#9AA4B2;font-size:11px">QR gerado na emissão</div>' : "") + "<span>" + U.esc(d.codigo) + (d.via > 1 ? " · " + d.via + "ª via" : "") + "</span></div>" + "</div>";
 }
 
-
-/* Nome da empresa vem da configuração central (Dados da empresa).
-   Nada de "ALMOXA PRO" fixo no documento. */
+/* Frente e verso lado a lado, como um par que não se separa na impressão. */
+function crachaPar(d, comQR) {
+return '<div class="cr-par">' + crachaFrente(d, comQR !== false) + crachaVerso(d) + "</div>";
+}
 function CRACHA_CPF(v) {
 var t = String(v || "").replace(/\D/g, "");
 if (t.length !== 11) return String(v || "");
@@ -40356,8 +41099,11 @@ var fora = {
 observacao: i < 0 ? txt.trim() : txt.slice(0, i).trim(),
 cursos: [],
 notas: [],
-compacto: false,
-semLibera: false
+sangue: "",
+/* o verso nasce limpo, conforme o modelo físico. Quem quiser os
+   textos antigos marca as opções, e aí entram #completo / #comlibera. */
+compacto: true,
+semLibera: true
 };
 if (i < 0) return fora;
 var bloco = "", secao = "";
@@ -40368,12 +41114,24 @@ if (l.toLowerCase() === "#compacto") {
 fora.compacto = true;
 return;
 }
+if (l.toLowerCase() === "#completo") {
+fora.compacto = false;
+return;
+}
 if (l.toLowerCase() === "#semlibera") {
 fora.semLibera = true;
 return;
 }
+if (l.toLowerCase() === "#comlibera") {
+fora.semLibera = false;
+return;
+}
 if (l.charAt(0) === "#") {
 secao = l.slice(1).trim().toLowerCase();
+return;
+}
+if (secao.indexOf("sangue") === 0 || secao.indexOf("tipagem") === 0) {
+fora.sangue = l;
 return;
 }
 if (secao.indexOf("curso") === 0 || secao.indexOf("trein") === 0 || secao.indexOf("nr") === 0) {
@@ -40391,8 +41149,12 @@ return fora;
 }
 function versoEscrever(base) {
 var linhas = [ VERSO_MARCA ];
-if (base.compacto) linhas.push("#compacto");
-if (base.semLibera) linhas.push("#semlibera");
+linhas.push(base.compacto ? "#compacto" : "#completo");
+linhas.push(base.semLibera ? "#semlibera" : "#comlibera");
+if (base.sangue) {
+linhas.push("#sangue");
+linhas.push(String(base.sangue).trim());
+}
 if (base.cursos.length) {
 linhas.push("#cursos");
 base.cursos.forEach(function(c) {
@@ -40417,16 +41179,94 @@ return fim.getTime() < Date.now();
 }
 function crachaVerso(d) {
 var v = versoLer(d.observacao);
+var L = CRACHA_LAYOUT(d.codigo);
+var qr = "";
+if (CRACHA_QR_NO_VERSO(L) && d.qr && typeof QR !== "undefined") {
+try {
+/* margem 4 (quiet zone larga) para o leitor não perder o código
+   e para a guilhotina da impressão não cortar a borda útil */
+qr = QR.svg(d.qr, 150, 4) || "";
+} catch (e) {
+qr = "";
+}
+}
 var libera = (d.acoesPermitidas || []).indexOf("*") > -1 ? "<li>Todas as operações do sistema</li>" : (d.acoesPermitidas || []).map(function(a) {
 return "<li>" + U.esc(CRM.ACOES[a] || a) + "</li>";
 }).join("");
 var blocoLibera = v.semLibera ? "" : "<h5>O que este crachá libera</h5><ul>" + libera + "</ul>";
-var cursos = v.cursos.length ? "<h5>Cursos e treinamentos</h5>" + '<table style="width:100%;border-collapse:collapse;font-size:10px">' + v.cursos.map(function(c) {
+var blocoSangue = v.sangue && L.sangueVerso !== false ? '<div class="cr-sangue"><span>TIPAGEM SANGUÍNEA</span><b>' + U.esc(v.sangue) + "</b></div>" : "";
+/* O verso mostra TODAS as NRs da lista oficial, na mesma ordem sempre.
+   Sem data preenchida a linha aparece com "—": a NR nunca desaparece. */
+var listaNR = CRACHA_NRS.map(function(nome) {
+var achado = (v.cursos || []).filter(function(c) {
+return String(c.nome || "").trim().toUpperCase() === String(nome).trim().toUpperCase();
+})[0];
+return {
+nome: nome,
+validade: achado ? achado.validade : ""
+};
+});
+(v.cursos || []).forEach(function(c) {
+var nome = String(c.nome || "").trim();
+if (!nome) return;
+var jaTem = listaNR.filter(function(x) {
+return x.nome.toUpperCase() === nome.toUpperCase();
+}).length;
+if (!jaTem) listaNR.push({
+nome: nome,
+validade: c.validade
+});
+});
+var cursos = "<h5>Treinamentos e normas</h5>" + '<table class="cr-nrs">' + listaNR.map(function(c) {
 var venceu = versoVenceu(c.validade);
-return '<tr><td style="padding:2px 0">' + U.esc(c.nome) + "</td>" + '<td style="padding:2px 0;text-align:right;white-space:nowrap;' + (venceu ? "color:#E5484D;font-weight:700" : "color:#5F6B7A") + '">' + U.esc(c.validade || "—") + (venceu ? " ⚠" : "") + "</td></tr>";
-}).join("") + "</table>" : "";
+return "<tr><td>" + U.esc(c.nome) + "</td>" + '<td class="cr-nr-d' + (venceu ? " cr-nr-venceu" : c.validade ? "" : " cr-nr-vazio") + '">' + U.esc(c.validade || "—") + (venceu ? " ⚠" : "") + "</td></tr>";
+}).join("") + "</table>";
 var notas = v.notas.length ? "<h5>Informações</h5><p>" + v.notas.map(U.esc).join("<br>") + "</p>" : "";
-return '<div class="cr-cracha">' + '<div class="cr-topo"><b>ALMOXA PRO</b><small>Crachá de acesso</small></div>' + '<div class="cr-verso">' + blocoLibera + cursos + notas + (v.compacto ? "" : "<h5>Em caso de perda</h5>" + "<p>Avise o almoxarifado na hora. Uma via nova cancela esta automaticamente, " + "e este crachá para de funcionar no mesmo instante.</p>" + "<h5>Uso pessoal e intransferível</h5>" + "<p>Tudo o que for retirado, reservado ou aprovado com este crachá fica registrado " + "no nome de " + U.esc(d.colaborador) + ", com data e hora.</p>") + (v.compacto ? "" : '<p style="margin-top:12px;font-size:9.5px;color:#9AA4B2">O código impresso não guarda ' + "nome, CPF ou senha — ele só vale dentro do ALMOXA PRO.</p>") + "</div></div>";
+/* Nada de código do crachá impresso aqui: o verso sobe e fica só
+   com o QR, a tipagem e as normas. */
+var blocoQR = CRACHA_QR_NO_VERSO(L) ? '<div class="cr-verso-qr">' + (qr || '<div style="height:150px;display:flex;align-items:center;justify-content:center;' + 'color:#9AA4B2;font-size:11px">QR gerado na emissão</div>') + "</div>" : "";
+return '<div class="cr-cracha cr-tras">' + '<div class="cr-topo"><b>' + U.esc(CRACHA_MARCA()) + "</b>" + (L.unidade && d.unidade ? "<small>" + U.esc(d.unidade) + "</small>" : "") + "</div>" + '<div class="cr-verso cr-verso-limpo">' + blocoQR + blocoSangue + blocoLibera + cursos + notas + (v.compacto ? "" : "<h5>Em caso de perda</h5>" + "<p>Avise o almoxarifado na hora. Uma via nova cancela esta automaticamente, " + "e este crachá para de funcionar no mesmo instante.</p>" + "<h5>Uso pessoal e intransferível</h5>" + "<p>Tudo o que for retirado, reservado ou aprovado com este crachá fica registrado " + "no nome de " + U.esc(d.colaborador) + ", com data e hora.</p>") + "</div></div>";
+}
+/* ============================================================
+ * FRENTE E VERSO — ESTRUTURAS INDEPENDENTES
+ * Um registro só do colaborador, dois blocos de edição separados.
+ * Antes de gravar, o registro ATUAL é relido do Core: o lado que
+ * não está sendo editado é devolvido intacto, nunca reconstruído.
+ * ============================================================ */
+function crachaSalvarLado(codigo, lado, campos, versoBase) {
+return API.call("cracha", "obter", {
+codigo: codigo,
+comQR: false
+}).then(function(r) {
+if (!r || !r.ok || !r.dados) {
+return {
+ok: false,
+codigo: "NAO_RELEU",
+mensagem: "Não consegui reler o crachá antes de salvar. Nada foi alterado."
+};
+}
+var atual = r.dados;
+var agora = versoLer(atual.observacao);
+var mudanca = {};
+if (lado === "frente") {
+/* copia os campos da frente e devolve o VERSO exatamente como está */
+Object.keys(campos || {}).forEach(function(k) {
+if (k !== "observacao") mudanca[k] = campos[k];
+});
+agora.observacao = String(campos.observacao === undefined ? agora.observacao : campos.observacao);
+mudanca.observacao = versoEscrever(agora);
+} else {
+/* só o bloco do verso muda; a observação livre da frente fica intacta */
+var novo = JSON.parse(JSON.stringify(versoBase || {}));
+novo.observacao = agora.observacao;
+mudanca.observacao = versoEscrever(novo);
+}
+mudanca.codigo = codigo;
+return API.call("cracha", "atualizar", mudanca).then(function(rr) {
+if (rr && rr.ok) rr.__salvo = mudanca;
+return rr;
+});
+});
 }
 
 function modalVersoCracha(d, aoSalvar) {
@@ -40458,12 +41298,15 @@ return l.trim();
 }).filter(Boolean);
 v.compacto = w.querySelector("#vsCompacto").checked;
 v.semLibera = !w.querySelector("#vsLibera").checked;
+v.sangue = String(w.querySelector("#vsSangue").value || "").trim().toUpperCase();
 }
 UI.modal({
 titulo: "Verso do crachá",
 sub: d.colaborador + " · " + d.codigo,
 tamanho: "lg",
-corpo: '<div style="display:grid;grid-template-columns:1fr 300px;gap:18px">' + "<div>" + '<div class="field"><label>Cursos, treinamentos e NRs</label>' + '<div class="small muted mb8">A NR é fixa; preencha só a data. Deixe em branco a que a pessoa não tem.</div>' + '<div id="vsCursos">' + htmlCursos() + "</div></div>" + '<div class="field mt12"><label>Outras informações (uma por linha)</label>' + '<textarea class="textarea" id="vsNotas" rows="4" placeholder="Ex.: Tipo sanguíneo O+&#10;Contato de emergência: 51 99999-0000">' + U.esc(v.notas.join("\n")) + "</textarea></div>" + '<label class="flex center gap8 small" style="cursor:pointer"><input type="checkbox" id="vsLibera"' + (v.semLibera ? "" : " checked") + "> Mostrar a lista do que o crachá libera</label>" + '<label class="flex center gap8 small mt8" style="cursor:pointer"><input type="checkbox" id="vsCompacto"' + (v.compacto ? " checked" : "") + "> Esconder os textos padrão (perda, uso pessoal e rodapé)</label>" + '<div class="alert a-blue mt12">' + ic("info") + "<div>Validade no formato mês/ano (12/2027). Curso vencido aparece em vermelho no verso.</div></div>" + "</div>" + '<div><div class="small mb8">Como vai ficar</div><div id="vsPreview"></div></div>' + "</div>",
+corpo: '<div style="display:grid;grid-template-columns:1fr 300px;gap:18px">' + "<div>" + '<div class="field"><label>Tipagem sanguínea</label>' + '<select class="select" id="vsSangue" style="max-width:200px">' + [ "", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-" ].map(function(t) {
+return '<option value="' + t + '"' + (String(v.sangue || "").toUpperCase() === t ? " selected" : "") + ">" + (t || "não informada") + "</option>";
+}).join("") + "</select></div>" + '<div class="field"><label>Cursos, treinamentos e NRs</label>' + '<div class="small muted mb8">A NR é fixa; preencha só a data. Deixe em branco a que a pessoa não tem.</div>' + '<div id="vsCursos">' + htmlCursos() + "</div></div>" + '<div class="field mt12"><label>Outras informações (uma por linha)</label>' + '<textarea class="textarea" id="vsNotas" rows="4" placeholder="Ex.: Tipo sanguíneo O+&#10;Contato de emergência: 51 99999-0000">' + U.esc(v.notas.join("\n")) + "</textarea></div>" + '<label class="flex center gap8 small" style="cursor:pointer"><input type="checkbox" id="vsLibera"' + (v.semLibera ? "" : " checked") + "> Mostrar a lista do que o crachá libera</label>" + '<label class="flex center gap8 small mt8" style="cursor:pointer"><input type="checkbox" id="vsCompacto"' + (v.compacto ? " checked" : "") + "> Esconder os textos padrão (perda, uso pessoal e rodapé)</label>" + '<div class="alert a-blue mt12">' + ic("info") + "<div>Validade no formato mês/ano (12/2027). Curso vencido aparece em vermelho no verso.</div></div>" + "</div>" + '<div><div class="small mb8">Como vai ficar</div><div id="vsPreview"></div></div>' + "</div>",
 rodape: '<button class="btn btn-ghost" data-x>Cancelar</button><button class="btn btn-primary" data-ok>' + ic("salvar") + "Salvar verso</button>",
 aoAbrir: function(w, fechar) {
 function preview() {
@@ -40493,6 +41336,7 @@ ligar();
 w.querySelector("#vsNotas").addEventListener("input", preview);
 w.querySelector("#vsCompacto").addEventListener("change", preview);
 w.querySelector("#vsLibera").addEventListener("change", preview);
+w.querySelector("#vsSangue").addEventListener("change", preview);
 
 preview();
 w.querySelector("[data-x]").addEventListener("click", fechar);
@@ -40502,10 +41346,7 @@ var botao = this;
 var texto = versoEscrever(v);
 botao.disabled = true;
 botao.innerHTML = '<span class="spinner"></span> Salvando…';
-API.call("cracha", "atualizar", {
-codigo: d.codigo,
-observacao: texto
-}).then(function(r) {
+crachaSalvarLado(d.codigo, "verso", null, v).then(function(r) {
 botao.disabled = false;
 botao.innerHTML = "Salvar verso";
 if (!r || !r.ok) {
@@ -40567,7 +41408,7 @@ return UI.cabecalho({
 trilha: [ "Configurações", "Crachás" ],
 titulo: "Crachás e validação de acesso",
 sub: "O crachá diz quem é a pessoa. O Core diz o que ela pode fazer — uma operação " + "por vez, e toda tentativa fica registrada.",
-acoes: '<button class="btn btn-ghost" data-cr-ler>' + ic("qr") + "Ler crachá</button>" + '<button class="btn btn-orange" data-cr-novo>' + ic("mais") + "Novo crachá</button>"
+acoes: '<button class="btn btn-ghost" data-cr-ler>' + ic("qr") + "Ler crachá</button>" + '<button class="btn btn-ghost" data-cr-imprimir-varios>' + ic("impressora") + "Imprimir vários</button>" + '<button class="btn btn-orange" data-cr-novo>' + ic("mais") + "Novo crachá</button>"
 }) + '<div class="grid g4 mb16">' + UI.kpi({
 icone: "escudoOk",
 cor: "ico-green",
@@ -40625,6 +41466,18 @@ var n = document.querySelector("[data-cr-novo]");
 if (n) n.addEventListener("click", function() {
 CRP.aba = "novo";
 ROUTER.render();
+});
+var iv = document.querySelector("[data-cr-imprimir-varios]");
+if (iv) iv.addEventListener("click", function() {
+CRP.aba = "lote";
+ROUTER.render();
+setTimeout(function() {
+var alvo = document.querySelector("[data-cr-lote]");
+if (alvo && alvo.scrollIntoView) alvo.scrollIntoView({
+block: "center"
+});
+toast("info", "Impressão em lote", "Marque as pessoas e clique em Imprimir selecionados. Sai frente e verso lado a lado.");
+}, 260);
 });
 var l = document.querySelector("[data-cr-ler]");
 if (l) l.addEventListener("click", function() {
@@ -40971,14 +41824,14 @@ return c.status === "ATIVO";
 if (!ativos.length) {
 return '<div class="card-body">' + UI.estado("vazio", "Nenhum crachá ativo para imprimir", "Emita os crachás primeiro; depois volte aqui para imprimir todos de uma vez.") + "</div>";
 }
-return '<div class="card-body" style="padding-top:16px">' + '<div class="alert a-yellow">' + ic("impressora") + "<div><b>Impressão em folha</b>Marque quem entra na folha, confira a prévia e mande imprimir. " + "Use papel A4 e corte nas bordas — o tamanho já sai certo para porta-crachá.</div></div>" + '<div class="flex gap8 mt12 mb12">' + '<button class="btn btn-ghost" id="crLoteTodos">Marcar todos</button>' + '<button class="btn btn-ghost" id="crLoteNenhum">Desmarcar</button>' + '<button class="btn btn-orange" id="crLoteImprimir">' + ic("impressora") + "Imprimir marcados</button>" + "</div>" + '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">' + ativos.map(function(c) {
+return '<div class="card-body" style="padding-top:16px">' + '<div class="alert a-yellow">' + ic("impressora") + "<div><b>Impressão em folha</b>Marque quem entra na folha, confira a prévia e mande imprimir. " + "Use papel A4 e corte nas bordas — o tamanho já sai certo para porta-crachá.</div></div>" + '<div class="flex gap8 mt12 mb12">' + '<button class="btn btn-ghost" id="crLoteTodos">Marcar todos</button>' + '<button class="btn btn-ghost" id="crLoteNenhum">Desmarcar</button>' + '<button class="btn btn-ghost" id="crLoteTamanho">' + ic("impressora") + "Tamanho e disposição</button>" + '<button class="btn btn-ghost" id="crLoteLayout">' + ic("tela") + "Layout geral</button>" + '<button class="btn btn-orange" id="crLoteImprimir">' + ic("impressora") + "Imprimir marcados</button>" + "</div>" + '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">' + ativos.map(function(c) {
 return '<label class="chip" style="cursor:pointer">' + '<input type="checkbox" data-cr-lote="' + U.esc(c.codigo) + '" ' + (CRP.selecionados[c.codigo] ? "checked" : "") + ' style="margin-right:6px">' + U.esc(c.colaborador) + "</label>";
-}).join("") + "</div>" + '<div id="crImpressao" class="cr-grade"></div></div>';
+}).join("") + "</div>" + '<div id="crImpressaoLote" class="cr-grade"></div></div>';
 }
 
 function ligarLote() {
 function repintar() {
-var alvo = document.getElementById("crImpressao");
+var alvo = document.getElementById("crImpressaoLote");
 if (!alvo) return;
 var codigos = Object.keys(CRP.selecionados).filter(function(k) {
 return CRP.selecionados[k];
@@ -40997,7 +41850,7 @@ comQR: true
 alvo.innerHTML = rs.filter(function(r) {
 return r && r.ok;
 }).map(function(r) {
-return crachaFrente(r.dados, true) + crachaVerso(r.dados);
+return crachaPar(r.dados, true);
 }).join("");
 });
 }
@@ -41023,13 +41876,22 @@ cb.checked = false;
 CRP.selecionados = {};
 repintar();
 });
+var bt = document.getElementById("crLoteTamanho");
+if (bt) bt.addEventListener("click", function() {
+CR_TAMANHO.modal();
+});
+var bl = document.getElementById("crLoteLayout");
+if (bl) bl.addEventListener("click", function() {
+CR_TAMANHO.modalLayout();
+});
 var imp = document.getElementById("crLoteImprimir");
 if (imp) imp.addEventListener("click", function() {
-if (!document.querySelectorAll("#crImpressao .cr-cracha").length) {
+var quadro = document.getElementById("crImpressaoLote");
+if (!quadro || !quadro.querySelectorAll(".cr-cracha").length) {
 toast("warn", "Nada marcado", "Escolha pelo menos uma pessoa antes de imprimir.");
 return;
 }
-CR_TAMANHO.imprimir();
+CR_TAMANHO.imprimir(quadro);
 });
 repintar();
 }
@@ -41092,15 +41954,19 @@ UI.modal({
 titulo: "Crachá de " + d.colaborador,
 sub: d.codigo + " · " + d.nomeNivel + (d.via > 1 ? " · " + d.via + "ª via" : ""),
 tamanho: "lg",
-corpo: '<div id="crImpressao" class="cr-grade">' + crachaFrente(d, true) + crachaVerso(d) + "</div>"  + (d.status !== "ATIVO" ? '<div class="alert a-red mt16">' + ic("bloqueio") + "<div><b>Este crachá está " + d.status.toLowerCase() + "</b>" + U.esc(d.motivoRevogacao || "Ele não abre nada.") + "</div></div>" : ""),
-rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' + '<button class="btn btn-ghost" id="crVerLog">' + ic("historico") + "Ver acessos</button>" + '<button class="btn btn-ghost" id="crTamanho">' + ic("impressora") + "Tamanho</button>" + (d.status !== "REVOGADO" ? '<button class="btn btn-ghost" id="crVerso">' + ic("editar") + "Editar verso</button>" + '<button class="btn btn-ghost" id="crEditarDaqui">' + ic("editar") + "Editar</button>" : "") + '<button class="btn btn-primary" id="crImprimir">' + ic("impressora") + "Imprimir</button>",
+corpo: '<div id="crImpressao" class="cr-grade">' + crachaPar(d, true) + "</div>"  + (d.status !== "ATIVO" ? '<div class="alert a-red mt16">' + ic("bloqueio") + "<div><b>Este crachá está " + d.status.toLowerCase() + "</b>" + U.esc(d.motivoRevogacao || "Ele não abre nada.") + "</div></div>" : ""),
+rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' + '<button class="btn btn-ghost" id="crVerLog">' + ic("historico") + "Ver acessos</button>" + '<button class="btn btn-ghost" id="crLayout">' + ic("tela") + "Layout</button>" + '<button class="btn btn-ghost" id="crTamanho">' + ic("impressora") + "Tamanho</button>" + (d.status !== "REVOGADO" ? '<button class="btn btn-ghost" id="crVerso">' + ic("editar") + "Editar verso</button>" + '<button class="btn btn-ghost" id="crEditarDaqui">' + ic("editar") + "Editar</button>" : "") + '<button class="btn btn-primary" id="crImprimir">' + ic("impressora") + "Imprimir</button>",
 aoAbrir: function(w, fechar) {
 w.querySelector("[data-x]").addEventListener("click", fechar);
+w.querySelector("#crLayout").addEventListener("click", function() {
+CR_TAMANHO.modalLayout(d.codigo, d.colaborador);
+});
 w.querySelector("#crTamanho").addEventListener("click", function() {
 CR_TAMANHO.modal();
 });
 w.querySelector("#crImprimir").addEventListener("click", function() {
-CR_TAMANHO.imprimir();
+/* imprime exatamente o quadro deste modal, não o da folha em lote */
+CR_TAMANHO.imprimir(w.querySelector("#crImpressao"));
 });
 w.querySelector("#crVerLog").addEventListener("click", function() {
 fechar();
@@ -41251,14 +42117,13 @@ if (!v("#ceNome").trim()) {
 toast("warn", "Falta o nome", "O crachá precisa do nome.");
 return;
 }
-/* o verso mora no mesmo campo de observação: preserva o bloco dele */
-var versoAtual = "";
-var iMarca = String(d.observacao || "").indexOf(VERSO_MARCA);
-if (iMarca > -1) versoAtual = String(d.observacao).slice(iMarca);
+/* A frente manda SOMENTE o que é dela. O bloco do verso não é
+   montado aqui: o serviço central relê o registro e devolve o verso
+   exatamente como está gravado. */
 var obsDigitada = String(v("#ceObs") || "");
 var iDigitada = obsDigitada.indexOf(VERSO_MARCA);
 if (iDigitada > -1) obsDigitada = obsDigitada.slice(0, iDigitada);
-var obsFinal = obsDigitada.trim() + (versoAtual ? (obsDigitada.trim() ? "\n\n" : "") + versoAtual : "");
+var obsFinal = obsDigitada.trim();
 var mudanca = {
 codigo: d.codigo,
 colaborador: v("#ceNome"),
@@ -41274,7 +42139,7 @@ observacao: obsFinal
 if (fotoMudou) mudanca.foto = foto;
 b.innerHTML = '<span class="spinner"></span> Salvando…';
 b.disabled = true;
-API.call("cracha", "atualizar", mudanca).then(function(rr) {
+crachaSalvarLado(d.codigo, "frente", mudanca, null).then(function(rr) {
 b.innerHTML = ic("check") + "Salvar alterações";
 b.disabled = false;
 if (!rr || !rr.ok) {
@@ -42809,6 +43674,16 @@ window.modalTransferenciaLote = modalTransferenciaLote;
  * TAMANHO DE IMPRESSÃO DO CRACHÁ
  * Deixa escolher o tamanho do cartão e guarda a escolha.
  * ============================================================ */
+/* ============================================================
+ * IMPRESSÃO DO CRACHÁ
+ * Uma folha só, montada na hora, colada direto no <body>.
+ * O antigo truque de "esconder tudo e mostrar o #crImpressao"
+ * saía em branco: existem DOIS #crImpressao na página (o do lote
+ * e o do modal), e o do modal fica dentro de uma janela fixa —
+ * o navegador imprimia a janela vazia e repetia as cópias.
+ * Agora o conteúdo é CLONADO para #crFolha, que é filho direto
+ * do body. Só ele aparece na impressão, e uma vez só.
+ * ============================================================ */
 var CR_TAMANHO = function() {
 var CHAVE = "almoxa_cracha_tamanho";
 var MODELOS = [ {
@@ -42832,6 +43707,7 @@ nome: "Folha A4 inteira",
 l: 0,
 a: 0
 } ];
+var DISPOSICOES = [ [ "lado", "Horizontal — frente e verso lado a lado" ], [ "empilhado", "Vertical — frente em cima, verso embaixo" ], [ "separado", "Uma folha para cada lado" ] ];
 function ler() {
 var d = {};
 try {
@@ -42839,10 +43715,14 @@ d = JSON.parse(localStorage.getItem(CHAVE) || "{}");
 } catch (e) {
 d = {};
 }
+var disp = d.disposicao === "empilhado" || d.disposicao === "separado" ? d.disposicao : "lado";
+/* zero é resposta válida: é a folha A4 inteira, sem @page fixo */
 return {
 id: d.id || "cr80v",
-l: Number(d.l) || 54,
-a: Number(d.a) || 85.6
+l: d.l === undefined || d.l === null || d.l === "" ? 54 : Number(d.l) || 0,
+a: d.a === undefined || d.a === null || d.a === "" ? 85.6 : Number(d.a) || 0,
+disposicao: disp,
+corte: d.corte === undefined ? true : !!d.corte
 };
 }
 function guardar(t) {
@@ -42850,37 +43730,118 @@ try {
 localStorage.setItem(CHAVE, JSON.stringify(t));
 } catch (e) {}
 }
+/* Qual o tamanho da FOLHA, em mm, para a disposição escolhida. */
+function folhaMM(t) {
+var respiro = 6;
+if (!t.l || !t.a) return null;
+if (t.disposicao === "separado") return {
+l: t.l,
+a: t.a
+};
+if (t.disposicao === "empilhado") return {
+l: t.l,
+a: Math.round((t.a * 2 + respiro) * 10) / 10
+};
+return {
+l: Math.round((t.l * 2 + respiro) * 10) / 10,
+a: t.a
+};
+}
+function descricao(t) {
+var f = folhaMM(t);
+if (!f) return "folha inteira";
+var nome = DISPOSICOES.filter(function(x) {
+return x[0] === t.disposicao;
+})[0];
+return f.l + " × " + f.a + " mm · " + (nome ? nome[1].split("—")[0].trim() : "");
+}
 function aplicar() {
 var t = ler();
 var velho = document.getElementById("crTamanhoEstilo");
 if (velho) velho.remove();
-if (!t.l || !t.a) return t;
 var pxPorMm = 96 / 25.4;
+var css = "#crFolha{display:none}" + "@media print{" + "html,body{margin:0!important;padding:0!important;background:#fff!important;" + "height:auto!important;min-height:0!important;overflow:visible!important}" + "body>*{display:none!important}" + "body>#crFolha{display:block!important;position:static!important;" + "margin:0!important;padding:0!important;width:auto!important;max-width:none!important;" + "background:#fff!important;box-shadow:none!important}" + "#crFolha .cr-grade,#crFolha>div{gap:0!important}" + "#crFolha .cr-cracha{box-shadow:none!important;page-break-inside:avoid;break-inside:avoid}";
+var f = folhaMM(t);
+if (f) {
 var zoom = t.l * pxPorMm / 280;
-var alturaPx = t.a * pxPorMm / zoom;
-var css = "@media print{@page{size:" + t.l + "mm " + t.a + "mm;margin:0}" + "#crImpressao .cr-cracha{zoom:" + zoom.toFixed(4) + ";width:280px!important;" + "height:" + Math.round(alturaPx) + "px!important;min-height:0!important;margin:0!important;" + "border-radius:0!important;box-shadow:none!important;page-break-after:always}" + "#crImpressao{display:block!important;gap:0!important}}";
+var alturaPx = Math.round(t.a * pxPorMm / zoom);
+var respiroPx = Math.round(6 / zoom);
+css += "@page{size:" + f.l + "mm " + f.a + "mm;margin:0}" + "#crFolha .cr-cracha{zoom:" + zoom.toFixed(4) + ";width:280px!important;" + "height:" + alturaPx + "px!important;min-height:0!important;margin:0!important;" + "border-radius:0!important;" + (t.corte ? "outline:1px dashed #C3CBD6!important;outline-offset:-1px;" : "") + "page-break-after:auto!important;break-after:auto!important}";
+if (t.disposicao === "separado") {
+css += "#crFolha .cr-par{display:block!important;margin:0!important;" + "page-break-after:auto!important;break-after:auto!important}" + "#crFolha .cr-cracha{page-break-after:always!important;break-after:page!important}" + "#crFolha .cr-par:last-child .cr-cracha:last-child{" + "page-break-after:auto!important;break-after:auto!important}";
+} else {
+css += "#crFolha .cr-par{display:flex!important;" + (t.disposicao === "empilhado" ? "flex-direction:column!important;" : "flex-direction:row!important;") + "gap:" + respiroPx + "px!important;align-items:flex-start!important;margin:0!important;" + "page-break-inside:avoid;break-inside:avoid;" + "page-break-after:always;break-after:page}" + "#crFolha .cr-par:last-child{page-break-after:auto!important;break-after:auto!important}";
+}
+} else {
+/* folha inteira: deixa o navegador quebrar, mas nunca no meio de um par */
+css += "#crFolha .cr-par{display:flex!important;gap:6mm!important;align-items:flex-start;" + "page-break-inside:avoid;break-inside:avoid;margin:0 0 6mm}";
+}
+css += "}";
 document.head.insertAdjacentHTML("beforeend", '<style id="crTamanhoEstilo">' + css + "</style>");
 return t;
 }
-function imprimir() {
+/* Acha o quadro de crachás que está de fato na tela agora.
+   Se o modal está aberto, é o dele; senão, o da folha em lote. */
+function origemAtual(alvo) {
+if (alvo && alvo.querySelector && alvo.querySelector(".cr-cracha")) return alvo;
+var todos = [].slice.call(document.querySelectorAll('[id="crImpressao"]'));
+var comCracha = todos.filter(function(el) {
+return el.querySelector(".cr-cracha");
+});
+if (!comCracha.length) return null;
+/* o último no DOM é o mais recente: o modal entra depois da página */
+return comCracha[comCracha.length - 1];
+}
+function limparFolha() {
+var velha = document.getElementById("crFolha");
+if (velha) velha.parentNode.removeChild(velha);
+}
+function montarFolha(origem) {
+limparFolha();
+var f = document.createElement("div");
+f.id = "crFolha";
+f.className = "cr-grade";
+f.innerHTML = origem.innerHTML;
+document.body.appendChild(f);
+return f;
+}
+var ligadoAfterPrint = false;
+function imprimir(alvo) {
+var origem = origemAtual(alvo);
+if (!origem) {
+if (typeof toast === "function") toast("warn", "Nada para imprimir", "Abra um crachá ou marque pelo menos uma pessoa na folha.");
+return;
+}
+montarFolha(origem);
 aplicar();
+if (!ligadoAfterPrint) {
+ligadoAfterPrint = true;
+window.addEventListener("afterprint", function() {
+setTimeout(limparFolha, 60);
+});
+}
 setTimeout(function() {
+try {
 window.print();
-}, 120);
+} catch (e) {}
+setTimeout(limparFolha, 1500);
+}, 180);
 }
 function controles() {
 var t = ler();
 return '<div class="card mt16" id="crTamanhoBox"><div class="card-body">' + '<div class="flex between center mb8"><b class="small">Tamanho da impressão</b>' + '<span class="small muted" id="crTamanhoAgora"></span></div>' + '<div class="grid g3" style="gap:10px;align-items:end">' + '<div class="field" style="margin:0"><label>Modelo</label><select class="select" id="crTamModelo">' + MODELOS.map(function(m) {
 return '<option value="' + m.id + '"' + (m.id === t.id ? " selected" : "") + ">" + U.esc(m.nome) + "</option>";
-}).join("") + '<option value="livre"' + (t.id === "livre" ? " selected" : "") + ">Personalizado</option></select></div>" + '<div class="field" style="margin:0"><label>Largura (mm)</label><input class="input" id="crTamL" inputmode="decimal" value="' + t.l + '"></div>' + '<div class="field" style="margin:0"><label>Altura (mm)</label><input class="input" id="crTamA" inputmode="decimal" value="' + t.a + '"></div>' + "</div>" + '<div class="small muted mt8">O conteúdo encolhe junto, então o crachá sai inteiro no tamanho escolhido. ' + "Na janela de impressão do Chrome, deixe as margens em <b>Nenhuma</b> e marque <b>Gráficos de plano de fundo</b>.</div>" + "</div></div>";
+}).join("") + '<option value="livre"' + (t.id === "livre" ? " selected" : "") + ">Personalizado</option></select></div>" + '<div class="field" style="margin:0"><label>Largura (mm)</label><input class="input" id="crTamL" inputmode="decimal" value="' + t.l + '"></div>' + '<div class="field" style="margin:0"><label>Altura (mm)</label><input class="input" id="crTamA" inputmode="decimal" value="' + t.a + '"></div>' + "</div>" + '<div class="field mt12" style="margin-bottom:0"><label>Como sai na folha</label>' + '<select class="select" id="crTamDisp">' + DISPOSICOES.map(function(o) {
+return '<option value="' + o[0] + '"' + (t.disposicao === o[0] ? " selected" : "") + ">" + U.esc(o[1]) + "</option>";
+}).join("") + "</select></div>" + '<label class="flex center gap8 small mt12" style="cursor:pointer">' + '<input type="checkbox" id="crTamCorte"' + (t.corte ? " checked" : "") + ">" + "<span>Marcar a linha de corte (tracejado fino na borda)</span></label>" + '<div class="small muted mt8">O conteúdo encolhe junto, então o crachá sai inteiro no tamanho escolhido. ' + "Na janela de impressão do Chrome, deixe as margens em <b>Nenhuma</b>, a escala em " + "<b>100%</b> e marque <b>Gráficos de plano de fundo</b>.</div>" + "</div></div>";
 }
 function ligar(w) {
 var caixa = w.querySelector("#crTamanhoBox");
 if (!caixa) return;
-var sel = w.querySelector("#crTamModelo"), cl = w.querySelector("#crTamL"), ca = w.querySelector("#crTamA");
+var sel = w.querySelector("#crTamModelo"), cl = w.querySelector("#crTamL"), ca = w.querySelector("#crTamA"), cd = w.querySelector("#crTamDisp"), cc = w.querySelector("#crTamCorte");
 function mostrar() {
-var t = ler();
-w.querySelector("#crTamanhoAgora").textContent = t.l && t.a ? t.l + " × " + t.a + " mm" : "folha inteira";
+var el = w.querySelector("#crTamanhoAgora");
+if (el) el.textContent = descricao(ler());
 }
 function salvar() {
 var m = MODELOS.filter(function(x) {
@@ -42895,6 +43856,8 @@ id: "livre",
 l: Number(String(cl.value).replace(",", ".")) || 0,
 a: Number(String(ca.value).replace(",", ".")) || 0
 };
+t.disposicao = cd ? cd.value : "lado";
+t.corte = cc ? cc.checked : true;
 guardar(t);
 if (m) {
 cl.value = m.l;
@@ -42903,6 +43866,8 @@ ca.value = m.a;
 mostrar();
 }
 sel.addEventListener("change", salvar);
+if (cd) cd.addEventListener("change", salvar);
+if (cc) cc.addEventListener("change", salvar);
 cl.addEventListener("change", function() {
 sel.value = "livre";
 salvar();
@@ -42912,6 +43877,100 @@ sel.value = "livre";
 salvar();
 });
 mostrar();
+}
+/* ---- LAYOUT: geral ou só deste crachá --------------------------------- */
+function modalLayout(codigo, nome) {
+function caixa(id, rot, ligado, dica) {
+return '<label class="flex center gap8 small" style="cursor:pointer;padding:7px 0;border-bottom:1px solid var(--linha)">' + '<input type="checkbox" id="' + id + '"' + (ligado ? " checked" : "") + ">" + "<span><b>" + rot + "</b>" + (dica ? '<div class="small muted">' + dica + "</div>" : "") + "</span></label>";
+}
+var proprio = CRACHA_LAYOUT_TEM_PROPRIO(codigo);
+var escopo = codigo && proprio ? "proprio" : "geral";
+UI.modal({
+titulo: "Layout do crachá",
+sub: "O que aparece impresso. Nada é apagado do cadastro.",
+tamanho: "md",
+corpo: (codigo ? '<div class="field"><label>Este layout vale para</label>' + '<select class="select" id="clEscopo">' + '<option value="geral"' + (escopo === "geral" ? " selected" : "") + ">Todos os crachás (layout geral)</option>" + '<option value="proprio"' + (escopo === "proprio" ? " selected" : "") + ">Só o crachá de " + U.esc(nome || codigo) + "</option></select>" + '<div class="small muted mt8" id="clEscopoDica"></div></div>' : "") + '<div style="display:grid;grid-template-columns:1fr 250px;gap:18px">' + "<div>" + '<div class="small muted mb8">FRENTE</div>' + caixa("clCpf", "CPF", false) + caixa("clMat", "Matrícula", false, "fora por padrão — marque se a obra exigir") + caixa("clSetor", "Setor", false) + caixa("clObra", "Obra", false) + caixa("clAcesso", "Nível de acesso", false) + caixa("clSangue", "Tipagem sanguínea na frente", false, "a mesma que você preenche no verso") + caixa("clUnidade", "Nome da unidade no cabeçalho", false) + '<div class="small muted mb8 mt16">VERSO</div>' + caixa("clSangueV", "Tipagem sanguínea no verso", false) + '<div class="small muted" style="padding:6px 0">As NRs aparecem sempre, todas, na ordem oficial. ' + "Só as datas são editáveis, em <b>Editar verso</b>.</div>" + '<div class="field mt12"><label>QR Code</label>' + '<select class="select" id="clQr">' + [ [ "frente", "Só na frente" ], [ "verso", "Só no verso" ], [ "ambos", "Nos dois lados" ] ].map(function(o) {
+return '<option value="' + o[0] + '">' + o[1] + "</option>";
+}).join("") + "</select></div>" + "</div>" + '<div><div class="small mb8">Como vai ficar</div><div id="clPreview"></div>' + '<div class="small mb8 mt12">Verso</div><div id="clPreviewV"></div></div>' + "</div>",
+rodape: (codigo ? '<button class="btn btn-ghost" id="clSoltar">Voltar ao layout geral</button>' : "") + '<button class="btn btn-primary" data-x>Pronto</button>',
+aoAbrir: function(w, fechar) {
+var exemplo = {
+colaborador: nome || "Nome do Colaborador",
+funcao: "Função",
+matricula: "000123",
+cpf: "12345678901",
+setor: "Setor",
+obra: "Obra",
+nomeNivel: "Somente solicitar",
+codigo: codigo || "CR-000",
+unidade: "Unidade",
+acoesPermitidas: [],
+observacao: "--- VERSO DO CRACHA ---\n#sangue\nO+\n#cursos\nNR 06 | 05/2027\nNR 35 | 11/2026"
+};
+var sel = w.querySelector("#clEscopo");
+function alvo() {
+return sel && sel.value === "proprio" ? codigo : "";
+}
+function pintarCampos() {
+var L = CRACHA_LAYOUT(alvo() || null);
+w.querySelector("#clCpf").checked = !!L.cpf;
+w.querySelector("#clMat").checked = !!L.matricula;
+w.querySelector("#clSetor").checked = !!L.setor;
+w.querySelector("#clObra").checked = !!L.obra;
+w.querySelector("#clAcesso").checked = !!L.acesso;
+w.querySelector("#clSangue").checked = !!L.sangueFrente;
+w.querySelector("#clSangueV").checked = L.sangueVerso !== false;
+w.querySelector("#clUnidade").checked = !!L.unidade;
+w.querySelector("#clQr").value = L.qr;
+}
+function lerCampos() {
+return {
+cpf: w.querySelector("#clCpf").checked,
+matricula: w.querySelector("#clMat").checked,
+setor: w.querySelector("#clSetor").checked,
+obra: w.querySelector("#clObra").checked,
+acesso: w.querySelector("#clAcesso").checked,
+sangueFrente: w.querySelector("#clSangue").checked,
+sangueVerso: w.querySelector("#clSangueV").checked,
+unidade: w.querySelector("#clUnidade").checked,
+qr: w.querySelector("#clQr").value
+};
+}
+function previa() {
+var ex = JSON.parse(JSON.stringify(exemplo));
+ex.codigo = alvo() || "CR-000";
+w.querySelector("#clPreview").innerHTML = '<div style="zoom:.6">' + crachaFrente(ex, false) + "</div>";
+w.querySelector("#clPreviewV").innerHTML = '<div style="zoom:.6">' + crachaVerso(ex) + "</div>";
+var dica = w.querySelector("#clEscopoDica");
+if (dica) dica.textContent = alvo() ? "Só este crachá muda. Os outros seguem o layout geral." : "Vale para todos os crachás que não tenham layout próprio.";
+}
+function pintar() {
+CRACHA_LAYOUT_GUARDAR(lerCampos(), alvo());
+previa();
+}
+pintarCampos();
+previa();
+w.querySelectorAll("#clCpf,#clMat,#clSetor,#clObra,#clAcesso,#clSangue,#clSangueV,#clUnidade,#clQr").forEach(function(c) {
+c.addEventListener("change", pintar);
+});
+if (sel) sel.addEventListener("change", function() {
+pintarCampos();
+previa();
+});
+var soltar = w.querySelector("#clSoltar");
+if (soltar) soltar.addEventListener("click", function() {
+CRACHA_LAYOUT_SOLTAR(codigo);
+if (sel) sel.value = "geral";
+pintarCampos();
+previa();
+if (typeof toast === "function") toast("ok", "Layout geral", "Este crachá voltou a seguir o layout de todos.");
+});
+w.querySelector("[data-x]").addEventListener("click", function() {
+fechar();
+if (typeof ROUTER !== "undefined" && ROUTER.render) ROUTER.render();
+});
+}
+});
 }
 function modal() {
 UI.modal({
@@ -42930,9 +43989,12 @@ return {
 controles: controles,
 ligar: ligar,
 modal: modal,
+modalLayout: modalLayout,
 imprimir: imprimir,
 aplicar: aplicar,
-ler: ler
+ler: ler,
+descricao: descricao,
+limparFolha: limparFolha
 };
 }();
 
