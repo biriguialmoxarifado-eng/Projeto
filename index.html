@@ -40739,17 +40739,15 @@ function modalCamposSeguranca() {
       sub: "O RH decide. O que estiver desmarcado não aparece na tela da Segurança — nem por engano.",
       tamanho: "lg",
       corpo: '<div class="alert a-gray mb16">' + ic("info") +
-        "<div><b>Nome e obra vão sempre.</b>Sem eles a Segurança não sabe quem chegou nem de onde. " +
-        "Marcar como <b>obrigatório</b> faz o sistema recusar o encaminhamento enquanto o campo estiver em branco.</div></div>" +
+        "<div><b>A escolha é sua, campo a campo.</b>Desmarcar <b>enviar</b> faz o campo não aparecer para a Segurança. " +
+        "Marcar <b>obrigatório</b> faz o sistema recusar o encaminhamento enquanto aquele campo estiver em branco — " +
+        "e não marcar nenhum também é uma escolha válida.</div></div>" +
         '<div class="card"><table class="tabela"><thead><tr>' +
         "<th>Campo</th><th style='width:110px'>Enviar</th><th style='width:130px'>Obrigatório</th>" +
         "</tr></thead><tbody>" + campos.map(function(c, i) {
-          var fixo = c.campo === "nome" || c.campo === "obra";
-          return "<tr><td>" + U.esc(c.rotulo) + (fixo ? ' <span class="badge b-gray">sempre</span>' : "") + "</td>" +
-            '<td><input type="checkbox" data-pc-enviar="' + i + '"' + (c.enviar ? " checked" : "") +
-            (fixo ? " disabled" : "") + "></td>" +
-            '<td><input type="checkbox" data-pc-obrig="' + i + '"' + (c.obrigatorio ? " checked" : "") +
-            (fixo ? " disabled" : "") + "></td></tr>";
+          return "<tr><td>" + U.esc(c.rotulo) + "</td>" +
+            '<td><input type="checkbox" data-pc-enviar="' + i + '"' + (c.enviar ? " checked" : "") + "></td>" +
+            '<td><input type="checkbox" data-pc-obrig="' + i + '"' + (c.obrigatorio ? " checked" : "") + "></td></tr>";
         }).join("") + "</tbody></table></div>" +
         (r.dados.configurado ? "" : '<p class="small muted mt8">Ninguém configurou isto ainda — o que você vê é o padrão de fábrica.</p>') +
         '<div id="pcErro"></div>',
@@ -40764,8 +40762,8 @@ function modalCamposSeguranca() {
             var obr = w.querySelector('[data-pc-obrig="' + i + '"]');
             return {
               campo: c.campo, rotulo: c.rotulo,
-              enviar: env ? (env.disabled ? true : env.checked) : c.enviar,
-              obrigatorio: obr ? (obr.disabled ? true : obr.checked) : c.obrigatorio
+              enviar: env ? env.checked : c.enviar,
+              obrigatorio: obr ? obr.checked : c.obrigatorio
             };
           });
           botao.disabled = true;
