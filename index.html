@@ -9233,6 +9233,7 @@ observacao: m.observacao || ""
 }
 
 SCREENS["consulta"] = {
+modulo: "pessoal",
 titulo: "Consulta de Estoque",
 render: function() {
 return UI.cabecalho({
@@ -11820,7 +11821,7 @@ UI.modal({
 titulo: id ? "Editar usuário" : "Novo usuário",
 sub: id ? (u.nome || "") + (u.matricula ? " · matrícula " + u.matricula : "") : "O usuário recebe um e-mail para definir a senha no primeiro acesso",
 tamanho: "lg",
-corpo: '<div class="grid g2">' + campo("Nome completo", "usNome", u.nome) + campo("Matrícula", "usMat", u.matricula) + campo("E-mail corporativo", "usEmail", u.email) + campo("Cargo", "usCargo", u.cargo) + campo("Setor / Equipe", "usSetor", u.setor) + '<div class="field"><label>Perfil de acesso</label><select class="select" id="usPerfil">' + Object.keys(APP.PERFIS).map(function(k) {
+corpo: '<div class="grid g2">' + campo("Nome completo", "usNome", u.nome) + campo("Matrícula", "usMat", u.matricula) + campo("E-mail corporativo", "usEmail", u.email) + '<div class="field"><label>Função / cargo</label>' + '<input class="input" id="usCargo" list="usFuncoes" value="' + U.esc(u.cargo || "") + '" ' + 'placeholder="Escolha uma função cadastrada ou digite"><datalist id="usFuncoes"></datalist>' + '<div class="small muted mt4" id="usFuncaoDesc"></div></div>' + campo("Setor / Equipe", "usSetor", u.setor) + '<div class="field"><label>Perfil de acesso</label><select class="select" id="usPerfil">' + Object.keys(APP.PERFIS).map(function(k) {
 return '<option value="' + k + '" ' + (u.perfil === k ? "selected" : "") + ">" + APP.PERFIS[k].nome + "</option>";
 }).join("") + "</select></div>" + '<div class="field"><label>Obra</label><select class="select" id="usObra">' + '<option value="">— sem obra —</option>' + (MOCK.obras || []).map(function(o) {
 return '<option value="' + o.id + '" ' + (u.obra === o.id ? "selected" : "") + ">" + U.esc(o.nome) + "</option>";
@@ -11832,6 +11833,32 @@ s.addEventListener("click", function() {
 s.classList.toggle("on");
 });
 });
+/* as funções cadastradas entram como sugestão, e a descrição
+   aparece embaixo — quem quiser digitar outra coisa, digita. */
+if (typeof FUNCOES_LISTA === "function") {
+FUNCOES_LISTA(false).then(function(funcoes) {
+var lista = w.querySelector("#usFuncoes");
+var campoCargo = w.querySelector("#usCargo");
+var legenda = w.querySelector("#usFuncaoDesc");
+if (!lista || !campoCargo) return;
+var ativas = listaSegura(funcoes).filter(function(f) {
+return String(f.status).toUpperCase() !== "ARQUIVADA";
+});
+lista.innerHTML = ativas.map(function(f) {
+return '<option value="' + U.esc(f.nome) + '">';
+}).join("");
+function mostrar() {
+if (!legenda) return;
+var achada = ativas.filter(function(f) {
+return f.nome.toLowerCase() === String(campoCargo.value || "").trim().toLowerCase();
+})[0];
+legenda.innerHTML = achada ? (achada.descricao ? U.esc(achada.descricao) : '<span class="badge b-yellow">função sem descrição</span>') : (campoCargo.value ? "função fora do cadastro — ela não entra na lista" : "");
+}
+campoCargo.addEventListener("input", mostrar);
+campoCargo.addEventListener("change", mostrar);
+mostrar();
+});
+}
 w.querySelector("[data-x]").addEventListener("click", fechar);
 w.querySelector("[data-ok]").addEventListener("click", function() {
 var senha = w.querySelector("#usSenha").value;
@@ -12659,6 +12686,7 @@ toast("ok", "Rotina executada", "A manutenção foi concluída sem erros.");
 };
 
 SCREENS["notificacoes"] = {
+modulo: "pessoal",
 titulo: "Centro de Notificações",
 render: function() {
 var cores = {
@@ -12696,6 +12724,7 @@ toast("ok", "Notificações lidas", "Sua caixa está limpa.");
 };
 
 SCREENS["notificacoes-prefs"] = {
+modulo: "pessoal",
 titulo: "Preferências de Notificação",
 render: function() {
 var tipos = [ [ "Reservas aprovadas ou recusadas", "Avisa quando alguém decide sobre sua reserva." ], [ "Reservas prontas para retirada", "Aviso no momento da disponibilização, com o prazo de 48 horas." ], [ "Prazo de retirada acabando", "Lembrete 6 horas antes do vencimento." ], [ "Aprovações aguardando você", "Somente para perfis com poder de aprovação." ], [ "Estoque em atenção", "Itens que chegaram ao mínimo." ], [ "EPI vencendo", "Aviso antes do vencimento da sua ficha." ], [ "Resumo diário do almoxarifado", "Consolidado enviado no fim do expediente." ] ];
@@ -12765,7 +12794,7 @@ ROUTER.render();
 
 SCREENS["tarefas"] = {
 titulo: "Tarefas em andamento",
-modulo: "perfil",
+modulo: "tarefas",
 render: function() {
 return TAREFAS.listarDoUsuario().then(function(lista) {
 var standby = lista.filter(function(t) {
@@ -12858,6 +12887,7 @@ ROUTER.render();
 };
 
 SCREENS["perfil"] = {
+modulo: "pessoal",
 titulo: "Meu Perfil",
 render: function() {
 var u = ST.usuario || {};
@@ -17304,6 +17334,11 @@ rota: "#/admin-alcadas",
 icone: "checkC",
 modulo: "permissoes"
 }, {
+rotulo: "Organograma e equipes",
+rota: "#/organograma",
+icone: "usuarios",
+modulo: "permissoes"
+}, {
 rotulo: "Log de auditoria",
 rota: "#/auditoria",
 icone: "escudo",
@@ -20385,6 +20420,7 @@ rota: "#/aprovar/" + protocolo.replace("#", "")
 }
 
 SCREENS["link"] = {
+modulo: "pessoal",
 titulo: "Solicitação",
 render: function(params) {
 var v = LINKS.validar(params.id || "");
@@ -25583,6 +25619,7 @@ return '<div class="card"><div class="card-body">' + '<div class="flex between c
 }
 
 SCREENS["tela-principal"] = {
+modulo: "pessoal",
 titulo: "Tela principal",
 render: function() {
 setTimeout(irParaTelaPrincipal, 60);
@@ -36369,216 +36406,802 @@ aba: "permissoes",
 dados: null
 };
 
+/* ============================================================
+ * BLOCO: FUNÇÕES  ·  código de busca: [FUNC]
+ * ------------------------------------------------------------
+ * O QUE FAZ  Cadastro das funções da obra, cada uma com a sua
+ *            descrição. A função diz o que a pessoa RESPONDE;
+ *            quem diz o que ela PODE é a tela de permissões.
+ * ENTRADA    PERM_CORE.call("funcoes" | "salvarFuncao" |
+ *            "arquivarFuncao" | "importarCargos").
+ * SAÍDA      a tela #/admin-funcoes e o select de função no
+ *            cadastro de pessoas.
+ * PRINCIPAIS SCREENS["admin-funcoes"], modalFuncao, FUNCOES_LISTA
+ * DEPENDE DE [PERMPORTA]; ALMOX_PRO_Modulo_Permissoes.gs
+ * ONDE PROCURAR ERRO
+ *   FUNCAO_DUPLICADA   já existe função com esse nome
+ *   FUNCAO_NAO_EXISTE  id que não está na aba
+ *   SEM_CADASTROS      o importador não achou a aba de usuários
+ * ============================================================ */
+var FUN = {
+busca: "",
+mostrarArquivadas: false,
+cache: null
+};
+
+/* A lista fica guardada para o cadastro de pessoas usar sem pedir
+   de novo a cada abertura de modal. */
+function FUNCOES_LISTA(recarregar) {
+if (FUN.cache && !recarregar) return Promise.resolve(FUN.cache);
+return PERM_CORE.call("funcoes", {}).then(function(r) {
+FUN.cache = r && r.ok ? listaSegura(r.dados.funcoes) : [];
+return FUN.cache;
+});
+}
+
+SCREENS["admin-funcoes"] = {
+titulo: "Funções e descrições",
+modulo: "permissoes",
+render: function() {
+return PERM_CORE.call("funcoes", {}).then(function(r) {
+if (!r.ok) {
+return UI.cabecalho({
+titulo: "Funções"
+}) + '<div class="card">' + UI.falha(r, true) + "</div>";
+}
+FUN.cache = listaSegura(r.dados.funcoes);
+var niveis = listaSegura(r.dados.niveis);
+FUN.niveis = niveis;
+var termo = FUN.busca.toLowerCase();
+var lista = FUN.cache.filter(function(f) {
+if (!FUN.mostrarArquivadas && String(f.status).toUpperCase() === "ARQUIVADA") return false;
+if (!termo) return true;
+return (f.nome + " " + f.descricao + " " + f.categoria).toLowerCase().indexOf(termo) > -1;
+});
+var semDescricao = FUN.cache.filter(function(f) {
+return !f.descricao && String(f.status).toUpperCase() !== "ARQUIVADA";
+});
+
+var topo = UI.cabecalho({
+trilha: [ "Administração", "Funções" ],
+titulo: "Funções e descrições",
+sub: "O que cada função responde na obra. A função descreve responsabilidade — " + "quem libera acesso é a tela de permissões.",
+acoes: '<button class="btn btn-ghost" data-ir="#/admin-permissoes">' + ic("cadeado") + "Permissões</button>" + '<button class="btn btn-ghost" id="fnImportar">' + ic("download") + "Trazer dos cadastros</button>" + '<button class="btn btn-orange" id="fnNova">' + ic("mais") + "Nova função</button>"
+});
+
+var aviso = semDescricao.length ? '<div class="alert a-yellow mb16">' + ic("alerta") + "<div><b>" + semDescricao.length + " função(ões) ainda sem descrição</b>" + "A descrição é o que explica o papel da pessoa no fluxo de trabalho. " + "Sem ela, a função vira só um rótulo." + '<div style="margin-top:8px">' + semDescricao.slice(0, 6).map(function(f) {
+return '<button class="btn btn-ghost btn-sm" data-fn-editar="' + U.esc(f.id) + '" style="margin:2px 4px 2px 0">' + U.esc(f.nome) + "</button>";
+}).join("") + (semDescricao.length > 6 ? '<span class="small muted"> e mais ' + (semDescricao.length - 6) + "</span>" : "") + "</div></div></div>" : "";
+
+var filtro = '<div class="flex gap8 mb16" style="flex-wrap:wrap;align-items:center">' + '<div class="search-wrap" style="flex:1;min-width:220px">' + ic("busca") + '<input class="input" id="fnBusca" placeholder="Buscar função, descrição ou área…" value="' + U.esc(FUN.busca) + '"></div>' + '<button class="btn btn-ghost' + (FUN.mostrarArquivadas ? " on" : "") + '" id="fnArquivadas">' + ic("olho") + (FUN.mostrarArquivadas ? "Mostrando arquivadas" : "Mostrar arquivadas") + "</button></div>";
+
+if (!FUN.cache.length) {
+return topo + filtro + '<div class="card">' + UI.estado("vazio", "Nenhuma função cadastrada", "Comece trazendo os cargos que já estão nos cadastros de pessoas — " + "eles entram como função, sem descrição, para você preencher. " + "Nada é inventado: só entra o que já existe.", '<button class="btn btn-orange mt12" id="fnImportar2">' + ic("download") + "Trazer dos cadastros</button>") + "</div>";
+}
+
+return topo + aviso + filtro + '<div class="card">' + (lista.length ? UI.tabela({
+linhas: lista,
+colunas: [ {
+rotulo: "Função",
+render: function(f) {
+var arq = String(f.status).toUpperCase() === "ARQUIVADA";
+return '<div class="strong">' + U.esc(f.nome) + (arq ? ' <span class="badge b-gray">arquivada</span>' : "") + "</div>" + '<div class="muted small">' + (f.categoria ? U.esc(f.categoria) : "sem área") + (f.nivel ? " · " + U.esc(f.nivel) : "") + "</div>";
+}
+}, {
+rotulo: "Descrição",
+render: function(f) {
+if (!f.descricao) return '<span class="badge b-yellow">sem descrição</span>';
+return '<div class="small" style="max-width:520px">' + U.esc(f.descricao) + "</div>" + (f.responsabilidades ? '<div class="muted small mt4">Responde por: ' + U.esc(f.responsabilidades) + "</div>" : "");
+}
+}, {
+rotulo: "",
+render: function(f) {
+var arq = String(f.status).toUpperCase() === "ARQUIVADA";
+return '<div class="flex gap8" style="justify-content:flex-end">' + '<button class="btn btn-ghost btn-sm" data-fn-editar="' + U.esc(f.id) + '">' + ic("editar") + "Editar</button>" + '<button class="btn btn-ghost btn-sm" data-fn-arquivar="' + U.esc(f.id) + '">' + (arq ? "Reativar" : "Arquivar") + "</button></div>";
+}
+} ]
+}) : UI.estado("busca", "Nada encontrado", "Tente outro termo.")) + "</div>";
+});
+},
+mount: function() {
+var busca = document.getElementById("fnBusca");
+if (busca) {
+var t = null;
+busca.addEventListener("input", function() {
+clearTimeout(t);
+t = setTimeout(function() {
+FUN.busca = busca.value;
+ROUTER.render();
+}, 300);
+});
+}
+var arq = document.getElementById("fnArquivadas");
+if (arq) arq.addEventListener("click", function() {
+FUN.mostrarArquivadas = !FUN.mostrarArquivadas;
+ROUTER.render();
+});
+[ "fnNova" ].forEach(function(id) {
+var b = document.getElementById(id);
+if (b) b.addEventListener("click", function() {
+modalFuncao(null);
+});
+});
+[ "fnImportar", "fnImportar2" ].forEach(function(id) {
+var b = document.getElementById(id);
+if (b) b.addEventListener("click", function() {
+var botao = b;
+botao.disabled = true;
+botao.innerHTML = '<span class="spinner"></span> Trazendo…';
+PERM_CORE.call("importarCargos", {}).then(function(r) {
+botao.disabled = false;
+if (!r.ok) {
+toast("warn", "Não deu para trazer", r.mensagem || "");
+return;
+}
+var n = listaSegura(r.dados.criadas).length;
+toast(n ? "ok" : "info", n ? n + " função(ões) trazida(s)" : "Nada novo para trazer", n ? "Todas sem descrição — escreva o que cada uma faz." : r.dados.jaExistiam + " cargo(s) já estavam cadastrados.");
+FUN.cache = null;
+ROUTER.render();
+});
+});
+});
+document.querySelectorAll("[data-fn-editar]").forEach(function(b) {
+b.addEventListener("click", function() {
+var id = b.getAttribute("data-fn-editar");
+modalFuncao(listaSegura(FUN.cache).filter(function(f) {
+return f.id === id;
+})[0] || null);
+});
+});
+document.querySelectorAll("[data-fn-arquivar]").forEach(function(b) {
+b.addEventListener("click", function() {
+var id = b.getAttribute("data-fn-arquivar");
+var f = listaSegura(FUN.cache).filter(function(x) {
+return x.id === id;
+})[0] || {};
+var arquivada = String(f.status).toUpperCase() === "ARQUIVADA";
+UI.confirmar(arquivada ? "Reativar função" : "Arquivar função", arquivada ? "Ela volta a aparecer na lista e no cadastro de pessoas." : "Ela sai das listas, mas não é apagada: quem já tem essa função no " + "cadastro continua com ela.", arquivada ? "Reativar" : "Arquivar", function() {
+PERM_CORE.call("arquivarFuncao", {
+id: id
+}).then(function(r) {
+if (!r.ok) {
+toast("err", "Não foi possível", r.mensagem);
+return;
+}
+toast("ok", arquivada ? "Função reativada" : "Função arquivada", f.nome || "");
+FUN.cache = null;
+ROUTER.render();
+});
+});
+});
+});
+}
+};
+
+function modalFuncao(f) {
+f = f || {};
+var niveis = listaSegura(FUN.niveis);
+function campo(rot, id, valor, dica) {
+return '<div class="field"><label>' + rot + "</label>" + '<input class="input" id="' + id + '" value="' + U.esc(valor || "") + '">' + (dica ? '<div class="small muted mt4">' + dica + "</div>" : "") + "</div>";
+}
+UI.modal({
+titulo: f.id ? "Editar função" : "Nova função",
+sub: "A função descreve responsabilidade. Ela não concede acesso nenhum.",
+tamanho: "md",
+corpo: '<div class="field"><label>Nome da função <span class="req">*</span></label>' + '<input class="input" id="fnNome" value="' + U.esc(f.nome || "") + '" placeholder="Ex.: Técnico de Segurança"></div>' + '<div class="field mt12"><label>Descrição <span class="req">*</span></label>' + '<textarea class="textarea" id="fnDesc" rows="4" placeholder="O que esta pessoa responde dentro do fluxo de trabalho">' + U.esc(f.descricao || "") + "</textarea>" + '<div class="small muted mt4">Escreva como explicaria para alguém que entrou hoje na obra.</div></div>' + '<div class="grid g2 mt12">' + campo("Área", "fnCat", f.categoria, "Ex.: Segurança, Almoxarifado, Compras") + '<div class="field"><label>Nível</label><select class="select" id="fnNivel">' + '<option value="">— não definido —</option>' + niveis.map(function(n) {
+return '<option value="' + U.esc(n) + '"' + (f.nivel === n ? " selected" : "") + ">" + U.esc(n) + "</option>";
+}).join("") + "</select></div></div>" + campo("Responde por", "fnResp", f.responsabilidades, "Separe por ponto e vírgula. Ex.: EPI; Ocorrências; Conferência de entregas") + '<div class="alert a-gray mt12">' + ic("cadeado") + "<div><b>Isto não libera nada.</b>Duas pessoas com a mesma função podem ter permissões " + "diferentes — quem decide é a tela de permissões.</div></div>" + '<div id="fnErro"></div>',
+rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' + '<button class="btn btn-primary" data-ok>' + (f.id ? "Salvar" : "Criar função") + "</button>",
+aoAbrir: function(w, fechar) {
+w.querySelector("[data-x]").addEventListener("click", fechar);
+w.querySelector("[data-ok]").addEventListener("click", function() {
+var nome = w.querySelector("#fnNome").value.trim();
+var desc = w.querySelector("#fnDesc").value.trim();
+function erro(txt) {
+w.querySelector("#fnErro").innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div>" + U.esc(txt) + "</div></div>";
+}
+if (!nome) {
+erro("Informe o nome da função.");
+return;
+}
+if (!desc) {
+erro("Escreva a descrição. É ela que explica o papel da pessoa — sem isso a função vira só um rótulo.");
+return;
+}
+var botao = this;
+botao.disabled = true;
+botao.innerHTML = '<span class="spinner"></span> Salvando…';
+PERM_CORE.call("salvarFuncao", {
+id: f.id || "",
+nome: nome,
+descricao: desc,
+categoria: w.querySelector("#fnCat").value,
+nivel: w.querySelector("#fnNivel").value,
+responsabilidades: w.querySelector("#fnResp").value
+}).then(function(r) {
+botao.disabled = false;
+botao.innerHTML = f.id ? "Salvar" : "Criar função";
+if (!r.ok) {
+erro(r.mensagem || "Não foi salvo.");
+return;
+}
+fechar();
+toast("ok", f.id ? "Função atualizada" : "Função criada", nome);
+FUN.cache = null;
+ROUTER.render();
+});
+});
+}
+});
+}
+
+
 var ADM_MAPA = [ {
 modulo: "dashboard",
 nome: "Painel e indicadores",
 icone: "grade",
 telas: [ {
-id: "",
-nome: "Painel geral",
-acoes: [ "visualizar", "filtrar", "exportar" ]
+id: "aprovar-preconta",
+nome: "Aprovação de pré-conta",
+acoes: ["visualizar","criar","editar","cancelar","aprovar","reprovar","verCusto","imprimir"]
+}, {
+id: "assistente",
+nome: "Assistente ALMOXA",
+acoes: ["visualizar","criar","imprimir"]
+}, {
+id: "calendario",
+nome: "Calendário",
+acoes: ["visualizar","criar"]
+}, {
+id: "central-mestre",
+nome: "Central do Mestre de Obra",
+acoes: ["visualizar"]
+}, {
+id: "dashboard",
+nome: "Painel de Informações",
+acoes: ["visualizar","filtrar","criar"]
+}, {
+id: "doutor",
+nome: "Doutor do Sistema",
+acoes: ["visualizar"]
 }, {
 id: "indicadores",
-nome: "Indicadores",
-acoes: [ "visualizar", "filtrar", "exportar", "verCusto" ]
+nome: "Indicadores da Obra",
+acoes: ["visualizar","criar"]
+}, {
+id: "mural",
+nome: "Mural",
+acoes: ["visualizar","criar","editar","excluir"]
 } ]
 }, {
 modulo: "lojinha",
 nome: "Loja e catálogo",
 icone: "carrinho",
 telas: [ {
-id: "",
-nome: "Catálogo",
-acoes: [ "visualizar", "pesquisar", "filtrar", "verCusto" ]
+id: "loja",
+nome: "Loja / Catálogo",
+acoes: ["visualizar","filtrar","verCusto"]
 }, {
-id: "carrinho",
-nome: "Carrinho",
-acoes: [ "visualizar", "criar", "editar", "cancelar" ]
+id: "painel-config",
+nome: "Configuração do Painel Interativo",
+acoes: ["visualizar","editar","excluir"]
+} ]
 }, {
-id: "solicitacoes",
+modulo: "solicitacoes",
 nome: "Solicitações",
-acoes: [ "visualizar", "criar", "cancelar", "exportar" ]
-} ]
-}, {
-modulo: "estoque",
-nome: "Estoque",
-icone: "caixa",
-telas: [ {
-id: "",
-nome: "Estoque geral",
-acoes: [ "visualizar", "pesquisar", "filtrar", "exportar", "verCusto", "verValorTotal", "verLocalizacao" ]
-}, {
-id: "movimentacoes",
-nome: "Movimentações",
-acoes: [ "visualizar", "exportar", "estornar" ]
-}, {
-id: "entradas",
-nome: "Entradas",
-acoes: [ "visualizar", "registrarEntrada", "cancelar" ]
-}, {
-id: "saidas",
-nome: "Saídas",
-acoes: [ "visualizar", "registrarSaida", "cancelar" ]
-}, {
-id: "ajustes",
-nome: "Ajustes",
-acoes: [ "visualizar", "ajustar", "aprovar" ]
-}, {
-id: "inventario",
-nome: "Inventário",
-acoes: [ "visualizar", "criar", "conferir", "ajustar", "aprovar", "exportar" ]
-} ]
-}, {
-modulo: "itens",
-nome: "Cadastro de itens",
 icone: "lista",
 telas: [ {
-id: "",
-nome: "Cadastro central",
-acoes: [ "visualizar", "pesquisar", "criar", "editar", "excluir", "exportar", "verCusto" ]
+id: "solicitacao-nova",
+nome: "Nova Solicitação",
+acoes: ["visualizar","criar"]
+}, {
+id: "solicitacoes",
+nome: "Minhas Solicitações",
+acoes: ["visualizar","criar"]
 } ]
 }, {
 modulo: "reservas",
-nome: "Reservas",
+nome: "Reservas, saídas e retiradas",
 icone: "calendario",
 telas: [ {
-id: "",
-nome: "Lista de reservas",
-acoes: [ "visualizar", "pesquisar", "filtrar", "exportar" ]
+id: "reserva",
+nome: "Detalhes da Reserva",
+acoes: ["visualizar","cancelar","aprovar","reprovar"]
 }, {
-id: "nova",
-nome: "Nova reserva",
-acoes: [ "criar", "editar", "cancelar" ]
+id: "reserva-nova",
+nome: "Nova Solicitação",
+acoes: ["visualizar","criar","excluir","verCusto"]
+}, {
+id: "reservas",
+nome: "Reservas",
+acoes: ["visualizar","filtrar","criar","exportar"]
+}, {
+id: "reservas-calendario",
+nome: "Calendário de Reservas",
+acoes: ["visualizar","criar"]
 }, {
 id: "retirada",
-nome: "Retirada",
-acoes: [ "visualizar", "separar", "conferir", "retirar", "retirarParcial", "autenticar", "gerarDocumento" ]
+nome: "Registrar Retirada",
+acoes: ["visualizar","retirar"]
+}, {
+id: "saidas",
+nome: "Saídas e Retiradas",
+acoes: ["visualizar"]
 } ]
 }, {
 modulo: "aprovacoes",
 nome: "Aprovações",
 icone: "checkC",
 telas: [ {
-id: "",
-nome: "Pendentes",
-acoes: [ "visualizar", "aprovar", "reprovar" ]
+id: "aprovacoes",
+nome: "Aprovações",
+acoes: ["visualizar","aprovar","reprovar"]
 }, {
-id: "historico",
-nome: "Histórico",
-acoes: [ "visualizar", "exportar" ]
+id: "aprovar",
+nome: "Solicitação para aprovar",
+acoes: ["visualizar","aprovar","reprovar"]
+}, {
+id: "historico-aprovacoes",
+nome: "Histórico de Aprovações",
+acoes: ["visualizar"]
+}, {
+id: "linkflow",
+nome: "Links de Aprovação",
+acoes: ["visualizar","criar","editar","excluir","aprovar","reprovar","confirmar","autenticar","imprimir"]
 } ]
 }, {
-modulo: "epi",
-nome: "EPI's e uniformes",
-icone: "epi",
+modulo: "estoque",
+nome: "Estoque e cadastros",
+icone: "caixa",
 telas: [ {
-id: "",
-nome: "Painel de EPI",
-acoes: [ "visualizar", "pesquisar", "exportar" ]
+id: "ajustes",
+nome: "Ajustes de Estoque",
+acoes: ["visualizar","filtrar","criar","editar","excluir","verCusto","imprimir"]
 }, {
-id: "entrega",
-nome: "Entrega",
-acoes: [ "criar", "autenticar", "gerarDocumento" ]
+id: "categorias",
+nome: "Categorias",
+acoes: ["visualizar","filtrar","criar","editar","excluir"]
 }, {
-id: "fichas",
-nome: "Fichas",
-acoes: [ "visualizar", "imprimir", "exportar" ]
+id: "entradas",
+nome: "Entradas",
+acoes: ["visualizar","criar"]
 }, {
-id: "perfil",
-nome: "Perfil de EPI",
-acoes: [ "visualizar", "criar", "editar", "aprovar" ]
+id: "estoque",
+nome: "Estoque Geral",
+acoes: ["visualizar","filtrar","ajustar","exportar"]
+}, {
+id: "estoque-item",
+nome: "Detalhes do Item",
+acoes: ["visualizar","imprimir"]
+}, {
+id: "etiquetas",
+nome: "Etiquetas",
+acoes: ["visualizar","imprimir"]
+}, {
+id: "ferramentas-devolucao",
+nome: "Devolução de ferramentas",
+acoes: ["visualizar"]
+}, {
+id: "ferramentas-uso",
+nome: "Ferramentas em Uso",
+acoes: ["visualizar"]
+}, {
+id: "fornecedores",
+nome: "Fornecedores",
+acoes: ["visualizar","criar","editar"]
+}, {
+id: "itens",
+nome: "Cadastro Central de Itens",
+acoes: ["visualizar","filtrar","criar","editar","excluir","exportar"]
+}, {
+id: "localizacao",
+nome: "Localização Física",
+acoes: ["visualizar","criar","editar","excluir"]
+}, {
+id: "mapa-3d",
+nome: "Mapeamento 3D",
+acoes: ["visualizar","criar","editar","imprimir"]
+}, {
+id: "movimentacoes",
+nome: "Movimentações",
+acoes: ["visualizar","exportar"]
+}, {
+id: "rastreabilidade",
+nome: "Rastreabilidade",
+acoes: ["visualizar"]
+}, {
+id: "sem-localizacao",
+nome: "Itens sem Localização",
+acoes: ["visualizar","criar"]
+}, {
+id: "transferencias",
+nome: "Transferências de Estoque",
+acoes: ["visualizar"]
 } ]
 }, {
-modulo: "ferramentas",
-nome: "Ferramentas",
-icone: "ferramenta",
+modulo: "inventario",
+nome: "Inventário",
+icone: "lista",
 telas: [ {
-id: "",
-nome: "Ferramentaria",
-acoes: [ "visualizar", "pesquisar", "exportar" ]
+id: "inventario",
+nome: "Inventários",
+acoes: ["visualizar","criar"]
 }, {
-id: "movimentacao",
-nome: "Retirada e devolução",
-acoes: [ "retirar", "confirmar", "autenticar" ]
+id: "inventario-contagem",
+nome: "Contagem de Inventário",
+acoes: ["visualizar","criar","editar"]
 }, {
-id: "manutencao",
-nome: "Manutenção",
-acoes: [ "visualizar", "criar", "editar" ]
+id: "inventario-divergencias",
+nome: "Divergências de Inventário",
+acoes: ["visualizar","exportar"]
+}, {
+id: "inventario-relatorio",
+nome: "Relatório de Inventário",
+acoes: ["visualizar","exportar"]
+}, {
+id: "inventario-sugestoes",
+nome: "Inventários sugeridos",
+acoes: ["visualizar"]
 } ]
 }, {
 modulo: "nf",
 nome: "Notas fiscais",
 icone: "nota",
 telas: [ {
-id: "",
-nome: "Lista de notas",
-acoes: [ "visualizar", "pesquisar", "exportar" ]
+id: "nf",
+nome: "Notas Fiscais de Entrada",
+acoes: ["visualizar","criar"]
 }, {
-id: "nova",
-nome: "Lançamento",
-acoes: [ "criar", "editar", "cancelar" ]
+id: "nf-conferencia",
+nome: "Conferência de Notas",
+acoes: ["visualizar"]
 }, {
-id: "conferencia",
-nome: "Conferência",
-acoes: [ "conferir", "confirmar", "registrarEntrada" ]
+id: "nf-divergencias",
+nome: "Divergências de Nota",
+acoes: ["visualizar","registrarEntrada","imprimir"]
+}, {
+id: "nf-historico",
+nome: "Histórico de Notas Fiscais",
+acoes: ["visualizar"]
+}, {
+id: "nf-importar",
+nome: "Importar Nota Fiscal",
+acoes: ["visualizar"]
+}, {
+id: "nf-nova",
+nome: "Nova Entrada de NF",
+acoes: ["visualizar","criar","verCusto","administrar"]
 } ]
 }, {
 modulo: "compras",
 nome: "Compras",
 icone: "caminhao",
 telas: [ {
-id: "",
-nome: "Pedidos",
-acoes: [ "visualizar", "criar", "aprovar", "reprovar", "exportar", "verCusto" ]
+id: "compras",
+nome: "Compras",
+acoes: ["visualizar","criar"]
 }, {
-id: "fornecedores",
-nome: "Fornecedores",
-acoes: [ "visualizar", "criar", "editar", "excluir" ]
+id: "historico-precos",
+nome: "Histórico de Preços",
+acoes: ["visualizar","criar"]
+}, {
+id: "orcamentos",
+nome: "Orçamentos",
+acoes: ["visualizar"]
+}, {
+id: "precompras",
+nome: "Pedidos de Compra",
+acoes: ["visualizar","aprovar","reprovar"]
+}, {
+id: "preconta",
+nome: "Pré-Conta de Compras",
+acoes: ["visualizar","editar"]
+} ]
+}, {
+modulo: "epi",
+nome: "EPI, uniformes e segurança",
+icone: "epi",
+telas: [ {
+id: "epi",
+nome: "EPI's e Uniformes",
+acoes: ["visualizar","editar","imprimir"]
+}, {
+id: "epi-catalogo",
+nome: "Catálogo de EPI",
+acoes: ["visualizar","criar"]
+}, {
+id: "epi-fichas",
+nome: "Fichas de EPI Ativas",
+acoes: ["visualizar","exportar"]
+}, {
+id: "epi-retiradas",
+nome: "Retiradas Agendadas",
+acoes: ["visualizar","criar","cancelar","confirmar"]
+}, {
+id: "epi-solicitacoes",
+nome: "Solicitações de EPI",
+acoes: ["visualizar"]
+}, {
+id: "epi-vencimentos",
+nome: "Vencimentos de EPI",
+acoes: ["visualizar"]
+}, {
+id: "kits",
+nome: "Kits por função",
+acoes: ["visualizar","criar","editar"]
+}, {
+id: "kits-cadastro",
+nome: "Kits",
+acoes: ["visualizar","criar","editar","excluir"]
+}, {
+id: "painel-seguranca",
+nome: "Painel de Segurança",
+acoes: ["visualizar"]
+}, {
+id: "precadastros",
+nome: "Pré-cadastros",
+acoes: ["visualizar","criar","editar","reprovar","confirmar"]
+} ]
+}, {
+modulo: "ferramentas",
+nome: "Ferramentas",
+icone: "ferramenta",
+telas: [ {
+id: "ferramentas",
+nome: "Ferramentas",
+acoes: ["visualizar","criar","editar"]
+}, {
+id: "ferramentas-historico",
+nome: "Histórico de Ferramentas",
+acoes: ["visualizar"]
+}, {
+id: "ferramentas-manutencao",
+nome: "Manutenção de Ferramentas",
+acoes: ["visualizar"]
+}, {
+id: "ferramentas-retiradas",
+nome: "Retiradas de Ferramentas",
+acoes: ["visualizar","criar"]
+} ]
+}, {
+modulo: "patrimonio",
+nome: "Patrimônio",
+icone: "caixa",
+telas: [ {
+id: "patrimonio",
+nome: "Patrimônio",
+acoes: ["visualizar","criar","editar","excluir","imprimir"]
+} ]
+}, {
+modulo: "obras",
+nome: "Obras, projetos e centros",
+icone: "obra",
+telas: [ {
+id: "centros",
+nome: "Centros de Custo",
+acoes: ["visualizar","criar","editar","excluir","verCusto"]
+}, {
+id: "obras",
+nome: "Obras e Projetos",
+acoes: ["visualizar","criar"]
+}, {
+id: "projeto",
+nome: "Projeto",
+acoes: ["visualizar","criar"]
+}, {
+id: "projetos",
+nome: "Projetos",
+acoes: ["visualizar","criar"]
 } ]
 }, {
 modulo: "ocorrencias",
 nome: "Ocorrências",
 icone: "alerta",
 telas: [ {
-id: "",
+id: "mapa",
+nome: "Mapa da Obra",
+acoes: ["visualizar"]
+}, {
+id: "ocorrencia",
+nome: "Detalhes da Ocorrência",
+acoes: ["visualizar","criar"]
+}, {
+id: "ocorrencias",
 nome: "Ocorrências",
-acoes: [ "visualizar", "criar", "editar", "confirmar", "exportar" ]
+acoes: ["visualizar","filtrar","criar"]
+} ]
+}, {
+modulo: "tarefas",
+nome: "Tarefas e stand-by",
+icone: "lista",
+telas: [ {
+id: "tarefas",
+nome: "Tarefas em andamento",
+acoes: ["visualizar"]
 } ]
 }, {
 modulo: "relatorios",
 nome: "Relatórios",
 icone: "doc",
 telas: [ {
-id: "",
-nome: "Central de relatórios",
-acoes: [ "visualizar", "gerarDocumento", "exportar", "imprimir", "verCusto" ]
+id: "relatorios",
+nome: "Central de Relatórios",
+acoes: ["visualizar","filtrar"]
+}, {
+id: "relatorios-gerados",
+nome: "Relatórios Gerados",
+acoes: ["visualizar"]
 } ]
 }, {
 modulo: "usuarios",
-nome: "Usuários",
+nome: "Usuários, crachás e acessos",
 icone: "usuarios",
 telas: [ {
-id: "",
-nome: "Gestão de usuários",
-acoes: [ "visualizar", "criar", "editar", "excluir", "administrar" ]
+id: "admin",
+nome: "Painel do Administrador",
+acoes: ["visualizar"]
+}, {
+id: "crachas",
+nome: "Crachás e Acesso",
+acoes: ["visualizar","criar","editar","excluir","imprimir"]
+}, {
+id: "credenciais",
+nome: "Identidade e Credenciais",
+acoes: ["visualizar","criar","editar","excluir","registrarSaida","administrar"]
+}, {
+id: "usuarios",
+nome: "Usuários e Perfis",
+acoes: ["visualizar","criar","editar"]
+} ]
+}, {
+modulo: "permissoes",
+nome: "Perfis e permissões",
+icone: "cadeado",
+telas: [ {
+id: "admin-alcadas",
+nome: "Alçadas de Aprovação",
+acoes: ["visualizar","pesquisar","filtrar","criar","exportar"]
+}, {
+id: "admin-funcoes",
+nome: "Funções e descrições",
+acoes: ["visualizar","filtrar","criar","editar","excluir","aprovar","reprovar","verCusto","exportar","imprimir"]
+}, {
+id: "admin-permissoes",
+nome: "Perfis e Permissões",
+acoes: ["visualizar","criar","editar"]
+}, {
+id: "organograma",
+nome: "Organograma e Equipes",
+acoes: ["visualizar","filtrar","criar","editar","excluir","exportar"]
+}, {
+id: "permissoes",
+nome: "Permissões",
+acoes: ["visualizar","exportar"]
 } ]
 }, {
 modulo: "auditoria",
-nome: "Auditoria",
+nome: "Auditoria e rastreio",
 icone: "escudo",
 telas: [ {
-id: "",
-nome: "Log de auditoria",
-acoes: [ "visualizar", "pesquisar", "exportar" ]
+id: "auditoria",
+nome: "Log de Auditoria",
+acoes: ["visualizar","exportar"]
+}, {
+id: "cracha-acessos",
+nome: "Log de Acessos",
+acoes: ["visualizar","editar","ajustar","verCusto"]
+} ]
+}, {
+modulo: "automacao",
+nome: "Automação e avisos",
+icone: "raio",
+telas: [ {
+id: "automacao",
+nome: "Links & Automação",
+acoes: ["visualizar","criar","editar"]
+}, {
+id: "automacao-canais",
+nome: "Canais e Destinatários",
+acoes: ["visualizar","criar","excluir","verCusto"]
+}, {
+id: "automacao-historico",
+nome: "Histórico de Envios",
+acoes: ["visualizar"]
+}, {
+id: "automacao-regras",
+nome: "Regras de automação",
+acoes: ["visualizar","criar","editar"]
+}, {
+id: "envios",
+nome: "Envios e Links",
+acoes: ["visualizar","verCusto"]
+} ]
+}, {
+modulo: "configuracoes",
+nome: "Configurações do sistema",
+icone: "engrenagem",
+telas: [ {
+id: "aprovadores",
+nome: "Aprovadores e E-mail",
+acoes: ["visualizar","criar"]
+}, {
+id: "backup",
+nome: "Backup e Sincronização",
+acoes: ["visualizar"]
+}, {
+id: "config",
+nome: "Parâmetros do Sistema",
+acoes: ["visualizar","verCusto"]
+}, {
+id: "config-inicial",
+nome: "Configuração inicial",
+acoes: ["visualizar","criar"]
+}, {
+id: "config-loja",
+nome: "Configuração da Loja",
+acoes: ["visualizar","filtrar","criar","editar"]
+}, {
+id: "config-sku",
+nome: "Identificação de Itens",
+acoes: ["visualizar","editar"]
+}, {
+id: "dados",
+nome: "Dados do sistema",
+acoes: ["visualizar","criar"]
+}, {
+id: "integracao-core",
+nome: "Integração com o Core",
+acoes: ["visualizar","criar","editar","excluir","verCusto"]
+}, {
+id: "integracoes",
+nome: "Integrações",
+acoes: ["visualizar"]
+}, {
+id: "manutencao",
+nome: "Manutenção e Versões",
+acoes: ["visualizar","criar","administrar"]
+}, {
+id: "painel-imagens",
+nome: "Imagens do Carrossel",
+acoes: ["visualizar","filtrar","criar","editar"]
 } ]
 }, {
 modulo: "backup",
-nome: "Backup",
+nome: "Backup e armazenamento",
 icone: "banco",
 telas: [ {
-id: "",
-nome: "Backup e restauração",
-acoes: [ "visualizar", "criar", "administrar" ]
+id: "armazenamento",
+nome: "Armazenamento Local",
+acoes: ["visualizar","criar","exportar"]
+} ]
+}, {
+modulo: "pessoal",
+nome: "Minha conta e consultas",
+icone: "usuario",
+telas: [ {
+id: "consulta",
+nome: "Consulta de Estoque",
+acoes: ["visualizar","editar"]
+}, {
+id: "link",
+nome: "Solicitação",
+acoes: ["visualizar","aprovar","reprovar"]
+}, {
+id: "notificacoes",
+nome: "Centro de Notificações",
+acoes: ["visualizar"]
+}, {
+id: "notificacoes-prefs",
+nome: "Preferências de Notificação",
+acoes: ["visualizar"]
+}, {
+id: "perfil",
+nome: "Meu Perfil",
+acoes: ["visualizar","criar"]
+}, {
+id: "tela-principal",
+nome: "Tela principal",
+acoes: ["visualizar"]
 } ]
 } ];
 
@@ -36631,7 +37254,7 @@ return UI.cabecalho({
 trilha: [ "Administração", "Permissões" ],
 titulo: "Perfis e permissões",
 sub: "O que cada perfil pode ver, fazer e aprovar — por ação, não só por módulo.",
-acoes: '<button class="btn btn-ghost" data-ver-alcadas>' + ic("escudo") + "Alçadas de aprovação</button>" + '<button class="btn btn-orange" data-novo-perfil>' + ic("mais") + "Novo perfil</button>"
+acoes: '<button class="btn btn-ghost" data-ir="#/admin-funcoes">' + ic("usuarios") + "Funções</button>" + '<button class="btn btn-ghost" data-ver-alcadas>' + ic("escudo") + "Alçadas de aprovação</button>" + '<button class="btn btn-orange" data-novo-perfil>' + ic("mais") + "Novo perfil</button>"
 }) + '<div class="epi-painel">' + '<div class="epi-lista">' + '<div class="epi-lista-topo"><b style="font-size:13px">' + perfis.length + " perfis</b>" + '<p class="small muted" style="margin:4px 0 0">Clique para configurar</p></div>' + '<div class="epi-pessoas">' + perfis.map(function(p) {
 return '<button class="epi-pessoa ' + (p.id === ADM.perfil ? "sel" : "") + '" ' + 'data-perfil="' + U.esc(p.id) + '">' + '<span class="epi-foto" style="border-radius:10px;background:' + (p.ativo ? "var(--azul-principal)" : "var(--texto-3)") + '">' + U.iniciais(p.nome) + "</span>" + '<span class="epi-dados"><b>' + U.esc(p.nome) + "</b>" + "<small>" + p.concedidas + " de " + p.permissoes + " permissões" + (p.sistema ? " · do sistema" : "") + "</small>" + (p.ativo ? "" : '<span class="badge b-gray">desativado</span>') + "</span></button>";
 }).join("") + "</div></div>" + '<div class="epi-ficha" id="admArvore">' + (atual ? '<div class="skeleton" style="height:300px"></div>' : UI.estado("vazio", "Nenhum perfil", "Crie o primeiro perfil.")) + "</div>" + "</div>";
@@ -36821,6 +37444,675 @@ ROUTER.render();
 });
 });
 }
+
+/* ############################################################
+ * BLOCO: ORGANOGRAMA  ·  código de busca: [ORG]
+ * ------------------------------------------------------------
+ * O QUE FAZ  Desenha o organograma que o ALMOX_PRO_Modulo_Organograma.gs
+ *            já guarda: empresas, obras, setores, equipes e as
+ *            pessoas vinculadas a cada pedaço.
+ * ENTRADA    ORG_CORE.call("arvore" | "salvarEmpresa" | "salvarObra" |
+ *            "salvarSetor" | "salvarEquipe" | "vincular" |
+ *            "desvincular" | "arquivar*" | "pendencias" | "modo")
+ * SAÍDA      {ok, codigo, mensagem, dados}, igual ao API.call.
+ * PRINCIPAIS ORG_CORE.call, SCREENS["organograma"], ORG
+ * DEPENDE DE [API]; [PERM] (mesma convenção de porta direta);
+ *            ALMOX_PRO_Modulo_Organograma.gs no Apps Script.
+ * NÃO MEXE   em permissões, perfis, alçadas nem funções: quem manda
+ *            nisso continua sendo o módulo de permissões.
+ * ONDE PROCURAR ERRO
+ *   SEM_ABA               falta rodar AP_ORG_instalar
+ *   MODULO_NAO_INSTALADO  o arquivo .gs não está no projeto
+ *   PAI_NAO_EXISTE        obra/setor/equipe apontando para algo arquivado
+ *   EM_USO                arquivar com gente ou filhos dentro
+ * ############################################################ */
+
+var ORG_CORE = function() {
+  function semModulo(msg) {
+    return {
+      ok: false,
+      codigo: "MODULO_NAO_INSTALADO",
+      mensagem: "O módulo de organograma não está instalado no Apps Script. " + "Cole o arquivo ALMOX_PRO_Modulo_Organograma, rode AP_ORG_instalar " + "e publique uma nova versão.",
+      dados: null
+    };
+  }
+  function portaDireta(acao, payload) {
+    return new Promise(function(resolve) {
+      if (typeof google === "undefined" || !google.script || !google.script.run) {
+        resolve(semModulo(""));
+        return;
+      }
+      try {
+        google.script.run.withSuccessHandler(function(r) {
+          var d = r;
+          if (typeof r === "string") {
+            try {
+              d = JSON.parse(r);
+            } catch (e) {
+              d = null;
+            }
+          }
+          resolve(d && d.ok !== undefined ? d : semModulo(""));
+        }).withFailureHandler(function(e) {
+          resolve(semModulo(e && e.message ? e.message : String(e)));
+        }).AP_ORG_direto(JSON.stringify({
+          acao: acao,
+          payload: payload || {},
+          token: ST.sessao && ST.sessao.token || ""
+        }));
+      } catch (e) {
+        resolve(semModulo(String(e)));
+      }
+    });
+  }
+  /* mesma regra do PERM_CORE: só cai na porta direta quando a ponte
+     falhou por não conhecer o módulo. SEM_ABA, PAI_NAO_EXISTE e
+     EM_USO são respostas legítimas e vão para a tela como estão. */
+  function pontefalhouPorFalta(r) {
+    if (!r || r.ok) return false;
+    var c = String(r.codigo || "");
+    if (c === "SEM_ROTEADOR" || c === "MODULO_DESCONHECIDO" || c === "MODULO_NAO_ENCONTRADO") return true;
+    if (c === "TIMEOUT" || c === "CORE_FALHA" || c === "RESPOSTA_ESTRANHA") return true;
+    if (c === "SEM_CONEXAO" || c === "PRECISA_PUBLICAR" || c === "CHAVE_INVALIDA") return true;
+    return /organograma|not defined|não definida|módulo/i.test(String(r.mensagem || "")) && !r.dados;
+  }
+  return {
+    call: function(acao, payload) {
+      return API.call("organograma", acao, payload || {}).then(function(r) {
+        if (!pontefalhouPorFalta(r)) return r;
+        return portaDireta(acao, payload).then(function(direto) {
+          if (direto && direto.ok) return direto;
+          if (direto && direto.codigo !== "MODULO_NAO_INSTALADO") return direto;
+          return r;
+        });
+      }, function() {
+        return portaDireta(acao, payload);
+      });
+    }
+  };
+}();
+
+/* O HTML de hoje chama UI.falha em quatro lugares, mas UI.falha não
+   existe no objeto UI — quando o módulo falha, a tela quebra em vez
+   de mostrar o motivo. Não mexo nesses quatro lugares aqui; a tela
+   do organograma usa o seu próprio, que só depende de UI.estado. */
+function orgFalha_(r) {
+  r = r || {};
+  return UI.estado("erro", "O organograma não respondeu", (r.mensagem || "Sem mensagem.") + (r.codigo ? "  [" + r.codigo + "]" : ""));
+}
+
+var ORG = {
+  abertos: {},
+  busca: "",
+  pessoa: "",
+  arvore: null,
+  verArquivados: false
+};
+
+function orgAberto_(id) {
+  return ORG.abertos[id] === true;
+}
+
+function orgAlternar_(id) {
+  ORG.abertos[id] = !orgAberto_(id);
+}
+
+/* Lista plana de empresas/obras/setores/equipes tirada da árvore que
+   já veio — para os <select> dos modais, sem uma chamada a mais. */
+function orgPlano_(arvore) {
+  var plano = {
+    empresas: [],
+    obras: [],
+    setores: [],
+    equipes: []
+  };
+  listaSegura(arvore && arvore.empresas).forEach(function(e) {
+    plano.empresas.push(e);
+    listaSegura(e.setoresDaEmpresa).forEach(function(s) {
+      plano.setores.push(s);
+    });
+    listaSegura(e.obras).forEach(function(o) {
+      plano.obras.push(o);
+      listaSegura(o.setores).forEach(function(s) {
+        plano.setores.push(s);
+        listaSegura(s.equipes).forEach(function(q) {
+          plano.equipes.push(q);
+        });
+      });
+    });
+  });
+  return plano;
+}
+
+function orgOpcoes_(lista, selecionado, vazio) {
+  return '<option value="">' + U.esc(vazio || "— escolha —") + "</option>" + listaSegura(lista).map(function(x) {
+    return '<option value="' + U.esc(x.id) + '"' + (x.id === selecionado ? " selected" : "") + ">" + U.esc(x.nome) + "</option>";
+  }).join("");
+}
+
+function orgCasa_(texto) {
+  var t = String(texto || "").toLowerCase();
+  if (!ORG.busca) return true;
+  return t.indexOf(ORG.busca.toLowerCase()) > -1;
+}
+
+function orgPessoas_(n) {
+  n = Number(n) || 0;
+  return '<span class="badge ' + (n ? "b-blue" : "b-gray") + '">' + n + (n === 1 ? " pessoa" : " pessoas") + "</span>";
+}
+
+function orgLinha_(op) {
+  /* op: {id, icone, nome, sub, nivel, pessoas, botoes, filhos, temFilhos} */
+  var aberto = orgAberto_(op.id);
+  var recuo = 14 * (op.nivel || 0);
+  return '<div class="adm-modulo" style="margin-left:' + recuo + 'px">' + '<button class="adm-modulo-topo" data-org-abrir="' + U.esc(op.id) + '">' + '<span class="adm-seta">' + (op.temFilhos ? ic(aberto ? "baixo" : "dir") : "") + "</span>" + '<span class="ii ' + (op.cor || "ico-blue") + '">' + ic(op.icone) + "</span>" + '<span class="grow" style="text-align:left"><b>' + U.esc(op.nome) + "</b>" + '<small class="muted" style="display:block">' + U.esc(op.sub || "") + "</small></span>" + orgPessoas_(op.pessoas) + "</button>" + '<div class="flex gap8" style="padding:0 12px 10px ' + (recuo ? "12px" : "12px") + '">' + (op.botoes || "") + "</div>" + (aberto && op.filhos ? '<div class="adm-telas">' + op.filhos + "</div>" : "") + "</div>";
+}
+
+function orgBotao_(attr, icone, rotulo) {
+  return '<button class="btn btn-ghost btn-sm" ' + attr + ">" + ic(icone) + rotulo + "</button>";
+}
+
+SCREENS["organograma"] = {
+  titulo: "Organograma e Equipes",
+  modulo: "permissoes",
+  render: function() {
+    return Promise.all([ ORG_CORE.call("arvore", {
+      incluirArquivados: ORG.verArquivados
+    }), ORG_CORE.call("pendencias", {}) ]).then(function(res) {
+      var r = res[0], pend = res[1];
+      if (!r.ok) {
+        return UI.cabecalho({
+          trilha: [ "Administração", "Organograma" ],
+          titulo: "Organograma e equipes"
+        }) + '<div class="card">' + orgFalha_(r) + "</div>" + '<div class="alert a-yellow mt16">' + ic("info") + "<div><b>O módulo de organograma não respondeu</b>" + "Confira se o arquivo <b>ALMOX_PRO_Modulo_Organograma.gs</b> foi instalado no Apps Script, " + "se você rodou <b>AP_ORG_instalar</b> e se publicou uma nova versão.</div></div>";
+      }
+
+      ORG.arvore = r.dados || {};
+      var totais = ORG.arvore.totais || {};
+      var empresas = listaSegura(ORG.arvore.empresas);
+      var modo = String(ORG.arvore.modo || "SOMBRA").toUpperCase();
+      var valendo = modo === "VALENDO";
+
+      var problemas = pend.ok ? listaSegura(pend.dados && pend.dados.problemas) : [];
+      var podeLigar = pend.ok && pend.dados && pend.dados.podeLigarOEscopo === true;
+
+      return UI.cabecalho({
+        trilha: [ "Administração", "Organograma" ],
+        titulo: "Organograma e equipes",
+        sub: "Empresa, obra, setor, equipe e quem responde por cada pedaço. É daqui que sai o escopo e o caminho da aprovação.",
+        acoes: '<button class="btn btn-ghost" data-ir="#/admin-permissoes">' + ic("cadeado") + "Permissões</button>" + '<button class="btn btn-ghost" data-org-pessoa>' + ic("usuarios") + "Vínculos de uma pessoa</button>" + '<button class="btn btn-orange" data-org-nova-empresa>' + ic("mais") + "Nova empresa</button>"
+      }) + '<div class="grid g4 mb16">' + UI.kpi({
+        icone: "banco",
+        cor: "ico-blue",
+        valor: totais.empresas || 0,
+        rotulo: "Empresas"
+      }) + UI.kpi({
+        icone: "grade",
+        cor: "ico-orange",
+        valor: totais.obras || 0,
+        rotulo: "Obras"
+      }) + UI.kpi({
+        icone: "lista",
+        cor: "ico-purple",
+        valor: totais.setores || 0,
+        rotulo: "Setores"
+      }) + UI.kpi({
+        icone: "usuarios",
+        cor: "ico-green",
+        valor: totais.pessoasVinculadas || 0,
+        rotulo: "Pessoas vinculadas"
+      }) + "</div>" + '<div class="alert ' + (valendo ? "a-green" : "a-yellow") + ' mb16">' + ic(valendo ? "escudoOk" : "info") + "<div><b>" + (valendo ? "O escopo está valendo" : "O escopo está em modo sombra") + "</b>" + (valendo ? "Quem não tem vínculo ativo é barrado de verdade ao mexer em registro de outra obra." : "Ninguém é barrado ainda: o sistema só registra na auditoria quem SERIA barrado. " + "É assim que se liga o escopo sem parar a obra. Quando a lista de pendências estiver limpa, " + "rode <b>AP_ORG_VALER</b> no Apps Script.") + "</div></div>" + (problemas.length ? '<div class="card mb16"><div class="card-head"><b>' + problemas.length + " pendência(s) antes de ligar o escopo</b>" + '<span class="badge ' + (podeLigar ? "b-yellow" : "b-red") + '">' + (podeLigar ? "dá para ligar" : "ainda não dá para ligar") + "</span></div>" + '<div class="card-body">' + problemas.map(function(p) {
+        return '<div class="flex gap8" style="padding:6px 0">' + '<span class="badge ' + (p.gravidade === "ALTA" ? "b-red" : "b-yellow") + '">' + U.esc(p.gravidade || "") + "</span>" + "<span>" + U.esc(p.o_que || "") + "</span></div>";
+      }).join("") + "</div></div>" : "") + '<div class="card">' + '<div class="card-head">' + '<div class="search-wrap grow">' + ic("busca") + '<input class="input" id="orgBusca" placeholder="Buscar empresa, obra, setor ou equipe…" value="' + U.esc(ORG.busca) + '"></div>' + '<button class="btn btn-ghost btn-sm" data-org-arquivados>' + (ORG.verArquivados ? "Esconder arquivados" : "Ver arquivados") + "</button>" + "</div>" + '<div class="card-body" id="orgArvore">' + (empresas.length ? empresas.map(orgDesenharEmpresa_).join("") : UI.estado("vazio", "Nenhuma empresa cadastrada", "O organograma começa pela empresa. Depois vêm as obras, os setores e as equipes.", '<button class="btn btn-orange mt12" data-org-nova-empresa>Cadastrar a primeira empresa</button>')) + "</div></div>";
+    });
+  },
+  mount: function() {
+    var busca = document.getElementById("orgBusca");
+    if (busca) {
+      var t = null;
+      busca.addEventListener("input", function() {
+        clearTimeout(t);
+        t = setTimeout(function() {
+          ORG.busca = busca.value;
+          ROUTER.render();
+        }, 300);
+      });
+    }
+    orgLigarCliques_();
+  }
+};
+
+function orgDesenharEmpresa_(e) {
+  var obras = listaSegura(e.obras).filter(function(o) {
+    return orgCasa_(o.nome) || orgCasa_(o.codigo) || !ORG.busca;
+  });
+  var setoresEscritorio = listaSegura(e.setoresDaEmpresa);
+  var temFilhos = obras.length > 0 || setoresEscritorio.length > 0;
+
+  var filhos = setoresEscritorio.map(function(s) {
+    return orgDesenharSetor_(s, 1, true);
+  }).join("") + obras.map(function(o) {
+    return orgDesenharObra_(o, 1);
+  }).join("");
+
+  return orgLinha_({
+    id: e.id,
+    icone: "banco",
+    cor: "ico-blue",
+    nome: e.nome + (e.ativo === false ? "  (arquivada)" : ""),
+    sub: (e.cnpj ? "CNPJ " + e.cnpj + " · " : "") + obras.length + " obra(s)",
+    nivel: 0,
+    pessoas: e.pessoas,
+    temFilhos: temFilhos,
+    botoes: orgBotao_('data-org-nova-obra="' + U.esc(e.id) + '"', "mais", "Obra") + orgBotao_('data-org-novo-setor="' + U.esc(e.id) + '|"', "mais", "Setor de escritório") + orgBotao_('data-org-editar-empresa="' + U.esc(e.id) + '"', "editar", "Editar") + orgBotao_('data-org-arquivar="empresas|' + U.esc(e.id) + '|' + U.esc(e.nome) + '"', "lixo", "Arquivar"),
+    filhos: filhos
+  });
+}
+
+function orgDesenharObra_(o, nivel) {
+  var setores = listaSegura(o.setores);
+  return orgLinha_({
+    id: o.id,
+    icone: "grade",
+    cor: "ico-orange",
+    nome: o.nome + (o.ativo === false ? "  (arquivada)" : ""),
+    sub: (o.codigo ? o.codigo + " · " : "") + (o.responsavel ? "responsável: " + o.responsavel : "sem responsável") + " · " + setores.length + " setor(es)",
+    nivel: nivel,
+    pessoas: o.pessoas,
+    temFilhos: setores.length > 0,
+    botoes: orgBotao_('data-org-novo-setor="' + U.esc(o.empresa) + "|" + U.esc(o.id) + '"', "mais", "Setor") + orgBotao_('data-org-vincular="obra|' + U.esc(o.id) + '"', "usuario", "Vincular pessoa") + orgBotao_('data-org-editar-obra="' + U.esc(o.id) + '"', "editar", "Editar") + orgBotao_('data-org-arquivar="obras|' + U.esc(o.id) + '|' + U.esc(o.nome) + '"', "lixo", "Arquivar"),
+    filhos: setores.map(function(s) {
+      return orgDesenharSetor_(s, nivel + 1, false);
+    }).join("")
+  });
+}
+
+function orgDesenharSetor_(s, nivel, doEscritorio) {
+  var equipes = listaSegura(s.equipes);
+  return orgLinha_({
+    id: s.id,
+    icone: "lista",
+    cor: "ico-purple",
+    nome: s.nome + (doEscritorio ? "  (escritório)" : "") + (s.ativo === false ? "  (arquivado)" : ""),
+    sub: (s.responsavel ? "responsável: " + s.responsavel + " · " : "") + equipes.length + " equipe(s)",
+    nivel: nivel,
+    pessoas: s.pessoas,
+    temFilhos: equipes.length > 0,
+    botoes: orgBotao_('data-org-nova-equipe="' + U.esc(s.id) + '"', "mais", "Equipe") + orgBotao_('data-org-vincular="setor|' + U.esc(s.id) + '"', "usuario", "Vincular pessoa") + orgBotao_('data-org-editar-setor="' + U.esc(s.id) + '"', "editar", "Editar") + orgBotao_('data-org-arquivar="setores|' + U.esc(s.id) + '|' + U.esc(s.nome) + '"', "lixo", "Arquivar"),
+    filhos: equipes.map(function(q) {
+      return orgDesenharEquipe_(q, nivel + 1);
+    }).join("")
+  });
+}
+
+function orgDesenharEquipe_(q, nivel) {
+  return orgLinha_({
+    id: q.id,
+    icone: "usuarios",
+    cor: "ico-green",
+    nome: q.nome + (q.ativo === false ? "  (arquivada)" : ""),
+    sub: q.lider ? "líder: " + q.lider : "sem líder",
+    nivel: nivel,
+    pessoas: q.pessoas,
+    temFilhos: false,
+    botoes: orgBotao_('data-org-vincular="equipe|' + U.esc(q.id) + '"', "usuario", "Vincular pessoa") + orgBotao_('data-org-editar-equipe="' + U.esc(q.id) + '"', "editar", "Editar") + orgBotao_('data-org-arquivar="equipes|' + U.esc(q.id) + '|' + U.esc(q.nome) + '"', "lixo", "Arquivar"),
+    filhos: ""
+  });
+}
+
+function orgLigarCliques_() {
+  document.querySelectorAll("[data-org-abrir]").forEach(function(b) {
+    b.addEventListener("click", function() {
+      orgAlternar_(b.getAttribute("data-org-abrir"));
+      ROUTER.render();
+    });
+  });
+  document.querySelectorAll("[data-org-arquivados]").forEach(function(b) {
+    b.addEventListener("click", function() {
+      ORG.verArquivados = !ORG.verArquivados;
+      ROUTER.render();
+    });
+  });
+  document.querySelectorAll("[data-org-nova-empresa]").forEach(function(b) {
+    b.addEventListener("click", function() {
+      orgModalEmpresa_(null);
+    });
+  });
+  document.querySelectorAll("[data-org-editar-empresa]").forEach(function(b) {
+    b.addEventListener("click", function() {
+      orgModalEmpresa_(orgAchar_("empresas", b.getAttribute("data-org-editar-empresa")));
+    });
+  });
+  document.querySelectorAll("[data-org-nova-obra]").forEach(function(b) {
+    b.addEventListener("click", function() {
+      orgModalObra_(null, b.getAttribute("data-org-nova-obra"));
+    });
+  });
+  document.querySelectorAll("[data-org-editar-obra]").forEach(function(b) {
+    b.addEventListener("click", function() {
+      var o = orgAchar_("obras", b.getAttribute("data-org-editar-obra"));
+      orgModalObra_(o, o && o.empresa);
+    });
+  });
+  document.querySelectorAll("[data-org-novo-setor]").forEach(function(b) {
+    b.addEventListener("click", function() {
+      var p = b.getAttribute("data-org-novo-setor").split("|");
+      orgModalSetor_(null, p[0], p[1] || "");
+    });
+  });
+  document.querySelectorAll("[data-org-editar-setor]").forEach(function(b) {
+    b.addEventListener("click", function() {
+      var s = orgAchar_("setores", b.getAttribute("data-org-editar-setor"));
+      orgModalSetor_(s, s && s.empresa, s && s.obra);
+    });
+  });
+  document.querySelectorAll("[data-org-nova-equipe]").forEach(function(b) {
+    b.addEventListener("click", function() {
+      orgModalEquipe_(null, b.getAttribute("data-org-nova-equipe"));
+    });
+  });
+  document.querySelectorAll("[data-org-editar-equipe]").forEach(function(b) {
+    b.addEventListener("click", function() {
+      var q = orgAchar_("equipes", b.getAttribute("data-org-editar-equipe"));
+      orgModalEquipe_(q, q && q.setor);
+    });
+  });
+  document.querySelectorAll("[data-org-vincular]").forEach(function(b) {
+    b.addEventListener("click", function() {
+      var p = b.getAttribute("data-org-vincular").split("|");
+      orgModalVincular_(p[0], p[1]);
+    });
+  });
+  document.querySelectorAll("[data-org-arquivar]").forEach(function(b) {
+    b.addEventListener("click", function() {
+      var p = b.getAttribute("data-org-arquivar").split("|");
+      orgModalArquivar_(p[0], p[1], p[2]);
+    });
+  });
+  document.querySelectorAll("[data-org-pessoa]").forEach(function(b) {
+    b.addEventListener("click", orgModalPessoa_);
+  });
+}
+
+function orgAchar_(qual, id) {
+  var plano = orgPlano_(ORG.arvore);
+  return listaSegura(plano[qual]).filter(function(x) {
+    return x.id === id;
+  })[0] || null;
+}
+
+/* ---------- salvar: um caminho só para os quatro cadastros ---------- */
+
+function orgSalvar_(w, acao, payload, botao, rotuloBotao, fechar) {
+  botao.innerHTML = '<span class="spinner"></span> Salvando…';
+  botao.disabled = true;
+  return ORG_CORE.call(acao, payload).then(function(res) {
+    botao.innerHTML = rotuloBotao;
+    botao.disabled = false;
+    if (!res.ok) {
+      w.querySelector("#orgErro").innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div>" + U.esc(res.mensagem || "Não foi salvo.") + "</div></div>";
+      return;
+    }
+    fechar();
+    toast("ok", res.dados && res.dados.criado === false ? "Alterado" : "Cadastrado", res.mensagem || "");
+    ROUTER.render();
+  });
+}
+
+function orgCampo_(id, rotulo, valor, dica, obrigatorio) {
+  return '<div class="field mt12"><label>' + U.esc(rotulo) + (obrigatorio ? ' <span class="req">*</span>' : "") + "</label>" + '<input class="input" id="' + id + '" placeholder="' + U.esc(dica || "") + '" value="' + U.esc(valor || "") + '"></div>';
+}
+
+function orgModalEmpresa_(e) {
+  e = e || {};
+  UI.modal({
+    titulo: e.id ? "Editar empresa" : "Nova empresa",
+    sub: "A empresa é o topo do organograma: obras e setores ficam pendurados nela.",
+    tamanho: "sm",
+    corpo: orgCampo_("orgNome", "Nome da empresa", e.nome, "Ex.: Construtora Silva Ltda", true) + orgCampo_("orgApelido", "Apelido", e.apelido, "Como aparece nas telas") + orgCampo_("orgCnpj", "CNPJ", e.cnpj, "00.000.000/0000-00") + orgCampo_("orgObs", "Observação", e.observacao, "") + '<div id="orgErro"></div>',
+    rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' + '<button class="btn btn-primary" data-ok>' + (e.id ? "Salvar" : "Criar empresa") + "</button>",
+    aoAbrir: function(w, fechar) {
+      w.querySelector("[data-x]").addEventListener("click", fechar);
+      w.querySelector("[data-ok]").addEventListener("click", function() {
+        orgSalvar_(w, "salvarEmpresa", {
+          id: e.id || "",
+          nome: w.querySelector("#orgNome").value,
+          apelido: w.querySelector("#orgApelido").value,
+          cnpj: w.querySelector("#orgCnpj").value,
+          observacao: w.querySelector("#orgObs").value
+        }, this, e.id ? "Salvar" : "Criar empresa", fechar);
+      });
+    }
+  });
+}
+
+function orgModalObra_(o, empresa) {
+  o = o || {};
+  var plano = orgPlano_(ORG.arvore);
+  UI.modal({
+    titulo: o.id ? "Editar obra" : "Nova obra",
+    sub: "Toda obra pertence a uma empresa. Sem empresa o registro nasce órfão.",
+    tamanho: "sm",
+    corpo: '<div class="field"><label>Empresa <span class="req">*</span></label>' + '<select class="select" id="orgEmpresa">' + orgOpcoes_(plano.empresas, empresa || o.empresa) + "</select></div>" + orgCampo_("orgNome", "Nome da obra", o.nome, "Ex.: Residencial Jardins — Torre A", true) + orgCampo_("orgCodigo", "Código da obra", o.codigo, "Ex.: OB-2026-01") + orgCampo_("orgEndereco", "Endereço", o.endereco, "") + orgCampo_("orgResp", "Responsável", o.responsavel, "Matrícula ou nome de quem responde pela obra") + '<div id="orgErro"></div>',
+    rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' + '<button class="btn btn-primary" data-ok>' + (o.id ? "Salvar" : "Criar obra") + "</button>",
+    aoAbrir: function(w, fechar) {
+      w.querySelector("[data-x]").addEventListener("click", fechar);
+      w.querySelector("[data-ok]").addEventListener("click", function() {
+        orgSalvar_(w, "salvarObra", {
+          id: o.id || "",
+          empresa: w.querySelector("#orgEmpresa").value,
+          nome: w.querySelector("#orgNome").value,
+          codigo: w.querySelector("#orgCodigo").value,
+          endereco: w.querySelector("#orgEndereco").value,
+          responsavel: w.querySelector("#orgResp").value
+        }, this, o.id ? "Salvar" : "Criar obra", fechar);
+      });
+    }
+  });
+}
+
+function orgModalSetor_(s, empresa, obra) {
+  s = s || {};
+  var plano = orgPlano_(ORG.arvore);
+  UI.modal({
+    titulo: s.id ? "Editar setor" : "Novo setor",
+    sub: "Setor de obra fica na obra. Setor de escritório fica direto na empresa — deixe a obra em branco.",
+    tamanho: "sm",
+    corpo: '<div class="field"><label>Empresa <span class="req">*</span></label>' + '<select class="select" id="orgEmpresa">' + orgOpcoes_(plano.empresas, empresa || s.empresa) + "</select></div>" + '<div class="field mt12"><label>Obra</label>' + '<select class="select" id="orgObra">' + orgOpcoes_(plano.obras, obra || s.obra, "— setor de escritório (sem obra) —") + "</select></div>" + orgCampo_("orgNome", "Nome do setor", s.nome, "Ex.: Almoxarifado", true) + orgCampo_("orgResp", "Responsável", s.responsavel, "Quem responde pelo setor") + '<div id="orgErro"></div>',
+    rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' + '<button class="btn btn-primary" data-ok>' + (s.id ? "Salvar" : "Criar setor") + "</button>",
+    aoAbrir: function(w, fechar) {
+      w.querySelector("[data-x]").addEventListener("click", fechar);
+      w.querySelector("[data-ok]").addEventListener("click", function() {
+        orgSalvar_(w, "salvarSetor", {
+          id: s.id || "",
+          empresa: w.querySelector("#orgEmpresa").value,
+          obra: w.querySelector("#orgObra").value,
+          nome: w.querySelector("#orgNome").value,
+          responsavel: w.querySelector("#orgResp").value
+        }, this, s.id ? "Salvar" : "Criar setor", fechar);
+      });
+    }
+  });
+}
+
+function orgModalEquipe_(q, setor) {
+  q = q || {};
+  var plano = orgPlano_(ORG.arvore);
+  UI.modal({
+    titulo: q.id ? "Editar equipe" : "Nova equipe",
+    sub: "A equipe vive dentro de um setor. Empresa e obra ela herda do setor, sozinha.",
+    tamanho: "sm",
+    corpo: '<div class="field"><label>Setor <span class="req">*</span></label>' + '<select class="select" id="orgSetor">' + orgOpcoes_(plano.setores, setor || q.setor) + "</select></div>" + orgCampo_("orgNome", "Nome da equipe", q.nome, "Ex.: Equipe de Acabamento", true) + orgCampo_("orgLider", "Líder", q.lider, "Matrícula ou nome do encarregado") + '<div id="orgErro"></div>',
+    rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' + '<button class="btn btn-primary" data-ok>' + (q.id ? "Salvar" : "Criar equipe") + "</button>",
+    aoAbrir: function(w, fechar) {
+      w.querySelector("[data-x]").addEventListener("click", fechar);
+      w.querySelector("[data-ok]").addEventListener("click", function() {
+        orgSalvar_(w, "salvarEquipe", {
+          id: q.id || "",
+          setor: w.querySelector("#orgSetor").value,
+          nome: w.querySelector("#orgNome").value,
+          lider: w.querySelector("#orgLider").value
+        }, this, q.id ? "Salvar" : "Criar equipe", fechar);
+      });
+    }
+  });
+}
+
+/* ---------- vincular uma pessoa a um pedaço do organograma ---------- */
+
+function orgModalVincular_(camada, id) {
+  var plano = orgPlano_(ORG.arvore);
+  var onde = {
+    empresa: "",
+    obra: "",
+    setor: "",
+    equipe: ""
+  };
+  onde[camada] = id;
+  var alvo = orgAchar_(camada === "obra" ? "obras" : camada === "setor" ? "setores" : camada === "equipe" ? "equipes" : "empresas", id) || {};
+
+  API.call("usuarios", "listar", {}).then(function(r) {
+    var usuarios = r && r.ok ? listaSegura(r.dados) : [];
+    UI.modal({
+      titulo: "Vincular pessoa",
+      sub: "Em " + (alvo.nome || id) + ". O vínculo é o que define o escopo — o que essa pessoa enxerga e onde pode mexer.",
+      tamanho: "sm",
+      corpo: '<div class="field"><label>Pessoa <span class="req">*</span></label>' + (usuarios.length ? '<select class="select" id="orgUsuario">' + '<option value="">— escolha —</option>' + usuarios.map(function(u) {
+        return '<option value="' + U.esc(u.matricula || u.id || u.nome) + '">' + U.esc(u.nome) + (u.matricula ? " · " + U.esc(u.matricula) : "") + "</option>";
+      }).join("") + "</select>" : '<input class="input" id="orgUsuario" placeholder="Matrícula ou nome">') + "</div>" + orgCampo_("orgMatricula", "Matrícula", "", "Se a lista acima já traz a matrícula, pode deixar em branco") + orgCampo_("orgFuncao", "Função", "", "Ex.: Encarregado de Almoxarifado") + '<div class="field mt12"><label>Nível</label>' + '<select class="select" id="orgNivel">' + [ "", "COLABORADOR", "AUXILIAR", "ENCARREGADO", "SUPERVISOR", "GESTOR", "DIRETOR" ].map(function(n) {
+        return '<option value="' + n + '">' + (n || "— sem nível —") + "</option>";
+      }).join("") + "</select></div>" + orgCampo_("orgInicio", "Início (AAAA-MM-DD)", "", "Em branco vale desde já") + orgCampo_("orgFim", "Fim (AAAA-MM-DD)", "", "Em branco é vínculo sem prazo") + '<label class="flex gap8 mt12" style="align-items:center"><input type="checkbox" id="orgPrincipal"> <span class="small">É o vínculo principal desta pessoa</span></label>' + '<div class="alert a-gray mt12">' + ic("info") + "<div>Campo em branco quer dizer <b>toda a camada de cima</b>: vínculo só com a empresa é alguém que enxerga a empresa inteira.</div></div>" + '<div id="orgErro"></div>',
+      rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' + '<button class="btn btn-primary" data-ok>Vincular</button>',
+      aoAbrir: function(w, fechar) {
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        w.querySelector("[data-ok]").addEventListener("click", function() {
+          var usuario = w.querySelector("#orgUsuario").value;
+          if (!String(usuario || "").trim()) {
+            w.querySelector("#orgErro").innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div>Diga de quem é o vínculo.</div></div>";
+            return;
+          }
+          orgSalvar_(w, "vincular", {
+            usuario: usuario,
+            matricula: w.querySelector("#orgMatricula").value,
+            empresa: onde.empresa,
+            obra: onde.obra,
+            setor: onde.setor,
+            equipe: onde.equipe,
+            funcao: w.querySelector("#orgFuncao").value,
+            nivel: w.querySelector("#orgNivel").value,
+            inicio: w.querySelector("#orgInicio").value,
+            fim: w.querySelector("#orgFim").value,
+            principal: w.querySelector("#orgPrincipal").checked
+          }, this, "Vincular", fechar);
+        });
+      }
+    });
+  });
+}
+
+/* ---------- os vínculos de uma pessoa ---------- */
+
+function orgModalPessoa_() {
+  UI.modal({
+    titulo: "Vínculos de uma pessoa",
+    sub: "Onde essa pessoa está hoje — e até quando.",
+    tamanho: "md",
+    corpo: '<div class="search-wrap">' + ic("busca") + '<input class="input" id="orgPessoaBusca" placeholder="Matrícula ou nome" value="' + U.esc(ORG.pessoa) + '"></div>' + '<div id="orgPessoaLista" class="mt12"></div>',
+    rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' + '<button class="btn btn-primary" data-ok>Procurar</button>',
+    aoAbrir: function(w, fechar) {
+      w.querySelector("[data-x]").addEventListener("click", fechar);
+      function procurar() {
+        var quem = w.querySelector("#orgPessoaBusca").value;
+        ORG.pessoa = quem;
+        var alvo = w.querySelector("#orgPessoaLista");
+        if (!String(quem || "").trim()) {
+          alvo.innerHTML = "";
+          return;
+        }
+        alvo.innerHTML = UI.carregando(3);
+        ORG_CORE.call("vinculos", {
+          usuario: quem
+        }).then(function(r) {
+          if (!r.ok) {
+            alvo.innerHTML = orgFalha_(r);
+            return;
+          }
+          var v = listaSegura(r.dados && r.dados.vinculos);
+          if (!v.length) {
+            alvo.innerHTML = UI.estado("vazio", "Sem vínculo ativo", "Enquanto o escopo estiver valendo, essa pessoa não mexe em registro de obra nenhuma.");
+            return;
+          }
+          alvo.innerHTML = v.map(function(x) {
+            var caminho = [ x.empresa, x.obra, x.setor, x.equipe ].filter(Boolean).join(" › ") || "empresa inteira";
+            return '<div class="card mb8"><div class="card-body flex gap8" style="align-items:center">' + '<div class="grow"><b>' + U.esc(caminho) + "</b>" + '<small class="muted" style="display:block">' + U.esc(x.funcao || "sem função") + (x.nivel ? " · " + U.esc(x.nivel) : "") + (x.fim ? " · até " + U.esc(x.fim) : "") + (x.principal ? " · principal" : "") + "</small></div>" + '<button class="btn btn-ghost btn-sm" data-org-desvincular="' + U.esc(x.id) + '">Encerrar</button>' + "</div></div>";
+          }).join("");
+          alvo.querySelectorAll("[data-org-desvincular]").forEach(function(b) {
+            b.addEventListener("click", function() {
+              b.disabled = true;
+              ORG_CORE.call("desvincular", {
+                id: b.getAttribute("data-org-desvincular")
+              }).then(function(res) {
+                b.disabled = false;
+                if (!res.ok) {
+                  toast("err", "Não deu", res.mensagem || "");
+                  return;
+                }
+                toast("ok", "Vínculo encerrado", res.mensagem || "");
+                procurar();
+                ROUTER.render();
+              });
+            });
+          });
+        });
+      }
+      w.querySelector("[data-ok]").addEventListener("click", procurar);
+      w.querySelector("#orgPessoaBusca").addEventListener("keydown", function(ev) {
+        if (ev.key === "Enter") procurar();
+      });
+      if (ORG.pessoa) procurar();
+    }
+  });
+}
+
+/* ---------- arquivar: nunca apagar ---------- */
+
+function orgModalArquivar_(qual, id, nome) {
+  var acao = {
+    empresas: "arquivarEmpresa",
+    obras: "arquivarObra",
+    setores: "arquivarSetor",
+    equipes: "arquivarEquipe"
+  }[qual];
+  UI.modal({
+    titulo: "Arquivar " + (nome || id),
+    sub: "Nada é apagado: o registro sai das listas e o histórico continua inteiro.",
+    tamanho: "sm",
+    corpo: '<div class="alert a-yellow">' + ic("alerta") + "<div>Se ainda houver obra, setor, equipe ou gente vinculada aqui dentro, o sistema vai recusar — " + "e faz isso de propósito, para não deixar registro apontando para o nada.</div></div>" + '<div id="orgErro"></div>',
+    rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' + '<button class="btn btn-primary" data-ok>Arquivar</button>',
+    aoAbrir: function(w, fechar) {
+      w.querySelector("[data-x]").addEventListener("click", fechar);
+      w.querySelector("[data-ok]").addEventListener("click", function() {
+        var botao = this;
+        botao.disabled = true;
+        botao.innerHTML = '<span class="spinner"></span> Arquivando…';
+        ORG_CORE.call(acao, {
+          id: id
+        }).then(function(res) {
+          botao.disabled = false;
+          botao.innerHTML = "Arquivar";
+          if (!res.ok) {
+            w.querySelector("#orgErro").innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div>" + U.esc(res.mensagem || "") + "</div></div>";
+            return;
+          }
+          fechar();
+          toast("ok", "Arquivado", res.mensagem || "");
+          ROUTER.render();
+        });
+      });
+    }
+  });
+}
+
 
 SCREENS["admin-alcadas"] = {
 titulo: "Alçadas de Aprovação",
