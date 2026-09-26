@@ -54,8 +54,12 @@ var AP_PRECAD_CFG = {
     LOGIN: 'LOGIN'        /* entra no sistema com um perfil */
   },
 
-  /* campos que o técnico precisa preencher para o pré-cadastro subir */
-  obrigatorios: ['nome', 'cpf', 'cargo', 'obra']
+  /* Campos que o pré-cadastro exige para subir.
+     Vazio de propósito: nada é obrigatório. Quem lança a ficha
+     preenche o que tem na mão, e o que faltar entra depois — pelo
+     próprio RH ou pela Segurança. Se um dia a obra quiser exigir
+     alguma coisa, é só pôr o nome do campo aqui dentro. */
+  obrigatorios: []
 };
 
 
@@ -251,10 +255,13 @@ function AP_PRECAD_criar_(payload, sessao) {
     };
   }
 
-  if (!AP_PRECAD_cpfValido_(payload.cpf)) {
+  /* CPF em branco passa — não é obrigatório. Escrito, é conferido:
+     isso não é exigência, é defesa contra erro de digitação, que
+     depois vira duas fichas da mesma pessoa. */
+  if (AP_PRECAD_so_(payload.cpf) && !AP_PRECAD_cpfValido_(payload.cpf)) {
     return {
       ok: false, codigo: 'CPF_INVALIDO',
-      mensagem: 'O CPF informado não é válido. Confira os números antes de enviar.'
+      mensagem: 'O CPF informado não é válido. Confira os números, ou deixe em branco para preencher depois.'
     };
   }
 
@@ -653,8 +660,18 @@ function AP_PRECAD_testes() {
     ok('quem pré-cadastrou fica registrado', f.solicitante === 'Lara (Téc. Segurança)', f.solicitante);
 
     /* ---------- 2. O QUE O PRÉ-CADASTRO RECUSA ---------- */
-    ok('campo obrigatório em falta é recusado',
-      AP_Modulo_precadastro('criar', { nome: 'X' }).codigo === 'CAMPOS_OBRIGATORIOS');
+    /* estas quatro gravam de verdade; a tabela de mentira volta ao
+       tamanho de antes para não bagunçar as contas lá embaixo */
+    var antesDosOpcionais = tabela.length;
+    ok('ficha com pouca coisa preenchida sobe do mesmo jeito',
+      AP_Modulo_precadastro('criar', { nome: 'X' }).ok === true);
+    ok('ficha sem nome nenhum também sobe — nada é obrigatório',
+      AP_Modulo_precadastro('criar', {}).ok === true);
+    ok('CPF em branco passa',
+      AP_Modulo_precadastro('criar', { nome: 'Sem CPF' }).ok === true);
+    ok('CPF escrito errado é recusado — isso é erro de digitação, não exigência',
+      AP_Modulo_precadastro('criar', { nome: 'Y', cpf: '111.111.111-11' }).codigo === 'CPF_INVALIDO');
+    tabela.length = antesDosOpcionais;
     ok('CPF inválido é recusado',
       AP_Modulo_precadastro('criar', {
         nome: 'Y', cpf: '111.111.111-11', cargo: 'Pedreiro', obra: 'OB02'
@@ -2318,4 +2335,3 @@ function AP_PRECAD_SEG_testes() {
   try { console.log(texto); } catch (e) { }
   return texto;
 }
-
