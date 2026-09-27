@@ -1795,6 +1795,41 @@ var ALMOXA_CONFIG = {
 API_URL: "https://script.google.com/macros/s/AKfycbwWahYJywIsbRGc3t8taMWTXNgLd_1JtFJ93VmGNfAA-bXcgMlUoW6OZszZWEWMULA1/exec",
 API_CHAVE: ""
 };
+
+/* ############################################################
+ * A RECUSA POR CHAVE DO APLICATIVO, EXPLICADA
+ * ------------------------------------------------------------
+ * Quem exige a chave é o Core, em ALMOXA_PRO_Modulo_Ponte.gs,
+ * função AP_PONTE_chaveConfere_: se a propriedade de script
+ * ALMOXA_CHAVE_APP estiver vazia, ele passa; se estiver
+ * preenchida, exige igualdade exata e recusa com o código
+ * APP_NAO_AUTORIZADO.
+ *
+ * Rodando DENTRO do Apps Script isso nunca aparecia, porque o
+ * API.call vai direto ao almoxaApi e a ponte não é tocada. Numa
+ * publicação hospedada todo pedido entra pela ponte, que é o
+ * único lugar onde a regra é conferida. A exigência não nasceu
+ * na migração: o tráfego passou a andar pela estrada onde ela
+ * sempre esteve.
+ *
+ * Esta função NÃO libera nada e NÃO confere chave: só troca uma
+ * frase sem saída por uma que diz o que fazer.
+ * ############################################################ */
+function APP_EXPLICAR_CHAVE(r) {
+  if (!r || r.ok !== false) return r;
+  var codigo = String(r.codigo || r.erro || "");
+  if (!/^(APP_NAO_AUTORIZADO|CHAVE_APP_INVALIDA|CHAVE_INVALIDA)$/.test(codigo)) return r;
+  r.chaveDoAplicativo = true;
+  r.mensagem = "O servidor do ALMOX-PRO está configurado com uma chave de aplicativo " +
+    "e esta publicação não está enviando a mesma chave. Isso não tem relação com " +
+    "login, senha ou crachá — é o servidor decidindo quais aplicativos podem falar " +
+    "com ele.\n\n" +
+    "Duas saídas, nenhuma delas criando chave nova: apagar a propriedade de script " +
+    "ALMOXA_CHAVE_APP no Apps Script (Configurações do projeto → Propriedades do " +
+    "script), o que devolve o servidor à fase 1 sem tirar a autenticação; ou informar " +
+    "aqui a mesma chave que já está lá, em Diagnóstico da conexão.";
+  return r;
+}
 /* ############################################################
  * BLOCO: PONTE / API / CORE                  busca: [API]
  * ------------------------------------------------------------
@@ -2053,6 +2088,16 @@ return r2;
 comRetentativa().then(function(r) {
 STATE.coreStatus = r && r.ok === false && r.codigo === "RESPOSTA_ESTRANHA" ? "erro" : "online";
 UI.atualizarCore();
+/* A CHAVE DO APLICATIVO.
+   Quem decide é o Core: o AP_PONTE_chaveConfere_ do
+   ALMOXA_PRO_Modulo_Ponte.gs, e só ele. Esta publicação não
+   confere chave nenhuma por conta própria e não bloqueia a
+   abertura por causa dela — a autenticação normal continua
+   obrigatória do mesmo jeito.
+   O que faltava era explicação: o Core recusa com
+   APP_NAO_AUTORIZADO e a frase dele não diz o que fazer, então
+   o erro chegava ao usuário como um beco sem saída. */
+r = APP_EXPLICAR_CHAVE(r);
 terminar(r && r.ok !== undefined ? r : {
 ok: true,
 dados: r
