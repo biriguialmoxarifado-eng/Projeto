@@ -28,38 +28,77 @@ function AP_DIAG_CHAVE_APP() {
   d(new Date().toISOString());
   d('============================================================');
 
+  /* ---------- 0. A PORTA QUE ESTA RECUSANDO ----------
+     O codigo CHAVE_APP_INVALIDA nao sai do ALMOXA_PRO_Modulo_Ponte.gs
+     (esse recusa com APP_NAO_AUTORIZADO). Ele vem de OUTRA porta,
+     instalada neste projeto. Aqui descobrimos qual, e o que rodar. */
+  titulo('0. QUEM RECUSA COM CHAVE_APP_INVALIDA');
+  var achadas = [];
+  [['ALMOXA_LIBERAR_FASE1', 'liga a fase 1 — a chave deixa de ser exigida'],
+   ['ALMOXA_VER_CHAVE', 'mostra o estado da chave (somente leitura)'],
+   ['ALMOXA_DIAGNOSTICO_DA_PORTA', 'diagnostico da porta'],
+   ['ALMOXA_EXIGIR_CHAVE', 'volta a exigir a chave'],
+   ['AP_PONTE_receber_', 'recebe o pedido na porta'],
+   ['AP_PONTE_doPost', 'entrada POST da ponte'],
+   ['AP_PONTE_atender_', 'porteiro da ponte'],
+   ['almoxaApi', 'a porta que a ponte chama']
+  ].forEach(function (par) {
+    var existe = false;
+    try { existe = (eval('typeof ' + par[0]) === 'function'); } catch (e) { }
+    if (existe) achadas.push(par[0]);
+    d((existe ? '[existe] ' : '[nao ha] ') + par[0] + '  —  ' + par[1]);
+  });
+  d('');
+  var temLiberar = achadas.indexOf('ALMOXA_LIBERAR_FASE1') > -1;
+  if (temLiberar) {
+    d('>>> O PROPRIO PROJETO JA TEM O INTERRUPTOR DA FASE 1.');
+    d('>>> Rode ALMOXA_LIBERAR_FASE1() no editor. Nenhuma linha de');
+    d('>>> codigo precisa ser alterada, e nenhuma chave nova e criada.');
+    d('>>> Depois rode este diagnostico de novo para conferir.');
+  } else {
+    d('>>> Nao ha ALMOXA_LIBERAR_FASE1 neste projeto. A fase 1 se liga');
+    d('>>> apagando a propriedade de script da chave — veja a secao 6.');
+  }
+
   /* ---------- 1. O MÓDULO DA PONTE ESTÁ INSTALADO? ---------- */
   titulo('1. O MODULO DA PONTE');
   var temPonte = (typeof AP_PONTE_CFG !== 'undefined');
   d('AP_PONTE_CFG ............ ' + (temPonte ? 'EXISTE' : 'NAO EXISTE'));
   if (!temPonte) {
     d('');
-    d('Sem o modulo da ponte instalado, NENHUMA publicacao hospedada');
-    d('consegue falar com o Core: o unico caminho de fora para dentro');
-    d('e o AP_PONTE_doPost/doGet. Instale o ALMOXA_PRO_Modulo_Ponte.gs.');
-    return AP_DIAG_CHAVE_fim_(L);
+    d('Este projeto usa OUTRA porta, nao o ALMOXA_PRO_Modulo_Ponte.gs.');
+    d('O diagnostico segue assim mesmo: o estado da chave e o caminho da');
+    d('fase 1 valem igual, porque a chave mora na propriedade de script,');
+    d('nao no codigo. O que nao da para conferir aqui e a lista de acoes');
+    d('que passam sem sessao — essa e da porta que voce usa.');
+  } else {
+    d('versao da ponte ......... ' + AP_PONTE_CFG.versao);
+    d('propriedade da chave .... ' + AP_PONTE_CFG.propChave);
+    d('limite do corpo ......... ' + AP_PONTE_CFG.limiteCorpo + ' caracteres');
+    d('acoes que passam SEM sessao (a porta de entrada):');
+    (AP_PONTE_CFG.semSessao || []).forEach(function (a) { d('   ' + a); });
   }
-  d('versao da ponte ......... ' + AP_PONTE_CFG.versao);
-  d('propriedade da chave .... ' + AP_PONTE_CFG.propChave);
-  d('limite do corpo ......... ' + AP_PONTE_CFG.limiteCorpo + ' caracteres');
-  d('acoes que passam SEM sessao (a porta de entrada):');
-  (AP_PONTE_CFG.semSessao || []).forEach(function (a) { d('   ' + a); });
 
   /* ---------- 2. A CHAVE EXISTE NESTE PROJETO? ---------- */
   titulo('2. A CHAVE NO PROPRIO PROJETO');
-  var chave = '', erroProp = '';
+  /* o nome da propriedade: o do modulo quando ele existe, senao o nome
+     padrao que a tela e o projeto usam */
+  var NOME_PROP = 'ALMOXA_CHAVE_APP';
+  try { if (temPonte && AP_PONTE_CFG.propChave) NOME_PROP = AP_PONTE_CFG.propChave; } catch (e) { }
+
+  var chave = '', bruto = '', erroProp = '';
   try {
-    chave = String(PropertiesService.getScriptProperties()
-      .getProperty(AP_PONTE_CFG.propChave) || '').trim();
+    bruto = String(PropertiesService.getScriptProperties().getProperty(NOME_PROP) || '');
+    chave = bruto.trim();
   } catch (e) { erroProp = e.message; }
+  d('propriedade conferida ... ' + NOME_PROP);
 
   if (erroProp) d('nao consegui ler as propriedades: ' + erroProp);
   d('a chave esta configurada? ' + (chave ? 'SIM' : 'NAO'));
   if (chave) {
     /* NUNCA o valor. Só o suficiente para conferir se e a mesma. */
     d('quantos caracteres ...... ' + chave.length);
-    d('tem espaco nas pontas? .. ' + (/^\s|\s$/.test(
-      String(PropertiesService.getScriptProperties().getProperty(AP_PONTE_CFG.propChave) || ''))
+    d('tem espaco nas pontas? .. ' + (/^\s|\s$/.test(bruto)
       ? 'SIM — isso sozinho ja faz a comparacao falhar' : 'nao'));
   }
 
@@ -88,10 +127,14 @@ function AP_DIAG_CHAVE_APP() {
   /* ---------- 4. O QUE O PING RESPONDE ---------- */
   titulo('4. O QUE O PING RESPONDE (e o que a tela le)');
   function simularPing(recebida) {
-    return {
-      exigeChave: !!chave,
-      chaveConfere: AP_PONTE_chaveConfere_(recebida)
-    };
+    var confere;
+    if (typeof AP_PONTE_chaveConfere_ === 'function') {
+      confere = AP_PONTE_chaveConfere_(recebida);
+    } else {
+      /* sem o modulo instalado, a regra descrita: vazia passa, cheia exige */
+      confere = !chave || String(recebida || '') === chave;
+    }
+    return { exigeChave: !!chave, chaveConfere: confere };
   }
   var semNada = simularPing('');
   d('pedido sem chave ........ exigeChave=' + semNada.exigeChave +
@@ -135,7 +178,7 @@ function AP_DIAG_CHAVE_APP() {
   if (chave) {
     d('Duas saidas, as duas sem criar chave nova e sem tirar seguranca:');
     d('');
-    d('(a) FASE 1 — apagar a propriedade ' + AP_PONTE_CFG.propChave);
+    d('(a) FASE 1 — apagar a propriedade ' + NOME_PROP);
     d('    em Configuracoes do projeto > Propriedades do script.');
     d('    A ponte volta a passar, e a AUTENTICACAO CONTINUA OBRIGATORIA:');
     d('    fora das acoes da lista semSessao, nada anda sem sessao.');
