@@ -40652,7 +40652,10 @@ ROUTER.render();
 }
 
 var PRECADP = {
-filtro: "AGUARDANDO_VALIDACAO",
+/* o filtro agora é por ETAPA do processo. Vazio = todos; antes
+   ele nascia com um status de acesso que não existe mais aqui,
+   e a lista aparecia vazia. */
+filtro: "",
 busca: ""
 };
 
@@ -40683,6 +40686,7 @@ busca: ""
 var PCSEG = {
   busca: "",
   filtro: "",
+  aba2: "aguardando",
   aba: "rh",
   processo: null,
   rascunho: null
@@ -40740,10 +40744,10 @@ function modalCamposSeguranca() {
       tamanho: "lg",
       corpo: '<div class="alert a-gray mb16">' + ic("info") +
         "<div><b>A escolha é sua, campo a campo.</b>Desmarcar <b>enviar</b> faz o campo não aparecer para a Segurança. " +
-        "Marcar <b>obrigatório</b> faz o sistema recusar o encaminhamento enquanto aquele campo estiver em branco — " +
-        "e não marcar nenhum também é uma escolha válida.</div></div>" +
+        "Marcar <b>cobrar na conferência</b> só faz o sistema lembrar de quem ficou em branco quando o processo chega " +
+        "na Segurança — <b>nada trava o encaminhamento</b>, nenhum campo é obrigatório.</div></div>" +
         '<div class="card"><table class="tabela"><thead><tr>' +
-        "<th>Campo</th><th style='width:110px'>Enviar</th><th style='width:130px'>Obrigatório</th>" +
+        "<th>Campo</th><th style='width:110px'>Enviar</th><th style='width:150px'>Cobrar na conferência</th>" +
         "</tr></thead><tbody>" + campos.map(function(c, i) {
           return "<tr><td>" + U.esc(c.rotulo) + "</td>" +
             '<td><input type="checkbox" data-pc-enviar="' + i + '"' + (c.enviar ? " checked" : "") + "></td>" +
@@ -40847,10 +40851,7 @@ function modalEncaminhar(id) {
         arq.addEventListener("change", function() {
           var f = arq.files && arq.files[0];
           if (!f) return;
-          var reduzir = (typeof encolherFoto === "function")
-            ? encolherFoto(f)
-            : Promise.reject(new Error("sem redutor"));
-          reduzir.then(function(url) {
+          pcEncolherImagem(f).then(function(url) {
             foto = url;
             w.querySelector("#pcFotoPalco").innerHTML =
               '<img src="' + url + '" style="width:100%;height:100%;object-fit:cover">';
@@ -40890,8 +40891,13 @@ function modalEncaminhar(id) {
             }
             fechar();
             toast("ok", "Encaminhado", res.mensagem || "");
+            var faltou = listaSegura(res.dados && res.dados.emBranco);
+            if (faltou.length) {
+              toast("warn", "Ficou em branco", faltou.join(", ") +
+                " — a Segurança vê isso na conferência.");
+            }
             if (typeof CACHE !== "undefined") CACHE.invalidar();
-            modalCredencial(id);
+            pcModalToken(id);
           });
         });
       }
@@ -40899,44 +40905,289 @@ function modalEncaminhar(id) {
   });
 }
 
-function modalCredencial(id) {
+/* ------------------------------------------------------------
+   FOTO PELA CÂMERA  ·  parte do bloco [PCSEG]
+   ------------------------------------------------------------
+   Usa o CameraCore que o crachá já usa — mesma câmera, mesmo
+   tratamento de erro. Se ela não abrir, o caminho do arquivo
+   continua ali do lado: ninguém fica sem foto por causa de uma
+   webcam que não ligou.
+   ------------------------------------------------------------ */
+
+/* O REDUTOR DE IMAGEM.
+   O sistema já tem um (encolherFoto), mas ele nasceu DENTRO do
+   bloco fechado do crachá e não é alcançável daqui — foi esse o
+   erro do "redutor de imagem não está disponível". Este aqui faz
+   o mesmo serviço, sem depender de ninguém: corta quadrado,
+   reduz e baixa a qualidade até caber na célula da planilha. */
+function pcEncolherImagem(origem, teto) {
+  teto = teto || 45000;
+
+  /* o do crachá vem primeiro — é o mesmo serviço, já testado no
+     sistema. Ele mora dentro do bloco CRACHA, e é por isso que
+     chamar "encolherFoto" solto não funcionava. */
+  try {
+    if (typeof CRACHA !== "undefined" && CRACHA && typeof CRACHA.encolherFoto === "function") {
+      return CRACHA.encolherFoto(origem).catch(function() {
+        return pcEncolherProprio(origem, teto);
+      });
+    }
+  } catch (e) {}
+  return pcEncolherProprio(origem, teto);
+}
+
+function pcEncolherProprio(origem, teto) {
+  teto = teto || 45000;
+  return new Promise(function(pronto, falhou) {
+    function desenhar(img) {
+      var lado = Math.min(img.width, img.height);
+      if (!lado) { falhou(new Error("Não consegui ler o tamanho da imagem.")); return; }
+      var tamanhos = [320, 260, 200, 160];
+      for (var t = 0; t < tamanhos.length; t++) {
+        var c = document.createElement("canvas");
+        c.width = tamanhos[t];
+        c.height = tamanhos[t];
+        var ctx = c.getContext("2d");
+        ctx.fillStyle = "#EEF2F7";
+        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.drawImage(img, (img.width - lado) / 2, (img.height - lado) / 2,
+          lado, lado, 0, 0, c.width, c.height);
+        var qualidades = [0.78, 0.62, 0.48, 0.36, 0.26];
+        for (var q = 0; q < qualidades.length; q++) {
+          var url = c.toDataURL("image/jpeg", qualidades[q]);
+          if (url.length <= teto) { pronto(url); return; }
+        }
+      }
+      falhou(new Error("Não consegui deixar esta imagem pequena o bastante. Tente outra."));
+    }
+    var img = new Image();
+    img.onload = function() { desenhar(img); };
+    img.onerror = function() { falhou(new Error("Não consegui abrir esta imagem.")); };
+    if (typeof origem === "string") { img.src = origem; return; }
+    var fr = new FileReader();
+    fr.onload = function() { img.src = fr.result; };
+    fr.onerror = function() { falhou(new Error("Não consegui ler o arquivo.")); };
+    fr.readAsDataURL(origem);
+  });
+}
+
+function modalTirarFoto(aoPronto) {
+  var stream = null;
+  UI.modal({
+    titulo: "Foto do colaborador",
+    sub: "Enquadre o rosto e clique em capturar. A foto é reduzida antes de subir.",
+    tamanho: "sm",
+    corpo: '<div id="pcCamPalco" class="cr-palco" style="min-height:240px;background:var(--fundo-2);' +
+      'border-radius:12px;display:grid;place-items:center;overflow:hidden"></div>' +
+      '<div id="pcCamAviso" class="mt12"></div>' +
+      '<div class="field mt12"><label>Ou escolha uma imagem do computador</label>' +
+      '<input type="file" accept="image/*" id="pcCamArquivo"></div>',
+    rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' +
+      '<button class="btn btn-primary" data-capturar disabled>' + ic("camera") + "Capturar</button>",
+    aoAbrir: function(w, fechar) {
+      var palco = w.querySelector("#pcCamPalco");
+      var aviso = w.querySelector("#pcCamAviso");
+      var botao = w.querySelector("[data-capturar]");
+
+      function encerrar() {
+        try { if (typeof CameraFoto !== "undefined") CameraFoto.fechar(); } catch (e) {}
+        try { if (typeof CameraCore !== "undefined") CameraCore.stop(); } catch (e) {}
+        if (stream) {
+          try { stream.getTracks().forEach(function(t) { t.stop(); }); } catch (e) {}
+          stream = null;
+        }
+      }
+      w.querySelector("[data-x]").addEventListener("click", function() { encerrar(); fechar(); });
+
+      function entregar(url) {
+        encerrar();
+        fechar();
+        if (aoPronto) aoPronto(url);
+      }
+
+      /* arquivo: sempre disponível, mesmo sem câmera */
+      w.querySelector("#pcCamArquivo").addEventListener("change", function() {
+        var f = this.files && this.files[0];
+        if (!f) return;
+        var reduzir = pcEncolherImagem(f);
+        reduzir.then(entregar).catch(function(e) {
+          aviso.innerHTML = '<div class="alert a-red">' + ic("alerta") +
+            "<div>" + U.esc(e && e.message || "Não consegui usar essa imagem.") + "</div></div>";
+        });
+      });
+
+      /* câmera: a mesma do crachá */
+      if (typeof CameraCore === "undefined") {
+        aviso.innerHTML = '<div class="alert a-yellow">' + ic("info") +
+          "<div>A câmera não está disponível nesta tela. Escolha uma imagem do computador.</div></div>";
+        return;
+      }
+      CameraCore.start("pcCamPalco", { frontal: true }).then(function(video) {
+        botao.disabled = false;
+        aviso.innerHTML = '<div class="alert a-green">' + ic("checkC") +
+          "<div>Câmera ligada.</div></div>";
+        botao.addEventListener("click", function() {
+          var url = null;
+          try {
+            url = (typeof CameraFoto !== "undefined") ? CameraFoto.tirar(video, 480) : null;
+          } catch (e) { url = null; }
+          if (!url) {
+            aviso.innerHTML = '<div class="alert a-red">' + ic("alerta") +
+              "<div>Não consegui capturar. Tente de novo ou escolha uma imagem.</div></div>";
+            return;
+          }
+          /* mesma redução do resto do sistema, para caber na planilha */
+          pcEncolherImagem(url).then(entregar).catch(function() { entregar(url); });
+        });
+      }).catch(function(e) {
+        var motivo = (typeof CameraCore !== "undefined" && CameraCore.explicar)
+          ? CameraCore.explicar(e) : String(e && e.message || e);
+        aviso.innerHTML = '<div class="alert a-yellow">' + ic("info") +
+          "<div><b>A câmera não abriu</b>" + U.esc(motivo) +
+          " Você pode escolher uma imagem do computador aqui embaixo.</div></div>";
+      });
+    },
+    aoFechar: function() {
+      try { if (typeof CameraCore !== "undefined") CameraCore.stop(); } catch (e) {}
+    }
+  });
+}
+
+
+/* ------------------------------------------------------------
+   A TELA DE PRÉ-CADASTRO FINALIZADO
+   O token grande, o QR, e o que fazer com ele.
+   ------------------------------------------------------------ */
+
+function pcfEstiloToken() {
+  if (document.getElementById("pcTokenCss")) return;
+  var st = document.createElement("style");
+  st.id = "pcTokenCss";
+  st.textContent =
+    ".pctk{text-align:center}" +
+    ".pctk-ok{width:56px;height:56px;border-radius:50%;background:#E6F7EC;color:#146C36;" +
+    "display:grid;place-items:center;margin:0 auto 10px;font-size:26px}" +
+    ".pctk h3{margin:0 0 4px;color:#146C36;font-size:18px}" +
+    ".pctk-sub{color:var(--texto-2);font-size:13px;margin:0 0 16px}" +
+    ".pctk-caixa{border:1px solid var(--linha);border-radius:14px;overflow:hidden;background:#fff}" +
+    ".pctk-rot{background:var(--fundo-2);border-bottom:1px solid var(--linha);padding:6px 10px;" +
+    "font-size:10px;letter-spacing:.1em;color:var(--texto-2);text-transform:uppercase}" +
+    ".pctk-num{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:26px;font-weight:800;" +
+    "letter-spacing:.06em;padding:14px 10px 6px;color:#0B2A55}" +
+    ".pctk-qr{padding:0 10px 14px}.pctk-qr svg{width:170px;height:170px}" +
+    ".pctk-linha{display:flex;justify-content:space-between;gap:10px;padding:6px 0;font-size:12.5px;" +
+    "border-bottom:1px dashed var(--linha);text-align:left}" +
+    ".pctk-linha:last-child{border-bottom:none}" +
+    "@media print{.modal-foot{display:none!important}}";
+  document.head.appendChild(st);
+}
+
+function pcModalToken(id) {
   pcApi("credencial", { id: id }).then(function(r) {
-    if (!r || !r.ok) { toast("err", "Sem credencial", r && r.mensagem || ""); return; }
+    if (!r || !r.ok) {
+      if (r && r.codigo === "SEM_TOKEN") {
+        toast("warn", "Ainda não tem token",
+          "O token nasce quando o RH finaliza o pré-cadastro. Use o botão " +
+          "“Finalizar e enviar para a Segurança”.");
+        return;
+      }
+      toast("err", "Não consegui abrir a credencial", r && r.mensagem || "");
+      return;
+    }
+    pcfEstiloToken();
     var d = r.dados;
-    var svg = pcQR(d.conteudoQR, 190);
+    var svg = pcQR(d.conteudoQR, 170);
+    var ativo = String(d.tokenEstado || "") === "ATIVO_PARA_ENTREGA";
+    var consumido = String(d.tokenEstado || "") === "CONSUMIDO";
+
     UI.modal({
-      titulo: "Credencial do processo",
-      sub: d.nome + " · " + d.id,
+      titulo: "Pré-cadastro finalizado",
+      sub: d.nome + (d.funcao ? " · " + d.funcao : "") + (d.obra ? " · " + d.obra : ""),
       tamanho: "sm",
-      corpo: '<div class="qr-caixa">' + (svg ||
-        '<div class="muted small" style="padding:30px">Não consegui desenhar o QR aqui. ' +
-        'O código abaixo funciona digitado.</div>') + "</div>" +
-        '<div class="qr-codigo mono">' + U.esc(d.id) + "</div>" +
-        '<div class="field mt12"><label>Token</label>' +
-        '<input class="input mono" value="' + U.esc(d.token) + '" readonly></div>' +
-        '<div class="alert a-gray mt12">' + ic("cadeado") +
-        "<div><b>Este QR não abre porta nenhuma.</b>Ele só localiza o processo. Quem libera qualquer ação " +
-        "é o login de quem está lendo, conferido contra perfil, permissão e obra.</div></div>" +
-        (d.usadoEm ? '<p class="small muted mt8">Última leitura: ' + U.esc(d.usadoEm) +
-          (d.usadoPor ? " por " + U.esc(d.usadoPor) : "") + "</p>" : ""),
+      corpo: '<div class="pctk">' +
+        '<div class="pctk-ok">' + (consumido ? "•" : "✓") + "</div>" +
+        "<h3>" + (consumido ? "Token já utilizado" : "Pré-Cadastro Finalizado!") + "</h3>" +
+        '<p class="pctk-sub">O colaborador foi encaminhado para a Segurança do Trabalho.</p>' +
+        '<div class="pctk-caixa">' +
+        '<div class="pctk-rot">Token do colaborador</div>' +
+        '<div class="pctk-num">' + U.esc(d.token) + "</div>" +
+        '<div class="pctk-qr">' + (svg ||
+          '<p class="small muted">Não consegui desenhar o QR aqui. O número acima funciona digitado.</p>') +
+        "</div></div>" +
+        '<div class="mt12">' +
+        '<div class="pctk-linha"><span class="muted">Status</span>' +
+        '<span class="badge ' + (consumido ? "b-gray" : ativo ? "b-green" : "b-yellow") + '">' +
+        (consumido ? "Consumido" : ativo ? "Ativo para entrega" : "Aguardando validação") + "</span></div>" +
+        '<div class="pctk-linha"><span class="muted">Processo</span><b class="mono">' + U.esc(d.id) + "</b></div>" +
+        (d.identificacao ? '<div class="pctk-linha"><span class="muted">Identificação</span>' +
+          '<b class="mono">' + U.esc(d.identificacao) + "</b></div>" : "") +
+        (d.criadoEm ? '<div class="pctk-linha"><span class="muted">Data / hora</span><b>' +
+          U.esc(pcfQuando(d.criadoEm)) + "</b></div>" : "") +
+        (d.criadoPor ? '<div class="pctk-linha"><span class="muted">Enviado por</span><b>' +
+          U.esc(d.criadoPor) + "</b></div>" : "") +
+        "</div>" +
+        '<div class="alert a-blue mt12" style="text-align:left">' + ic("info") +
+        "<div>Informe o token ao colaborador para a retirada do material, " +
+        "<b>depois que a Segurança validar</b>. Enquanto isso ele não libera entrega nenhuma.</div></div>" +
+        "</div>",
       rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' +
+        '<button class="btn btn-ghost" data-copiar>' + ic("copiar") + "Copiar token</button>" +
         '<button class="btn btn-primary" data-imprimir>' + ic("impressora") + "Imprimir</button>",
       aoAbrir: function(w, fechar) {
         w.querySelector("[data-x]").addEventListener("click", fechar);
+        w.querySelector("[data-copiar]").addEventListener("click", function() {
+          try {
+            navigator.clipboard.writeText(d.token);
+            toast("ok", "Token copiado", d.token);
+          } catch (e) {
+            toast("warn", "Não consegui copiar", "Anote: " + d.token);
+          }
+        });
         w.querySelector("[data-imprimir]").addEventListener("click", function() {
-          var janela = window.open("", "credencial");
-          if (!janela) { toast("warn", "Janela bloqueada", "Libere as janelas deste site para imprimir."); return; }
-          janela.document.write('<!doctype html><meta charset="utf-8"><title>' + U.esc(d.id) + "</title>" +
+          var janela = window.open("", "token");
+          if (!janela) { toast("warn", "Janela bloqueada", "Libere as janelas deste site."); return; }
+          janela.document.write('<!doctype html><meta charset="utf-8"><title>' + U.esc(d.token) + "</title>" +
             "<style>body{font:14px system-ui;text-align:center;padding:40px}" +
-            "svg{width:240px;height:240px}.mono{font-family:ui-monospace,Menlo,monospace;letter-spacing:.08em}" +
-            "</style><h2>" + U.esc(d.nome) + "</h2><p>" + U.esc(d.obra || "") + "</p>" +
-            (svg || "") + '<p class="mono">' + U.esc(d.id) + "</p>");
+            ".n{font-family:ui-monospace,Menlo,monospace;font-size:30px;font-weight:800;letter-spacing:.06em;margin:16px 0}" +
+            "svg{width:220px;height:220px}</style>" +
+            "<h2>" + U.esc(d.nome) + "</h2><p>" + U.esc(d.funcao || "") + " · " + U.esc(d.obra || "") + "</p>" +
+            '<div class="n">' + U.esc(d.token) + "</div>" + (svg || "") +
+            "<p>" + U.esc(d.id) + "</p>");
           janela.document.close();
           janela.print();
         });
       }
     });
   });
+}
+
+
+/* ------------------------------------------------------------
+   NOTIFICAÇÃO DO NAVEGADOR
+   Usa a nativa quando houver permissão; quando não houver, o
+   aviso interno do sistema continua aparecendo do mesmo jeito.
+   A permissão é pedida UMA vez por navegador.
+   ------------------------------------------------------------ */
+
+var PCAVISO = { chavePedido: "almoxa_notif_pedida" };
+
+function pcAvisarNavegador(titulo, texto) {
+  /* o aviso interno sempre sai — o do navegador é o extra */
+  try {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "granted") {
+      new Notification(titulo, { body: texto, tag: "almoxa-precadastro" });
+      return;
+    }
+    if (Notification.permission === "denied") return;
+    var jaPediu = false;
+    try { jaPediu = localStorage.getItem(PCAVISO.chavePedido) === "1"; } catch (e) {}
+    if (jaPediu) return;
+    try { localStorage.setItem(PCAVISO.chavePedido, "1"); } catch (e) {}
+    Notification.requestPermission().then(function(p) {
+      if (p === "granted") new Notification(titulo, { body: texto, tag: "almoxa-precadastro" });
+    });
+  } catch (e) {}
 }
 
 
@@ -40955,6 +41206,199 @@ function modalCredencial(id) {
    pela descrição pareceria mais arrumado na tela e entregaria o
    número errado no dia da retirada.
    ------------------------------------------------------------ */
+
+/* ------------------------------------------------------------
+   O APERTO DE MÃO COM O CORE  ·  parte do bloco [PCSEG]
+   ------------------------------------------------------------
+   As duas telas dependem de ações que só existem na versão nova
+   do ALMOXA_PRO_Modulo_PreCadastro.gs. Quando o arquivo lá é o
+   antigo, o sintoma aparece longe da causa: "CPF inválido",
+   nenhum token, fila vazia. Isso custou horas.
+
+   Aqui a tela pergunta a versão ao Core UMA vez e, se estiver
+   velha, põe uma tarja vermelha no alto dizendo exatamente o que
+   fazer. Nenhum palpite: é o próprio Core que responde.
+   ------------------------------------------------------------ */
+
+var PCVER = {
+  minima: "1.3.0-fluxo-plus",
+  precisa: ["versao", "encaminhar", "credencial", "pendentesSeguranca",
+    "abrirSeguranca", "salvarItens", "salvarFoto", "validarSeguranca"],
+  resposta: null,
+  perguntando: null
+};
+
+function pcPerguntarVersao() {
+  if (PCVER.resposta) return Promise.resolve(PCVER.resposta);
+  if (PCVER.perguntando) return PCVER.perguntando;
+  PCVER.perguntando = pcApi("versao", {}).then(function(r) {
+    if (r && r.ok && r.dados) {
+      PCVER.resposta = {
+        ok: true, versao: String(r.dados.versao || "?"),
+        acoes: listaSegura(r.dados.acoes),
+        cpfNaoTranca: r.dados.cpfNaoTranca === true,
+        tokenNoCriar: r.dados.tokenNoCriar === true
+      };
+    } else {
+      /* o Core não conhece nem "versao": é o arquivo antigo */
+      PCVER.resposta = {
+        ok: false,
+        codigo: (r && r.codigo) || "SEM_RESPOSTA",
+        mensagem: (r && r.mensagem) || ""
+      };
+    }
+    PCVER.perguntando = null;
+    return PCVER.resposta;
+  }, function() {
+    PCVER.resposta = { ok: false, codigo: "SEM_RESPOSTA", mensagem: "" };
+    PCVER.perguntando = null;
+    return PCVER.resposta;
+  });
+  return PCVER.perguntando;
+}
+
+function pcVersaoVelha(v) {
+  if (!v || !v.ok) return true;
+  if (v.versao !== PCVER.minima) return true;
+  var faltando = PCVER.precisa.filter(function(a) { return v.acoes.indexOf(a) === -1; });
+  return faltando.length > 0;
+}
+
+/* MODO SIMULAÇÃO.
+   Quando o HTML é aberto solto — duplo clique no arquivo, fora do
+   Apps Script — não existe google.script.run nem PONTE, e o
+   API.call cai no MOCK que vive dentro desta página. Aí NADA é
+   real: não grava, não lê a planilha, e o pré-cadastro do MOCK é a
+   versão velha, que exige CPF e obra e recusa CPF inválido.
+   Era isso que fazia a tela acusar o arquivo do Apps Script sem
+   culpa nenhuma. Agora ela diz a verdade. */
+/* COM QUEM ESTA TELA ESTÁ FALANDO.
+   São três situações bem diferentes, e antes todas caíam na mesma
+   tarja acusando o arquivo do Apps Script — inclusive quando o
+   arquivo estava certo. Distinguir importa porque o que fazer em
+   cada uma é outra coisa:
+
+     online     — google.script.run existe: é o Core de verdade.
+     simulacao  — sem Core e sem ponte: o API.call cai no MOCK que
+                  vive dentro desta página. Nada é gravado, e o
+                  pré-cadastro do MOCK é a versão velha, que exige
+                  CPF e obra e recusa CPF inválido.
+     sem_conexao — a ponte está configurada mas não respondeu. Nada
+                  é gravado, e o erro não tem nada a ver com o .gs. */
+function pcLigacao() {
+  /* A pergunta é decidida pela MESMA condição que o API.call usa
+     para escolher o caminho — não pelo APP.STATE.coreStatus, que o
+     ping do boot muda por baixo e já apontou "erro" numa chamada
+     que na verdade foi para o MOCK. */
+  var temCore = false, temPonte = false;
+  try { temCore = !!API.disponivelCore(); } catch (e) { }
+  try { temPonte = !!(API.PONTE && API.PONTE.pronta()); } catch (e) { }
+
+  if (temCore) return { real: true, tipo: "online" };
+  if (!temPonte) return { real: false, tipo: "simulacao" };
+
+  /* a ponte é o caminho certo; só não é real se ela não respondeu */
+  var codigo = (PCVER.resposta && !PCVER.resposta.ok && String(PCVER.resposta.codigo || "")) || "";
+  if (/SEM_CONEXAO|CORE_FALHA|TIMEOUT|SEM_RESPOSTA/.test(codigo)) {
+    return { real: false, tipo: "sem_conexao", codigo: codigo };
+  }
+  return { real: true, tipo: "ponte" };
+}
+
+/** Mantida para quem já chamava: simulação é um dos casos de "não é real". */
+function pcModoSimulacao() { return pcLigacao().tipo === "simulacao"; }
+
+function pcTarjaSimulacao() {
+  var lig = pcLigacao();
+  if (lig.real) return "";
+  if (lig.tipo === "sem_conexao") {
+    return '<div class="alert a-red mb16">' + ic("alerta") +
+      "<div><b>Esta tela não está falando com o ALMOX-PRO</b>" +
+      "A ponte está configurada mas não respondeu" +
+      (lig.codigo ? " (" + U.esc(lig.codigo) + ")" : "") + ". " +
+      "Enquanto isso <b>nada é gravado</b>: o que você cadastrar não vai para a " +
+      "planilha, o token não nasce e a fila da Segurança fica vazia. " +
+      "<b>Isso não é problema do arquivo do Apps Script.</b>" +
+      "<br><br><b>O que fazer:</b> confira a internet deste aparelho e o endereço " +
+      "da ponte em Configurações. Se você abriu o sistema pelo arquivo HTML salvo " +
+      "no computador, abra pelo endereço publicado do Apps Script " +
+      "(Implantar → aplicativo da Web)." +
+      "</div></div>";
+  }
+  return '<div class="alert a-yellow mb16">' + ic("alerta") +
+    "<div><b>Você está em MODO SIMULAÇÃO — nada aqui é real</b>" +
+    "Esta página não conseguiu falar com o ALMOX-PRO, então está respondendo " +
+    "com dados de exemplo de dentro do próprio arquivo. O que você cadastrar " +
+    "<b>não vai para a planilha</b>, o token não é gravado e a fila da Segurança " +
+    "não é a de verdade. E o pré-cadastro simulado é a versão velha: é ele que " +
+    "exige CPF e obra e recusa CPF inválido." +
+    "<br><br><b>O que fazer:</b> abra o sistema pelo endereço publicado do " +
+    "Apps Script (Implantar → aplicativo da Web), não pelo arquivo HTML salvo " +
+    "no computador." +
+    "</div></div>";
+}
+
+function pcTarjaVersao(v) {
+  if (!pcLigacao().real) return pcTarjaSimulacao();
+  if (!pcVersaoVelha(v)) return "";
+  var faltando = (v && v.ok)
+    ? PCVER.precisa.filter(function(a) { return v.acoes.indexOf(a) === -1; })
+    : PCVER.precisa;
+  return '<div class="alert a-red mb16">' + ic("alerta") +
+    "<div><b>O arquivo do pré-cadastro no Apps Script está desatualizado</b>" +
+    (v && v.ok
+      ? "O Core respondeu a versão <b>" + U.esc(v.versao) + "</b>; estas telas precisam da <b>" +
+        U.esc(PCVER.minima) + "</b>." +
+        (faltando.length ? " Faltam as ações: <b>" + U.esc(faltando.join(", ")) + "</b>." : "")
+      : "O Core não respondeu nem à pergunta da versão, o que só acontece com o arquivo antigo.") +
+    "<br><br><b>Enquanto não atualizar:</b> o CPF vai continuar recusando o cadastro, o token não " +
+    "vai nascer e ninguém vai aparecer na fila da Segurança — mesmo com o HTML novo instalado." +
+    "<br><br><b>O que fazer:</b> abra o Apps Script, cole a versão nova do arquivo " +
+    "<b>ALMOXA_PRO_Modulo_PreCadastro.gs</b>, salve, e publique uma nova versão " +
+    "(Implantar → Gerenciar implantações → nova versão)." +
+    "</div></div>";
+}
+
+/* A tarja é buscada em segundo plano e encaixada no alto da tela
+   quando a resposta chega — a tela não espera por ela. */
+function pcMostrarTarja(idDoLugar) {
+  pcPerguntarVersao().then(function(v) {
+    var alvo = document.getElementById(idDoLugar);
+    if (!alvo) return;
+    alvo.innerHTML = pcTarjaVersao(v);
+  });
+}
+
+/* Quando um erro do Core é sintoma do arquivo velho, dizer isso
+   em vez de repetir a mensagem técnica. */
+function pcExplicarErro(r) {
+  var c = String((r && r.codigo) || (r && r.erro) || "");
+  var lig = pcLigacao();
+  if (lig.tipo === "simulacao") {
+    return "Você está em MODO SIMULAÇÃO: esta página não falou com o ALMOX-PRO e " +
+      "respondeu sozinha, com dados de exemplo. Nada foi gravado. Abra o sistema " +
+      "pelo endereço publicado do Apps Script.";
+  }
+  if (c === "SEM_CONEXAO" || c === "CORE_FALHA" || lig.tipo === "sem_conexao") {
+    return "Esta tela não falou com o ALMOX-PRO, então nada foi gravado. Confira a " +
+      "internet e o endereço da ponte em Configurações. Não é problema do arquivo " +
+      "do Apps Script.";
+  }
+  if (c === "TIMEOUT") {
+    return "O Core não respondeu no tempo. A ficha PODE ter sido gravada — recarregue e " +
+      "confira na lista antes de cadastrar de novo.";
+  }
+  if (c === "ACAO_DESCONHECIDA") {
+    return "O Core não conhece essa ação — o arquivo do pré-cadastro no Apps Script é o antigo. " +
+      "Cole a versão nova e publique.";
+  }
+  if (c === "CPF_INVALIDO") {
+    return "Essa recusa vem do arquivo ANTIGO no Apps Script: na versão nova o CPF não tranca nada. " +
+      "Atualize o ALMOXA_PRO_Modulo_PreCadastro.gs e publique uma nova versão.";
+  }
+  return (r && r.mensagem) || "O Core recusou.";
+}
+
 
 var PCITENS = {
   aba: "itens",
@@ -41051,7 +41495,17 @@ function modalItensPreCadastro(id, aoSalvar) {
   PCITENS.aba = "itens";
   PCITENS.busca = "";
 
-  Promise.all([pcCarregarCatalogo(), pcApi("itens", { id: id })]).then(function(r) {
+  /* Sem id, a ficha ainda não existe: a escolha fica na mão e volta
+     pelo aoSalvar. É o que permite escolher o EPI ANTES de finalizar
+     o pré-cadastro, em vez de obrigar a salvar e voltar depois. */
+  var rascunho = !id;
+  Promise.all([
+    pcCarregarCatalogo(),
+    rascunho ? Promise.resolve({ ok: true, dados: { itens: [], kit: "" } }) : pcApi("itens", { id: id })
+  ]).then(function(r) {
+    if (rascunho && aoSalvar && aoSalvar.jaEscolhidos) {
+      r[1] = { ok: true, dados: { itens: aoSalvar.jaEscolhidos, kit: aoSalvar.kitAtual || "" } };
+    }
     var jaTinha = (r[1] && r[1].ok) ? listaSegura(r[1].dados.itens) : [];
     PCITENS.escolhidos = jaTinha.map(function(x) {
       var doCatalogo = (PCITENS.catalogo || []).filter(function(c) { return c.sku === x.sku; })[0];
@@ -41076,16 +41530,23 @@ function modalItensPreCadastro(id, aoSalvar) {
         w.querySelector("[data-x]").addEventListener("click", fechar);
         w.querySelector("[data-ok]").addEventListener("click", function() {
           var botao = this;
+          var lista = PCITENS.escolhidos.map(function(x) {
+            return {
+              sku: x.sku, nome: x.nome, tamanho: x.tamanho, unidade: x.unidade,
+              categoria: x.categoria, qtd: x.qtd, kit: x.kit
+            };
+          });
+          /* rascunho: devolve para quem abriu, sem tocar no Core —
+             a ficha ainda não existe para receber nada */
+          if (rascunho) {
+            fechar();
+            if (aoSalvar) aoSalvar({ itens: lista, kit: PCITENS.kit, total: lista.length });
+            return;
+          }
           botao.disabled = true;
           botao.innerHTML = '<span class="spinner"></span> Salvando…';
           pcApi("salvarItens", {
-            id: id, kit: PCITENS.kit,
-            itens: PCITENS.escolhidos.map(function(x) {
-              return {
-                sku: x.sku, nome: x.nome, tamanho: x.tamanho, unidade: x.unidade,
-                categoria: x.categoria, qtd: x.qtd, kit: x.kit
-              };
-            })
+            id: id, kit: PCITENS.kit, itens: lista
           }).then(function(res) {
             botao.disabled = false;
             botao.innerHTML = ic("salvar") + "Salvar a lista";
@@ -41315,6 +41776,221 @@ function pcLigarItens(w, id) {
 }
 
 
+/* ------------------------------------------------------------
+   DIAGNÓSTICO DO FLUXO  ·  parte do bloco [PCSEG]
+   ------------------------------------------------------------
+   Responde uma pergunta só: se a pessoa não apareceu na fila da
+   Segurança, ONDE ela parou. Testa o Core ação por ação e mostra
+   o que cada ficha respondeu — sem consertar nada, sem gravar
+   nada, sem inventar nada.
+   ------------------------------------------------------------ */
+
+function modalDiagnosticoFluxo() {
+  UI.modal({
+    titulo: "Diagnóstico do fluxo",
+    sub: "Só leitura: nada é gravado nem alterado.",
+    tamanho: "lg",
+    corpo: '<div id="pcDiag">' + UI.carregando(5) + "</div>",
+    rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' +
+      '<button class="btn btn-primary" data-rodar>Rodar de novo</button>',
+    aoAbrir: function(w, fechar) {
+      w.querySelector("[data-x]").addEventListener("click", fechar);
+      w.querySelector("[data-rodar]").addEventListener("click", function() {
+        pcRodarDiagnostico(w);
+      });
+      pcRodarDiagnostico(w);
+    }
+  });
+}
+
+function pcRodarDiagnostico(w) {
+  var alvo = w.querySelector("#pcDiag");
+  alvo.innerHTML = UI.carregando(5);
+
+  /* as ações que a etapa de Segurança acrescentou ao .gs. Se o
+     Core não conhece nenhuma delas, o arquivo instalado é o
+     antigo — e é esse o motivo de a fila ficar vazia. */
+  var acoes = [
+    ["versao", {}, "versão do módulo", false],
+    ["conferirAba", {}, "cabeçalho da planilha", false],
+    ["listar", {}, "listar pré-cadastros", true],
+    ["campos", {}, "configuração de campos", false],
+    ["pendentesSeguranca", {}, "fila da Segurança", false],
+    ["credencial", { id: "__nao_existe__" }, "credencial / token", false],
+    ["abrirSeguranca", { id: "__nao_existe__" }, "abrir processo", false],
+    ["itens", { id: "__nao_existe__" }, "EPIs separados", false],
+    ["encaminhar", { id: "__nao_existe__" }, "encaminhar à Segurança", false]
+  ];
+
+  Promise.all(acoes.map(function(a) {
+    return pcApi(a[0], a[1]).then(function(r) {
+      return { acao: a[0], rotulo: a[2], antiga: a[3], r: r || {} };
+    }, function(e) {
+      return { acao: a[0], rotulo: a[2], antiga: a[3], r: { ok: false, codigo: "FALHOU", mensagem: String(e) } };
+    });
+  })).then(function(res) {
+    var listar = res.filter(function(x) { return x.acao === "listar"; })[0];
+    var fichas = (listar && listar.r.ok) ? listaSegura(listar.r.dados && listar.r.dados.precadastros) : [];
+
+    /* "não existe esse ID" é resposta boa: quer dizer que o Core
+       conhece a ação. ACAO_DESCONHECIDA é que denuncia o arquivo
+       velho. */
+    function situacao(x) {
+      if (x.r.ok) return { cor: "b-green", txt: "responde" };
+      var c = String(x.r.codigo || "");
+      if (c === "ACAO_DESCONHECIDA") return { cor: "b-red", txt: "o Core não conhece" };
+      if (c === "NAO_ENCONTRADO" || c === "SEM_TOKEN") return { cor: "b-green", txt: "responde" };
+      if (c === "SEM_ABA") return { cor: "b-yellow", txt: "falta a aba" };
+      if (c === "SEM_PERMISSAO") return { cor: "b-yellow", txt: "sem permissão" };
+      return { cor: "b-yellow", txt: c || "erro" };
+    }
+
+    var desconhecidas = res.filter(function(x) {
+      return String(x.r.codigo || "") === "ACAO_DESCONHECIDA";
+    });
+    var novasQueFaltam = desconhecidas.filter(function(x) { return !x.antiga; });
+
+    var porEtapa = {};
+    fichas.forEach(function(f) {
+      var e = String(f.etapa || "RH");
+      porEtapa[e] = (porEtapa[e] || 0) + 1;
+    });
+    var noRH = fichas.filter(function(f) { return String(f.etapa || "RH") === "RH"; });
+
+    /* a versão do módulo, dita pelo próprio Core */
+    var daVersao = res.filter(function(x) { return x.acao === "versao"; })[0];
+    var versaoDita = (daVersao && daVersao.r.ok && daVersao.r.dados && daVersao.r.dados.versao) || "";
+
+    alvo.innerHTML =
+      /* PRIMEIRO de tudo: com quem esta tela está falando. Sem isso,
+         qualquer conclusão abaixo pode estar acusando o arquivo errado. */
+      '<div class="card mb16"><div class="card-head"><b>Com quem esta tela está falando</b></div>' +
+      '<div class="card-body">' +
+      '<div class="info-row"><span>Ligação com o ALMOX-PRO</span><b>' +
+      (function () {
+        var lig = pcLigacao();
+        if (lig.tipo === "simulacao") return '<span class="badge b-red">MODO SIMULAÇÃO — nada é real</span>';
+        if (lig.tipo === "sem_conexao") return '<span class="badge b-red">SEM CONEXÃO — nada é gravado</span>';
+        return '<span class="badge b-green">Core de verdade (' +
+          U.esc(String((APP && APP.STATE && APP.STATE.coreStatus) || "?")) + ")</span>";
+      })() +
+      "</b></div>" +
+      '<div class="info-row"><span>Versão do módulo no Apps Script</span><b class="mono">' +
+      U.esc(versaoDita || "(não respondeu)") + "</b></div>" +
+      '<div class="info-row"><span>Versão que estas telas precisam</span><b class="mono">' +
+      U.esc(PCVER.minima) + "</b></div>" +
+      /* O CABEÇALHO DA PLANILHA.
+         Coluna que não existe no cabeçalho não é gravada: o append
+         escreve no vazio e o campo se perde sem erro. Era assim que o
+         token nascia na resposta e não existia na linha. */
+      (function () {
+        var x = res.filter(function (y) { return y.acao === "conferirAba"; })[0];
+        if (!x) return "";
+        if (!x.r.ok) {
+          return '<div class="info-row"><span>Cabeçalho da aba</span><b>' +
+            '<span class="badge b-yellow">' + U.esc(String(x.r.codigo || "não respondeu")) +
+            "</span></b></div>";
+        }
+        var d = x.r.dados || {};
+        var faltam = listaSegura(d.faltando);
+        return '<div class="info-row"><span>Aba ' + U.esc(String(d.aba || "")) + "</span><b>" +
+          (d.existe
+            ? '<span class="badge b-green">existe · ' + (d.linhas === null ? "?" : d.linhas) +
+              " ficha(s)</span>"
+            : '<span class="badge b-yellow">ainda não existe</span>') +
+          "</b></div>" +
+          '<div class="info-row"><span>Colunas no cabeçalho</span><b>' +
+          U.esc(String(d.noCabecalho || 0)) + " de " + U.esc(String(d.esperadas || 0)) +
+          (faltam.length
+            ? ' <span class="badge b-red">faltam ' + faltam.length + "</span>"
+            : ' <span class="badge b-green">completo</span>') +
+          "</b></div>" +
+          (faltam.length
+            ? '<div class="alert a-red mt8">' + ic("alerta") +
+              "<div><b>É daqui que vem o token que desaparece</b>" +
+              "Estas colunas não existem no cabeçalho da planilha, então o que o " +
+              "sistema grava nelas se perde sem dar erro: <b>" +
+              U.esc(faltam.join(", ")) + "</b>. " +
+              "O próximo pré-cadastro acrescenta essas colunas no fim da aba, sozinho — " +
+              "nenhuma coluna existente é movida nem apagada. Depois disso, use " +
+              "<b>Encaminhar</b> nas fichas paradas com o RH para elas receberem o token." +
+              "</div></div>"
+            : "");
+      })() +
+      "</div></div>" +
+
+      pcTarjaSimulacao() +
+
+      (!pcLigacao().real
+        ? ""
+        : novasQueFaltam.length
+        ? '<div class="alert a-red mb16">' + ic("alerta") +
+          "<div><b>O arquivo do pré-cadastro no Apps Script está desatualizado</b>" +
+          "O Core não conhece " + novasQueFaltam.length + " ação(ões) da etapa de Segurança: <b>" +
+          novasQueFaltam.map(function(x) { return x.acao; }).join(", ") + "</b>. " +
+          "É por isso que ninguém chega na fila. Cole a versão nova do " +
+          "<b>ALMOXA_PRO_Modulo_PreCadastro.gs</b>, salve e publique uma nova versão.</div></div>"
+        : '<div class="alert a-green mb16">' + ic("checkC") +
+          "<div><b>O Core conhece todo o caminho</b>Todas as ações da etapa de Segurança responderam.</div></div>") +
+
+      '<div class="card mb16"><div class="card-head"><b>O que o Core respondeu</b></div>' +
+      '<table class="tabela"><thead><tr><th>Ação</th><th>Para que serve</th><th>Situação</th><th>Detalhe</th></tr></thead><tbody>' +
+      res.map(function(x) {
+        var s = situacao(x);
+        return "<tr><td><span class='mono small'>" + U.esc(x.acao) + "</span></td>" +
+          "<td>" + U.esc(x.rotulo) + "</td>" +
+          '<td><span class="badge ' + s.cor + '">' + s.txt + "</span></td>" +
+          '<td class="muted small">' + U.esc(String(x.r.mensagem || "").slice(0, 90)) + "</td></tr>";
+      }).join("") + "</tbody></table></div>" +
+
+      '<div class="card mb16"><div class="card-head"><b>Onde estão os processos</b>' +
+      '<span class="badge b-gray">' + fichas.length + " ficha(s)</span></div>" +
+      '<div class="card-body">' +
+      (fichas.length
+        ? Object.keys(porEtapa).map(function(e) {
+            return '<div class="info-row"><span>' + U.esc(pcRotuloEtapa(e)) +
+              ' <span class="mono small">(' + U.esc(e) + ")</span></span><b>" + porEtapa[e] + "</b></div>";
+          }).join("")
+        : '<p class="muted">Nenhum pré-cadastro cadastrado ainda.</p>') +
+      "</div></div>" +
+
+      (noRH.length
+        ? '<div class="card"><div class="card-head"><b>Parados com o RH — nunca foram encaminhados</b>' +
+          '<span class="badge b-yellow">' + noRH.length + "</span></div>" +
+          '<div class="card-body"><p class="small muted">' +
+          "Estes existem no pré-cadastro mas não têm token e por isso não aparecem na fila da Segurança. " +
+          "Dá para encaminhar daqui mesmo.</p>" +
+          noRH.slice(0, 20).map(function(f) {
+            return '<div class="flex gap8 mt8" style="align-items:center">' +
+              "<div class='grow'><b>" + U.esc(f.nome || "(sem nome)") + "</b>" +
+              '<div class="muted small mono">' + U.esc(f.id) + "</div></div>" +
+              '<button class="btn btn-primary btn-sm" data-diag-enc="' + U.esc(f.id) + '">' +
+              ic("enviar") + "Encaminhar</button></div>";
+          }).join("") + "</div></div>"
+        : "");
+
+    alvo.querySelectorAll("[data-diag-enc]").forEach(function(b) {
+      b.addEventListener("click", function() {
+        var id = b.getAttribute("data-diag-enc");
+        b.disabled = true;
+        b.innerHTML = '<span class="spinner"></span> Enviando…';
+        pcApi("encaminhar", { id: id }).then(function(r) {
+          b.disabled = false;
+          b.innerHTML = ic("enviar") + "Encaminhar";
+          if (!r || !r.ok) {
+            toast("err", "Não encaminhou", (r && r.mensagem || "") + " [" + (r && r.codigo || "?") + "]");
+            return;
+          }
+          toast("ok", "Encaminhado", r.mensagem || "");
+          if (typeof CACHE !== "undefined") CACHE.invalidar();
+          pcRodarDiagnostico(w);
+        });
+      });
+    });
+  });
+}
+
+
 SCREENS["seguranca-entrada"] = {
   titulo: "Entrada de colaborador",
   modulo: "epi",
@@ -41328,12 +42004,17 @@ SCREENS["seguranca-entrada"] = {
           '<div class="alert a-yellow mt16">' + ic("info") +
           "<div><b>A etapa de Segurança não respondeu</b>" +
           "Confira se o arquivo do pré-cadastro no Apps Script já tem a etapa de Segurança " +
-          "(rode <b>AP_PRECAD_SEG_testes</b> lá) e se você publicou uma nova versão.</div></div>";
+          "(rode <b>AP_PRECAD_SEG_testes</b> lá) e se você publicou uma nova versão." +
+          '<div class="mt12"><button class="btn btn-primary btn-sm" data-pc-diag-vazio>' +
+          ic("doutor") + "Ver onde parou</button></div></div></div>";
       }
 
       var d = r.dados;
-      var lista = listaSegura(d.processos);
-      if (PCSEG.filtro) {
+      var aguardando = listaSegura(d.processos);
+      var validados = listaSegura(d.validados);
+      var naAbaValidados = PCSEG.aba2 === "validados";
+      var lista = naAbaValidados ? validados : aguardando;
+      if (!naAbaValidados && PCSEG.filtro) {
         lista = lista.filter(function(p) { return p.etapa === PCSEG.filtro; });
       }
 
@@ -41343,8 +42024,9 @@ SCREENS["seguranca-entrada"] = {
         titulo: "Entrada de colaborador",
         sub: "Quem o RH mandou, o que já foi conferido e o que falta para liberar o crachá.",
         acoes: '<button class="btn btn-ghost" data-pc-ler>' + ic("qr") + "Ler QR</button>" +
+          '<button class="btn btn-ghost" data-pc-diag>' + ic("doutor") + "Diagnóstico</button>" +
           '<button class="btn btn-ghost" data-ir="#/precadastros">' + ic("usuarios") + "Pré-cadastros do RH</button>"
-      }) + '<div class="grid g4 mb16">' + UI.kpi({
+      }) + '<div id="pcTarjaSeg"></div>' + '<div class="grid g4 mb16">' + UI.kpi({
         icone: "relogio", cor: porEtapa.AGUARDANDO_SEGURANCA ? "ico-orange" : "ico-gray",
         valor: porEtapa.AGUARDANDO_SEGURANCA || 0, rotulo: "Chegaram agora"
       }) + UI.kpi({
@@ -41357,11 +42039,17 @@ SCREENS["seguranca-entrada"] = {
         icone: "checkC", cor: "ico-green",
         valor: porEtapa.AGUARDANDO_VALIDACAO_SEGURANCA || 0, rotulo: "Prontos para validar"
       }) + "</div>" +
+        '<div class="chips mb12">' +
+        '<button class="chip ' + (naAbaValidados ? "" : "on") + '" data-pcs-aba="aguardando">' +
+        "Aguardando validação <span class='badge b-yellow'>" + aguardando.length + "</span></button>" +
+        '<button class="chip ' + (naAbaValidados ? "on" : "") + '" data-pcs-aba="validados">' +
+        "Validados <span class='badge b-green'>" + validados.length + "</span></button>" +
+        "</div>" +
         '<div class="flex gap8 mb16" style="flex-wrap:wrap">' +
         '<div class="search-wrap" style="flex:1;min-width:220px">' + ic("busca") +
         '<input class="input" id="pcsBusca" placeholder="Nome, ID do processo, matrícula ou CPF…" value="' +
         U.esc(PCSEG.busca) + '"></div>' +
-        '<div class="chips">' + [
+        (naAbaValidados ? "" : '<div class="chips">' + [
           ["", "Todos", d.quantos],
           ["AGUARDANDO_SEGURANCA", "Novos", porEtapa.AGUARDANDO_SEGURANCA || 0],
           ["AGUARDANDO_TREINAMENTO", "Treinamento", porEtapa.AGUARDANDO_TREINAMENTO || 0],
@@ -41370,10 +42058,13 @@ SCREENS["seguranca-entrada"] = {
         ].map(function(c) {
           return '<button class="chip ' + (PCSEG.filtro === c[0] ? "on" : "") + '" data-pcs-filtro="' +
             c[0] + '">' + c[1] + ' <span class="badge b-gray">' + c[2] + "</span></button>";
-        }).join("") + "</div></div>" +
+        }).join("") + "</div>") + "</div>" +
         '<div id="pcsLista">' + (lista.length ? lista.map(pcCartao).join("") :
           UI.estado("vazio", "Ninguém na fila",
-            "Quando o RH encaminhar um pré-cadastro, ele aparece aqui — e a equipe é avisada.")) + "</div>";
+            "Quando o RH encaminhar um pré-cadastro, ele aparece aqui. Se você acabou de cadastrar " +
+            "alguém e não está vendo, o Diagnóstico diz onde o processo parou.",
+            '<button class="btn btn-primary mt12" data-pc-diag-vazio>' + ic("doutor") +
+            "Ver onde parou</button>")) + "</div>";
     });
   },
   mount: function() {
@@ -41388,6 +42079,14 @@ SCREENS["seguranca-entrada"] = {
         }, 320);
       });
     }
+    document.querySelectorAll("[data-pcs-aba]").forEach(function(b) {
+      b.addEventListener("click", function() {
+        PCSEG.aba2 = b.getAttribute("data-pcs-aba");
+        PCSEG.filtro = "";
+        PCSEG.busca = "";
+        ROUTER.render();
+      });
+    });
     document.querySelectorAll("[data-pcs-filtro]").forEach(function(b) {
       b.addEventListener("click", function() {
         PCSEG.filtro = b.getAttribute("data-pcs-filtro");
@@ -41397,24 +42096,49 @@ SCREENS["seguranca-entrada"] = {
     });
     var ler = document.querySelector("[data-pc-ler]");
     if (ler) ler.addEventListener("click", modalLerQR);
+    var diag = document.querySelector("[data-pc-diag]");
+    if (diag) diag.addEventListener("click", modalDiagnosticoFluxo);
+    pcMostrarTarja("pcTarjaSeg");
+    document.querySelectorAll("[data-pc-diag-vazio]").forEach(function(b) {
+      b.addEventListener("click", modalDiagnosticoFluxo);
+    });
     pcLigarCartoes();
   }
 };
 
 function pcCartao(p) {
+  var validado = /VALIDADO|LIBERADO|CRACHA/.test(String(p.etapa || ""));
   return '<div class="card mb12"><div class="card-body">' +
-    '<div class="flex gap8" style="justify-content:space-between;align-items:flex-start">' +
-    '<div><div class="strong">' + U.esc(p.nome) + "</div>" +
-    '<div class="muted small">Pré-cadastro <span class="mono">' + U.esc(p.id) + "</span>" +
-    (p.empresa ? " · " + U.esc(p.empresa) : "") +
-    (p.obra ? " · " + U.esc(p.obra) : "") +
-    (p.funcao ? " · " + U.esc(p.funcao) : "") + "</div>" +
-    (p.desde ? '<div class="muted small">desde ' + U.esc(String(p.desde).slice(0, 10)) + "</div>" : "") +
+    '<div class="flex gap8" style="align-items:flex-start">' +
+    '<div style="width:56px;height:66px;border-radius:10px;background:var(--fundo-2);' +
+    'border:1px solid var(--linha);overflow:hidden;display:grid;place-items:center;flex:none">' +
+    (p.foto ? '<img src="' + U.esc(p.foto) + '" style="width:100%;height:100%;object-fit:cover">'
+      : '<span class="muted" style="font-size:16px">' + U.esc(U.iniciais(p.nome || "?")) + "</span>") +
+    "</div>" +
+    '<div class="grow"><div class="strong">' + U.esc(p.nome) + "</div>" +
+    '<div class="muted small">' + U.esc(p.funcao || "—") +
+    (p.obra ? " · Obra: " + U.esc(p.obra) : "") +
+    (p.empresa ? " · " + U.esc(p.empresa) : "") + "</div>" +
+    '<div class="muted small">Processo <span class="mono">' + U.esc(p.id) + "</span>" +
+    (p.token ? ' · Token: <span class="mono">' + U.esc(p.token) + "</span>" : "") + "</div>" +
+    /* a reserva de EPI, visível sem abrir o processo */
+    (p.reservaProtocolo
+      ? '<div class="muted small">Reserva de EPI <span class="mono">' +
+        U.esc(p.reservaProtocolo) + "</span></div>"
+      : p.reservaErro
+        ? '<div class="small" style="color:var(--vermelho,#B42318)">Reserva de EPI não saiu — ' +
+          "abra o processo para ver o motivo</div>"
+        : "") +
+    (validado && p.validadoPor
+      ? '<div class="muted small">Validado por ' + U.esc(p.validadoPor) +
+        (p.validadoEmail ? " · " + U.esc(p.validadoEmail) : "") + "</div>"
+      : p.desde ? '<div class="muted small">desde ' + U.esc(String(p.desde).slice(0, 10)) + "</div>" : "") +
     "</div>" +
     '<span class="badge ' + pcCorEtapa(p.etapa) + '">' + U.esc(pcRotuloEtapa(p.etapa)) + "</span>" +
     "</div>" +
     '<div class="flex gap8 mt12">' +
-    '<button class="btn btn-primary" data-pc-abrir="' + U.esc(p.id) + '">' + ic("olho") + "Abrir processo</button>" +
+    '<button class="btn ' + (validado ? "btn-ghost" : "btn-primary") + '" data-pc-abrir="' +
+    U.esc(p.id) + '">' + ic("olho") + (validado ? "Ver ficha" : "Abrir e validar") + "</button>" +
     "</div></div></div>";
 }
 
@@ -41527,11 +42251,385 @@ function modalLerQR() {
    4. O PROCESSO ABERTO
    ============================================================ */
 
+/* ------------------------------------------------------------
+   A FICHA DO COLABORADOR  ·  parte do bloco [PCSEG]
+   ------------------------------------------------------------
+   É o mesmo registro do pré-cadastro, desenhado como documento:
+   cabeçalho com o número do processo, dados do colaborador, os
+   EPIs que o RH separou, e os campos de conferência da Segurança.
+
+   Não tem biometria. Onde o modelo impresso mostrava a digital,
+   aqui mostra o TOKEN — que é o que este sistema tem hoje para
+   identificar quem retira. Quando a biometria entrar, o lugar já
+   está reservado e o que foi assinado continua valendo.
+
+   O CSS nasce aqui, num <style> próprio, com nomes prefixados
+   pcf-. Nenhuma regra do sistema foi alterada.
+   ------------------------------------------------------------ */
+
+function pcfEstilo() {
+  if (document.getElementById("pcFichaCss")) return;
+  var st = document.createElement("style");
+  st.id = "pcFichaCss";
+  st.textContent =
+    ".pcf{--pcf-azul:#0B2A55;--pcf-linha:#D6DEE8;--pcf-claro:#F4F7FB;" +
+    "background:#fff;color:#16202E;border:1px solid var(--pcf-linha);border-radius:10px;overflow:hidden;" +
+    "font-size:12.5px;line-height:1.45}" +
+    ".pcf-topo{display:flex;align-items:stretch;border-bottom:2px solid var(--pcf-azul)}" +
+    ".pcf-marca{background:var(--pcf-azul);color:#fff;padding:14px 18px;min-width:180px;display:flex;" +
+    "flex-direction:column;justify-content:center}" +
+    ".pcf-marca b{font-size:16px;letter-spacing:.04em}" +
+    ".pcf-marca small{opacity:.8;font-size:10px;letter-spacing:.06em}" +
+    ".pcf-titulo{flex:1;padding:14px 18px;text-align:center}" +
+    ".pcf-titulo h3{margin:0;font-size:17px;color:var(--pcf-azul);letter-spacing:.02em}" +
+    ".pcf-titulo p{margin:2px 0 0;font-size:11.5px;color:#5F6B7A}" +
+    ".pcf-caixas{display:flex;gap:8px;padding:10px 12px;align-items:center}" +
+    ".pcf-caixa{border:1px solid var(--pcf-linha);border-radius:8px;text-align:center;min-width:130px;overflow:hidden}" +
+    ".pcf-caixa .rot{background:var(--pcf-azul);color:#fff;font-size:9.5px;letter-spacing:.08em;padding:3px 8px}" +
+    ".pcf-caixa .val{padding:6px 8px;font-weight:700;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}" +
+    ".pcf-faixa{display:flex;flex-wrap:wrap;border-bottom:1px solid var(--pcf-linha);background:var(--pcf-claro)}" +
+    ".pcf-faixa > div{flex:1;min-width:150px;padding:8px 12px;border-right:1px solid var(--pcf-linha)}" +
+    ".pcf-faixa > div:last-child{border-right:none}" +
+    ".pcf-rot{font-size:9.5px;letter-spacing:.07em;color:#5F6B7A;text-transform:uppercase}" +
+    ".pcf-val{font-weight:600;margin-top:2px;word-break:break-word}" +
+    ".pcf-secao{display:flex;align-items:center;gap:8px;background:var(--pcf-azul);color:#fff;" +
+    "padding:5px 12px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase}" +
+    ".pcf-secao b{background:rgba(255,255,255,.18);border-radius:4px;padding:1px 6px;font-family:ui-monospace,monospace}" +
+    ".pcf-corpo{padding:12px}" +
+    ".pcf-pessoa{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}" +
+    ".pcf-foto{width:118px;height:140px;border:1px solid var(--pcf-linha);border-radius:8px;" +
+    "background:var(--pcf-claro);display:grid;place-items:center;overflow:hidden;flex:none}" +
+    ".pcf-foto img{width:100%;height:100%;object-fit:cover}" +
+    ".pcf-foto span{color:#8A96A6;font-size:11px;text-align:center;padding:6px}" +
+    ".pcf-campos{flex:1;min-width:260px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px 18px}" +
+    ".pcf-ident{width:240px;border:1px solid var(--pcf-linha);border-radius:8px;overflow:hidden;flex:none}" +
+    ".pcf-ident .rot{background:var(--pcf-claro);border-bottom:1px solid var(--pcf-linha);" +
+    "padding:5px 10px;font-size:9.5px;letter-spacing:.07em;color:#5F6B7A;text-transform:uppercase}" +
+    ".pcf-ident .miolo{padding:12px;text-align:center}" +
+    ".pcf-token{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px;font-weight:700;" +
+    "letter-spacing:.14em;border:1px dashed var(--pcf-linha);border-radius:8px;padding:10px 6px;background:var(--pcf-claro)}" +
+    ".pcf-selo{display:inline-block;margin-top:8px;font-size:10.5px;padding:2px 8px;border-radius:999px}" +
+    ".pcf-selo.ok{background:#E6F7EC;color:#146C36}.pcf-selo.espera{background:#FFF4E0;color:#8A5300}" +
+    ".pcf-selo.nao{background:#FDECEC;color:#8C1D1D}" +
+    ".pcf-tab{width:100%;border-collapse:collapse}" +
+    ".pcf-tab th{background:var(--pcf-claro);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;" +
+    "color:#5F6B7A;padding:6px 8px;text-align:left;border-bottom:1px solid var(--pcf-linha)}" +
+    ".pcf-tab td{padding:7px 8px;border-bottom:1px solid var(--pcf-linha);vertical-align:middle}" +
+    ".pcf-tab tr:last-child td{border-bottom:none}" +
+    ".pcf-num{width:24px;height:24px;border-radius:50%;background:var(--pcf-azul);color:#fff;" +
+    "display:grid;place-items:center;font-size:11px;font-weight:700}" +
+    ".pcf-totais{display:flex;gap:24px;padding:8px 12px;border-top:1px solid var(--pcf-linha);" +
+    "background:var(--pcf-claro);font-size:11.5px}" +
+    ".pcf-grade{display:grid;grid-template-columns:2fr 1fr;gap:12px}" +
+    "@media (max-width:820px){.pcf-grade{grid-template-columns:1fr}}" +
+    ".pcf-aviso{display:flex;gap:8px;padding:7px 0;border-bottom:1px dashed var(--pcf-linha);font-size:11.5px}" +
+    ".pcf-aviso:last-child{border-bottom:none}" +
+    ".pcf-assinaturas{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;padding:12px}" +
+    ".pcf-ass{border:1px solid var(--pcf-linha);border-radius:8px;overflow:hidden}" +
+    ".pcf-ass .rot{background:var(--pcf-azul);color:#fff;font-size:9.5px;letter-spacing:.07em;padding:4px 10px}" +
+    ".pcf-ass .miolo{padding:10px;min-height:96px}" +
+    ".pcf-linha-ass{border-top:1px solid #16202E;margin-top:26px;padding-top:4px;text-align:center;" +
+    "font-size:10px;color:#5F6B7A}" +
+    ".pcf-ass img{max-width:100%;max-height:52px;display:block;margin:0 auto}" +
+    ".pcf-rodape{background:var(--pcf-azul);color:#fff;padding:8px 12px;font-size:10.5px;" +
+    "display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}" +
+    "@media print{.pcf{border:none}.modal-foot,.chips{display:none!important}}";
+  document.head.appendChild(st);
+}
+
+function pcfTexto(v, seVazio) {
+  var t = String(v == null ? "" : v).trim();
+  return t || (seVazio === undefined ? "—" : seVazio);
+}
+
+function pcfCampo(rotulo, valor) {
+  return '<div><div class="pcf-rot">' + U.esc(rotulo) + "</div>" +
+    '<div class="pcf-val">' + U.esc(pcfTexto(valor)) + "</div></div>";
+}
+
+function pcfQuando(v) {
+  var t = String(v || "");
+  if (!t) return "—";
+  try {
+    var d = new Date(t);
+    if (!isNaN(d.getTime())) {
+      function dd(n) { return (n < 10 ? "0" : "") + n; }
+      return dd(d.getDate()) + "/" + dd(d.getMonth() + 1) + "/" + d.getFullYear() +
+        " " + dd(d.getHours()) + ":" + dd(d.getMinutes());
+    }
+  } catch (e) {}
+  return t.slice(0, 16).replace("T", " ");
+}
+
+/* O que o RH mandou, pelo nome do campo — respeitando a
+   configuração: campo não autorizado devolve vazio, e a ficha
+   mostra um traço em vez de inventar. */
+function pcfDoRH(d, campo) {
+  var c = (d.doRH || {})[campo];
+  return c ? c.valor : "";
+}
+
+function pcfFicha(d) {
+  pcfEstilo();
+
+  var cab = d.cabecalho || {};
+  var itens = listaSegura(d.itens);
+  var tok = d.token || {};
+  var etapa = String(d.etapa || "");
+  var validado = etapa === "VALIDADO_SEGURANCA" || etapa === "LIBERADO" || etapa === "CRACHA_EMITIDO";
+
+  var qrSvg = "";
+  if (d.conteudoQR) qrSvg = pcQR(d.conteudoQR, 110);
+
+  var foto = d.fotoAtual || pcfDoRH(d, "foto");
+
+  var selo = tok.situacao === "ATIVO"
+    ? '<span class="pcf-selo ok">TOKEN ATIVO</span>'
+    : tok.tem
+      ? '<span class="pcf-selo espera">AGUARDANDO VALIDAÇÃO</span>'
+      : '<span class="pcf-selo nao">SEM TOKEN</span>';
+
+  return '<div class="pcf">' +
+
+    /* ---------- cabeçalho ---------- */
+    '<div class="pcf-topo">' +
+    '<div class="pcf-marca"><b>ALMOX PRO</b><small>GESTÃO INTELIGENTE PARA OBRAS</small></div>' +
+    '<div class="pcf-titulo"><h3>FICHA DE ENTRADA DO COLABORADOR</h3>' +
+    "<p>Conferência e liberação pela Segurança do Trabalho</p></div>" +
+    '<div class="pcf-caixas">' +
+    '<div class="pcf-caixa"><div class="rot">Nº DO PROCESSO</div>' +
+    '<div class="val">' + U.esc(d.id) + "</div></div>" +
+    '<div class="pcf-caixa"><div class="rot">ABERTO EM</div>' +
+    '<div class="val" style="font-size:11.5px">' + U.esc(pcfQuando(cab.criadoEm)) + "</div></div>" +
+    "</div></div>" +
+
+    /* ---------- faixa de contexto ---------- */
+    '<div class="pcf-faixa">' +
+    pcfCampo("Obra / local", pcfDoRH(d, "obra") || cab.obra) +
+    pcfCampo("Setor / frente", pcfDoRH(d, "setor") || cab.setor) +
+    pcfCampo("Empresa", pcfDoRH(d, "empresa") || cab.empresa) +
+    pcfCampo("Pré-cadastrado por", cab.criadoPor) +
+    pcfCampo("Situação", pcRotuloEtapa(etapa)) +
+    pcfCampo("Identificação", "Token do processo") +
+    "</div>" +
+
+    /* ---------- 01 dados do colaborador ---------- */
+    '<div class="pcf-secao"><b>01</b> Dados do colaborador</div>' +
+    '<div class="pcf-corpo"><div class="pcf-pessoa">' +
+    '<div><div class="pcf-foto" id="pcfFoto">' +
+    (foto ? '<img src="' + U.esc(foto) + '">' : "<span>sem foto</span>") + "</div>" +
+    '<button class="btn btn-ghost btn-sm mt8" style="width:118px" data-pcf-foto>' +
+    (foto ? "Trocar foto" : "Adicionar foto") + "</button>" +
+    '<input type="file" accept="image/*" id="pcfFotoArq" style="display:none"></div>' +
+    '<div class="pcf-campos">' +
+    pcfCampo("Nome completo", pcfDoRH(d, "nome")) +
+    pcfCampo("CPF", pcfDoRH(d, "cpf")) +
+    pcfCampo("RG", pcfDoRH(d, "rg")) +
+    pcfCampo("Matrícula / identificação", pcfDoRH(d, "matricula")) +
+    pcfCampo("Função", pcfDoRH(d, "funcao")) +
+    pcfCampo("Cargo", pcfDoRH(d, "cargo")) +
+    pcfCampo("Admissão", pcfDoRH(d, "admissao")) +
+    pcfCampo("Telefone", pcfDoRH(d, "telefone")) +
+    pcfCampo("E-mail", pcfDoRH(d, "email")) +
+    pcfCampo("Endereço", pcfDoRH(d, "endereco")) +
+    pcfCampo("Camisa", pcfDoRH(d, "tamanhoCamisa")) +
+    pcfCampo("Calça", pcfDoRH(d, "tamanhoCalca")) +
+    pcfCampo("Calçado", pcfDoRH(d, "numeroCalcado")) +
+    pcfCampo("Tipo sanguíneo", (d.seguranca || {}).tipoSanguineo) +
+    "</div>" +
+    '<div class="pcf-ident"><div class="rot">Identificação do colaborador</div>' +
+    '<div class="miolo">' +
+    '<div class="pcf-token">' + U.esc(tok.tem ? "•••• ••••" : "sem token") + "</div>" +
+    selo +
+    '<p style="margin:8px 0 0;font-size:10.5px;color:#5F6B7A">' +
+    (tok.situacao === "ATIVO"
+      ? "O colaborador retira o material digitando este token no almoxarifado."
+      : tok.tem
+        ? "O token existe desde o pré-cadastro. Só vale para retirada depois que a Segurança validar."
+        : "Este processo ainda não foi encaminhado pelo RH.") +
+    "</p>" +
+    '<p style="margin:6px 0 0;font-size:10px;color:#8A96A6">Biometria: não configurada neste sistema.</p>' +
+    "</div></div>" +
+    "</div>" +
+    (listaSegura(d.camposOcultos).length
+      ? '<p style="margin:10px 0 0;font-size:10.5px;color:#8A96A6">O RH escolheu não enviar: ' +
+        U.esc(listaSegura(d.camposOcultos).join(", ")) + ".</p>"
+      : "") +
+    "</div>" +
+
+    /* ---------- 02 EPIs ---------- */
+    '<div class="pcf-secao"><b>02</b> EPIs e uniforme da pré-reserva</div>' +
+    (itens.length
+      ? '<table class="pcf-tab"><thead><tr>' +
+        "<th style='width:40px'>Item</th><th>Código</th><th>Descrição</th><th>Tamanho</th>" +
+        "<th>Qtd.</th><th>Unid.</th><th>Origem</th><th>Situação</th>" +
+        "</tr></thead><tbody>" + itens.map(function(i, n) {
+          return "<tr>" +
+            '<td><span class="pcf-num">' + (n + 1) + "</span></td>" +
+            "<td><span class='mono'>" + U.esc(i.sku) + "</span></td>" +
+            "<td>" + U.esc(i.nome) + "</td>" +
+            "<td>" + U.esc(pcfTexto(i.tamanho)) + "</td>" +
+            "<td>" + i.qtd + "</td>" +
+            "<td>" + U.esc(i.unidade || "un") + "</td>" +
+            "<td>" + U.esc(i.kit || "avulso") + "</td>" +
+            '<td><span class="pcf-selo espera">a entregar</span></td>' +
+            "</tr>";
+        }).join("") + "</tbody></table>" +
+        '<div class="pcf-totais"><div><b>Total de itens:</b> ' + itens.length + "</div>" +
+        "<div><b>Total de quantidades:</b> " +
+        itens.reduce(function(t, i) { return t + (Number(i.qtd) || 0); }, 0) + "</div>" +
+        (d.kit ? "<div><b>Kit:</b> " + U.esc(d.kit) + "</div>" : "") + "</div>"
+      : '<div class="pcf-corpo"><p style="color:#8A96A6;margin:0">Nenhum EPI na pré-reserva. ' +
+        "A lista pode ser montada depois, no almoxarifado.</p></div>") +
+
+    /* ---------- 03 e 04 ---------- */
+    '<div class="pcf-corpo"><div class="pcf-grade">' +
+    "<div>" +
+    '<div class="pcf-secao" style="margin:-12px -12px 10px"><b>03</b> Conferência da Segurança</div>' +
+    pcfConferencia(d) +
+    "</div>" +
+    "<div>" +
+    '<div class="pcf-secao" style="margin:-12px -12px 10px"><b>04</b> Autenticação</div>' +
+    '<div style="text-align:center">' +
+    (qrSvg ? '<div style="background:#fff;display:inline-block;padding:6px;border:1px solid var(--pcf-linha);' +
+      'border-radius:8px">' + qrSvg + "</div>" : '<p style="color:#8A96A6">QR indisponível</p>') +
+    '<p style="font-size:10.5px;color:#5F6B7A;margin:8px 0 0">Documento eletrônico com trilha de auditoria. ' +
+    "Confira pelo QR ou pelo número do processo no ALMOX PRO.</p></div>" +
+    "</div></div></div>" +
+
+    /* ---------- assinaturas ---------- */
+    '<div class="pcf-secao"><b>05</b> Responsabilidades</div>' +
+    '<div class="pcf-assinaturas">' +
+    '<div class="pcf-ass"><div class="rot">Pré-cadastro (RH)</div><div class="miolo">' +
+    '<div class="pcf-rot">Nome</div><div class="pcf-val">' + U.esc(pcfTexto(cab.criadoPor)) + "</div>" +
+    '<div class="pcf-rot mt8">Data</div><div class="pcf-val">' + U.esc(pcfQuando(cab.encaminhadoEm || cab.criadoEm)) + "</div>" +
+    "</div></div>" +
+    '<div class="pcf-ass"><div class="rot">Conferência (Segurança do Trabalho)</div><div class="miolo">' +
+    '<div class="pcf-rot">Nome</div><div class="pcf-val">' +
+    U.esc(pcfTexto(cab.validadoSegPor, validado ? "—" : "aguardando validação")) + "</div>" +
+    '<div class="pcf-rot mt8">Data</div><div class="pcf-val">' + U.esc(pcfQuando(cab.validadoSegEm)) + "</div>" +
+    "</div></div>" +
+    '<div class="pcf-ass"><div class="rot">Ciência do colaborador</div><div class="miolo">' +
+    (d.assinatura && d.assinatura.tem
+      ? '<div id="pcfAssinatura" style="min-height:52px"></div>' +
+        '<div class="pcf-linha-ass">Assinado em ' + U.esc(pcfQuando(d.assinatura.em)) + "</div>"
+      : '<div class="pcf-linha-ass">Assinatura do colaborador</div>' +
+        '<p style="font-size:10.5px;color:#8A96A6;margin:6px 0 0;text-align:center">' +
+        "Colha na aba Assinatura.</p>") +
+    "</div></div></div>" +
+
+    '<div class="pcf-rodape"><span>ALMOX PRO · ' + U.esc(d.id) + "</span>" +
+    "<span>Este documento não substitui login, crachá nem biometria.</span></div>" +
+    "</div>";
+}
+
+function pcfConferencia(d) {
+  var seg = d.seguranca || {};
+  var treinos = listaSegura(seg.treinamentos);
+  var aso = seg.aso || {};
+  var pend = listaSegura(d.pendencias);
+
+  function linha(rot, valor, bom) {
+    return '<div class="pcf-aviso">' +
+      '<span style="width:14px">' + (bom ? "✓" : "·") + "</span>" +
+      '<span style="flex:1"><b>' + U.esc(rot) + "</b> — " + valor + "</span></div>";
+  }
+
+  var concluidos = treinos.filter(function(t) {
+    return String(t.status).toUpperCase() === "CONCLUIDO";
+  }).length;
+
+  return linha("Treinamentos / NRs",
+    treinos.length ? concluidos + " de " + treinos.length + " concluído(s)" : "nenhum lançado",
+    treinos.length > 0 && concluidos === treinos.length) +
+    linha("ASO / exame",
+      aso.situacao ? U.esc(aso.situacao) + (aso.validade ? " · até " + U.esc(aso.validade) : "") : "não lançado",
+      String(aso.situacao || "").toUpperCase() === "APTO") +
+    linha("Tipo sanguíneo", U.esc(pcfTexto(seg.tipoSanguineo)), !!seg.tipoSanguineo) +
+    linha("Riscos da atividade",
+      listaSegura(seg.riscos).length ? U.esc(listaSegura(seg.riscos).join(", ")) : "não informados",
+      listaSegura(seg.riscos).length > 0) +
+    linha("EPIs obrigatórios",
+      listaSegura(seg.episObrigatorios).length ? U.esc(listaSegura(seg.episObrigatorios).join(", ")) : "não informados",
+      listaSegura(seg.episObrigatorios).length > 0) +
+    linha("Observação", U.esc(pcfTexto(seg.observacao)), !!seg.observacao) +
+    (pend.length
+      ? '<div class="pcf-aviso" style="color:#8A5300"><span style="width:14px">!</span>' +
+        "<span><b>Falta para validar:</b> " +
+        U.esc(pend.map(function(p) { return p.o_que; }).join("; ")) + "</span></div>"
+      : '<div class="pcf-aviso" style="color:#146C36"><span style="width:14px">✓</span>' +
+        "<span><b>Nada pendente</b> — o processo pode ser validado.</span></div>");
+}
+
+/* a foto e a assinatura, depois que a ficha está na tela */
+function pcfLigar(w, id, fechar) {
+  var botao = w.querySelector("[data-pcf-foto]");
+  var arq = w.querySelector("#pcfFotoArq");
+  if (botao && arq) {
+    botao.addEventListener("click", function() {
+      /* a mesma câmera do crachá; o arquivo fica como alternativa */
+      modalTirarFoto(function(url) {
+        botao.disabled = true;
+        pcApi("salvarFoto", { id: id, foto: url }).then(function(r) {
+          botao.disabled = false;
+          if (!r || !r.ok) { toast("err", "Foto não gravada", r && r.mensagem || ""); return; }
+          toast("ok", "Foto gravada", r.mensagem || "");
+          PCSEG.processo.fotoAtual = url;
+          var palco = w.querySelector("#pcfFoto");
+          if (palco) palco.innerHTML = '<img src="' + U.esc(url) + '">';
+          botao.textContent = "Trocar foto";
+        });
+      });
+    });
+    arq.addEventListener("change", function() {
+      var f = arq.files && arq.files[0];
+      if (!f) return;
+      botao.disabled = true;
+      botao.textContent = "Preparando…";
+      pcEncolherImagem(f).then(function(url) {
+        return pcApi("salvarFoto", { id: id, foto: url }).then(function(r) {
+          botao.disabled = false;
+          botao.textContent = "Trocar foto";
+          if (!r || !r.ok) { toast("err", "Foto não gravada", r && r.mensagem || ""); return; }
+          toast("ok", "Foto gravada", r.mensagem || "");
+          PCSEG.processo.fotoAtual = url;
+          var palco = w.querySelector("#pcfFoto");
+          if (palco) palco.innerHTML = '<img src="' + U.esc(url) + '">';
+        });
+      }).catch(function(e) {
+        botao.disabled = false;
+        botao.textContent = "Adicionar foto";
+        toast("err", "Não consegui usar essa imagem", e && e.message || "");
+      });
+    });
+  }
+
+  var alvoAss = w.querySelector("#pcfAssinatura");
+  if (alvoAss) {
+    pcApi("assinatura", { id: id }).then(function(r) {
+      if (r && r.ok) alvoAss.innerHTML = '<img src="' + U.esc(r.dados.assinatura) + '">';
+    });
+  }
+}
+
+
 function modalProcessoSeguranca(id) {
   pcApi("abrirSeguranca", { id: id }).then(function(r) {
     if (!r || !r.ok) { toast("err", "Não consegui abrir", r && r.mensagem || ""); return; }
     PCSEG.processo = r.dados;
-    PCSEG.aba = "rh";
+    PCSEG.aba = "ficha";
+    /* o QR da ficha é o mesmo do processo: busca a credencial em
+       paralelo e repinta quando chegar, sem segurar a abertura */
+    pcApi("credencial", { id: id }).then(function(rc) {
+      if (rc && rc.ok && PCSEG.processo && PCSEG.processo.id === id) {
+        PCSEG.processo.conteudoQR = rc.dados.conteudoQR;
+        var aberto = document.querySelector("#pcCorpo");
+        if (aberto && PCSEG.aba === "ficha") {
+          var caixa = aberto.closest(".modal-wrap");
+          if (caixa) pcPintarProcesso(caixa, id, function() {});
+        }
+      }
+    });
     PCSEG.rascunho = {
       riscos: listaSegura(r.dados.seguranca.riscos).slice(),
       episObrigatorios: listaSegura(r.dados.seguranca.episObrigatorios).slice(),
@@ -41548,15 +42646,42 @@ function modalProcessoSeguranca(id) {
       corpo: '<div id="pcCorpo">' + UI.carregando(4) + "</div>",
       rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' +
         '<div class="grow"></div>' +
+        '<button class="btn btn-ghost" data-pc-imprimir>' + ic("impressora") + "Imprimir</button>" +
         '<button class="btn btn-ghost" data-pc-devolver>Devolver ao RH</button>' +
-        '<button class="btn btn-primary" data-pc-salvar>' + ic("salvar") + "Salvar</button>",
+        '<button class="btn btn-ghost" data-pc-salvar>' + ic("salvar") + "Salvar</button>" +
+        /* VALIDAR NO RODAPÉ.
+           Antes este botão existia só no fim da aba "Conclusão", a
+           oitava — o técnico abria o processo, via a ficha e não
+           achava onde validar. No rodapé ele fica visível em
+           qualquer aba, do lado de Salvar. É o MESMO pcValidar: não
+           há segundo caminho de validação. O texto e a cor mudam
+           conforme a etapa, e quem decide se pode validar continua
+           sendo o Core. */
+        '<button class="btn btn-primary" data-pc-acao>' + ic("checkC") + "Validar</button>",
       aoAbrir: function(w, fechar) {
         w.querySelector("[data-x]").addEventListener("click", fechar);
         w.querySelector("[data-pc-devolver]").addEventListener("click", function() {
           modalDevolver(id, fechar);
         });
+        w.querySelector("[data-pc-imprimir]").addEventListener("click", function() {
+          var ficha = w.querySelector(".pcf");
+          if (!ficha) { toast("warn", "Abra a ficha", "A impressão sai da aba Ficha do colaborador."); return; }
+          var janela = window.open("", "ficha");
+          if (!janela) { toast("warn", "Janela bloqueada", "Libere as janelas deste site para imprimir."); return; }
+          var css = document.getElementById("pcFichaCss");
+          janela.document.write('<!doctype html><meta charset="utf-8"><title>' + U.esc(id) + "</title>" +
+            "<style>body{margin:18px;font:13px system-ui,-apple-system,Segoe UI,Roboto,Arial}" +
+            (css ? css.textContent : "") + "</style>" + ficha.outerHTML);
+          janela.document.close();
+          janela.focus();
+          janela.print();
+        });
         w.querySelector("[data-pc-salvar]").addEventListener("click", function() {
           pcSalvarSeguranca(id, this, w);
+        });
+        w.querySelector("[data-pc-acao]").addEventListener("click", function() {
+          if (String(PCSEG.processo.etapa) === "LIBERADO") { modalEmitirCracha(id, fechar); return; }
+          pcValidar(id, this, w, fechar);
         });
         pcPintarProcesso(w, id, fechar);
       }
@@ -41569,6 +42694,7 @@ function pcPintarProcesso(w, id, fechar) {
   var d = PCSEG.processo;
   var corpo = w.querySelector("#pcCorpo");
   var abas = [
+    ["ficha", "Ficha do colaborador"],
     ["rh", "Recebido do RH"],
     ["seg", "Segurança"],
     ["itens", "EPIs e kits"],
@@ -41591,10 +42717,48 @@ function pcPintarProcesso(w, id, fechar) {
     });
   });
   pcLigarAba(w, id, fechar);
+  pcAcertarBotaoRodape(w, d);
+}
+
+/* O botão do rodapé segue a etapa do processo. Uma função só, para o
+   rodapé e a aba Conclusão nunca dizerem coisas diferentes. */
+function pcAcertarBotaoRodape(w, d) {
+  var b = w.querySelector("[data-pc-acao]");
+  if (!b) return;
+  var etapa = String((d && d.etapa) || "");
+  var falta = listaSegura(d && d.pendencias).length;
+
+  if (etapa === "CRACHA_EMITIDO") {
+    b.style.display = "none";
+    return;
+  }
+  b.style.display = "";
+  if (etapa === "LIBERADO") {
+    b.className = "btn btn-orange";
+    b.innerHTML = ic("qr") + "Emitir crachá";
+    b.title = "O administrador já definiu o acesso. Dá para emitir o crachá.";
+    return;
+  }
+  if (etapa === "VALIDADO_SEGURANCA") {
+    b.className = "btn btn-ghost";
+    b.innerHTML = ic("checkC") + "Já validado";
+    b.disabled = true;
+    b.title = "A Segurança já validou. O crachá sai depois que o administrador " +
+      "definir o tipo de acesso, em Pré-cadastros.";
+    return;
+  }
+  b.className = "btn btn-primary";
+  b.disabled = false;
+  b.innerHTML = ic("checkC") + "Validar colaborador";
+  b.title = falta
+    ? "Ainda falta " + falta + " item — clique para ver o que é."
+    : "Nada pendente: pode validar.";
 }
 
 function pcConteudoAba(d) {
   var r = PCSEG.rascunho;
+
+  if (PCSEG.aba === "ficha") return pcfFicha(d);
 
   if (PCSEG.aba === "rh") {
     var campos = Object.keys(d.doRH || {});
@@ -41752,7 +42916,30 @@ function pcConteudoAba(d) {
     (d.assinatura && d.assinatura.tem ? "registrada" : "não registrada") + "</b></div>" +
     (d.cracha && d.cracha.codigo ? '<div class="info-row"><span>Crachá</span><b>' +
       U.esc(d.cracha.codigo) + "</b></div>" : "") +
+    /* A RESERVA DE EPI.
+       Nasce quando a Segurança valida, e é ela que o almoxarifado
+       chama de "ficha" no balcão. Mostrar aqui o protocolo — ou o
+       motivo de não ter saído — porque antes ela simplesmente não
+       aparecia em lugar nenhum. */
+    '<div class="info-row"><span>Reserva de EPI</span><b>' +
+    (d.reserva && d.reserva.protocolo
+      ? '<span class="mono">' + U.esc(d.reserva.protocolo) + "</span>"
+      : d.reserva && d.reserva.erro
+        ? '<span class="badge b-red">não saiu</span>'
+        : '<span class="muted">sai na validação</span>') +
+    "</b></div>" +
     "</div></div>" +
+    (d.reserva && d.reserva.erro && !(d.reserva && d.reserva.protocolo)
+      ? '<div class="alert a-red mb12">' + ic("alerta") +
+        "<div><b>A reserva de EPI não saiu</b>" + U.esc(d.reserva.erro) +
+        "<br><br>A validação continua valendo e o token segue ativo — o que falta é o " +
+        "material ficar guardado no nome da pessoa. Resolva o que está acima " +
+        "(cadastrar o EPI, repor o saldo, ou escolher os itens na aba " +
+        '"EPIs e kits") e clique em refazer.' +
+        '<div class="mt8"><button class="btn btn-primary btn-sm" data-pc-refazer-reserva>' +
+        ic("sync") + "Refazer a reserva</button></div>" +
+        "</div></div>"
+      : "") +
     '<div class="flex gap8">' +
     (d.etapa === "CRACHA_EMITIDO" ? '<span class="muted small">Processo encerrado.</span>' :
       d.etapa === "LIBERADO" ?
@@ -41871,11 +43058,41 @@ function pcLigarAba(w, id, fechar) {
   var tela = w.querySelector("#pcAssinatura");
   if (tela) pcLigarAssinatura(w, tela, id, fechar);
 
+  /* a ficha: foto e a imagem da assinatura */
+  if (PCSEG.aba === "ficha") pcfLigar(w, id, fechar);
+
   var val = w.querySelector("[data-pc-validar]");
   if (val) val.addEventListener("click", function() { pcValidar(id, this, w, fechar); });
 
   var cr = w.querySelector("[data-pc-cracha]");
   if (cr) cr.addEventListener("click", function() { modalEmitirCracha(id, fechar); });
+
+  /* refazer a reserva de EPI que não saiu na validação. Mesma ação do
+     Core que a validação usa — não existe segundo caminho. */
+  var rf = w.querySelector("[data-pc-refazer-reserva]");
+  if (rf) rf.addEventListener("click", function() {
+    var b = this;
+    b.disabled = true;
+    b.innerHTML = '<span class="spinner"></span> Reservando…';
+    pcApi("gerarReserva", { id: id }).then(function(r) {
+      b.disabled = false;
+      b.innerHTML = ic("sync") + "Refazer a reserva";
+      if (!r || !r.ok) {
+        toast("err", "A reserva ainda não saiu", pcExplicarErro(r));
+        if (PCSEG.processo) PCSEG.processo.reserva = {
+          protocolo: "", erro: (r && r.mensagem) || "", em: ""
+        };
+        pcPintarProcesso(w, id, fechar);
+        return;
+      }
+      toast("ok", "Reserva criada", r.mensagem || "");
+      if (typeof CACHE !== "undefined") CACHE.invalidar();
+      if (PCSEG.processo) PCSEG.processo.reserva = {
+        protocolo: r.dados.protocolo, erro: "", em: ""
+      };
+      pcPintarProcesso(w, id, fechar);
+    });
+  });
 }
 
 /* O bloco de assinatura. Desenha com o dedo ou com o mouse; o que
@@ -41983,11 +43200,15 @@ function pcSalvarSeguranca(id, botao, w) {
 }
 
 function pcValidar(id, botao, w, fechar) {
+  /* guarda o rótulo que estava ali: o botão do rodapé e o da aba
+     Conclusão têm textos diferentes, e devolver um rótulo fixo
+     trocava o do rodapé por outro no meio do caminho */
+  var rotulo = botao.innerHTML;
   botao.disabled = true;
   botao.innerHTML = '<span class="spinner"></span> Validando…';
   pcApi("validarSeguranca", { id: id }).then(function(r) {
     botao.disabled = false;
-    botao.innerHTML = ic("checkC") + "Validar";
+    botao.innerHTML = rotulo;
     if (!r || !r.ok) {
       toast("err", "Ainda não dá para validar", r && r.mensagem || "");
       if (r && r.dados && r.dados.pendencias) {
@@ -42090,6 +43311,22 @@ function modalEmitirCracha(id, fecharPai) {
 }
 
 
+/* A etapa de um processo, agrupada do jeito que o RH acompanha:
+   ainda comigo, com a Segurança, ou já resolvido. */
+function pcGrupoEtapa(etapa) {
+  var e = String(etapa || "RH");
+  if (e === "RH") return "RH";
+  if (e === "VALIDADO_SEGURANCA" || e === "LIBERADO") return "VALIDADOS";
+  if (e === "CRACHA_EMITIDO") return "CRACHA";
+  return "SEGURANCA";
+}
+
+function pcContarEtapa(lista, grupo) {
+  return listaSegura(lista).filter(function(p) {
+    return pcGrupoEtapa(p.etapa) === grupo;
+  }).length;
+}
+
 SCREENS["precadastros"] = {
 titulo: "Pré-cadastros",
 modulo: "epi",
@@ -42101,42 +43338,50 @@ if (!r || !r.ok) {
 return UI.estado("erro", "Não foi possível carregar os pré-cadastros", r && r.mensagem || "O Core não respondeu.");
 }
 var d = r.dados, t = d.totais;
-var lista = PRECADP.filtro ? d.precadastros.filter(function(p) {
-return p.status === PRECADP.filtro;
-}) : d.precadastros;
+var lista = PRECADP.filtro ? listaSegura(d.precadastros).filter(function(p) {
+return pcGrupoEtapa(p.etapa) === PRECADP.filtro;
+}) : listaSegura(d.precadastros);
 var souAdmin = !APP || !APP.pode || APP.pode("usuarios");
 return UI.cabecalho({
 trilha: [ "Cadastros", "Pré-cadastro de colaboradores" ],
 titulo: "Pré-cadastro de colaboradores",
-sub: "O técnico anota os dados de quem vai entrar. O administrador define o tipo de acesso — " + "e só aí a ficha de EPI pode ser vinculada.",
+sub: "O RH preenche o que for necessário, separa os EPIs e envia para a Segurança do Trabalho. Quem valida o colaborador é a Segurança.",
 acoes: (souAdmin ? '<button class="btn btn-ghost" data-campos-seg>' + ic("escudo") + "O que vai para a Segurança</button>" : "") + '<button class="btn btn-ghost" data-ir="#/seguranca-entrada">' + ic("epi") + "Fila da Segurança</button>" + '<button class="btn btn-primary" data-novo-precad>' + ic("mais") + "Novo pré-cadastro</button>"
-}) + '<div class="grid g4 mb16">' + UI.kpi({
+}) + '<div id="pcTarjaRH"></div>' + '<div class="grid g4 mb16">' + UI.kpi({
+icone: "editar",
+cor: pcContarEtapa(d.precadastros, "RH") ? "ico-blue" : "ico-gray",
+valor: pcContarEtapa(d.precadastros, "RH"),
+rotulo: "Em preenchimento"
+}) + UI.kpi({
 icone: "relogio",
-cor: t.aguardando ? "ico-orange" : "ico-gray",
-valor: t.aguardando,
-rotulo: "Esperando validação"
+cor: pcContarEtapa(d.precadastros, "SEGURANCA") ? "ico-orange" : "ico-gray",
+valor: pcContarEtapa(d.precadastros, "SEGURANCA"),
+rotulo: "Com a Segurança"
 }) + UI.kpi({
 icone: "checkC",
 cor: "ico-green",
-valor: t.validados,
-rotulo: "Validados"
+valor: pcContarEtapa(d.precadastros, "VALIDADOS"),
+rotulo: "Validados pela Segurança"
 }) + UI.kpi({
-icone: "cadeado",
-cor: "ico-blue",
-valor: t.comLogin,
-rotulo: "Com login"
-}) + UI.kpi({
-icone: "usuarios",
-cor: "ico-navy",
-valor: t.publicos,
-rotulo: "Usuários públicos"
-}) + "</div>" + '<div class="flex gap8 mb16" style="flex-wrap:wrap">' + '<div class="search-wrap" style="flex:1;min-width:200px">' + ic("busca") + '<input class="input" id="pcBusca" placeholder="Buscar por nome, CPF, matrícula…" value="' + U.esc(PRECADP.busca) + '"></div>' + '<div class="chips">' + [ [ "AGUARDANDO_VALIDACAO", "Esperando", t.aguardando ], [ "VALIDADO", "Validados", t.validados ], [ "RECUSADO", "Recusados", t.recusados ], [ "", "Todos", t.todos ] ].map(function(c) {
+icone: "qr",
+cor: "ico-purple",
+valor: pcContarEtapa(d.precadastros, "CRACHA"),
+rotulo: "Crachá emitido"
+}) + "</div>" + '<div class="flex gap8 mb16" style="flex-wrap:wrap">' + '<div class="search-wrap" style="flex:1;min-width:200px">' + ic("busca") + '<input class="input" id="pcBusca" placeholder="Buscar por nome, CPF, matrícula…" value="' + U.esc(PRECADP.busca) + '"></div>' + '<div class="chips">' + [ [ "RH", "Em preenchimento", pcContarEtapa(d.precadastros, "RH") ], [ "SEGURANCA", "Com a Segurança", pcContarEtapa(d.precadastros, "SEGURANCA") ], [ "VALIDADOS", "Validados", pcContarEtapa(d.precadastros, "VALIDADOS") ], [ "", "Todos", listaSegura(d.precadastros).length ] ].map(function(c) {
 return '<button class="chip ' + (PRECADP.filtro === c[0] ? "on" : "") + '" data-pc-filtro="' + c[0] + '">' + c[1] + ' <span class="badge b-gray">' + c[2] + "</span></button>";
 }).join("") + "</div></div>" + (lista.length ? lista.map(function(p) {
-var cor = p.validado ? "b-green" : p.recusado ? "b-red" : "b-orange";
-var rotulo = p.validado ? p.tipoAcesso === "LOGIN" ? "acesso com login · " + p.perfil : "usuário público" : p.recusado ? "recusado" : "esperando validação";
-return '<div class="card mb12"><div class="card-body">' + '<div class="flex gap8" style="justify-content:space-between;align-items:flex-start">' + '<div><div class="strong">' + U.esc(p.nome) + "</div>" + '<div class="muted small">' + U.esc(p.cargo) + (p.setor ? " · " + U.esc(p.setor) : "") + ' · CPF <span class="mono">' + U.esc(p.cpf) + "</span>" + (p.matricula ? " · matrícula " + U.esc(p.matricula) : "") + (p.admissao ? " · admissão " + U.data(p.admissao) : "") + "</div>" + '<div class="muted small">pré-cadastrado por ' + U.esc(p.solicitante || "—") + (p.validadoPor ? " · validado por " + U.esc(p.validadoPor) : "") + "</div>" + "</div>" + '<span class="badge ' + cor + '">' + rotulo + "</span>" + "</div>" + (p.recusado && p.motivoRecusa ? '<div class="alert a-red mt8">' + ic("alerta") + "<div><b>Recusado</b>" + U.esc(p.motivoRecusa) + "</div></div>" : "") + '<div class="flex gap8 mt12">' + (p.aguardando && souAdmin ? '<button class="btn btn-ghost" data-validar-pc="' + U.esc(p.id) + '">' + ic("cadeado") + "Definir o tipo de acesso</button>" + '<button class="btn btn-ghost" data-recusar-pc="' + U.esc(p.id) + '">Recusar</button>' : "") + (p.aguardando && !souAdmin ? '<span class="muted small">Aguardando o administrador definir o tipo de acesso.</span>' : "") + (!p.validado ? '<button class="btn btn-ghost" data-editar-pc="' + U.esc(p.id) + '">Corrigir dados</button>' : '<button class="btn btn-orange" data-ficha-pc="' + U.esc(p.id) + '">' + ic("epi") + "Abrir ficha de EPI</button>") + (p.etapa === "RH" && !p.recusado ? '<button class="btn btn-ghost" data-itens-pc="' + U.esc(p.id) + '">' + ic("caixa") + "EPIs e kits</button>" + '<button class="btn btn-primary" data-encaminhar-pc="' + U.esc(p.id) + '">' + ic("enviar") + "Encaminhar para a Segurança</button>" : "") + (p.etapa && p.etapa !== "RH" ? '<span class="badge ' + (p.etapa === "CRACHA_EMITIDO" || p.etapa === "LIBERADO" ? "b-green" : p.etapa === "VALIDADO_SEGURANCA" ? "b-blue" : "b-yellow") + '">' + U.esc(pcRotuloEtapa(p.etapa)) + "</span>" + '<button class="btn btn-ghost" data-credencial-pc="' + U.esc(p.id) + '">' + ic("qr") + "Credencial</button>" : "") + (p.devolvidoMotivo ? '<span class="badge b-red">devolvido: ' + U.esc(p.devolvidoMotivo) + "</span>" : "") + "</div></div></div>";
-}).join("") : UI.estado("vazio", "Nada por aqui", PRECADP.filtro === "AGUARDANDO_VALIDACAO" ? "Nenhum pré-cadastro esperando validação." : "Nenhum registro nesta faixa."));
+/* O CARTÃO DO RH.
+   Aqui o RH NÃO valida ninguém: o botão de definir o tipo de
+   acesso saiu. O que ele faz é preencher, separar EPI e enviar
+   para a Segurança. Depois disso o cartão só acompanha o
+   andamento — e mostra o token, que é o que o colaborador leva. */
+var noRH = String(p.etapa || "RH") === "RH";
+var eta = String(p.etapa || "RH");
+var corEtapa = eta === "CRACHA_EMITIDO" || eta === "LIBERADO" ? "b-green"
+  : eta === "VALIDADO_SEGURANCA" ? "b-blue"
+  : eta === "RH" ? "b-gray" : "b-yellow";
+return '<div class="card mb12"><div class="card-body">' + '<div class="flex gap8" style="justify-content:space-between;align-items:flex-start">' + '<div><div class="strong">' + U.esc(p.nome) + "</div>" + '<div class="muted small">' + U.esc(p.cargo || "—") + (p.setor ? " · " + U.esc(p.setor) : "") + (p.obra ? " · " + U.esc(p.obra) : "") + (p.cpf ? ' · CPF <span class="mono">' + U.esc(p.cpf) + "</span>" : "") + (p.matricula ? " · matrícula " + U.esc(p.matricula) : "") + "</div>" + (p.token ? '<div class="muted small">Token <span class="mono">' + U.esc(p.token) + "</span>" + (p.identificacao ? ' · <span class="mono">' + U.esc(p.identificacao) + "</span>" : "") + "</div>" : "") + '<div class="muted small">pré-cadastrado por ' + U.esc(p.solicitante || "—") + (p.validadoSegPor ? " · <b>validado pela Segurança</b> por " + U.esc(p.validadoSegPor) + (p.validadoSegEmail ? " (" + U.esc(p.validadoSegEmail) + ")" : "") : "") + "</div>" + "</div>" + '<span class="badge ' + corEtapa + '">' + U.esc(pcRotuloEtapa(eta)) + "</span>" + "</div>" + (p.devolvidoMotivo ? '<div class="alert a-yellow mt8">' + ic("alerta") + "<div><b>Devolvido pela Segurança</b>" + U.esc(p.devolvidoMotivo) + "</div></div>" : "") + '<div class="flex gap8 mt12">' + (noRH ? '<button class="btn btn-ghost" data-editar-pc="' + U.esc(p.id) + '">Corrigir dados</button>' + '<button class="btn btn-ghost" data-itens-pc="' + U.esc(p.id) + '">' + ic("caixa") + "EPIs e kits</button>" + '<button class="btn btn-primary" data-encaminhar-pc="' + U.esc(p.id) + '">' + ic("enviar") + "Finalizar e enviar para a Segurança</button>" : '<button class="btn btn-ghost" data-credencial-pc="' + U.esc(p.id) + '">' + ic("qr") + "Ver token</button>" + '<button class="btn btn-ghost" data-ir="#/seguranca-entrada">' + ic("escudo") + "Ver na Segurança</button>" + (eta === "LIBERADO" || eta === "CRACHA_EMITIDO" ? '<button class="btn btn-orange" data-ficha-pc="' + U.esc(p.id) + '">' + ic("epi") + "Ficha de EPI</button>" : "")) + "</div></div></div>";
+}).join("") : UI.estado("vazio", "Nada por aqui", PRECADP.filtro === "RH" ? "Nenhum pré-cadastro em preenchimento." : PRECADP.filtro === "SEGURANCA" ? "Ninguém com a Segurança no momento." : "Nenhum registro nesta faixa."));
 });
 },
 mount: function() {
@@ -42161,6 +43406,7 @@ var novo = document.querySelector("[data-novo-precad]");
 if (novo) novo.addEventListener("click", function() {
 modalPreCadastro(null);
 });
+pcMostrarTarja("pcTarjaRH");
 var cfgSeg = document.querySelector("[data-campos-seg]");
 if (cfgSeg) cfgSeg.addEventListener("click", modalCamposSeguranca);
 document.querySelectorAll("[data-encaminhar-pc]").forEach(function(b) {
@@ -42175,7 +43421,7 @@ modalItensPreCadastro(b.getAttribute("data-itens-pc"));
 });
 document.querySelectorAll("[data-credencial-pc]").forEach(function(b) {
 b.addEventListener("click", function() {
-modalCredencial(b.getAttribute("data-credencial-pc"));
+pcModalToken(b.getAttribute("data-credencial-pc"));
 });
 });
 document.querySelectorAll("[data-editar-pc]").forEach(function(b) {
@@ -42238,6 +43484,8 @@ modalFichaAgendada(r.dados.matricula);
 }
 };
 
+var PCFORM = { itens: [], kit: "", foto: "" };
+
 function modalPreCadastro(id) {
 function abrir(p) {
 p = p || {};
@@ -42248,10 +43496,45 @@ sub: id ? p.nome : "Só os dados da pessoa. O tipo de acesso quem define é o ad
 tamanho: "lg",
 corpo: '<div class="grid g2">' + cpo("Nome completo", "pcNome", p.nome) + cpo("CPF", "pcCpf", p.cpf) + cpo("Matrícula", "pcMat", p.matricula) + cpo("RG", "pcRg", p.rg) + cpo("Cargo / função", "pcCargo", p.cargo) + cpo("Setor / equipe", "pcSetor", p.setor) + '<div class="field"><label>Obra</label><select class="select" id="pcObra">' + '<option value="">— deixar em branco —</option>' + listaSegura(MOCK.obras).map(function(o) {
 return '<option value="' + U.esc(o.id) + '"' + (p.obra === o.id ? " selected" : "") + ">" + U.esc(o.nome) + "</option>";
-}).join("") + "</select></div>" + cpo("Empresa", "pcEmpresa", p.empresa) + '<div class="field"><label>Data de admissão</label>' + '<input class="input" type="date" id="pcAdm" value="' + U.esc(p.admissao || "") + '"></div>' + cpo("Telefone", "pcTel", p.telefone) + cpo("E-mail", "pcEmail", p.email) + "</div>" + '<div class="section-title mt16">Tamanhos (para a entrega de EPI e uniforme)</div>' + '<div class="grid g3">' + cpo("Camisa", "pcCamisa", t.camisa) + cpo("Calça", "pcCalca", t.calca) + cpo("Calçado", "pcCalcado", t.calcado) + "</div>" + '<div class="field mt8"><label>Observação</label>' + '<input class="input" id="pcObs" value="' + U.esc(p.observacao || "") + '"></div>' + '<div class="alert a-gray mt12">' + ic("cadeado") + "<div><b>Este cadastro não cria acesso.</b>Ele sobe para o administrador, que define se a pessoa " + "será usuário público (recebe EPI, não entra no sistema) ou terá login com perfil.</div></div>",
-rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' + '<button class="btn btn-primary" data-ok>' + ic("salvar") + (id ? "Salvar e reenviar" : "Enviar para validação") + "</button>",
+}).join("") + "</select></div>" + cpo("Empresa", "pcEmpresa", p.empresa) + '<div class="field"><label>Data de admissão</label>' + '<input class="input" type="date" id="pcAdm" value="' + U.esc(p.admissao || "") + '"></div>' + cpo("Telefone", "pcTel", p.telefone) + cpo("E-mail", "pcEmail", p.email) + "</div>" + '<div class="section-title mt16">Tamanhos (para a entrega de EPI e uniforme)</div>' + '<div class="grid g3">' + cpo("Camisa", "pcCamisa", t.camisa) + cpo("Calça", "pcCalca", t.calca) + cpo("Calçado", "pcCalcado", t.calcado) + "</div>" + '<div class="field mt8"><label>Observação</label>' + '<input class="input" id="pcObs" value="' + U.esc(p.observacao || "") + '"></div>' + '<div class="section-title mt16">Foto do colaborador</div>' + '<div class="flex gap8" style="align-items:center">' + '<div id="pcFormFoto" style="width:96px;height:112px;border-radius:12px;background:var(--fundo-2);border:1px solid var(--linha);display:grid;place-items:center;overflow:hidden;flex:none">' + (p.foto ? '<img src="' + U.esc(p.foto) + '" style="width:100%;height:100%;object-fit:cover">' : '<span class="muted small">sem foto</span>') + "</div>" + '<div><button type="button" class="btn btn-ghost btn-sm" data-form-foto>' + ic("camera") + "Tirar foto</button>" + '<p class="small muted" style="margin:6px 0 0">Pela câmera do computador ou escolhendo uma imagem. A mesma foto vai para a Segurança, o crachá e a ficha de EPI.</p></div></div>' + '<div class="section-title mt16">EPIs e uniforme</div>' + '<div id="pcFormItens"></div>' + '<div class="alert a-gray mt12">' + ic("cadeado") + "<div><b>Este cadastro não cria acesso.</b>Ao finalizar, o processo ganha um número, um token e um QR, " + "e entra na fila da Segurança do Trabalho. Quem define se a pessoa terá login é o administrador, depois.</div></div>" + '<div id="pcFormErro"></div>',
+rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' + '<button class="btn btn-ghost" data-form-itens>' + ic("caixa") + "EPIs e kits</button>" + '<button class="btn btn-primary" data-ok>' + ic("enviar") + (id ? "Salvar e reenviar" : "Finalizar e enviar para a Segurança") + "</button>",
 aoAbrir: function(w, fechar) {
 w.querySelector("[data-x]").addEventListener("click", fechar);
+PCFORM.itens = [];
+PCFORM.kit = "";
+PCFORM.foto = p.foto || "";
+w.querySelector("[data-form-foto]").addEventListener("click", function() {
+modalTirarFoto(function(url) {
+PCFORM.foto = url;
+var palco = w.querySelector("#pcFormFoto");
+if (palco) palco.innerHTML = '<img src="' + U.esc(url) + '" style="width:100%;height:100%;object-fit:cover">';
+toast("ok", "Foto pronta", "Ela é gravada quando você finalizar o pré-cadastro.");
+});
+});
+function pintarItensDoForm() {
+var alvo = w.querySelector("#pcFormItens");
+if (!alvo) return;
+alvo.innerHTML = PCFORM.itens.length
+? '<div class="card"><div class="card-head"><b>' + PCFORM.itens.length + " item(ns) separado(s)</b>" +
+(PCFORM.kit ? '<span class="badge b-blue">' + U.esc(PCFORM.kit) + "</span>" : "") + "</div>" +
+'<div class="card-body"><div class="muted small">' + PCFORM.itens.map(function(i) {
+return U.esc(i.nome) + (i.tamanho ? " " + U.esc(i.tamanho) : "") + " ×" + i.qtd;
+}).join(" · ") + "</div></div></div>"
+: '<div class="alert a-gray">' + ic("info") +
+"<div>Nenhum EPI separado. Clique em <b>EPIs e kits</b> para escolher do estoque — " +
+"ou finalize assim, que a Segurança resolve depois.</div></div>";
+}
+pintarItensDoForm();
+w.querySelector("[data-form-itens]").addEventListener("click", function() {
+var volta = function(escolha) {
+PCFORM.itens = escolha.itens || [];
+PCFORM.kit = escolha.kit || "";
+pintarItensDoForm();
+};
+volta.jaEscolhidos = PCFORM.itens;
+volta.kitAtual = PCFORM.kit;
+modalItensPreCadastro(id || null, volta);
+});
 w.querySelector("[data-ok]").addEventListener("click", function() {
 var dados = {
 id: id,
@@ -42271,14 +43554,55 @@ tamanhoCalca: w.querySelector("#pcCalca").value.trim(),
 numeroCalcado: w.querySelector("#pcCalcado").value.trim(),
 observacao: w.querySelector("#pcObs").value.trim()
 };
+var botaoEnviar = this;
+botaoEnviar.disabled = true;
+botaoEnviar.innerHTML = '<span class="spinner"></span> Enviando…';
+function devolverBotao() {
+botaoEnviar.disabled = false;
+botaoEnviar.innerHTML = ic("enviar") + (id ? "Salvar e reenviar" : "Finalizar e enviar para a Segurança");
+}
+function avisar(msg) {
+var alvo = w.querySelector("#pcFormErro");
+if (alvo) alvo.innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div>" + U.esc(msg) + "</div></div>";
+else toast("err", "Não deu", msg);
+}
+/* UMA ida ao Core só: a ficha nasce, o token nasce, os EPIs vão
+   junto e o processo entra na fila da Segurança. Antes eram duas
+   chamadas — e quando a segunda demorava ou falhava, a ficha
+   ficava sem token e fora da fila. */
+if (PCFORM.foto) dados.foto = PCFORM.foto;
+if (!id) {
+dados.encaminharAgora = true;
+dados.itens = PCFORM.itens;
+dados.kit = PCFORM.kit;
+}
 API.call("precadastro", id ? "corrigir" : "criar", dados).then(function(r) {
+devolverBotao();
 if (!r || !r.ok) {
-toast("err", "Não deu para salvar", r && r.mensagem || "O Core recusou.");
+avisar(pcExplicarErro(r));
 return;
 }
+var idFicha = id || (r.dados && r.dados.id);
+if (typeof CACHE !== "undefined") CACHE.invalidar();
+
+/* o Core criou mas não conseguiu encaminhar: a ficha existe, com
+   token, e a mensagem diz o motivo */
+if (r.dados && r.dados.naoEncaminhou) {
+avisar(r.dados.mensagem || r.dados.naoEncaminhou);
+return;
+}
+
 fechar();
-toast("ok", id ? "Pré-cadastro corrigido" : "Pré-cadastro enviado", r.dados.mensagem);
-ROUTER.render();
+toast("ok", id ? "Dados atualizados" : "Enviado para a Segurança", r.dados.mensagem || "");
+var emBranco = listaSegura(r.dados && r.dados.emBranco);
+if (emBranco.length) {
+toast("warn", "Ficou em branco", emBranco.join(", ") + " — a Segurança vê isso na conferência. O processo seguiu normalmente.");
+}
+if (r.dados && r.dados.cpfSuspeito) {
+toast("warn", "Confira o CPF depois", "Os dígitos do CPF digitado não fecham. O cadastro seguiu normalmente — dá para corrigir a qualquer momento.");
+}
+if (id) { ROUTER.render(); return; }
+pcModalToken(idFicha);
 });
 });
 }
