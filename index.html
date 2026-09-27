@@ -1881,11 +1881,37 @@ PONTE.url = (par("core") || ALMOXA_CONFIG.API_URL || guardado(PONTE.chaves.url) 
    3. a chave que a PESSOA digitou neste navegador.
    A chave velha que ficou guardada de uma configuração antiga NÃO
    entra: API_CHAVE vazia é fase 1, e fase 1 não manda chave nenhuma. */
-PONTE.chave = (par("chave") || ALMOXA_CONFIG.API_CHAVE || guardado(PONTE.chaves.manual) || "").trim();
-PONTE.origemDaChave = par("chave") ? "endereço" : ALMOXA_CONFIG.API_CHAVE ? "configuração do projeto" : guardado(PONTE.chaves.manual) ? "digitada neste navegador" : "nenhuma";
-/* limpa de vez a chave antiga, que só atrapalhava */
+/* FASE 1 É FASE 1, INCLUSIVE PARA A CHAVE GUARDADA.
+   O comentário acima já dizia isto, mas o código não fazia: a
+   terceira fonte — a chave que alguém digitou UMA VEZ neste
+   navegador, em almoxa_app_chave_digitada — continuava entrando
+   mesmo com API_CHAVE vazia. A limpeza logo abaixo apagava
+   almoxa_app_chave e deixava justamente essa.
+
+   Resultado: a publicação hospedada mandava uma chave que a
+   configuração do projeto diz não existir, e o servidor recusava
+   com CHAVE_APP_INVALIDA. Dentro do Apps Script isso nunca
+   aparecia, porque lá a PONTE não é usada — o API.call vai direto
+   ao google.script.run. Era essa a diferença entre os dois
+   ambientes.
+
+   Agora: sem ?chave= no endereço e com API_CHAVE vazia, a fase 1
+   vale de verdade — nenhuma chave é enviada, e as guardadas são
+   apagadas para não voltarem no próximo carregamento. */
+var chaveDoEndereco = par("chave");
+var chaveDigitada = guardado(PONTE.chaves.manual);
+var ehFase1 = !chaveDoEndereco && !ALMOXA_CONFIG.API_CHAVE;
+
+PONTE.chave = ehFase1 ? "" : (chaveDoEndereco || ALMOXA_CONFIG.API_CHAVE || chaveDigitada || "").trim();
+PONTE.origemDaChave = ehFase1 ? "nenhuma (fase 1)" : chaveDoEndereco ? "endereço" : ALMOXA_CONFIG.API_CHAVE ? "configuração do projeto" : chaveDigitada ? "digitada neste navegador" : "nenhuma";
+/* em fase 1, nenhuma chave guardada sobrevive ao carregamento */
 try {
-if (!ALMOXA_CONFIG.API_CHAVE && guardado(PONTE.chaves.chave)) localStorage.removeItem(PONTE.chaves.chave);
+if (ehFase1) {
+localStorage.removeItem(PONTE.chaves.chave);
+localStorage.removeItem(PONTE.chaves.manual);
+} else if (!ALMOXA_CONFIG.API_CHAVE && guardado(PONTE.chaves.chave)) {
+localStorage.removeItem(PONTE.chaves.chave);
+}
 } catch (e) {}
 if (par("core")) PONTE.lembrar();
 },
@@ -6700,7 +6726,7 @@ var chave = (API.PONTE && API.PONTE.chave) || "";
 var dentroDoGoogle = typeof google !== "undefined" && google.script && google.script.run;
 function pintar(ping) {
 var base = ST.existeUsuario;
-alvo.innerHTML = linha("Ambiente", dentroDoGoogle ? "dentro do Apps Script" : "hospedado (ponte)") + linha("Endereço do servidor", url ? url.slice(0, 48) + "…" : "não configurado", !!url || dentroDoGoogle) + linha("Chave do aplicativo enviada", chave ? "sim (" + chave.slice(0, 4) + "…)" : "vazia") + linha("Servidor exige chave", ping && ping.dados ? (ping.dados.exigeChave ? "SIM" : "não") : "não sei") + linha("Chave confere", ping && ping.dados ? (ping.dados.exigeChave ? (ping.dados.chaveConfere ? "sim" : "NÃO") : "não se aplica") : "não sei", ping && ping.dados && ping.dados.exigeChave ? !!ping.dados.chaveConfere : undefined) + linha("Servidor respondeu", ping && ping.ok ? "sim" : "NÃO", !!(ping && ping.ok)) + linha("Base de usuários consultada", base === true || base === false ? "sim" : "NÃO", base === true || base === false) + linha("Usuários na base oficial", ST.totalUsuarios === undefined ? "não consultado" : String(ST.totalUsuarios)) + (ST.erroBase ? '<div class="alert a-yellow mt12">' + ic("alerta") + "<div><b>" + U.esc(ST.erroBase.codigo) + "</b>" + U.esc(ST.erroBase.mensagem) + "</div></div>" : "") + '<div class="alert a-blue mt12">' + ic("info") + "<div>A <b>chave do aplicativo</b> protege a comunicação desta publicação com o servidor. " + "Ela é outra coisa, e não substitui, a <b>chave do crachá</b>.<br><br>" + "Se o servidor exige chave e esta publicação está sem ela, rode <b>PONTE_removerChave</b> no Apps Script " + "para voltar à fase sem chave, ou informe a chave abaixo.</div></div>" + (dentroDoGoogle ? "" : '<button class="btn btn-ghost btn-sm mt8" data-por-chave>Informar a chave do aplicativo</button>');
+alvo.innerHTML = linha("Ambiente", dentroDoGoogle ? "dentro do Apps Script" : "hospedado (ponte)") + linha("Endereço do servidor", url ? url.slice(0, 48) + "…" : "não configurado", !!url || dentroDoGoogle) + linha("Chave do aplicativo enviada", chave ? "sim (" + chave.slice(0, 4) + "…)" : "vazia") + linha("De onde veio essa chave", (API.PONTE && API.PONTE.origemDaChave) || "nenhuma") + linha("Servidor exige chave", ping && ping.dados ? (ping.dados.exigeChave ? "SIM" : "não") : "não sei") + linha("Chave confere", ping && ping.dados ? (ping.dados.exigeChave ? (ping.dados.chaveConfere ? "sim" : "NÃO") : "não se aplica") : "não sei", ping && ping.dados && ping.dados.exigeChave ? !!ping.dados.chaveConfere : undefined) + linha("Servidor respondeu", ping && ping.ok ? "sim" : "NÃO", !!(ping && ping.ok)) + linha("Base de usuários consultada", base === true || base === false ? "sim" : "NÃO", base === true || base === false) + linha("Usuários na base oficial", ST.totalUsuarios === undefined ? "não consultado" : String(ST.totalUsuarios)) + (ST.erroBase ? '<div class="alert a-yellow mt12">' + ic("alerta") + "<div><b>" + U.esc(ST.erroBase.codigo) + "</b>" + U.esc(ST.erroBase.mensagem) + "</div></div>" : "") + '<div class="alert a-blue mt12">' + ic("info") + "<div>A <b>chave do aplicativo</b> protege a comunicação desta publicação com o servidor. " + "Ela é outra coisa, e não substitui, a <b>chave do crachá</b>.<br><br>" + "Se o servidor exige chave e esta publicação está sem ela, rode <b>PONTE_removerChave</b> no Apps Script " + "para voltar à fase sem chave, ou informe a chave abaixo.</div></div>" + (dentroDoGoogle ? "" : '<button class="btn btn-ghost btn-sm mt8" data-por-chave>Informar a chave do aplicativo</button>');
 var bp = alvo.querySelector("[data-por-chave]");
 if (bp) bp.addEventListener("click", function() {
 var v = window.prompt("Chave do aplicativo (deixe em branco para não enviar nenhuma):", chave);
