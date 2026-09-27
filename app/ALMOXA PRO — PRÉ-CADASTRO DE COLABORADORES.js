@@ -863,6 +863,7 @@ var AP_PRECAD_SEG = {
     'validadoSegPor', 'validadoSegEm', 'devolvidoMotivo',
     'assinatura', 'assinaturaEm', 'assinaturaPor',
     'biometriaId',
+    'itensSelecionados', 'kitSelecionado',
     'crachaCodigo', 'crachaEm'
   ],
 
@@ -1204,6 +1205,14 @@ function AP_PRECAD_SEG_encaminhar_(payload, sessao) {
     if (payload[c] !== undefined) completar[c] = AP_PRECAD_SEG_texto_(payload[c]);
   });
 
+  /* o RH pode mandar a lista de EPI junto do encaminhamento, em vez
+     de salvar antes. Um caminho só, dois jeitos de chegar nele. */
+  if (payload.itens !== undefined) {
+    completar.itensSelecionados =
+      JSON.stringify(AP_PRECAD_SEG_juntarPorSku_(AP_PRECAD_SEG_limparItens_(payload.itens)));
+  }
+  if (payload.kit !== undefined) completar.kitSelecionado = AP_PRECAD_SEG_texto_(payload.kit);
+
   var cfg = AP_PRECAD_SEG_campos_();
   var autorizados = cfg.campos.filter(function (c) { return c.enviar; });
 
@@ -1462,6 +1471,9 @@ function AP_PRECAD_SEG_abrir_(payload, sessao) {
       tipoSanguineo: AP_PRECAD_SEG_texto_(p.tipoSanguineo),
       observacao: AP_PRECAD_SEG_texto_(p.observacaoSeguranca)
     },
+    /* o que o RH separou no estoque — a Segurança confere, não redigita */
+    itens: AP_PRECAD_SEG_json_(p.itensSelecionados, []),
+    kit: AP_PRECAD_SEG_texto_(p.kitSelecionado),
     assinatura: {
       tem: !!AP_PRECAD_SEG_texto_(p.assinatura),
       em: AP_PRECAD_SEG_texto_(p.assinaturaEm),
@@ -1832,6 +1844,9 @@ function AP_PRECAD_SEG_paraCracha_(payload, sessao) {
       foto: AP_PRECAD_SEG_texto_(p.foto),
       nivel: 'SOLICITAR'
     },
+    /* o que foi separado, para quem for montar a reserva depois */
+    itens: AP_PRECAD_SEG_json_(p.itensSelecionados, []),
+    kit: AP_PRECAD_SEG_texto_(p.kitSelecionado),
     /* o que a Segurança apurou, para o verso do crachá */
     verso: {
       tipoSanguineo: AP_PRECAD_SEG_texto_(p.tipoSanguineo),
@@ -1900,6 +1915,91 @@ function AP_PRECAD_SEG_instalar_() {
 }
 
 
+/* ------------------------------------------------------------
+   9. OS EPIs E KITS QUE O RH SEPAROU
+   ------------------------------------------------------------
+   Nada de catálogo próprio aqui. O que entra é o que o cadastro
+   de itens e o de kits já têm — cada linha guarda o SKU, e é o
+   SKU que diferencia BOTA 40 de BOTA 41. Agrupar pela descrição
+   seria o mesmo que entregar o número errado no dia da retirada.
+   ------------------------------------------------------------ */
+
+function AP_PRECAD_SEG_limparItens_(lista) {
+  return (lista || []).map(function (i) {
+    var qtd = Number(i && i.qtd);
+    if (!(qtd > 0)) qtd = 1;
+    return {
+      sku: AP_PRECAD_SEG_texto_(i.sku || i.codigo || i.id),
+      nome: AP_PRECAD_SEG_texto_(i.nome || i.descricao),
+      tamanho: AP_PRECAD_SEG_texto_(i.tamanho),
+      unidade: AP_PRECAD_SEG_texto_(i.unidade) || 'un',
+      categoria: AP_PRECAD_SEG_texto_(i.categoria),
+      qtd: qtd,
+      /* de onde veio: item avulso ou dentro de um kit. Some junto
+         com o kit se o kit for trocado, e é por isso que precisa
+         estar escrito. */
+      kit: AP_PRECAD_SEG_texto_(i.kit)
+    };
+  }).filter(function (i) { return i.sku && i.nome; });
+}
+
+/** Junta as linhas do mesmo SKU, somando — sem misturar tamanhos. */
+function AP_PRECAD_SEG_juntarPorSku_(lista) {
+  var mapa = {}, ordem = [];
+  lista.forEach(function (i) {
+    var chave = i.sku + '|' + i.kit;
+    if (!mapa[chave]) { mapa[chave] = i; ordem.push(chave); return; }
+    mapa[chave].qtd += i.qtd;
+  });
+  return ordem.map(function (k) { return mapa[k]; });
+}
+
+function AP_PRECAD_SEG_salvarItens_(payload, sessao) {
+  var p = AP_PRECAD_SEG_linha_(payload && payload.id);
+  if (!p) return AP_PRECAD_SEG_erro_('NAO_ENCONTRADO', 'Pré-cadastro não localizado.');
+
+  var pode = AP_PRECAD_SEG_pode_(sessao, 'separarItens', p);
+  if (!pode.permitido) return AP_PRECAD_SEG_erro_('SEM_PERMISSAO', pode.motivo);
+
+  var etapa = AP_PRECAD_SEG_etapaDe_(p);
+  if (etapa === AP_PRECAD_SEG.etapas.CRACHA) {
+    return AP_PRECAD_SEG_erro_('JA_EMITIDO',
+      'O processo já foi encerrado; a entrega de EPI agora é pela ficha do colaborador.');
+  }
+
+  var itens = AP_PRECAD_SEG_juntarPorSku_(AP_PRECAD_SEG_limparItens_(payload.itens));
+  var quem = AP_PRECAD_quem_(sessao);
+
+  AP_Data_update(AP_PRECAD_CFG.aba, p.id, {
+    itensSelecionados: JSON.stringify(itens),
+    kitSelecionado: AP_PRECAD_SEG_texto_(payload.kit),
+    atualizadoEm: AP_PRECAD_agora_(), atualizadoPor: quem
+  }, 'id');
+
+  AP_PRECAD_auditar_(quem, 'PRECADASTRO_ITENS_SEPARADOS', p.id, {
+    quantos: itens.length,
+    kit: AP_PRECAD_SEG_texto_(payload.kit),
+    skus: itens.map(function (i) { return i.sku + ' x' + i.qtd; })
+  });
+
+  return AP_PRECAD_SEG_ok_({
+    id: p.id, itens: itens, kit: AP_PRECAD_SEG_texto_(payload.kit),
+    total: itens.reduce(function (t, i) { return t + i.qtd; }, 0)
+  }, itens.length ? itens.length + ' item(ns) separado(s).' : 'Lista de itens limpa.');
+}
+
+function AP_PRECAD_SEG_itens_(payload, sessao) {
+  var p = AP_PRECAD_SEG_linha_(payload && payload.id);
+  if (!p) return AP_PRECAD_SEG_erro_('NAO_ENCONTRADO', 'Pré-cadastro não localizado.');
+  var itens = AP_PRECAD_SEG_json_(p.itensSelecionados, []);
+  return AP_PRECAD_SEG_ok_({
+    id: p.id, itens: itens,
+    kit: AP_PRECAD_SEG_texto_(p.kitSelecionado),
+    total: itens.reduce(function (t, i) { return t + (Number(i.qtd) || 0); }, 0)
+  });
+}
+
+
 /* ============================================================
    AS PORTAS NOVAS
    ------------------------------------------------------------
@@ -1922,6 +2022,9 @@ function AP_PRECAD_SEG_atender_(acao, payload, sessao) {
     case 'localizar': return AP_PRECAD_SEG_localizar_(payload, sessao);
     case 'pendentesSeguranca': return AP_PRECAD_SEG_pendentes_(payload, sessao);
     case 'abrirSeguranca': return AP_PRECAD_SEG_abrir_(payload, sessao);
+
+    case 'itens': return AP_PRECAD_SEG_itens_(payload, sessao);
+    case 'salvarItens': return AP_PRECAD_SEG_salvarItens_(payload, sessao);
 
     case 'complementar': return AP_PRECAD_SEG_complementar_(payload, sessao);
     case 'nrs': return AP_PRECAD_SEG_ok_({ nrs: AP_PRECAD_SEG_nrsDisponiveis_() });
@@ -2298,6 +2401,83 @@ function AP_PRECAD_SEG_testes() {
       if (!r || r.ok || r.codigo !== 'NAO_ENCONTRADO') todasRecusaram = false;
     });
     ok('78 processo inexistente é recusado em todas as portas, sem explodir', todasRecusaram);
+
+    /* ---------- os EPIs e kits que o RH separou ---------- */
+    limpar();
+    var idI = novo();
+    var comItens = chamar('salvarItens', {
+      id: idI,
+      kit: 'KIT INTEGRACAO',
+      itens: [
+        { sku: 'BOT-41', nome: 'Bota de segurança', tamanho: '41', unidade: 'par', categoria: 'EPI', qtd: 1, kit: 'KIT INTEGRACAO' },
+        { sku: 'CAM-M', nome: 'Camiseta', tamanho: 'M', unidade: 'un', categoria: 'Uniforme', qtd: 2, kit: 'KIT INTEGRACAO' },
+        { sku: 'CAP-01', nome: 'Capacete', unidade: 'un', categoria: 'EPI', qtd: 1 }
+      ]
+    }, RH);
+    ok('80 o RH separa os EPIs e o kit', comItens.ok, comItens.mensagem);
+    ok('81 cada item guarda o próprio SKU',
+      comItens.dados.itens.map(function (i) { return i.sku; }).join(',') === 'BOT-41,CAM-M,CAP-01',
+      comItens.dados.itens.map(function (i) { return i.sku; }).join(','));
+    ok('82 e de qual kit veio', comItens.dados.itens[0].kit === 'KIT INTEGRACAO');
+    ok('83 o total soma as quantidades', comItens.dados.total === 4, comItens.dados.total);
+
+    var doisTamanhos = chamar('salvarItens', {
+      id: idI,
+      itens: [
+        { sku: 'BOT-40', nome: 'Bota de segurança', tamanho: '40', qtd: 1 },
+        { sku: 'BOT-41', nome: 'Bota de segurança', tamanho: '41', qtd: 1 }
+      ]
+    }, RH);
+    ok('84 BOTA 40 e BOTA 41 continuam sendo duas coisas',
+      doisTamanhos.dados.itens.length === 2,
+      doisTamanhos.dados.itens.map(function (i) { return i.sku; }).join(','));
+
+    var repetido = chamar('salvarItens', {
+      id: idI,
+      itens: [
+        { sku: 'CAP-01', nome: 'Capacete', qtd: 1 },
+        { sku: 'CAP-01', nome: 'Capacete', qtd: 2 }
+      ]
+    }, RH);
+    ok('85 o mesmo SKU duas vezes vira uma linha com a soma',
+      repetido.dados.itens.length === 1 && repetido.dados.itens[0].qtd === 3,
+      JSON.stringify(repetido.dados.itens));
+
+    var semSku = chamar('salvarItens', {
+      id: idI, itens: [{ nome: 'Coisa sem código', qtd: 1 }]
+    }, RH);
+    ok('86 item sem SKU não entra — não existe no estoque',
+      semSku.ok && semSku.dados.itens.length === 0);
+
+    var qtdRuim = chamar('salvarItens', {
+      id: idI, itens: [{ sku: 'CAP-01', nome: 'Capacete', qtd: 0 }]
+    }, RH);
+    ok('87 quantidade zero ou vazia vira 1, em vez de sumir',
+      qtdRuim.dados.itens.length === 1 && qtdRuim.dados.itens[0].qtd === 1);
+
+    chamar('salvarItens', {
+      id: idI, kit: 'KIT OBRA',
+      itens: [{ sku: 'CAP-01', nome: 'Capacete', qtd: 1, kit: 'KIT OBRA' }]
+    }, RH);
+    chamar('encaminhar', { id: idI }, RH);
+    var vistoPelaSeg = chamar('abrirSeguranca', { id: idI }, SEG);
+    ok('88 a Segurança vê o que o RH separou',
+      vistoPelaSeg.ok && vistoPelaSeg.dados.itens.length === 1 &&
+      vistoPelaSeg.dados.itens[0].sku === 'CAP-01');
+    ok('89 e vê de qual kit', vistoPelaSeg.dados.kit === 'KIT OBRA', vistoPelaSeg.dados.kit);
+
+    var lidos = chamar('itens', { id: idI }, SEG);
+    ok('90 a lista pode ser lida sozinha', lidos.ok && lidos.dados.total === 1);
+
+    /* mandar itens junto do encaminhamento, sem salvar antes */
+    var idJ = novo({ nome: 'Direto', cpf: '111.444.777-35', matricula: '000666' });
+    var encComItens = chamar('encaminhar', {
+      id: idJ, kit: 'KIT INTEGRACAO',
+      itens: [{ sku: 'LUV-P', nome: 'Luva', tamanho: 'P', qtd: 1 }]
+    }, RH);
+    ok('91 dá para mandar a lista junto do encaminhamento', encComItens.ok);
+    ok('92 e ela chega lá',
+      chamar('abrirSeguranca', { id: idJ }, SEG).dados.itens[0].sku === 'LUV-P');
 
     /* ---------- sem o módulo de crachá não se inventa chave ---------- */
     limpar();
