@@ -23,7 +23,7 @@
  * AP_Config_readFromSheet_ continuam existindo com o mesmo
  * comportamento externo.
  */
-
+const ALMOXA_CHAVE_APP = "ax_pro_8d4c9f1a2e3b7c8d9e0f_2026_secure"
 var AP_SHEETS = {
   CONFIG: 'CONFIG',
   USUARIOS: 'USUARIOS',
