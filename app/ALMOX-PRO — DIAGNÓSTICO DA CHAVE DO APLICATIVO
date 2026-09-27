@@ -1,0 +1,214 @@
+/* ============================================================
+   ALMOX-PRO — DIAGNÓSTICO DA CHAVE DO APLICATIVO
+   ------------------------------------------------------------
+   SÓ LEITURA. Não grava, não apaga, não altera propriedade
+   nenhuma, não mexe em usuário, crachá, permissão nem banco.
+   Pode rodar quantas vezes quiser, na obra, em horário de uso.
+
+   Responde uma pergunta: POR QUE a publicação hospedada é
+   recusada com "chave de aplicativo", e se essa exigência foi
+   criada na migração ou já existia.
+
+   COMO RODAR
+     No editor do Apps Script, escolha AP_DIAG_CHAVE_APP e clique
+     em Executar. O resultado sai no Registro de execução.
+
+   NENHUMA CHAVE É IMPRESSA. O diagnóstico diz se ela existe e
+   quantos caracteres tem — nunca o valor. Log é coisa que se
+   copia e cola, e chave em log vira chave vazada.
+   ============================================================ */
+
+function AP_DIAG_CHAVE_APP() {
+  var L = [];
+  function d(t) { L.push(t); }
+  function titulo(t) { d(''); d('--- ' + t + ' ---'); }
+
+  d('============================================================');
+  d('DIAGNOSTICO DA CHAVE DO APLICATIVO   (somente leitura)');
+  d(new Date().toISOString());
+  d('============================================================');
+
+  /* ---------- 1. O MÓDULO DA PONTE ESTÁ INSTALADO? ---------- */
+  titulo('1. O MODULO DA PONTE');
+  var temPonte = (typeof AP_PONTE_CFG !== 'undefined');
+  d('AP_PONTE_CFG ............ ' + (temPonte ? 'EXISTE' : 'NAO EXISTE'));
+  if (!temPonte) {
+    d('');
+    d('Sem o modulo da ponte instalado, NENHUMA publicacao hospedada');
+    d('consegue falar com o Core: o unico caminho de fora para dentro');
+    d('e o AP_PONTE_doPost/doGet. Instale o ALMOXA_PRO_Modulo_Ponte.gs.');
+    return AP_DIAG_CHAVE_fim_(L);
+  }
+  d('versao da ponte ......... ' + AP_PONTE_CFG.versao);
+  d('propriedade da chave .... ' + AP_PONTE_CFG.propChave);
+  d('limite do corpo ......... ' + AP_PONTE_CFG.limiteCorpo + ' caracteres');
+  d('acoes que passam SEM sessao (a porta de entrada):');
+  (AP_PONTE_CFG.semSessao || []).forEach(function (a) { d('   ' + a); });
+
+  /* ---------- 2. A CHAVE EXISTE NESTE PROJETO? ---------- */
+  titulo('2. A CHAVE NO PROPRIO PROJETO');
+  var chave = '', erroProp = '';
+  try {
+    chave = String(PropertiesService.getScriptProperties()
+      .getProperty(AP_PONTE_CFG.propChave) || '').trim();
+  } catch (e) { erroProp = e.message; }
+
+  if (erroProp) d('nao consegui ler as propriedades: ' + erroProp);
+  d('a chave esta configurada? ' + (chave ? 'SIM' : 'NAO'));
+  if (chave) {
+    /* NUNCA o valor. Só o suficiente para conferir se e a mesma. */
+    d('quantos caracteres ...... ' + chave.length);
+    d('tem espaco nas pontas? .. ' + (/^\s|\s$/.test(
+      String(PropertiesService.getScriptProperties().getProperty(AP_PONTE_CFG.propChave) || ''))
+      ? 'SIM — isso sozinho ja faz a comparacao falhar' : 'nao'));
+  }
+
+  /* ---------- 3. QUEM EXIGE, E O QUE ACONTECE ---------- */
+  titulo('3. QUEM EXIGE A CHAVE');
+  d('Arquivo ..... ALMOXA_PRO_Modulo_Ponte.gs');
+  d('Funcao ...... AP_PONTE_chaveConfere_(recebida)');
+  d('Regra ....... se a chave NAO esta configurada, devolve true e passa.');
+  d('              se esta configurada, exige igualdade exata.');
+  d('Quem chama .. AP_PONTE_atender_, antes de qualquer modulo.');
+  d('Recusa com .. codigo APP_NAO_AUTORIZADO');
+  d('              "Este aplicativo nao esta autorizado a falar com o Core."');
+  d('');
+  if (chave) {
+    d('>>> ESTE PROJETO EXIGE CHAVE. Toda chamada que chegar pela ponte');
+    d('>>> sem a chave exata sera recusada — e a ponte e o unico caminho');
+    d('>>> de uma publicacao hospedada (GitHub, Pages, servidor proprio).');
+  } else {
+    d('>>> ESTE PROJETO NAO EXIGE CHAVE. A ponte passa qualquer chamada');
+    d('>>> para o Core, e a autenticacao normal continua obrigatoria:');
+    d('>>> fora da lista semSessao acima, nada anda sem sessao.');
+    d('>>> Se a publicacao hospedada esta sendo recusada por chave, a');
+    d('>>> recusa NAO vem daqui. Veja a secao 6.');
+  }
+
+  /* ---------- 4. O QUE O PING RESPONDE ---------- */
+  titulo('4. O QUE O PING RESPONDE (e o que a tela le)');
+  function simularPing(recebida) {
+    return {
+      exigeChave: !!chave,
+      chaveConfere: AP_PONTE_chaveConfere_(recebida)
+    };
+  }
+  var semNada = simularPing('');
+  d('pedido sem chave ........ exigeChave=' + semNada.exigeChave +
+    '  chaveConfere=' + semNada.chaveConfere);
+  if (chave) {
+    var certa = simularPing(chave);
+    var errada = simularPing(chave + 'X');
+    d('pedido com a chave certa  exigeChave=' + certa.exigeChave +
+      '  chaveConfere=' + certa.chaveConfere);
+    d('pedido com chave errada . exigeChave=' + errada.exigeChave +
+      '  chaveConfere=' + errada.chaveConfere);
+  }
+  d('');
+  d('A tela de abertura recusa quando exigeChave=true E chaveConfere=false.');
+  d(chave
+    ? 'Neste projeto isso acontece com qualquer publicacao que nao mande a chave.'
+    : 'Neste projeto isso NUNCA acontece: exigeChave e false.');
+
+  /* ---------- 5. O SISTEMA ANTIGO NUNCA PASSAVA POR AQUI ---------- */
+  titulo('5. POR QUE O SISTEMA ANTIGO NAO DAVA ESSE ERRO');
+  d('O frontend antigo rodava DENTRO do Apps Script. No bloco [API] do');
+  d('HTML, o API.call faz:');
+  d('');
+  d('    if (API.disponivelCore()) {           // google.script.run existe');
+  d('        google.script.run ... .almoxaApi(JSON.stringify(req));');
+  d('        return;                           // <-- sai aqui');
+  d('    }');
+  d('    if (PONTE.pronta()) { ... }           // so chega aqui de fora');
+  d('');
+  d('Ou seja: rodando dentro do Apps Script a chamada vai direto ao');
+  d('almoxaApi e a PONTE NUNCA E TOCADA — e a ponte e o unico lugar que');
+  d('confere a chave. A exigencia ja existia no codigo; o trafego e que');
+  d('nao passava por ela.');
+  d('');
+  d('A migracao para o GitHub nao CRIOU a exigencia. Ela mudou o');
+  d('transporte de google.script.run para HTTP, e HTTP so entra pela');
+  d('ponte — a estrada onde a regra sempre esteve.');
+
+  /* ---------- 6. O QUE FALTA PARA A PUBLICACAO ABRIR ---------- */
+  titulo('6. O QUE FAZER');
+  if (chave) {
+    d('Duas saidas, as duas sem criar chave nova e sem tirar seguranca:');
+    d('');
+    d('(a) FASE 1 — apagar a propriedade ' + AP_PONTE_CFG.propChave);
+    d('    em Configuracoes do projeto > Propriedades do script.');
+    d('    A ponte volta a passar, e a AUTENTICACAO CONTINUA OBRIGATORIA:');
+    d('    fora das acoes da lista semSessao, nada anda sem sessao.');
+    d('    Isto e o que o proprio bloco [CFG] do HTML chama de fase 1.');
+    d('');
+    d('(b) MANTER A CHAVE — copiar o valor que ja esta nessa propriedade');
+    d('    para o API_CHAVE da publicacao hospedada. Mesma chave, nenhuma');
+    d('    nova. Nao coloque esse valor em repositorio publico.');
+    d('');
+    d('Nao ha terceira saida honesta: se o projeto exige chave e a');
+    d('publicacao nao a manda, a recusa esta certa.');
+  } else {
+    d('Este projeto NAO exige chave, entao a mensagem que voce viu nao');
+    d('pode ter saido daqui. Ela esta no FRONTEND da publicacao');
+    d('hospedada, num portao proprio que le exigeChave/chaveConfere do');
+    d('ping e para a abertura por conta propria.');
+    d('');
+    d('Procure no arquivo da publicacao por:');
+    d('   exigeChave        chaveConfere        ponte=ping');
+    d('   API_CHAVE         PONTE.chave');
+    d('E confira tambem se sobrou chave guardada no navegador:');
+    d('   localStorage, chaves almoxa_ponte_chave / almoxa_chave_manual.');
+    d('Chave velha guardada de uma configuracao antiga e recusa de hoje.');
+  }
+
+  /* ---------- 7. O RESTO DA CORRENTE ESTA DE PE? ---------- */
+  titulo('7. O RESTO DA CORRENTE (para o teste seguinte)');
+  [['almoxaApi', 'a porta que a ponte chama'],
+   ['AP_Modulo_auth', 'login e primeiro acesso'],
+   ['AP_Modulo_usuarios', 'banco de usuarios'],
+   ['AP_Modulo_cracha', 'autenticacao por cracha'],
+   ['AP_SEG_abrirSessao', 'criacao de sessao'],
+   ['AP_SEG_validarSessao', 'validacao de sessao'],
+   ['AP_SEG_podeFazer', 'permissoes'],
+   ['AP_Data_getSheet', 'camada de dados']
+  ].forEach(function (par) {
+    var existe = false;
+    try { existe = (eval('typeof ' + par[0]) === 'function'); } catch (e) { }
+    d((existe ? '[ok]   ' : '[falta]') + ' ' + par[0] + '  —  ' + par[1]);
+  });
+
+  /* ---------- 8. A LISTA DE VERIFICACAO ---------- */
+  titulo('8. A LISTA DE VERIFICACAO');
+  d('O que pode ser respondido DE DENTRO do Apps Script:');
+  d('');
+  d('[?] GitHub abriu ............. so a publicacao responde');
+  d('[?] API respondeu ........... so a publicacao responde');
+  d((temPonte ? '[ok]' : '[falha]') + ' Backend respondeu ....... a ponte esta instalada e responde ping');
+  d('[?] Tela de autenticacao .... so a publicacao responde');
+  var temCracha = false;
+  try { temCracha = (typeof AP_Modulo_cracha === 'function'); } catch (e) { }
+  d((temCracha ? '[ok]' : '[falha]') + ' Cracha disponivel ....... modulo do cracha');
+  var temDados = false;
+  try { temDados = (typeof AP_Data_getSheet === 'function'); } catch (e) { }
+  d((temDados ? '[ok]' : '[falha]') + ' Banco acessivel ......... camada de dados');
+  d('[?] Usuario localizado ...... precisa de um login de verdade');
+  d('[?] Sessao criada ........... precisa de um login de verdade');
+  d('[?] Permissoes carregadas ... precisa de um login de verdade');
+  d('');
+  d('Os quatro ultimos so podem ser marcados depois que a publicacao');
+  d('abrir e alguem fizer login com um usuario REAL. Nao marque nenhum');
+  d('deles por conta deste diagnostico.');
+
+  return AP_DIAG_CHAVE_fim_(L);
+}
+
+function AP_DIAG_CHAVE_fim_(L) {
+  L.push('');
+  L.push('============================================================');
+  L.push('Nada foi gravado nem alterado por este diagnostico.');
+  L.push('============================================================');
+  var texto = L.join('\n');
+  try { Logger.log(texto); } catch (e) { }
+  try { console.log(texto); } catch (e) { }
+  return texto;
+}
