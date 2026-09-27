@@ -1795,6 +1795,41 @@ var ALMOXA_CONFIG = {
 API_URL: "https://script.google.com/macros/s/AKfycbwWahYJywIsbRGc3t8taMWTXNgLd_1JtFJ93VmGNfAA-bXcgMlUoW6OZszZWEWMULA1/exec",
 API_CHAVE: ""
 };
+
+/* ############################################################
+ * A RECUSA POR CHAVE DO APLICATIVO, EXPLICADA
+ * ------------------------------------------------------------
+ * Quem exige a chave é o Core, em ALMOXA_PRO_Modulo_Ponte.gs,
+ * função AP_PONTE_chaveConfere_: se a propriedade de script
+ * ALMOXA_CHAVE_APP estiver vazia, ele passa; se estiver
+ * preenchida, exige igualdade exata e recusa com o código
+ * APP_NAO_AUTORIZADO.
+ *
+ * Rodando DENTRO do Apps Script isso nunca aparecia, porque o
+ * API.call vai direto ao almoxaApi e a ponte não é tocada. Numa
+ * publicação hospedada todo pedido entra pela ponte, que é o
+ * único lugar onde a regra é conferida. A exigência não nasceu
+ * na migração: o tráfego passou a andar pela estrada onde ela
+ * sempre esteve.
+ *
+ * Esta função NÃO libera nada e NÃO confere chave: só troca uma
+ * frase sem saída por uma que diz o que fazer.
+ * ############################################################ */
+function APP_EXPLICAR_CHAVE(r) {
+  if (!r || r.ok !== false) return r;
+  var codigo = String(r.codigo || r.erro || "");
+  if (!/^(APP_NAO_AUTORIZADO|CHAVE_APP_INVALIDA|CHAVE_INVALIDA)$/.test(codigo)) return r;
+  r.chaveDoAplicativo = true;
+  r.mensagem = "O servidor do ALMOX-PRO está configurado com uma chave de aplicativo " +
+    "e esta publicação não está enviando a mesma chave. Isso não tem relação com " +
+    "login, senha ou crachá — é o servidor decidindo quais aplicativos podem falar " +
+    "com ele.\n\n" +
+    "Duas saídas, nenhuma delas criando chave nova: apagar a propriedade de script " +
+    "ALMOXA_CHAVE_APP no Apps Script (Configurações do projeto → Propriedades do " +
+    "script), o que devolve o servidor à fase 1 sem tirar a autenticação; ou informar " +
+    "aqui a mesma chave que já está lá, em Diagnóstico da conexão.";
+  return r;
+}
 /* ############################################################
  * BLOCO: PONTE / API / CORE                  busca: [API]
  * ------------------------------------------------------------
@@ -1846,11 +1881,38 @@ PONTE.url = (par("core") || ALMOXA_CONFIG.API_URL || guardado(PONTE.chaves.url) 
    3. a chave que a PESSOA digitou neste navegador.
    A chave velha que ficou guardada de uma configuração antiga NÃO
    entra: API_CHAVE vazia é fase 1, e fase 1 não manda chave nenhuma. */
-PONTE.chave = (par("chave") || ALMOXA_CONFIG.API_CHAVE || guardado(PONTE.chaves.manual) || "").trim();
-PONTE.origemDaChave = par("chave") ? "endereço" : ALMOXA_CONFIG.API_CHAVE ? "configuração do projeto" : guardado(PONTE.chaves.manual) ? "digitada neste navegador" : "nenhuma";
-/* limpa de vez a chave antiga, que só atrapalhava */
+/* FASE 1 É FASE 1, INCLUSIVE PARA A CHAVE GUARDADA.
+   O comentário acima já dizia isto, mas o código não fazia: a
+   terceira fonte — a chave que alguém digitou UMA VEZ neste
+   navegador, em almoxa_app_chave_digitada — continuava entrando
+   mesmo com API_CHAVE vazia. A limpeza logo abaixo apagava
+   almoxa_app_chave e deixava justamente essa.
+
+   Resultado: a publicação hospedada mandava uma chave que a
+   configuração do projeto diz não existir, e o servidor recusava
+   com CHAVE_APP_INVALIDA. Dentro do Apps Script isso nunca
+   aparecia, porque lá a PONTE não é usada — o API.call vai direto
+   ao google.script.run. Era essa a diferença entre os dois
+   ambientes.
+
+   Agora: sem ?chave= no endereço e com API_CHAVE vazia, a fase 1
+   vale de verdade — nenhuma chave é enviada, e as guardadas são
+   apagadas para não voltarem no próximo carregamento. */
+var chaveDoEndereco = par("chave");
+var chaveDigitada = guardado(PONTE.chaves.manual);
+var ehFase1 = !chaveDoEndereco && !ALMOXA_CONFIG.API_CHAVE;
+
+PONTE.chave = (chaveDoEndereco || ALMOXA_CONFIG.API_CHAVE || chaveDigitada || "").trim();
+PONTE.origemDaChave = chaveDoEndereco ? "endereço" : ALMOXA_CONFIG.API_CHAVE ? "configuração do projeto" : chaveDigitada ? "guardada neste navegador (não está no repositório)" : "nenhuma (fase 1)";
+/* A chave ANTIGA, herdada de uma configuração passada, sai sempre —
+   era ela que voltava sozinha e fazia o servidor recusar.
+   A chave que a PESSOA digitou de propósito FICA: quando o servidor
+   realmente exige uma, é assim que esta publicação a recebe sem
+   nunca gravá-la no repositório. Se ela estiver errada, o próprio
+   API.call repete o pedido sem chave e, dando certo, esquece a
+   guardada — o conserto é automático. */
 try {
-if (!ALMOXA_CONFIG.API_CHAVE && guardado(PONTE.chaves.chave)) localStorage.removeItem(PONTE.chaves.chave);
+localStorage.removeItem(PONTE.chaves.chave);
 } catch (e) {}
 if (par("core")) PONTE.lembrar();
 },
@@ -2053,6 +2115,16 @@ return r2;
 comRetentativa().then(function(r) {
 STATE.coreStatus = r && r.ok === false && r.codigo === "RESPOSTA_ESTRANHA" ? "erro" : "online";
 UI.atualizarCore();
+/* A CHAVE DO APLICATIVO.
+   Quem decide é o Core: o AP_PONTE_chaveConfere_ do
+   ALMOXA_PRO_Modulo_Ponte.gs, e só ele. Esta publicação não
+   confere chave nenhuma por conta própria e não bloqueia a
+   abertura por causa dela — a autenticação normal continua
+   obrigatória do mesmo jeito.
+   O que faltava era explicação: o Core recusa com
+   APP_NAO_AUTORIZADO e a frase dele não diz o que fazer, então
+   o erro chegava ao usuário como um beco sem saída. */
+r = APP_EXPLICAR_CHAVE(r);
 terminar(r && r.ok !== undefined ? r : {
 ok: true,
 dados: r
@@ -6421,18 +6493,42 @@ var voltar = el.querySelector("#lgVoltar");
 if (voltar) voltar.addEventListener("click", function() {
 LOGIN.fechar();
 });
-var bt1 = el.querySelector("[data-base-tentar]");
-if (bt1) bt1.addEventListener("click", function() {
-var b = this;
-b.innerHTML = '<span class="spinner"></span> Consultando…';
-b.disabled = true;
+/* OS BOTÕES DO AVISO DA BASE, LIGADOS DE UMA VEZ SÓ.
+   Antes cada botão recebia o seu ouvinte aqui dentro. Só que a tela
+   de login é repintada logo depois — e a repintura joga fora os
+   botões antigos e cria outros, sem ouvinte nenhum. O resultado era
+   silencioso e enganoso: os botões apareciam bonitos e não faziam
+   nada. "Tentar de novo" e "Ver diagnóstico" estavam assim desde
+   sempre.
+   O ouvinte agora fica no #loginScreen, que NÃO é recriado, e
+   descobre no clique qual botão foi. Repintar quantas vezes quiser
+   não desliga mais nada. */
+if (!el.__ligouAvisoDaBase) {
+el.__ligouAvisoDaBase = true;
+el.addEventListener("click", function(ev) {
+var alvo = ev.target && ev.target.closest
+? ev.target.closest("[data-base-tentar],[data-base-diag],[data-base-chave]")
+: null;
+if (!alvo || !el.contains(alvo)) return;
+
+if (alvo.hasAttribute("data-base-tentar")) {
+alvo.innerHTML = '<span class="spinner"></span> Consultando…';
+alvo.disabled = true;
 verificarExisteUsuario().then(function() {
 LOGIN.montar();
 if (baseConsultada()) toast("ok", "Cadastro consultado", (ST.totalUsuarios || 0) + " usuário(s) na base oficial.");
 });
+return;
+}
+if (alvo.hasAttribute("data-base-diag")) { modalDiagnosticoDeConexao(); return; }
+if (alvo.hasAttribute("data-base-chave")) {
+/* informar a chave sem nunca escrevê-la no repositório */
+modalInformarChave(function() {
+if (typeof verificarExisteUsuario === "function") verificarExisteUsuario().then(function() { LOGIN.montar(); });
 });
-var bt2 = el.querySelector("[data-base-diag]");
-if (bt2) bt2.addEventListener("click", modalDiagnosticoDeConexao);
+}
+});
+}
 var novo = el.querySelector("#lgNovoCadastro");
 if (novo) novo.addEventListener("click", function() {
 if (typeof precisaPrimeiroAcesso === "function" && precisaPrimeiroAcesso()) {
@@ -6518,7 +6614,7 @@ return typeof precisaPrimeiroAcesso === "function" ? precisaPrimeiroAcesso() : f
 function avisoDaBaseOficial() {
 if (typeof baseConsultada !== "function" || baseConsultada()) return "";
 var e = (typeof erroDaBase === "function" && erroDaBase()) || null;
-return '<div class="alert a-yellow mt12" id="lgBase">' + ic("alerta") + "<div><b>Não consegui consultar o cadastro de usuários</b>" + U.esc(e && e.mensagem || "O servidor não respondeu.") + (e && e.codigo ? '<div class="small mt8" style="opacity:.8">Código: <b class="mono">' + U.esc(e.codigo) + "</b></div>" : "") + "<div class=\"small mt8\">Você ainda pode tentar entrar com matrícula e senha. " + "O cadastro existente não foi alterado.</div>" + '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' + '<button class="btn btn-ghost btn-sm" data-base-tentar>' + ic("sync") + "Tentar de novo</button>" + '<button class="btn btn-ghost btn-sm" data-base-diag>' + ic("doutor") + "Ver diagnóstico</button></div>" + "</div></div>";
+return '<div class="alert a-yellow mt12" id="lgBase">' + ic("alerta") + "<div><b>Não consegui consultar o cadastro de usuários</b>" + U.esc(e && e.mensagem || "O servidor não respondeu.") + (e && e.codigo ? '<div class="small mt8" style="opacity:.8">Código: <b class="mono">' + U.esc(e.codigo) + "</b></div>" : "") + "<div class=\"small mt8\">Você ainda pode tentar entrar com matrícula e senha. " + "O cadastro existente não foi alterado.</div>" + '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' + '<button class="btn btn-ghost btn-sm" data-base-tentar>' + ic("sync") + "Tentar de novo</button>" + '<button class="btn btn-ghost btn-sm" data-base-diag>' + ic("doutor") + "Ver diagnóstico</button>" + /* só aparece quando a recusa é de chave do aplicativo */ ((e && (e.chaveDoAplicativo || /CHAVE|AUTORIZADO/i.test(String(e.codigo || "")))) ? '<button class="btn btn-primary btn-sm" data-base-chave>' + ic("cadeado") + "Informar a chave do aplicativo</button>" : "") + "</div>" + "</div></div>";
 }
 function esqueciSenha() {
 UI.modal({
@@ -6635,6 +6731,443 @@ ROUTER.render ? ROUTER.render() : location.reload();
 }
 
 /* Mostra o que o sistema realmente sabe: endereço, chave e base oficial. */
+/* ############################################################
+ * SONDA CRUA DO /exec                        busca: [SONDA]
+ * ------------------------------------------------------------
+ * O QUE FAZ   Mede o que o endereço do Apps Script REALMENTE
+ *             devolve, byte a byte, em vez de adivinhar. Responde
+ *             de uma vez: a ponte está ligada no doPost? o
+ *             servidor exige chave? a recusa muda se eu mandar
+ *             uma chave errada? veio JSON, HTML ou redirecionamento?
+ * ENTRADA     ALMOXA_CONFIG.API_URL (via PONTE.url)
+ * SAÍDA       um relatório com status HTTP, redirecionamento,
+ *             tipo do conteúdo e os primeiros bytes do corpo.
+ * DEPENDE DE  [CFG] e [API]. Não usa nem altera nada do negócio.
+ * REGRA       SÓ LEITURA. Três pedidos inofensivos: um ping e
+ *             duas consultas de contagem de usuários. Nada é
+ *             gravado. Nenhuma chave é impressa inteira.
+ * ############################################################ */
+
+function SONDA_recorte_(t, n) {
+  var s = String(t || "");
+  return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+/* Um pedido e tudo o que dá para saber dele. */
+function SONDA_pedir_(rotulo, url, opcoes) {
+  var comecou = Date.now();
+  return fetch(url, opcoes).then(function (r) {
+    return r.text().then(function (txt) {
+      var d = null;
+      try { d = JSON.parse(txt); } catch (e) { d = null; }
+      return {
+        rotulo: rotulo, alcancou: true,
+        status: r.status, ok: r.ok,
+        redirecionou: r.redirected === true,
+        urlFinal: r.url || "",
+        tipo: r.headers.get("content-type") || "(sem tipo)",
+        ms: Date.now() - comecou,
+        bruto: SONDA_recorte_(txt, 400),
+        json: d,
+        codigo: d ? String(d.codigo || d.erro || (d.ok ? "OK" : "")) : "",
+        ehHtml: /^\s*<(!doctype|html)/i.test(txt),
+        pediuLogin: /accounts\.google\.com/i.test(txt)
+      };
+    });
+  }).catch(function (e) {
+    return {
+      rotulo: rotulo, alcancou: false,
+      erro: String(e && e.message || e),
+      ms: Date.now() - comecou,
+      /* fetch não conta o motivo de um bloqueio de CORS: o erro vem
+         vazio de propósito, por segurança do navegador. */
+      talvezCors: /failed to fetch|networkerror|load failed/i.test(String(e && e.message || e))
+    };
+  });
+}
+
+function SONDA_corpo_(chave) {
+  return JSON.stringify({
+    ponte: "ALMOXA", chave: chave,
+    modulo: "usuarios", acao: "contar",
+    payload: {}, sessao: null, perfil: null, obra: null, origem: "sonda"
+  });
+}
+
+/* Os três pedidos. As respostas COMPARADAS é que dão a conclusão. */
+function SONDA_CRUA() {
+  var url = (API.PONTE && API.PONTE.url) || "";
+  if (!url) return Promise.resolve({ semUrl: true });
+  var sep = url.indexOf("?") > -1 ? "&" : "?";
+  var post = function (chave) {
+    return {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: SONDA_corpo_(chave),
+      redirect: "follow"
+    };
+  };
+  return Promise.all([
+    SONDA_pedir_("ping", url + sep + "ponte=ping&t=" + Date.now(), { method: "GET" }),
+    SONDA_pedir_("post sem chave", url, post("")),
+    /* uma chave que com certeza está errada. Se a recusa for
+       IGUAL à de cima, o servidor recusa os dois — então ele exige
+       uma chave e não é o frontend que está mandando lixo. */
+    SONDA_pedir_("post com chave errada", url, post("SONDA-CHAVE-QUE-NAO-EXISTE-" + Date.now()))
+  ]).then(function (r) {
+    return { url: url, ping: r[0], semChave: r[1], chaveErrada: r[2] };
+  });
+}
+
+/* A leitura dos três resultados — é aqui que a conclusão sai. */
+function SONDA_CONCLUIR(m) {
+  if (!m || m.semUrl) {
+    return { classe: "erro", titulo: "Nenhum endereço configurado",
+      texto: "ALMOXA_CONFIG.API_URL está vazio nesta publicação." };
+  }
+  var p = m.ping, a = m.semChave, b = m.chaveErrada;
+
+  if (!a.alcancou) {
+    return { classe: "erro", titulo: "O navegador não conseguiu enviar o pedido",
+      texto: (a.talvezCors
+        ? "O pedido nem chegou a receber resposta. Isso acontece quando o endereço está errado, " +
+          "quando o app não está publicado com acesso “Qualquer pessoa”, ou quando a rede bloqueia. " +
+          "O navegador não conta o motivo exato, por segurança."
+        : "Erro: " + (a.erro || "desconhecido")) };
+  }
+  if (a.pediuLogin || (p.alcancou && p.pediuLogin)) {
+    return { classe: "erro", titulo: "PRECISA_PUBLICAR — o Google pediu login",
+      texto: "O endereço devolveu a tela de login do Google. Publique o app da Web com " +
+        "acesso “Qualquer pessoa”, e use o endereço /exec dessa implantação." };
+  }
+  if (a.ehHtml || (!a.json && !a.pediuLogin)) {
+    return { classe: "erro", titulo: "RESPOSTA_ESTRANHA — não veio JSON",
+      texto: "O endereço respondeu com " + (a.ehHtml ? "uma página HTML" : "um texto que não é JSON") +
+        ". Confira se ele termina em /exec e se é a implantação certa. O corpo recebido está abaixo." };
+  }
+
+  var pontePronta = !!(p.alcancou && p.json && p.json.ok && p.json.dados &&
+    p.json.dados.exigeChave !== undefined);
+  var codA = String(a.codigo || "");
+  var codB = String(b.codigo || "");
+  var chaveNoCodigo = /CHAVE|AUTORIZADO/i.test(codA);
+
+  if (!chaveNoCodigo && a.json && a.json.ok) {
+    return { classe: "ok", titulo: "A estrada externa está aberta",
+      texto: "O pedido sem chave foi aceito e o Core respondeu. Se ainda houver erro de chave na " +
+        "tela, ele vem de uma chave guardada neste navegador — e não do servidor." };
+  }
+  if (!chaveNoCodigo) {
+    return { classe: "aviso", titulo: "O servidor respondeu, e a recusa não é de chave",
+      texto: "Código devolvido: " + (codA || "(sem código)") + ". A comunicação está de pé; " +
+        "o problema é outro, e está no Core ou no módulo chamado." };
+  }
+
+  /* daqui para baixo, é assunto de chave */
+  if (codA && codB && codA === codB) {
+    return { classe: "erro", titulo: "O SERVIDOR EXIGE UMA CHAVE — e recusa qualquer uma",
+      texto: "Sem chave e com chave errada deram a MESMA recusa (" + codA + "). Isso prova que a " +
+        "exigência está no servidor, não nesta publicação. " +
+        (pontePronta
+          ? ("O ping confirma: exigeChave = " + String(p.json.dados.exigeChave) + ".")
+          : "O ping não respondeu no formato da ponte, então a porta instalada aí é outra — e é " +
+            "nela que a exigência está escrita.") +
+        " Enquanto ela não sair, nenhuma mudança no frontend faz este endereço aceitar." };
+  }
+  if (codA && !codB) {
+    return { classe: "ok", titulo: "Sem chave passa; com chave errada é recusado",
+      texto: "É o comportamento correto da fase 1 ao contrário do esperado — confira o relatório." };
+  }
+  return { classe: "aviso", titulo: "Recusa por chave, com respostas diferentes",
+    texto: "Sem chave: " + (codA || "(nada)") + " · com chave errada: " + (codB || "(nada)") +
+      ". Respostas diferentes indicam que a porta trata os dois casos de formas distintas." };
+}
+
+function SONDA_linha_(r) {
+  if (!r) return "";
+  if (!r.alcancou) {
+    return '<tr><td><b>' + U.esc(r.rotulo) + "</b></td><td colspan=4 class='small'>" +
+      '<span class="badge b-red">não chegou</span> ' + U.esc(r.erro || "") + "</td></tr>";
+  }
+  return "<tr><td><b>" + U.esc(r.rotulo) + "</b></td>" +
+    "<td>" + r.status + "</td>" +
+    "<td>" + (r.redirecionou ? "sim" : "não") + "</td>" +
+    "<td class='small'>" + U.esc(SONDA_recorte_(r.tipo, 28)) + "</td>" +
+    "<td class='small mono'>" + U.esc(r.codigo || (r.json ? "(sem código)" : "não é JSON")) +
+    " · " + r.ms + "ms</td></tr>";
+}
+
+/* A sonda fica alcançável pelo console do navegador, de propósito:
+   é a única ferramenta aqui que responde "o que o servidor mandou
+   de verdade", e quem está depurando precisa dela na mão.
+       SONDA_CRUA().then(console.log)                              */
+try {
+  window.SONDA_CRUA = SONDA_CRUA;
+  window.SONDA_CONCLUIR = SONDA_CONCLUIR;
+} catch (e) {}
+
+/* ############################################################
+ * A CHAVE DO APLICATIVO, INFORMADA SEM IR PARA O REPOSITÓRIO
+ * ------------------------------------------------------------
+ * Quando o servidor exige uma chave, esta publicação precisa
+ * mandá-la. Escrevê-la no arquivo significaria publicá-la: tudo
+ * que está no GitHub Pages é público, inclusive o HTML.
+ *
+ * Então ela é digitada UMA VEZ, aqui, e fica guardada só neste
+ * navegador (localStorage). Não vai para o repositório, não
+ * aparece na tela, não sai em mensagem nenhuma. Em outro
+ * computador, digita-se de novo.
+ *
+ * Isto NÃO é uma segunda chave nem uma segunda ponte: é a
+ * PONTE.chave que já existe, alimentada pela fonte que já
+ * existe (PONTE.chaves.manual).
+ * ############################################################ */
+function modalInformarChave(aoSalvar) {
+  UI.modal({
+    titulo: "Chave do aplicativo",
+    sub: "Fica guardada só neste navegador — não vai para o GitHub.",
+    tamanho: "sm",
+    corpo:
+      '<div class="alert a-blue mb12">' + ic("info") +
+      "<div>Isto <b>não é</b> a sua senha, nem o crachá, nem o token do colaborador. " +
+      "É o valor da propriedade <b class='mono'>ALMOXA_CHAVE_APP</b> do Apps Script, que autoriza " +
+      "esta publicação a falar com o servidor.</div></div>" +
+      '<div class="field"><label>Chave</label>' +
+      '<input class="input mono" id="ckValor" type="password" autocomplete="off" ' +
+      'spellcheck="false" placeholder="cole aqui"></div>' +
+      '<label class="small" style="display:flex;gap:8px;align-items:center;margin-top:8px">' +
+      '<input type="checkbox" id="ckVer"> mostrar enquanto digito</label>' +
+      '<p class="small muted mt12">Prefere não usar chave nenhuma? No Apps Script, rode ' +
+      "<b class='mono'>ALMOXA_LIBERAR_FASE1</b> e publique uma nova versão — aí nenhuma " +
+      "publicação precisa de chave, e a autenticação continua a mesma.</p>" +
+      '<div id="ckAviso"></div>',
+    rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' +
+      '<button class="btn btn-ghost" data-limpar>Apagar a guardada</button>' +
+      '<button class="btn btn-primary" data-ok>Guardar e tentar</button>',
+    aoAbrir: function (w, fechar) {
+      var campo = w.querySelector("#ckValor");
+      w.querySelector("[data-x]").addEventListener("click", fechar);
+      w.querySelector("#ckVer").addEventListener("change", function () {
+        campo.type = this.checked ? "text" : "password";
+      });
+      w.querySelector("[data-limpar]").addEventListener("click", function () {
+        try { API.PONTE.esquecerChave(); } catch (e) {}
+        toast("ok", "Chave apagada deste navegador", "A publicação volta a falar sem chave.");
+        fechar();
+        if (aoSalvar) aoSalvar();
+      });
+      w.querySelector("[data-ok]").addEventListener("click", function () {
+        var v = String(campo.value || "").trim();
+        if (!v) {
+          w.querySelector("#ckAviso").innerHTML =
+            '<div class="alert a-yellow mt12">' + ic("alerta") +
+            "<div>Digite a chave, ou use “Apagar a guardada” para falar sem nenhuma.</div></div>";
+          return;
+        }
+        try {
+          API.PONTE.chave = v;
+          API.PONTE.semChaveNestaSessao = false;
+          API.PONTE.origemDaChave = "guardada neste navegador (não está no repositório)";
+          API.PONTE.lembrar();
+        } catch (e) {}
+        toast("ok", "Chave guardada neste navegador", "Ela não foi para o repositório.");
+        fechar();
+        if (aoSalvar) aoSalvar();
+      });
+      setTimeout(function () { try { campo.focus(); } catch (e) {} }, 60);
+    }
+  });
+}
+try { window.modalInformarChave = modalInformarChave; } catch (e) {}
+
+/* ############################################################
+ * ONDE A CHAVE ENTRA                          busca: [SONDA]
+ * ------------------------------------------------------------
+ * O QUE FAZ   A chave está CERTA e o servidor diz que "a que
+ *             chegou não confere". A explicação mais provável é
+ *             que ela esteja chegando num lugar que a porta não
+ *             olha: a PONTE manda no campo `chave` do corpo, e a
+ *             porta instalada no Apps Script pode esperar outro
+ *             nome, ou esperar na URL.
+ * COMO        Manda o MESMO pedido de leitura várias vezes,
+ *             cada uma pondo a chave num lugar diferente, e vê
+ *             qual delas o servidor aceita.
+ * REGRA       SÓ LEITURA (usuarios.contar). Nada é gravado.
+ *             A chave nunca é impressa — só o nome do campo.
+ * ############################################################ */
+
+var SONDA_LUGARES = [
+  { id: "corpo.chave", onde: "corpo", campo: "chave", nota: "o que a PONTE usa hoje" },
+  { id: "corpo.appKey", onde: "corpo", campo: "appKey" },
+  { id: "corpo.apiKey", onde: "corpo", campo: "apiKey" },
+  { id: "corpo.chaveApp", onde: "corpo", campo: "chaveApp" },
+  { id: "corpo.chaveAplicativo", onde: "corpo", campo: "chaveAplicativo" },
+  { id: "corpo.token", onde: "corpo", campo: "token" },
+  { id: "corpo.key", onde: "corpo", campo: "key" },
+  { id: "payload.chave", onde: "payload", campo: "chave" },
+  { id: "url.chave", onde: "url", campo: "chave" },
+  { id: "url.key", onde: "url", campo: "key" },
+  { id: "sem chave", onde: "nenhum", campo: "" }
+];
+
+function SONDA_ONDE_ENTRA() {
+  var url = (API.PONTE && API.PONTE.url) || "";
+  var chave = (API.PONTE && API.PONTE.chave) || "";
+  if (!url) return Promise.resolve({ semUrl: true });
+  if (!chave) return Promise.resolve({ semChave: true });
+
+  function tentar(lugar) {
+    var corpo = {
+      ponte: "ALMOXA", modulo: "usuarios", acao: "contar",
+      payload: {}, sessao: null, perfil: null, obra: null, origem: "sonda"
+    };
+    var endereco = url;
+    if (lugar.onde === "corpo") corpo[lugar.campo] = chave;
+    if (lugar.onde === "payload") corpo.payload[lugar.campo] = chave;
+    if (lugar.onde === "url") {
+      endereco += (url.indexOf("?") > -1 ? "&" : "?") +
+        lugar.campo + "=" + encodeURIComponent(chave);
+    }
+    /* o campo `chave` sempre vai — vazio quando não é ele que está
+       sendo testado — para o corpo continuar com o mesmo formato */
+    if (corpo.chave === undefined) corpo.chave = "";
+
+    return fetch(endereco, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(corpo),
+      redirect: "follow"
+    }).then(function (r) { return r.text(); }).then(function (t) {
+      var d = null;
+      try { d = JSON.parse(t); } catch (e) { d = null; }
+      return {
+        id: lugar.id, nota: lugar.nota || "",
+        aceitou: !!(d && d.ok === true),
+        codigo: d ? String(d.codigo || d.erro || (d.ok ? "OK" : "")) : "não é JSON",
+        mensagem: d ? String(d.mensagem || "").slice(0, 110) : SONDA_recorte_(t, 110)
+      };
+    }).catch(function (e) {
+      return { id: lugar.id, nota: lugar.nota || "", aceitou: false,
+        codigo: "NAO_CHEGOU", mensagem: String(e && e.message || e) };
+    });
+  }
+
+  /* um de cada vez: o Apps Script não gosta de rajada */
+  var saida = [];
+  return SONDA_LUGARES.reduce(function (fila, lugar) {
+    return fila.then(function () {
+      return tentar(lugar).then(function (r) { saida.push(r); });
+    });
+  }, Promise.resolve()).then(function () { return { lugares: saida }; });
+}
+
+function modalSondaOndeEntra() {
+  UI.modal({
+    titulo: "Onde a chave entra",
+    sub: "Só leitura: o mesmo pedido, com a chave em lugares diferentes.",
+    tamanho: "lg",
+    corpo: '<div id="sondaOnde">' + UI.carregando(4) + "</div>",
+    rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' +
+      '<button class="btn btn-primary" data-rodar>Medir de novo</button>',
+    aoAbrir: function (w, fechar) {
+      w.querySelector("[data-x]").addEventListener("click", fechar);
+      function medir() {
+        var alvo = w.querySelector("#sondaOnde");
+        alvo.innerHTML = UI.carregando(4);
+        SONDA_ONDE_ENTRA().then(function (m) {
+          if (m.semUrl) { alvo.innerHTML = UI.estado("erro", "Sem endereço", "ALMOXA_CONFIG.API_URL está vazio."); return; }
+          if (m.semChave) {
+            alvo.innerHTML = UI.estado("vazio", "Nenhuma chave guardada",
+              "Informe a chave primeiro, em “Informar a chave do aplicativo”.");
+            return;
+          }
+          var venceu = m.lugares.filter(function (x) { return x.aceitou; });
+          alvo.innerHTML =
+            (venceu.length
+              ? '<div class="alert a-green mb16">' + ic("checkC") +
+                "<div><b>Achei onde a chave entra</b>O servidor aceitou quando ela foi em <b>" +
+                U.esc(venceu.map(function (x) { return x.id; }).join(", ")) + "</b>. " +
+                (venceu.some(function (x) { return x.id === "corpo.chave"; })
+                  ? "É o lugar que esta publicação já usa — então a recusa de antes era outra coisa."
+                  : "Não é o lugar que esta publicação usa hoje (corpo.chave). É esta a incompatibilidade.") +
+                "</div></div>"
+              : '<div class="alert a-red mb16">' + ic("alerta") +
+                "<div><b>Nenhum lugar foi aceito</b>A chave foi mandada em " + m.lugares.length +
+                " lugares diferentes e o servidor recusou todos. Então o valor não confere com o " +
+                "que está gravado no servidor, ou a porta recusa antes de olhar a chave. " +
+                "Compare o valor com a propriedade <b class='mono'>ALMOXA_CHAVE_APP</b> " +
+                "(inclusive espaços no começo e no fim), e confira se a implantação publicada " +
+                "é a versão nova.</div></div>") +
+            '<div class="card"><div class="card-head"><b>O que cada lugar respondeu</b></div>' +
+            '<table class="tabela"><thead><tr><th>Onde a chave foi</th><th>Aceitou</th>' +
+            "<th>Código</th><th>Mensagem</th></tr></thead><tbody>" +
+            m.lugares.map(function (x) {
+              return "<tr><td><span class='mono small'>" + U.esc(x.id) + "</span>" +
+                (x.nota ? ' <span class="muted small">· ' + U.esc(x.nota) + "</span>" : "") + "</td>" +
+                '<td><span class="badge ' + (x.aceitou ? "b-green" : "b-gray") + '">' +
+                (x.aceitou ? "SIM" : "não") + "</span></td>" +
+                "<td class='mono small'>" + U.esc(x.codigo) + "</td>" +
+                "<td class='small muted'>" + U.esc(x.mensagem) + "</td></tr>";
+            }).join("") + "</tbody></table></div>";
+        });
+      }
+      w.querySelector("[data-rodar]").addEventListener("click", medir);
+      medir();
+    }
+  });
+}
+try { window.SONDA_ONDE_ENTRA = SONDA_ONDE_ENTRA; window.modalSondaOndeEntra = modalSondaOndeEntra; } catch (e) {}
+
+function modalSondaCrua() {
+  UI.modal({
+    titulo: "Sonda do /exec",
+    sub: "Só leitura: três pedidos inofensivos, nada é gravado.",
+    tamanho: "lg",
+    corpo: '<div id="sondaCorpo">' + UI.carregando(4) + "</div>",
+    rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' +
+      '<button class="btn btn-ghost" data-copiar>' + ic("copiar") + "Copiar relatório</button>" +
+      '<button class="btn btn-primary" data-rodar>Medir de novo</button>',
+    aoAbrir: function (w, fechar) {
+      var ultimo = "";
+      w.querySelector("[data-x]").addEventListener("click", fechar);
+      w.querySelector("[data-copiar]").addEventListener("click", function () {
+        try { navigator.clipboard.writeText(ultimo); toast("ok", "Relatório copiado", ""); }
+        catch (e) { toast("warn", "Não consegui copiar", ""); }
+      });
+      function medir() {
+        var alvo = w.querySelector("#sondaCorpo");
+        alvo.innerHTML = UI.carregando(4);
+        SONDA_CRUA().then(function (m) {
+          var c = SONDA_CONCLUIR(m);
+          var cor = c.classe === "ok" ? "a-green" : c.classe === "aviso" ? "a-yellow" : "a-red";
+          ultimo = JSON.stringify(m, null, 1);
+          alvo.innerHTML =
+            '<div class="alert ' + cor + ' mb16">' + ic(c.classe === "ok" ? "checkC" : "alerta") +
+            "<div><b>" + U.esc(c.titulo) + "</b>" + U.esc(c.texto) + "</div></div>" +
+            (m.semUrl ? "" :
+              '<div class="card mb16"><div class="card-head"><b>Os três pedidos</b>' +
+              '<span class="badge b-gray mono">' + U.esc(DIAGNOSTICO_ENDERECO_CURTO(m.url)) + "</span></div>" +
+              '<table class="tabela"><thead><tr><th>Pedido</th><th>HTTP</th><th>Redirecionou</th>' +
+              "<th>Tipo</th><th>Código · tempo</th></tr></thead><tbody>" +
+              SONDA_linha_(m.ping) + SONDA_linha_(m.semChave) + SONDA_linha_(m.chaveErrada) +
+              "</tbody></table></div>" +
+              '<div class="card"><div class="card-head"><b>O que voltou, sem maquiagem</b></div>' +
+              '<div class="card-body">' +
+              [m.ping, m.semChave, m.chaveErrada].map(function (r) {
+                if (!r || !r.alcancou) return "";
+                return "<p class='small muted' style='margin:8px 0 2px'><b>" + U.esc(r.rotulo) + "</b></p>" +
+                  "<pre class='small' style='white-space:pre-wrap;word-break:break-all;background:var(--fundo-2);" +
+                  "padding:8px;border-radius:8px;margin:0'>" + U.esc(r.bruto) + "</pre>";
+              }).join("") + "</div></div>");
+        });
+      }
+      w.querySelector("[data-rodar]").addEventListener("click", medir);
+      medir();
+    }
+  });
+}
+try { window.modalSondaCrua = modalSondaCrua; } catch (e) {}
+
 function modalDiagnosticoDeConexao() {
 var linha = function(rot, val, bom) {
 return '<div style="display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--linha)">' + '<span class="small" style="color:var(--texto-3)">' + rot + "</span>" + '<b class="small" style="text-align:right;color:' + (bom === true ? "#1FA971" : bom === false ? "#E5484D" : "inherit") + '">' + U.esc(val) + "</b></div>";
@@ -6644,7 +7177,7 @@ titulo: "Diagnóstico da conexão",
 sub: "O que esta publicação está usando para falar com o servidor",
 tamanho: "md",
 corpo: '<div id="dcCorpo"><div class="muted small"><span class="spinner"></span> Conferindo…</div></div>',
-rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' + '<button class="btn btn-primary" data-refazer>Conferir de novo</button>',
+rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' + '<button class="btn btn-ghost" data-sonda>Sonda do /exec</button>' + '<button class="btn btn-ghost" data-ondechave>Onde a chave entra</button>' + '<button class="btn btn-primary" data-refazer>Conferir de novo</button>',
 aoAbrir: function(w, fechar) {
 w.querySelector("[data-x]").addEventListener("click", fechar);
 function conferir() {
@@ -6655,7 +7188,7 @@ var chave = (API.PONTE && API.PONTE.chave) || "";
 var dentroDoGoogle = typeof google !== "undefined" && google.script && google.script.run;
 function pintar(ping) {
 var base = ST.existeUsuario;
-alvo.innerHTML = linha("Ambiente", dentroDoGoogle ? "dentro do Apps Script" : "hospedado (ponte)") + linha("Endereço do servidor", url ? url.slice(0, 48) + "…" : "não configurado", !!url || dentroDoGoogle) + linha("Chave do aplicativo enviada", chave ? "sim (" + chave.slice(0, 4) + "…)" : "vazia") + linha("Servidor exige chave", ping && ping.dados ? (ping.dados.exigeChave ? "SIM" : "não") : "não sei") + linha("Chave confere", ping && ping.dados ? (ping.dados.exigeChave ? (ping.dados.chaveConfere ? "sim" : "NÃO") : "não se aplica") : "não sei", ping && ping.dados && ping.dados.exigeChave ? !!ping.dados.chaveConfere : undefined) + linha("Servidor respondeu", ping && ping.ok ? "sim" : "NÃO", !!(ping && ping.ok)) + linha("Base de usuários consultada", base === true || base === false ? "sim" : "NÃO", base === true || base === false) + linha("Usuários na base oficial", ST.totalUsuarios === undefined ? "não consultado" : String(ST.totalUsuarios)) + (ST.erroBase ? '<div class="alert a-yellow mt12">' + ic("alerta") + "<div><b>" + U.esc(ST.erroBase.codigo) + "</b>" + U.esc(ST.erroBase.mensagem) + "</div></div>" : "") + '<div class="alert a-blue mt12">' + ic("info") + "<div>A <b>chave do aplicativo</b> protege a comunicação desta publicação com o servidor. " + "Ela é outra coisa, e não substitui, a <b>chave do crachá</b>.<br><br>" + "Se o servidor exige chave e esta publicação está sem ela, rode <b>PONTE_removerChave</b> no Apps Script " + "para voltar à fase sem chave, ou informe a chave abaixo.</div></div>" + (dentroDoGoogle ? "" : '<button class="btn btn-ghost btn-sm mt8" data-por-chave>Informar a chave do aplicativo</button>');
+alvo.innerHTML = linha("Ambiente", dentroDoGoogle ? "dentro do Apps Script" : "hospedado (ponte)") + linha("Endereço do servidor", url ? url.slice(0, 48) + "…" : "não configurado", !!url || dentroDoGoogle) + linha("Chave do aplicativo enviada", chave ? "sim (" + chave.slice(0, 4) + "…)" : "vazia") + linha("De onde veio essa chave", (API.PONTE && API.PONTE.origemDaChave) || "nenhuma") + linha("Servidor exige chave", ping && ping.dados ? (ping.dados.exigeChave ? "SIM" : "não") : "não sei") + linha("Chave confere", ping && ping.dados ? (ping.dados.exigeChave ? (ping.dados.chaveConfere ? "sim" : "NÃO") : "não se aplica") : "não sei", ping && ping.dados && ping.dados.exigeChave ? !!ping.dados.chaveConfere : undefined) + linha("Servidor respondeu", ping && ping.ok ? "sim" : "NÃO", !!(ping && ping.ok)) + linha("Base de usuários consultada", base === true || base === false ? "sim" : "NÃO", base === true || base === false) + linha("Usuários na base oficial", ST.totalUsuarios === undefined ? "não consultado" : String(ST.totalUsuarios)) + (ST.erroBase ? '<div class="alert a-yellow mt12">' + ic("alerta") + "<div><b>" + U.esc(ST.erroBase.codigo) + "</b>" + U.esc(ST.erroBase.mensagem) + "</div></div>" : "") + '<div class="alert a-blue mt12">' + ic("info") + "<div>A <b>chave do aplicativo</b> protege a comunicação desta publicação com o servidor. " + "Ela é outra coisa, e não substitui, a <b>chave do crachá</b>.<br><br>" + "Se o servidor exige chave e esta publicação está sem ela, rode <b>PONTE_removerChave</b> no Apps Script " + "para voltar à fase sem chave, ou informe a chave abaixo.</div></div>" + (dentroDoGoogle ? "" : '<button class="btn btn-ghost btn-sm mt8" data-por-chave>Informar a chave do aplicativo</button>');
 var bp = alvo.querySelector("[data-por-chave]");
 if (bp) bp.addEventListener("click", function() {
 var v = window.prompt("Chave do aplicativo (deixe em branco para não enviar nenhuma):", chave);
@@ -6681,6 +7214,10 @@ pintar(d);
 pintar(null);
 });
 }
+var bs = w.querySelector("[data-sonda]");
+if (bs) bs.addEventListener("click", function() { modalSondaCrua(); });
+var bo = w.querySelector("[data-ondechave]");
+if (bo) bo.addEventListener("click", function() { modalSondaOndeEntra(); });
 w.querySelector("[data-refazer]").addEventListener("click", conferir);
 conferir();
 }
@@ -26086,7 +26623,10 @@ return ST.existeUsuario;
 ST.existeUsuario = null;
 ST.erroBase = {
 codigo: r && (r.codigo || r.erro) || "SEM_RESPOSTA",
-mensagem: r && r.mensagem || "O servidor não respondeu à consulta de usuários."
+mensagem: r && r.mensagem || "O servidor não respondeu à consulta de usuários.",
+/* marcado pelo APP_EXPLICAR_CHAVE quando a recusa é de chave do
+   aplicativo — é o que faz aparecer o botão de informar a chave */
+chaveDoAplicativo: !!(r && r.chaveDoAplicativo)
 };
 return null;
 }).catch(function(e) {
