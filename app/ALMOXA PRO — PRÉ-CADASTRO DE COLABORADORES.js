@@ -110,6 +110,15 @@ function AP_PRECAD_linhas_() {
 
 function AP_PRECAD_aba_() {
   try { AP_Data_getSheet(AP_PRECAD_CFG.aba, AP_PRECAD_CFG.colunas); } catch (e) { }
+  /* A aba pode já existir com o cabeçalho ANTIGO — 29 colunas, de
+     antes de token/etapa/identificacao existirem. Nesse caso o
+     AP_Data_append grava os campos novos em colunas que não estão
+     no cabeçalho e eles se perdem em silêncio: a ficha salva, a
+     resposta traz o token, e ao reler a linha não há token nenhum.
+     Era esse o motivo de "Ainda não tem token" e da fila vazia.
+     Aqui o cabeçalho é conferido e completado NO FIM, uma vez por
+     execução, antes de qualquer gravação. */
+  if (typeof AP_PRECAD_SEG_garantirColunas_ === 'function') AP_PRECAD_SEG_garantirColunas_();
 }
 
 function AP_PRECAD_agora_() { return new Date().toISOString(); }
@@ -233,6 +242,12 @@ function AP_PRECAD_montar_(p) {
     etapa: String(p.etapa || 'RH'),
     etapaEm: p.etapaEm || '', etapaPor: p.etapaPor || '',
     temToken: !!String(p.token || ''),
+    token: String(p.token || ''),
+    tokenEstado: String(p.tokenEstado || ''),
+    identificacao: String(p.identificacao || ''),
+    validadoSegPor: String(p.validadoSegPor || ''),
+    validadoSegEmail: String(p.validadoSegEmail || ''),
+    validadoSegEm: String(p.validadoSegEm || ''),
     devolvidoMotivo: p.devolvidoMotivo || '',
     crachaCodigo: p.crachaCodigo || ''
   };
@@ -255,15 +270,13 @@ function AP_PRECAD_criar_(payload, sessao) {
     };
   }
 
-  /* CPF em branco passa — não é obrigatório. Escrito, é conferido:
-     isso não é exigência, é defesa contra erro de digitação, que
-     depois vira duas fichas da mesma pessoa. */
-  if (AP_PRECAD_so_(payload.cpf) && !AP_PRECAD_cpfValido_(payload.cpf)) {
-    return {
-      ok: false, codigo: 'CPF_INVALIDO',
-      mensagem: 'O CPF informado não é válido. Confira os números, ou deixe em branco para preencher depois.'
-    };
-  }
+  /* O CPF NÃO TRANCA NADA.
+     Em branco passa, escrito errado passa, meio digitado passa.
+     A conferência dos dígitos continua existindo, mas só para
+     AVISAR — porque barrar aqui já parou a obra uma vez, e o CPF
+     é dado que o RH completa depois, na entrevista ou no papel
+     que o colaborador traz. */
+  var cpfSuspeito = !!(AP_PRECAD_so_(payload.cpf) && !AP_PRECAD_cpfValido_(payload.cpf));
 
   var repetido = AP_PRECAD_jaExiste_(payload.cpf, payload.matricula);
   if (repetido) {
@@ -300,17 +313,67 @@ function AP_PRECAD_criar_(payload, sessao) {
     solicitante: quem,
     tipoAcesso: '', perfil: '',
     validadoPor: '', validadoEm: '', motivoRecusa: '', usuarioCriado: '',
-    atualizadoEm: agora, atualizadoPor: quem
+    atualizadoEm: agora, atualizadoPor: quem,
+    /* O TOKEN NASCE AQUI, junto da ficha. Não espera o
+       encaminhamento, não espera a Segurança, não depende de
+       nenhum outro módulo estar de pé. É o número que o
+       colaborador leva para retirar o EPI, e ele existe desde o
+       momento em que a pessoa entra no sistema. */
+    token: AP_PRECAD_SEG_numeroToken_(),
+    tokenChave: AP_PRECAD_SEG_chave_(),
+    tokenEstado: AP_PRECAD_SEG.estadosToken.GERADO,
+    tokenEm: agora,
+    identificacao: AP_PRECAD_SEG_identificacao_(),
+    etapa: 'RH', etapaEm: agora, etapaPor: quem
   });
 
   AP_PRECAD_auditar_(quem, 'PRECADASTRO_CRIADO', id, { nome: payload.nome, obra: payload.obra });
+
+  /* FINALIZAR E ENVIAR NA MESMA CHAMADA.
+     Antes eram duas idas ao Core: criar e depois encaminhar. Cada
+     ida pode demorar, e se a segunda falhasse a ficha ficava
+     órfã, sem token e fora da fila da Segurança. Com o pedido
+     junto, ou vai tudo, ou a ficha fica no RH com o token já no
+     lugar — e dá para reenviar sem refazer nada. */
+  if (payload.encaminharAgora && typeof AP_PRECAD_SEG_encaminhar_ === 'function') {
+    var enc = AP_PRECAD_SEG_encaminhar_({
+      id: id, itens: payload.itens, kit: payload.kit,
+      foto: payload.foto, endereco: payload.endereco
+    }, sessao);
+    if (enc && enc.ok) {
+      enc.dados.id = id;
+      enc.dados.criado = true;
+      enc.dados.cpfSuspeito = cpfSuspeito;
+      if (cpfSuspeito) {
+        enc.mensagem = (enc.mensagem || '') +
+          ' O CPF digitado não fecha nos dígitos — confira depois com calma.';
+      }
+      return enc;
+    }
+    /* não encaminhou: a ficha existe, com token, e a resposta diz
+       por que parou — em vez de sumir com o registro */
+    return {
+      ok: true,
+      dados: {
+        id: id, status: AP_PRECAD_CFG.status.AGUARDANDO,
+        etapa: 'RH', criado: true,
+        naoEncaminhou: (enc && enc.mensagem) || 'O encaminhamento não respondeu.',
+        codigoEncaminhar: (enc && enc.codigo) || 'SEM_RESPOSTA',
+        mensagem: 'Ficha de ' + AP_PRECAD_SEG_texto_(payload.nome) + ' salva com o token, ' +
+          'mas não foi para a fila da Segurança: ' +
+          ((enc && enc.mensagem) || 'sem resposta') + ' Use Encaminhar no cartão.'
+      }
+    };
+  }
 
   return {
     ok: true,
     dados: {
       id: id, status: AP_PRECAD_CFG.status.AGUARDANDO,
-      mensagem: 'Pré-cadastro de ' + payload.nome + ' enviado. O administrador vai definir ' +
-        'o tipo de acesso — até lá, nenhum login é criado e a ficha de EPI ainda não pode ser vinculada.'
+      cpfSuspeito: cpfSuspeito,
+      mensagem: 'Pré-cadastro de ' + AP_PRECAD_SEG_texto_(payload.nome) + ' salvo. ' +
+        'O token do processo já foi gerado.' +
+        (cpfSuspeito ? ' O CPF digitado não fecha nos dígitos — confira depois com calma.' : '')
     }
   };
 }
@@ -327,9 +390,8 @@ function AP_PRECAD_corrigir_(payload, sessao) {
     };
   }
 
-  if (payload.cpf && !AP_PRECAD_cpfValido_(payload.cpf)) {
-    return { ok: false, codigo: 'CPF_INVALIDO', mensagem: 'O CPF informado não é válido.' };
-  }
+  /* CPF escrito errado também não tranca a correção */
+  var cpfSuspeitoAqui = !!(payload.cpf && !AP_PRECAD_cpfValido_(payload.cpf));
   if (payload.cpf || payload.matricula) {
     var rep = AP_PRECAD_jaExiste_(payload.cpf || p.cpf, payload.matricula || p.matricula, p.id);
     if (rep) {
@@ -669,13 +731,29 @@ function AP_PRECAD_testes() {
       AP_Modulo_precadastro('criar', {}).ok === true);
     ok('CPF em branco passa',
       AP_Modulo_precadastro('criar', { nome: 'Sem CPF' }).ok === true);
-    ok('CPF escrito errado é recusado — isso é erro de digitação, não exigência',
-      AP_Modulo_precadastro('criar', { nome: 'Y', cpf: '111.111.111-11' }).codigo === 'CPF_INVALIDO');
+    /* estas duas também gravam; a tabela de mentira volta ao
+       tamanho de antes para não bagunçar as contas lá embaixo */
+    var antesDoCpf = tabela.length;
+    ok('CPF escrito errado NÃO tranca — entra e avisa',
+      (function () {
+        var r = AP_Modulo_precadastro('criar', { nome: 'Y', cpf: '111.111.111-11' });
+        return r.ok === true && r.dados.cpfSuspeito === true;
+      })());
+    ok('CPF com poucos dígitos também entra',
+      AP_Modulo_precadastro('criar', { nome: 'Z', cpf: '0000000000' }).ok === true);
+    tabela.length = antesDoCpf;
     tabela.length = antesDosOpcionais;
-    ok('CPF inválido é recusado',
-      AP_Modulo_precadastro('criar', {
-        nome: 'Y', cpf: '111.111.111-11', cargo: 'Pedreiro', obra: 'OB02'
-      }).codigo === 'CPF_INVALIDO');
+    /* era 'CPF inválido é recusado'. Hoje o CPF não tranca nada:
+       entra e o sistema avisa. A tabela volta ao tamanho de antes. */
+    var antesDoCpfRuim = tabela.length;
+    ok('CPF inválido entra e só avisa',
+      (function () {
+        var r = AP_Modulo_precadastro('criar', {
+          nome: 'Y', cpf: '111.111.111-11', cargo: 'Pedreiro', obra: 'OB02'
+        });
+        return r.ok === true && r.dados.cpfSuspeito === true;
+      })());
+    tabela.length = antesDoCpfRuim;
     ok('mesma pessoa duas vezes é recusada',
       AP_Modulo_precadastro('criar', {
         nome: 'João de novo', cpf: '111.444.777-35', cargo: 'Servente', obra: 'OB02'
@@ -850,7 +928,7 @@ function AP_PRECAD_testes() {
    ------------------------------------------------------------ */
 
 var AP_PRECAD_SEG = {
-  versao: '1.1.0-seguranca',
+  versao: '1.3.0-fluxo-plus',
 
   /* colunas NOVAS — entram no fim da aba, nunca no meio */
   colunas: [
@@ -863,7 +941,10 @@ var AP_PRECAD_SEG = {
     'validadoSegPor', 'validadoSegEm', 'devolvidoMotivo',
     'assinatura', 'assinaturaEm', 'assinaturaPor',
     'biometriaId',
+    'tokenChave', 'tokenEstado', 'tokenConsumidoEm', 'tokenConsumidoPor',
+    'validadoSegEmail', 'identificacao',
     'itensSelecionados', 'kitSelecionado',
+    'reservaProtocolo', 'reservaEm', 'reservaErro',
     'crachaCodigo', 'crachaEm'
   ],
 
@@ -885,6 +966,25 @@ var AP_PRECAD_SEG = {
   /* o QR do pré-cadastro. Mesmo desenho do crachá, outra letra:
      CR é crachá de gente que já entrou; PC é processo de entrada. */
   prefixoQR: 'ALMOXA:PC',
+
+  /* O NÚMERO DO TOKEN — TK-2026-000256.
+     É o que a pessoa leva anotado e digita no balcão, então tem
+     que ser legível e curto. A chave aleatória continua existindo
+     por baixo, dentro do QR: o número identifica, a chave prova.
+     Quem só tem o número não consegue forjar o QR. */
+  prefixoToken: 'TK',
+  chaveContador: 'ALMOXA_PRECAD_SEQ_TOKEN',
+
+  /* a vida do token, do nascimento ao consumo */
+  estadosToken: {
+    GERADO: 'GERADO',
+    AGUARDANDO: 'AGUARDANDO_VALIDACAO',
+    ATIVO: 'ATIVO_PARA_ENTREGA',
+    CONSUMIDO: 'CONSUMIDO'
+  },
+
+  /* a identificação provisória, até a matrícula oficial chegar */
+  prefixoIdentificacao: 'COL',
 
   /* onde a escolha do RH fica guardada, no config que já existe */
   chaveConfig: 'precadastro.camposSeguranca',
@@ -959,19 +1059,92 @@ function AP_PRECAD_SEG_json_(v, seVazio) {
   } catch (e) { return seVazio; }
 }
 
-/** A chave do token. É a do crachá — não existe outra neste sistema. */
+/**
+ * A chave do token.
+ *
+ * Primeiro tenta a do crachá, que é a que este sistema já usa —
+ * mesmo alfabeto, mesmo tamanho, mesma qualidade. Se ela não
+ * responder, gera aqui, com o mesmo alfabeto e o mesmo tamanho.
+ *
+ * Antes, quando o crachá não respondia, o processo PARAVA sem
+ * token. Isso estava errado: o token é o que faz o colaborador
+ * conseguir retirar o EPI, e ele não pode depender de outro
+ * módulo estar de pé. Reaproveitar é bom; ficar refém não é.
+ */
 function AP_PRECAD_SEG_chave_() {
   if (typeof AP_CR_chave_ === 'function') {
-    try { return AP_CR_chave_(); } catch (e) { }
+    try {
+      var doCracha = String(AP_CR_chave_() || '').trim();
+      if (doCracha) return doCracha;
+    } catch (e) { }
   }
-  /* o módulo de crachá não está instalado: em vez de inventar um
-     gerador fraco e seguir em frente calado, o processo para. */
-  return '';
+  /* o mesmo alfabeto do crachá: sem O, I, 0 e 1, que se confundem
+     quando alguém lê de um papel e digita no balcão */
+  var alfabeto = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  var chave = '';
+  for (var i = 0; i < 8; i++) {
+    chave += alfabeto.charAt(Math.floor(Math.random() * alfabeto.length));
+  }
+  return chave;
 }
 
-/** O conteúdo do QR: prefixo, ID e token. Nada de pessoa aqui. */
-function AP_PRECAD_SEG_conteudoQR_(id, token) {
-  return AP_PRECAD_SEG.prefixoQR + ':' + id + ':' + token;
+/**
+ * O NÚMERO DO TOKEN, sequencial por ano: TK-2026-000256.
+ *
+ * O contador mora nas propriedades do script, com trava, porque
+ * duas pessoas finalizando ao mesmo tempo não podem receber o
+ * mesmo número. Se as propriedades não estiverem disponíveis,
+ * cai para a contagem das linhas — pior, mas nunca fica sem
+ * número.
+ */
+function AP_PRECAD_SEG_numeroToken_() {
+  var ano = new Date().getFullYear();
+  var seq = 0;
+  var trava = null;
+
+  try {
+    trava = LockService.getScriptLock();
+    trava.waitLock(8000);
+  } catch (e) { trava = null; }
+
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var chave = AP_PRECAD_SEG.chaveContador + '_' + ano;
+    seq = Number(props.getProperty(chave) || 0) + 1;
+    props.setProperty(chave, String(seq));
+  } catch (e) {
+    /* sem propriedades: conta o que já existe neste ano */
+    try {
+      var marca = AP_PRECAD_SEG.prefixoToken + '-' + ano + '-';
+      seq = (AP_PRECAD_linhas_() || []).filter(function (l) {
+        return String(l.token || '').indexOf(marca) === 0;
+      }).length + 1;
+    } catch (e2) { seq = Math.floor(Math.random() * 900000) + 1; }
+  } finally {
+    if (trava) { try { trava.releaseLock(); } catch (e) { } }
+  }
+
+  var texto = String(seq);
+  while (texto.length < 6) texto = '0' + texto;
+  return AP_PRECAD_SEG.prefixoToken + '-' + ano + '-' + texto;
+}
+
+/** A identificação provisória do colaborador: COL-000123. */
+function AP_PRECAD_SEG_identificacao_() {
+  var quantos = 0;
+  try {
+    quantos = (AP_PRECAD_linhas_() || []).filter(function (l) {
+      return String(l.identificacao || '').indexOf(AP_PRECAD_SEG.prefixoIdentificacao) === 0;
+    }).length;
+  } catch (e) { }
+  var texto = String(quantos + 1);
+  while (texto.length < 6) texto = '0' + texto;
+  return AP_PRECAD_SEG.prefixoIdentificacao + '-' + texto;
+}
+
+/** O conteúdo do QR: prefixo, ID e a chave secreta. Nada de pessoa aqui. */
+function AP_PRECAD_SEG_conteudoQR_(id, chave) {
+  return AP_PRECAD_SEG.prefixoQR + ':' + id + ':' + chave;
 }
 
 /** Lê o que veio da câmera. Aceita o QR inteiro e também só o ID. */
@@ -1221,22 +1394,20 @@ function AP_PRECAD_SEG_encaminhar_(payload, sessao) {
   AP_PRECAD_CFG.colunas.forEach(function (c) { juntos[c] = p[c]; });
   Object.keys(completar).forEach(function (c) { juntos[c] = completar[c]; });
 
+  /* O que o RH marcou como obrigatório vira AVISO, não tranca.
+     Antes isto recusava o encaminhamento, e o resultado prático era
+     a ficha ficar presa no RH, sem token, sem credencial — por um
+     campo em branco que ninguém era obrigado a preencher. A
+     marcação continua servindo para quem confere lembrar do que
+     falta; quem decide se manda assim mesmo é quem está lançando. */
   var faltando = autorizados.filter(function (c) {
     return c.obrigatorio && !AP_PRECAD_SEG_texto_(juntos[c.campo]);
   }).map(function (c) { return c.rotulo; });
 
-  if (faltando.length) {
-    return AP_PRECAD_SEG_erro_('CAMPOS_OBRIGATORIOS',
-      'Antes de mandar para a Segurança, falta preencher: ' + faltando.join(', ') + '.',
-      { faltando: faltando });
-  }
-
-  var token = AP_PRECAD_SEG_texto_(p.token) || AP_PRECAD_SEG_chave_();
-  if (!token) {
-    return AP_PRECAD_SEG_erro_('SEM_CRACHA',
-      'O módulo de crachá não está instalado, e é dele que sai a chave do QR. ' +
-      'Instale o ALMOXA_PRO_Modulo_Cracha antes de encaminhar.');
-  }
+  /* o token ou já nasceu no pré-cadastro, ou nasce agora. Nunca
+     falta: nada aqui pode impedir o processo de ter um. */
+  var token = AP_PRECAD_SEG_texto_(p.token) || AP_PRECAD_SEG_numeroToken_();
+  var chave = AP_PRECAD_SEG_texto_(p.tokenChave) || AP_PRECAD_SEG_chave_();
 
   var quem = AP_PRECAD_quem_(sessao);
   var agora = AP_PRECAD_agora_();
@@ -1245,7 +1416,10 @@ function AP_PRECAD_SEG_encaminhar_(payload, sessao) {
     etapa: AP_PRECAD_SEG.etapas.SEGURANCA,
     etapaEm: agora, etapaPor: quem,
     token: token,
+    tokenChave: chave,
+    tokenEstado: AP_PRECAD_SEG.estadosToken.AGUARDANDO,
     tokenEm: AP_PRECAD_SEG_texto_(p.tokenEm) || agora,
+    identificacao: AP_PRECAD_SEG_texto_(p.identificacao) || AP_PRECAD_SEG_identificacao_(),
     /* congela o que foi autorizado HOJE: mudar a configuração
        amanhã não reescreve o que a Segurança recebeu */
     camposEnviados: JSON.stringify(autorizados.map(function (c) { return c.campo; })),
@@ -1270,11 +1444,16 @@ function AP_PRECAD_SEG_encaminhar_(payload, sessao) {
     id: p.id,
     etapa: AP_PRECAD_SEG.etapas.SEGURANCA,
     token: token,
-    conteudoQR: AP_PRECAD_SEG_conteudoQR_(p.id, token),
+    tokenEstado: AP_PRECAD_SEG.estadosToken.AGUARDANDO,
+    conteudoQR: AP_PRECAD_SEG_conteudoQR_(p.id, chave),
     camposEnviados: autorizados.length,
-    notificado: aviso.enviado
+    notificado: aviso.enviado,
+    /* campos em branco que alguém marcou como obrigatórios: a
+       Segurança vê e cobra, mas o processo não ficou parado */
+    emBranco: faltando
   }, 'Encaminhado para a Segurança do Trabalho. ' +
-    (aviso.enviado ? 'A equipe foi avisada.' : 'O aviso automático não saiu — a fila mostra assim mesmo.'));
+    (aviso.enviado ? 'A equipe foi avisada.' : 'O aviso automático não saiu — a fila mostra assim mesmo.') +
+    (faltando.length ? ' Ficaram em branco: ' + faltando.join(', ') + '.' : ''));
 }
 
 /** A credencial do processo: ID, token e o conteúdo do QR para imprimir. */
@@ -1293,9 +1472,16 @@ function AP_PRECAD_SEG_credencial_(payload, sessao) {
 
   return AP_PRECAD_SEG_ok_({
     id: p.id, nome: p.nome, obra: p.obra,
+    empresa: AP_PRECAD_SEG_texto_(p.empresa),
+    funcao: AP_PRECAD_SEG_texto_(p.funcao || p.cargo),
     token: token,
-    conteudoQR: AP_PRECAD_SEG_conteudoQR_(p.id, token),
+    tokenEstado: AP_PRECAD_SEG_texto_(p.tokenEstado) || AP_PRECAD_SEG.estadosToken.GERADO,
+    identificacao: AP_PRECAD_SEG_texto_(p.identificacao),
+    conteudoQR: AP_PRECAD_SEG_conteudoQR_(p.id, AP_PRECAD_SEG_texto_(p.tokenChave) || token),
     etapa: AP_PRECAD_SEG_etapaDe_(p),
+    criadoEm: AP_PRECAD_SEG_texto_(p.data),
+    criadoPor: AP_PRECAD_SEG_texto_(p.solicitante),
+    email: AP_PRECAD_SEG_texto_(p.email),
     usadoEm: AP_PRECAD_SEG_texto_(p.tokenUsadoEm),
     usadoPor: AP_PRECAD_SEG_texto_(p.tokenUsadoPor)
   });
@@ -1319,7 +1505,10 @@ function AP_PRECAD_SEG_localizar_(payload, sessao) {
   if (doQR.id || token) {
     achados = linhas.filter(function (x) {
       if (doQR.id && AP_PRECAD_SEG_texto_(x.id).toUpperCase() !== doQR.id.toUpperCase()) return false;
-      if (token && AP_PRECAD_SEG_texto_(x.token) !== token) return false;
+      /* o QR carrega a CHAVE; o número do token também é aceito,
+         para quem digitou em vez de ler */
+      if (token && AP_PRECAD_SEG_texto_(x.tokenChave) !== token &&
+          AP_PRECAD_SEG_texto_(x.token) !== token) return false;
       return true;
     });
 
@@ -1370,18 +1559,31 @@ function AP_PRECAD_SEG_localizar_(payload, sessao) {
      processo, e não precisa ver o conteúdo para saber que achou */
   return AP_PRECAD_SEG_ok_({
     quantos: achados.length,
-    resultados: achados.slice(0, 25).map(function (x) {
-      return {
-        id: x.id, nome: x.nome,
-        matricula: AP_PRECAD_SEG_texto_(x.matricula),
-        empresa: AP_PRECAD_SEG_texto_(x.empresa),
-        obra: AP_PRECAD_SEG_texto_(x.obra),
-        funcao: AP_PRECAD_SEG_texto_(x.funcao || x.cargo),
-        etapa: AP_PRECAD_SEG_etapaDe_(x),
-        status: AP_PRECAD_SEG_texto_(x.status)
-      };
-    })
+    resultados: achados.slice(0, 25).map(AP_PRECAD_SEG_daFila_)
   }, achados.length ? '' : 'Nada encontrado com esse termo.');
+}
+
+/** Uma linha do jeito que a fila da Segurança mostra. */
+function AP_PRECAD_SEG_daFila_(x) {
+  return {
+    id: x.id, nome: AP_PRECAD_SEG_texto_(x.nome),
+    obra: AP_PRECAD_SEG_texto_(x.obra),
+    empresa: AP_PRECAD_SEG_texto_(x.empresa),
+    setor: AP_PRECAD_SEG_texto_(x.setor),
+    funcao: AP_PRECAD_SEG_texto_(x.funcao || x.cargo),
+    foto: AP_PRECAD_SEG_texto_(x.foto),
+    token: AP_PRECAD_SEG_texto_(x.token),
+    tokenEstado: AP_PRECAD_SEG_texto_(x.tokenEstado) || AP_PRECAD_SEG.estadosToken.GERADO,
+    identificacao: AP_PRECAD_SEG_texto_(x.identificacao),
+    etapa: AP_PRECAD_SEG_etapaDe_(x),
+    validadoPor: AP_PRECAD_SEG_texto_(x.validadoSegPor),
+    validadoEmail: AP_PRECAD_SEG_texto_(x.validadoSegEmail),
+    validadoEm: AP_PRECAD_SEG_texto_(x.validadoSegEm),
+    desde: AP_PRECAD_SEG_texto_(x.etapaEm) || AP_PRECAD_SEG_texto_(x.data),
+    /* para o cartão do validado mostrar a reserva sem abrir o processo */
+    reservaProtocolo: AP_PRECAD_SEG_texto_(x.reservaProtocolo),
+    reservaErro: AP_PRECAD_SEG_texto_(x.reservaErro)
+  };
 }
 
 /** A fila da Segurança. */
@@ -1403,15 +1605,15 @@ function AP_PRECAD_SEG_pendentes_(payload, sessao) {
       acc[e] = lista.filter(function (x) { return AP_PRECAD_SEG_etapaDe_(x) === e; }).length;
       return acc;
     }, {}),
-    processos: lista.map(function (x) {
-      return {
-        id: x.id, nome: x.nome, obra: AP_PRECAD_SEG_texto_(x.obra),
-        empresa: AP_PRECAD_SEG_texto_(x.empresa),
-        funcao: AP_PRECAD_SEG_texto_(x.funcao || x.cargo),
-        etapa: AP_PRECAD_SEG_etapaDe_(x),
-        desde: AP_PRECAD_SEG_texto_(x.etapaEm) || AP_PRECAD_SEG_texto_(x.data)
-      };
-    })
+    processos: lista.map(AP_PRECAD_SEG_daFila_),
+    /* os já validados, para a outra aba da tela */
+    validados: AP_PRECAD_linhas_().filter(function (x) {
+      var e = AP_PRECAD_SEG_etapaDe_(x);
+      return e === AP_PRECAD_SEG.etapas.VALIDADO || e === AP_PRECAD_SEG.etapas.LIBERADO ||
+        e === AP_PRECAD_SEG.etapas.CRACHA;
+    }).filter(function (x) {
+      return !(payload && payload.obra) || String(x.obra) === String(payload.obra);
+    }).map(AP_PRECAD_SEG_daFila_)
   });
 }
 
@@ -1457,6 +1659,33 @@ function AP_PRECAD_SEG_abrir_(payload, sessao) {
     id: p.id,
     etapa: etapa,
     status: AP_PRECAD_SEG_texto_(p.status),
+    /* o cabeçalho da ficha: quem lançou, quando, e a foto.
+       A foto vem por fora da configuração de campos porque a
+       Segurança pode acrescentar ou trocar — e continua sendo o
+       mesmo registro, não outro cadastro de pessoa. */
+    cabecalho: {
+      criadoEm: AP_PRECAD_SEG_texto_(p.data),
+      criadoPor: AP_PRECAD_SEG_texto_(p.solicitante),
+      encaminhadoEm: AP_PRECAD_SEG_texto_(p.etapaEm),
+      encaminhadoPor: AP_PRECAD_SEG_texto_(p.etapaPor),
+      validadoSegPor: AP_PRECAD_SEG_texto_(p.validadoSegPor),
+      validadoSegEm: AP_PRECAD_SEG_texto_(p.validadoSegEm),
+      validadoSegEmail: AP_PRECAD_SEG_texto_(p.validadoSegEmail),
+      obra: AP_PRECAD_SEG_texto_(p.obra),
+      setor: AP_PRECAD_SEG_texto_(p.setor),
+      empresa: AP_PRECAD_SEG_texto_(p.empresa)
+    },
+    fotoAtual: AP_PRECAD_SEG_texto_(p.foto),
+    token: {
+      tem: !!AP_PRECAD_SEG_texto_(p.token),
+      numero: AP_PRECAD_SEG_texto_(p.token),
+      estado: AP_PRECAD_SEG_texto_(p.tokenEstado) || AP_PRECAD_SEG.estadosToken.GERADO,
+      situacao: AP_PRECAD_SEG_texto_(p.token)
+        ? (etapa === AP_PRECAD_SEG.etapas.VALIDADO || etapa === AP_PRECAD_SEG.etapas.LIBERADO ||
+           etapa === AP_PRECAD_SEG.etapas.CRACHA ? 'ATIVO' : 'AGUARDANDO_VALIDACAO')
+        : 'SEM_TOKEN'
+    },
+    identificacao: AP_PRECAD_SEG_texto_(p.identificacao),
     /* o que veio do RH, campo a campo, cada um dizendo de onde veio */
     doRH: doRH,
     camposOcultos: cfg.campos.filter(function (c) {
@@ -1480,6 +1709,14 @@ function AP_PRECAD_SEG_abrir_(payload, sessao) {
       por: AP_PRECAD_SEG_texto_(p.assinaturaPor)
     },
     biometriaId: AP_PRECAD_SEG_texto_(p.biometriaId),
+    /* a reserva de EPI deste processo: o protocolo quando saiu, o
+       motivo quando não saiu. A tela mostra os dois — esconder o
+       motivo foi o que fez a reserva "desaparecer" sem explicação. */
+    reserva: {
+      protocolo: AP_PRECAD_SEG_texto_(p.reservaProtocolo),
+      em: AP_PRECAD_SEG_texto_(p.reservaEm),
+      erro: AP_PRECAD_SEG_texto_(p.reservaErro)
+    },
     cracha: {
       codigo: AP_PRECAD_SEG_texto_(p.crachaCodigo),
       em: AP_PRECAD_SEG_texto_(p.crachaEm)
@@ -1651,6 +1888,44 @@ function AP_PRECAD_SEG_nrsDisponiveis_() {
 }
 
 
+/**
+ * A FOTO — acrescentada ou trocada pela Segurança quando o RH não
+ * mandou. Grava no mesmo registro: não nasce cadastro de pessoa
+ * nenhum só para guardar uma imagem. A mesma foto serve depois
+ * para o crachá, a ficha de EPI e o histórico.
+ */
+function AP_PRECAD_SEG_salvarFoto_(payload, sessao) {
+  var p = AP_PRECAD_SEG_linha_(payload && payload.id);
+  if (!p) return AP_PRECAD_SEG_erro_('NAO_ENCONTRADO', 'Pré-cadastro não localizado.');
+
+  var pode = AP_PRECAD_SEG_pode_(sessao, 'foto', p);
+  if (!pode.permitido) return AP_PRECAD_SEG_erro_('SEM_PERMISSAO', pode.motivo);
+
+  var foto = AP_PRECAD_SEG_texto_(payload.foto);
+  if (!foto) return AP_PRECAD_SEG_erro_('SEM_FOTO', 'Não veio nenhuma foto.');
+  if (foto.indexOf('data:image/') !== 0) {
+    return AP_PRECAD_SEG_erro_('FOTO_INVALIDA', 'O que chegou não é uma imagem.');
+  }
+  if (foto.length > 45000) {
+    return AP_PRECAD_SEG_erro_('FOTO_GRANDE',
+      'A foto ficou grande demais para guardar (' + foto.length + ' caracteres). ' +
+      'Reduza antes de enviar.');
+  }
+
+  var quem = AP_PRECAD_quem_(sessao);
+  var tinha = !!AP_PRECAD_SEG_texto_(p.foto);
+  AP_Data_update(AP_PRECAD_CFG.aba, p.id, {
+    foto: foto, atualizadoEm: AP_PRECAD_agora_(), atualizadoPor: quem
+  }, 'id');
+
+  AP_PRECAD_auditar_(quem, tinha ? 'PRECADASTRO_FOTO_TROCADA' : 'PRECADASTRO_FOTO_ACRESCENTADA',
+    p.id, { tamanho: foto.length });
+
+  return AP_PRECAD_SEG_ok_({ id: p.id, trocada: tinha },
+    tinha ? 'Foto trocada.' : 'Foto acrescentada ao mesmo registro do colaborador.');
+}
+
+
 /* ------------------------------------------------------------
    5. ASSINATURA — registro do processo, nunca autenticação
    ------------------------------------------------------------ */
@@ -1741,6 +2016,14 @@ function AP_PRECAD_SEG_validar_(payload, sessao) {
   var quem = AP_PRECAD_quem_(sessao);
   var agora = AP_PRECAD_agora_();
 
+  /* O E-MAIL DE QUEM VALIDOU sai da sessão ou da conta do Google —
+     nunca de um campo digitado. Quem valida responde pelo que
+     validou, e isso não pode ser escrito à mão por outra pessoa. */
+  var email = AP_PRECAD_SEG_texto_(sessao && (sessao.email || sessao.usuarioEmail));
+  if (!email) {
+    try { email = AP_PRECAD_SEG_texto_(Session.getActiveUser().getEmail()); } catch (e) { }
+  }
+
   /* validado pela Segurança E com o acesso decidido pelo
      administrador = liberado. Só um dos dois não basta. */
   var acessoDecidido = String(p.status || '').toUpperCase() === AP_PRECAD_CFG.status.VALIDADO;
@@ -1748,23 +2031,60 @@ function AP_PRECAD_SEG_validar_(payload, sessao) {
 
   AP_Data_update(AP_PRECAD_CFG.aba, p.id, {
     etapa: etapaNova, etapaEm: agora, etapaPor: quem,
-    validadoSegPor: quem, validadoSegEm: agora, devolvidoMotivo: ''
+    validadoSegPor: quem, validadoSegEm: agora,
+    validadoSegEmail: email,
+    /* o token passa a valer para a retirada. É o MESMO token:
+       muda de estado, não de número. */
+    tokenEstado: AP_PRECAD_SEG.estadosToken.ATIVO,
+    identificacao: AP_PRECAD_SEG_texto_(p.identificacao) || AP_PRECAD_SEG_identificacao_(),
+    devolvidoMotivo: ''
   }, 'id');
 
   AP_PRECAD_auditar_(quem, 'PRECADASTRO_VALIDADO_SEGURANCA', p.id, {
     nome: p.nome, empresa: p.empresa, obra: p.obra,
-    etapa: etapaNova,
+    etapa: etapaNova, validadoPor: quem, email: email,
     comPendencia: falta.length ? falta.map(function (f) { return f.o_que; }) : [],
     permissaoVerificada: pode.verificado
   });
 
+  /* o RH fica sabendo — pelo mesmo mecanismo de notificações */
+  AP_PRECAD_SEG_avisar_('Validação concluída',
+    AP_PRECAD_SEG_texto_(p.nome) + ' foi validado pela Segurança. Validado por: ' + quem + '.',
+    'rh', p.id);
+
+  /* A RESERVA DE EPI SAI AGORA.
+     Depois de gravar a validação, nunca antes: se a reserva falhar,
+     a validação continua valendo. O motivo vai na resposta e fica
+     gravado, para a tela mostrar em vez de esconder. */
+  var reserva = null, reservaErro = null;
+  try {
+    var rr = AP_PRECAD_SEG_gerarReserva_(
+      AP_PRECAD_SEG_linha_(p.id) || p, sessao, false);
+    if (rr && rr.ok) reserva = rr.dados;
+    else reservaErro = { codigo: (rr && rr.codigo) || 'SEM_RESPOSTA', mensagem: (rr && rr.mensagem) || '' };
+  } catch (e) {
+    reservaErro = { codigo: 'FALHOU', mensagem: e.message };
+  }
+
+  var base = etapaNova === AP_PRECAD_SEG.etapas.LIBERADO
+    ? 'Validado e liberado. O crachá já pode ser emitido.'
+    : 'Validado pela Segurança. Falta o administrador definir o tipo de acesso para liberar o crachá.';
+
   return AP_PRECAD_SEG_ok_({
     id: p.id, etapa: etapaNova,
     liberado: etapaNova === AP_PRECAD_SEG.etapas.LIBERADO,
-    pendencias: falta
-  }, etapaNova === AP_PRECAD_SEG.etapas.LIBERADO
-    ? 'Validado e liberado. O crachá já pode ser emitido.'
-    : 'Validado pela Segurança. Falta o administrador definir o tipo de acesso para liberar o crachá.');
+    validadoPor: quem, validadoEmail: email, validadoEm: agora,
+    tokenEstado: AP_PRECAD_SEG.estadosToken.ATIVO,
+    identificacao: AP_PRECAD_SEG_texto_(p.identificacao),
+    pendencias: falta,
+    reserva: reserva,
+    reservaErro: reservaErro
+  }, base + (reserva
+    ? ' Reserva de EPI ' + reserva.protocolo + ' criada com ' + reserva.itens +
+      ' item(ns) — o estoque só baixa na entrega.'
+    : reservaErro
+      ? ' A reserva de EPI NÃO saiu: ' + reservaErro.mensagem
+      : ''));
 }
 
 /** Devolver para o RH — com motivo, sempre. */
@@ -1885,32 +2205,109 @@ function AP_PRECAD_SEG_crachaEmitido_(payload, sessao) {
    8. INSTALAR — só garante a aba e as colunas novas
    ------------------------------------------------------------ */
 
-function AP_PRECAD_SEG_instalar_() {
-  AP_PRECAD_aba_();
-  var conferencia = { aba: AP_PRECAD_CFG.aba, colunas: AP_PRECAD_CFG.colunas.length, faltando: [] };
+/* Uma vez por execução. Conferir cabeçalho custa uma leitura, e
+   AP_PRECAD_aba_() é chamada em todo caminho de gravação. */
+var AP_PRECAD_SEG_COLUNAS_CONFERIDAS = false;
+
+/**
+ * Confere o cabeçalho REAL da aba e acrescenta no FIM as colunas
+ * que faltarem. Nunca reordena, nunca apaga, nunca cria outra aba.
+ * Devolve o que encontrou, para o diagnóstico poder mostrar.
+ */
+function AP_PRECAD_SEG_garantirColunas_(forcar) {
+  var conferencia = {
+    aba: AP_PRECAD_CFG.aba,
+    esperadas: AP_PRECAD_CFG.colunas.length,
+    noCabecalho: 0,
+    faltando: [],
+    acrescentadas: [],
+    jaConferida: false
+  };
+  if (AP_PRECAD_SEG_COLUNAS_CONFERIDAS && !forcar) {
+    conferencia.jaConferida = true;
+    return conferencia;
+  }
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var aba = ss.getSheetByName(AP_PRECAD_CFG.aba);
-    if (aba && aba.getLastColumn() > 0) {
-      var cab = aba.getRange(1, 1, 1, aba.getLastColumn()).getValues()[0].map(String);
-      conferencia.faltando = AP_PRECAD_CFG.colunas.filter(function (c) {
-        return cab.indexOf(c) === -1;
-      });
-      /* coluna nova entra no FIM. Nunca no meio: o que já está
-         gravado embaixo não pode escorregar de lugar. */
-      if (conferencia.faltando.length) {
-        aba.getRange(1, cab.length + 1, 1, conferencia.faltando.length)
-          .setValues([conferencia.faltando]);
-        conferencia.acrescentadas = conferencia.faltando.slice();
-        conferencia.faltando = [];
-      }
+    if (!aba) { conferencia.erro = 'A aba não existe ainda.'; return conferencia; }
+    var ultima = aba.getLastColumn();
+    if (ultima < 1) { conferencia.erro = 'A aba está sem cabeçalho.'; return conferencia; }
+
+    var cab = aba.getRange(1, 1, 1, ultima).getValues()[0].map(function (c) {
+      return String(c).trim();
+    });
+    conferencia.noCabecalho = cab.filter(function (c) { return c; }).length;
+
+    var faltando = AP_PRECAD_CFG.colunas.filter(function (c) {
+      return cab.indexOf(c) === -1;
+    });
+    conferencia.faltando = faltando.slice();
+
+    /* coluna nova entra no FIM. Nunca no meio: o que já está
+       gravado embaixo não pode escorregar de lugar. */
+    if (faltando.length) {
+      aba.getRange(1, cab.length + 1, 1, faltando.length).setValues([faltando]);
+      try { SpreadsheetApp.flush(); } catch (e) { }
+      conferencia.acrescentadas = faltando.slice();
+      conferencia.faltando = [];
     }
+    AP_PRECAD_SEG_COLUNAS_CONFERIDAS = true;
   } catch (e) {
     conferencia.erro = e.message;
   }
+  return conferencia;
+}
+
+/**
+ * Só leitura. Não cria a aba, não escreve cabeçalho, não grava nada.
+ * Responde o que está lá para a tela poder mostrar.
+ */
+function AP_PRECAD_SEG_conferirAba_() {
+  var r = {
+    aba: AP_PRECAD_CFG.aba,
+    existe: false,
+    noCabecalho: 0,
+    esperadas: AP_PRECAD_CFG.colunas.length,
+    faltando: [],
+    linhas: null
+  };
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var aba = ss.getSheetByName(AP_PRECAD_CFG.aba);
+    if (!aba) {
+      return AP_PRECAD_SEG_ok_(r, 'A aba ' + AP_PRECAD_CFG.aba + ' ainda não existe. ' +
+        'Ela é criada no primeiro pré-cadastro.');
+    }
+    r.existe = true;
+    r.linhas = Math.max(0, aba.getLastRow() - 1);
+    var ultima = aba.getLastColumn();
+    if (ultima > 0) {
+      var cab = aba.getRange(1, 1, 1, ultima).getValues()[0].map(function (c) {
+        return String(c).trim();
+      });
+      r.noCabecalho = cab.filter(function (c) { return c; }).length;
+      r.faltando = AP_PRECAD_CFG.colunas.filter(function (c) { return cab.indexOf(c) === -1; });
+    }
+  } catch (e) {
+    r.erro = e.message;
+    return AP_PRECAD_SEG_erro_('FALHOU_LER_ABA', 'Não consegui ler o cabeçalho: ' + e.message, r);
+  }
+  return AP_PRECAD_SEG_ok_(r, r.faltando.length
+    ? ('Faltam ' + r.faltando.length + ' coluna(s) no cabeçalho: ' + r.faltando.join(', ') +
+      '. Enquanto elas não existirem, o token e a etapa não ficam gravados. ' +
+      'O próximo pré-cadastro acrescenta essas colunas no fim, sozinho.')
+    : 'O cabeçalho está completo: ' + r.noCabecalho + ' coluna(s).');
+}
+
+function AP_PRECAD_SEG_instalar_() {
+  AP_PRECAD_aba_();
+  var conferencia = AP_PRECAD_SEG_garantirColunas_(true);
+  conferencia.colunas = AP_PRECAD_CFG.colunas.length;
   return AP_PRECAD_SEG_ok_(conferencia,
-    'Aba conferida. ' + ((conferencia.acrescentadas || []).length
-      ? (conferencia.acrescentadas.length + ' coluna(s) acrescentada(s) no fim.')
+    'Aba conferida. ' + (conferencia.acrescentadas.length
+      ? (conferencia.acrescentadas.length + ' coluna(s) acrescentada(s) no fim: ' +
+        conferencia.acrescentadas.join(', ') + '.')
       : 'Nenhuma coluna faltando.'));
 }
 
@@ -2001,6 +2398,165 @@ function AP_PRECAD_SEG_itens_(payload, sessao) {
 
 
 /* ============================================================
+   A RESERVA DE EPI NASCE NA VALIDAÇÃO
+   ------------------------------------------------------------
+   O RH separa os EPIs no pré-cadastro, a Segurança valida, e é
+   nesse instante que o material tem que ficar guardado no nome da
+   pessoa. Antes não ficava: os itens dormiam na coluna
+   itensSelecionados e o almoxarifado não tinha o que entregar.
+
+   NÃO existe reserva nova aqui. Quem cria é o AP_EPI_criarReserva_
+   do módulo de EPI, pela porta AP_Modulo_epigestao('criarReserva'),
+   a mesma que a tela usa. No almoxarifado deste sistema uma reserva
+   de EPI É a "ficha" — o modalBaixaEPI procura o protocolo na
+   listarReservas e chama isso de ficha. Então é um pedido só que
+   resolve a ficha e a reserva.
+
+   Três regras que isto respeita:
+     · o estoque NÃO é baixado — a baixa é na entrega, no balcão,
+       contra o token;
+     · uma validação gera UMA reserva: se já houver protocolo
+       gravado, não cria outra;
+     · se a reserva não puder sair (EPI não cadastrado, saldo
+       insuficiente, módulo de EPI ausente), a validação continua
+       valendo e o motivo fica GRAVADO e visível — validar é decisão
+       de segurança, não de estoque.
+   ============================================================ */
+
+function AP_PRECAD_SEG_gerarReserva_(p, sessao, forcar) {
+  if (!p) return AP_PRECAD_SEG_erro_('NAO_ENCONTRADO', 'Pré-cadastro não localizado.');
+
+  var jaTem = AP_PRECAD_SEG_texto_(p.reservaProtocolo);
+  if (jaTem && !forcar) {
+    return AP_PRECAD_SEG_ok_({ protocolo: jaTem, jaExistia: true },
+      'A reserva ' + jaTem + ' já existe para este processo.');
+  }
+
+  var itens = AP_PRECAD_SEG_json_(p.itensSelecionados, []);
+  if (!itens.length) {
+    return AP_PRECAD_SEG_erro_('SEM_ITENS',
+      'O RH não separou nenhum EPI neste pré-cadastro, então não há o que reservar. ' +
+      'Abra a aba "EPIs e kits" e escolha os itens.');
+  }
+
+  if (typeof AP_Modulo_epigestao !== 'function') {
+    return AP_PRECAD_SEG_erro_('SEM_MODULO_EPI',
+      'O módulo de gestão de EPI não está instalado neste projeto do Apps Script, ' +
+      'então a reserva não pode ser criada. Instale o ALMOXA_PRO_Modulo_EPI.gs.');
+  }
+
+  /* o colaborador ainda pode não ter matrícula: a identificação
+     provisória (COL-…) é o que segura a reserva até a matrícula
+     oficial chegar */
+  var identificacao = AP_PRECAD_SEG_texto_(p.identificacao) || AP_PRECAD_SEG_texto_(p.id);
+  var token = AP_PRECAD_SEG_texto_(p.token);
+
+  var pedido = {
+    codigoColaborador: identificacao,
+    matricula: AP_PRECAD_SEG_texto_(p.matricula),
+    colaborador: AP_PRECAD_SEG_texto_(p.nome),
+    empresa: AP_PRECAD_SEG_texto_(p.empresa),
+    obra: AP_PRECAD_SEG_texto_(p.obra),
+    setor: AP_PRECAD_SEG_texto_(p.setor),
+    funcao: AP_PRECAD_SEG_texto_(p.funcao) || AP_PRECAD_SEG_texto_(p.cargo),
+    solicitante: AP_PRECAD_quem_(sessao),
+    /* de onde a reserva veio: o processo de entrada. É por este
+       campo que a ficha volta a apontar para o pré-cadastro. */
+    fichaOrigem: AP_PRECAD_SEG_texto_(p.id),
+    tipo: 'ENTREGA',
+    observacao: 'Entrada de novo colaborador. Processo ' + AP_PRECAD_SEG_texto_(p.id) +
+      (token ? ' · Token ' + token : '') +
+      (AP_PRECAD_SEG_texto_(p.kitSelecionado) ? ' · Kit ' + AP_PRECAD_SEG_texto_(p.kitSelecionado) : ''),
+    itens: itens.map(function (i) {
+      return {
+        sku: AP_PRECAD_SEG_texto_(i.sku),
+        descricao: AP_PRECAD_SEG_texto_(i.nome || i.descricao),
+        tamanho: AP_PRECAD_SEG_texto_(i.tamanho),
+        qtd: Number(i.qtd) || 1
+      };
+    })
+  };
+
+  var r;
+  try {
+    r = AP_Modulo_epigestao('criarReserva', pedido, sessao);
+  } catch (e) {
+    r = { ok: false, codigo: 'FALHOU', mensagem: e.message };
+  }
+
+  var agora = AP_PRECAD_agora_();
+
+  if (!r || !r.ok) {
+    var motivo = (r && r.mensagem) || 'O módulo de EPI não respondeu.';
+    var detalhe = (r && r.dados && r.dados.recusados) || null;
+    if (detalhe) {
+      motivo += ' ' + detalhe.map(function (x) {
+        return AP_PRECAD_SEG_texto_(x.sku) + ': ' + AP_PRECAD_SEG_texto_(x.motivo);
+      }).join('; ') + '.';
+    }
+    /* fica gravado para aparecer na tela em vez de sumir */
+    try {
+      AP_Data_update(AP_PRECAD_CFG.aba, p.id, {
+        reservaErro: motivo, reservaEm: agora
+      }, 'id');
+    } catch (e) { }
+    AP_PRECAD_auditar_(AP_PRECAD_quem_(sessao), 'PRECADASTRO_RESERVA_RECUSADA', p.id, {
+      nome: p.nome, codigo: (r && r.codigo) || 'SEM_RESPOSTA', motivo: motivo
+    });
+    return AP_PRECAD_SEG_erro_((r && r.codigo) || 'RESERVA_RECUSADA', motivo,
+      { recusados: detalhe, itens: pedido.itens.length });
+  }
+
+  var protocolo = AP_PRECAD_SEG_texto_(r.dados && r.dados.protocolo);
+
+  /* A reserva nasce SOLICITADA, e o balcão só entrega de APROVADA
+     em diante. Pedir uma segunda aprovação aqui não faz sentido: a
+     Segurança do Trabalho acabou de validar a pessoa E a lista de
+     EPI, e é essa a aprovação. Então avança um passo — pela porta do
+     próprio módulo, que registra a mudança na auditoria, nunca
+     escrevendo o status na planilha por fora.
+
+     Vai para APROVADA e NÃO para PRONTA_PARA_RETIRADA: separar o
+     material continua sendo trabalho do almoxarife, e dizer que
+     está pronta sem ninguém ter separado seria mentira na tela. */
+  var statusFinal = (r.dados && r.dados.status) || '';
+  try {
+    var mv = AP_Modulo_epigestao('mudarStatus', {
+      protocolo: protocolo, status: 'APROVADA'
+    }, sessao);
+    if (mv && mv.ok) statusFinal = 'APROVADA';
+  } catch (e) { }
+
+  AP_Data_update(AP_PRECAD_CFG.aba, p.id, {
+    reservaProtocolo: protocolo, reservaEm: agora, reservaErro: ''
+  }, 'id');
+
+  AP_PRECAD_auditar_(AP_PRECAD_quem_(sessao), 'PRECADASTRO_RESERVA_CRIADA', p.id, {
+    nome: p.nome, protocolo: protocolo, itens: pedido.itens.length
+  });
+
+  return AP_PRECAD_SEG_ok_({
+    protocolo: protocolo,
+    status: statusFinal,
+    validade: (r.dados && r.dados.validade) || '',
+    itens: pedido.itens.length,
+    token: token
+  }, 'Reserva ' + protocolo + ' criada com ' + pedido.itens.length + ' item(ns) no nome de ' +
+    AP_PRECAD_SEG_texto_(p.nome) + '. O estoque NÃO foi baixado: a baixa acontece na entrega, ' +
+    'no balcão, contra o token' + (token ? ' ' + token : '') + '.');
+}
+
+/** Porta para a tela: refazer a reserva que não saiu. */
+function AP_PRECAD_SEG_reserva_(payload, sessao) {
+  var p = AP_PRECAD_SEG_linha_(payload && payload.id);
+  if (!p) return AP_PRECAD_SEG_erro_('NAO_ENCONTRADO', 'Pré-cadastro não localizado.');
+  var pode = AP_PRECAD_SEG_pode_(sessao, 'validarSeguranca', p);
+  if (!pode.permitido) return AP_PRECAD_SEG_erro_('SEM_PERMISSAO', pode.motivo);
+  return AP_PRECAD_SEG_gerarReserva_(p, sessao, false);
+}
+
+
+/* ============================================================
    AS PORTAS NOVAS
    ------------------------------------------------------------
    O AP_Modulo_precadastro original continua inteiro. Esta função
@@ -2011,7 +2567,37 @@ function AP_PRECAD_SEG_itens_(payload, sessao) {
 function AP_PRECAD_SEG_atender_(acao, payload, sessao) {
   payload = payload || {};
   switch (String(acao || '')) {
+    case 'versao': return AP_PRECAD_SEG_ok_({
+      versao: AP_PRECAD_SEG.versao,
+      /* a lista do que este arquivo sabe fazer. A tela compara com
+         o que ela precisa e avisa se o arquivo estiver velho — em
+         vez de deixar o erro aparecer três telas adiante. */
+      acoes: ['versao', 'instalarSeguranca', 'conferirAba', 'gerarReserva', 'campos', 'salvarCampos', 'encaminhar',
+        'credencial', 'localizar', 'pendentesSeguranca', 'abrirSeguranca', 'itens',
+        'salvarItens', 'complementar', 'nrs', 'salvarFoto', 'assinar', 'assinatura',
+        'validarSeguranca', 'devolver', 'paraCracha', 'crachaEmitido'],
+      /* o que mudou de comportamento e a tela precisa saber */
+      cpfNaoTranca: true,
+      tokenNoCriar: true,
+      criarEncaminhaJunto: true,
+      /* o cabeçalho da aba é conferido e completado sozinho antes de
+         cada gravação: sem isso o token era gravado numa coluna que
+         não existia e se perdia em silêncio */
+      colunasAutoReparo: true,
+      /* a reserva de EPI nasce quando a Segurança valida */
+      reservaNaValidacao: true,
+      formatoToken: AP_PRECAD_SEG.prefixoToken + '-ANO-NNNNNN'
+    });
+
     case 'instalarSeguranca': return AP_PRECAD_SEG_instalar_();
+
+    /* SÓ LEITURA: diz o que existe no cabeçalho da aba, sem escrever
+       nada. Serve para a tela provar de onde vem o token faltando,
+       em vez de acusar o arquivo errado. */
+    case 'conferirAba': return AP_PRECAD_SEG_conferirAba_();
+
+    /* refazer a reserva de EPI que não saiu na validação */
+    case 'gerarReserva': return AP_PRECAD_SEG_reserva_(payload, sessao);
 
     case 'campos': return AP_PRECAD_SEG_ok_(AP_PRECAD_SEG_campos_());
     case 'salvarCampos': return AP_PRECAD_SEG_salvarCampos_(payload, sessao);
@@ -2028,6 +2614,8 @@ function AP_PRECAD_SEG_atender_(acao, payload, sessao) {
 
     case 'complementar': return AP_PRECAD_SEG_complementar_(payload, sessao);
     case 'nrs': return AP_PRECAD_SEG_ok_({ nrs: AP_PRECAD_SEG_nrsDisponiveis_() });
+
+    case 'salvarFoto': return AP_PRECAD_SEG_salvarFoto_(payload, sessao);
 
     case 'assinar': return AP_PRECAD_SEG_assinar_(payload, sessao);
     case 'assinatura': return AP_PRECAD_SEG_verAssinatura_(payload, sessao);
@@ -2166,9 +2754,10 @@ function AP_PRECAD_SEG_testes() {
     var enc = chamar('encaminhar', { id: id }, RH);
     ok('7  o RH encaminha para a Segurança', enc.ok, enc.mensagem);
     ok('8  nasce um token', !!enc.dados.token, enc.dados.token);
-    ok('9  o QR é prefixo + ID + token',
-      enc.dados.conteudoQR === AP_PRECAD_SEG.prefixoQR + ':' + id + ':' + enc.dados.token,
-      enc.dados.conteudoQR);
+    ok('9  o QR é prefixo + ID + a chave secreta — não o número do token',
+      enc.dados.conteudoQR.indexOf(AP_PRECAD_SEG.prefixoQR + ':' + id + ':') === 0 &&
+      enc.dados.conteudoQR.indexOf(enc.dados.token) === -1,
+      enc.dados.conteudoQR + '  (token ' + enc.dados.token + ')');
     ok('10 o QR NÃO leva CPF nem nome',
       enc.dados.conteudoQR.indexOf('529') === -1 &&
       enc.dados.conteudoQR.toLowerCase().indexOf('silva') === -1);
@@ -2260,14 +2849,22 @@ function AP_PRECAD_SEG_testes() {
       })());
     ok('42 e nenhum campo nasce obrigatório — quem marca é o RH',
       AP_PRECAD_SEG.camposPadrao.filter(function (c) { return c.obrigatorio; }).length === 0);
-    ok('43 marcar obrigatório continua valendo quando o RH marca',
+    ok('43 campo marcado como obrigatório NÃO tranca o encaminhamento',
       (function () {
         chamar('salvarCampos', { campos: [
           { campo: 'nome', enviar: true }, { campo: 'obra', enviar: true },
+          { campo: 'cpf', enviar: true, obrigatorio: true },
           { campo: 'foto', enviar: true, obrigatorio: true }
         ] }, RH);
-        var semFoto = novo({ nome: 'Sem Foto', cpf: '111.444.777-35', matricula: '000555' });
-        return chamar('encaminhar', { id: semFoto }, RH).codigo === 'CAMPOS_OBRIGATORIOS';
+        var semNada = novo({ nome: 'Sem CPF nem foto', cpf: '', matricula: '000555' });
+        var r = chamar('encaminhar', { id: semNada }, RH);
+        return r.ok === true && !!r.dados.token;
+      })());
+    ok('44 mas a resposta diz o que ficou em branco, para a Segurança cobrar',
+      (function () {
+        var outro = novo({ nome: 'Outro sem CPF', cpf: '', matricula: '000556' });
+        var r = chamar('encaminhar', { id: outro }, RH);
+        return r.ok && r.dados.emBranco.length >= 1 && /em branco/i.test(r.mensagem);
       })());
 
     /* ---------- complementar, NRs, ASO ---------- */
@@ -2402,6 +2999,101 @@ function AP_PRECAD_SEG_testes() {
     });
     ok('78 processo inexistente é recusado em todas as portas, sem explodir', todasRecusaram);
 
+    /* ---------- o número do token, os estados e a validação ---------- */
+    limpar();
+    var idN = novo();
+    var numero = tabela[0].token;
+    ok('79l o token tem número legível: TK-ano-sequencial',
+      /^TK-\d{4}-\d{6}$/.test(numero), numero);
+    ok('79m com a chave secreta separada do número',
+      !!tabela[0].tokenChave && tabela[0].tokenChave !== numero, tabela[0].tokenChave);
+    ok('79n e nasce no estado GERADO',
+      tabela[0].tokenEstado === AP_PRECAD_SEG.estadosToken.GERADO, tabela[0].tokenEstado);
+    ok('79o a identificação provisória também nasce: COL-xxxxxx',
+      /^COL-\d{6}$/.test(tabela[0].identificacao), tabela[0].identificacao);
+
+    var outroN = novo({ nome: 'Segundo', cpf: '', matricula: '000801' });
+    ok('79p dois processos, dois números diferentes',
+      tabela[1].token !== numero, numero + ' ≠ ' + tabela[1].token);
+
+    var encN = chamar('encaminhar', { id: idN }, RH);
+    ok('79q encaminhado, o token passa a AGUARDANDO_VALIDACAO',
+      tabela[0].tokenEstado === AP_PRECAD_SEG.estadosToken.AGUARDANDO, tabela[0].tokenEstado);
+    ok('79r e o número NÃO mudou', tabela[0].token === numero, numero);
+    ok('79s o QR leva a CHAVE, nunca o número que a pessoa digita',
+      encN.dados.conteudoQR.indexOf(tabela[0].tokenChave) > -1 &&
+      encN.dados.conteudoQR.indexOf(numero) === -1, encN.dados.conteudoQR);
+
+    chamar('complementar', {
+      id: idN, treinamentos: [{ nr: 'NR 35', status: 'CONCLUIDO' }], aso: { situacao: 'APTO' }
+    }, SEG);
+    var valN = chamar('validarSeguranca', { id: idN }, { nome: 'Carlos Alberto Lima',
+      perfil: 'seguranca', email: 'carlos.lima@empresa.com' });
+    ok('79t validado, o token vira ATIVO_PARA_ENTREGA',
+      tabela[0].tokenEstado === AP_PRECAD_SEG.estadosToken.ATIVO, tabela[0].tokenEstado);
+    ok('79u e continua sendo o MESMO número', tabela[0].token === numero, numero);
+    ok('79v a validação grava quem validou', valN.dados.validadoPor === 'Carlos Alberto Lima');
+    ok('79w com o e-mail do usuário autenticado, não digitado',
+      valN.dados.validadoEmail === 'carlos.lima@empresa.com' &&
+      tabela[0].validadoSegEmail === 'carlos.lima@empresa.com', tabela[0].validadoSegEmail);
+    ok('79x e com data e hora', !!valN.dados.validadoEm);
+    ok('79y o RH é avisado da validação',
+      avisos.filter(function (a) { return /concluída/i.test(a.titulo); }).length === 1,
+      avisos.map(function (a) { return a.titulo; }).join(' | '));
+    ok('79z o pré-cadastro do RH passa a mostrar quem validou',
+      chamar('obter', { id: idN }, RH).dados.validadoSegEmail === 'carlos.lima@empresa.com');
+
+    var fila = chamar('pendentesSeguranca', {}, SEG);
+    ok('79aa a fila separa aguardando de validados',
+      fila.dados.quantos === 0 && fila.dados.validados.length === 1,
+      fila.dados.quantos + ' aguardando · ' + fila.dados.validados.length + ' validado(s)');
+    ok('79ab e o validado leva o token e quem validou',
+      fila.dados.validados[0].token === numero &&
+      fila.dados.validados[0].validadoEmail === 'carlos.lima@empresa.com');
+
+    /* ---------- a foto e o cabeçalho da ficha ---------- */
+    limpar();
+    var idF = novo();
+    chamar('encaminhar', { id: idF }, RH);
+    var fichaSemFoto = chamar('abrirSeguranca', { id: idF }, SEG);
+    ok('80 a ficha traz o cabeçalho: quem lançou e quando',
+      fichaSemFoto.dados.cabecalho.criadoPor === 'RH de teste' &&
+      !!fichaSemFoto.dados.cabecalho.criadoEm,
+      JSON.stringify(fichaSemFoto.dados.cabecalho.criadoPor));
+    ok('81 e diz que o token está aguardando validação',
+      fichaSemFoto.dados.token.tem === true &&
+      fichaSemFoto.dados.token.situacao === 'AGUARDANDO_VALIDACAO',
+      fichaSemFoto.dados.token.situacao);
+    ok('82 a ficha começa sem foto', fichaSemFoto.dados.fotoAtual === '');
+
+    ok('83 texto no lugar de foto é recusado',
+      chamar('salvarFoto', { id: idF, foto: 'foto do joão' }, SEG).codigo === 'FOTO_INVALIDA');
+    ok('84 foto grande demais é recusada ANTES de gravar',
+      chamar('salvarFoto', {
+        id: idF, foto: 'data:image/jpeg;base64,' + new Array(46001).join('A')
+      }, SEG).codigo === 'FOTO_GRANDE');
+    var posta = chamar('salvarFoto', { id: idF, foto: 'data:image/jpeg;base64,AAAA' }, SEG);
+    ok('85 a Segurança acrescenta a foto que faltava', posta.ok && posta.dados.trocada === false);
+    ok('86 e ela entra no MESMO registro — nenhum cadastro novo',
+      tabela.length === 1 && tabela[0].foto === 'data:image/jpeg;base64,AAAA', tabela.length + ' linha(s)');
+    ok('87 a ficha passa a mostrar a foto',
+      chamar('abrirSeguranca', { id: idF }, SEG).dados.fotoAtual === 'data:image/jpeg;base64,AAAA');
+    ok('88 trocar a foto depois é reconhecido como troca',
+      chamar('salvarFoto', { id: idF, foto: 'data:image/png;base64,BBBB' }, SEG).dados.trocada === true);
+    ok('89 e fica registrado na auditoria',
+      contarAuditoria('PRECADASTRO_FOTO_ACRESCENTADA') === 1 &&
+      contarAuditoria('PRECADASTRO_FOTO_TROCADA') === 1);
+
+    chamar('complementar', {
+      id: idF, treinamentos: [{ nr: 'NR 35', status: 'CONCLUIDO' }],
+      aso: { situacao: 'APTO' }
+    }, SEG);
+    chamar('validarSeguranca', { id: idF }, SEG);
+    ok('90 depois de validado, o token vira ATIVO — o mesmo token',
+      chamar('abrirSeguranca', { id: idF }, SEG).dados.token.situacao === 'ATIVO');
+    ok('91 e o token não foi trocado no caminho',
+      chamar('credencial', { id: idF }, SEG).dados.token === tabela[0].token);
+
     /* ---------- os EPIs e kits que o RH separou ---------- */
     limpar();
     var idI = novo();
@@ -2479,17 +3171,54 @@ function AP_PRECAD_SEG_testes() {
     ok('92 e ela chega lá',
       chamar('abrirSeguranca', { id: idJ }, SEG).dados.itens[0].sku === 'LUV-P');
 
-    /* ---------- sem o módulo de crachá não se inventa chave ---------- */
+    /* ---------- o token não depende de mais ninguém ---------- */
     limpar();
     var guardaChave = (typeof AP_CR_chave_ === 'function') ? AP_CR_chave_ : null;
     try {
       AP_CR_chave_ = undefined;
       var idSem = novo();
-      ok('79 sem o módulo de crachá, o processo PARA em vez de inventar chave',
-        chamar('encaminhar', { id: idSem }, RH).codigo === 'SEM_CRACHA');
+      ok('79 sem o módulo de crachá, o token nasce do mesmo jeito',
+        !!AP_PRECAD_SEG_texto_(tabela[0].token), tabela[0].token);
+      var encSem = chamar('encaminhar', { id: idSem }, RH);
+      ok('79b e o encaminhamento não para por causa disso', encSem.ok, encSem.mensagem);
+      ok('79c a chave do QR tem 8 caracteres, sem letra que se confunde com número',
+        /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/.test(tabela[0].tokenChave), tabela[0].tokenChave);
     } finally {
       if (guardaChave) AP_CR_chave_ = guardaChave;
     }
+
+    /* ---------- o token nasce com a ficha, antes de encaminhar ---------- */
+    limpar();
+    var idT = novo();
+    ok('79d o token existe assim que a ficha é criada',
+      !!AP_PRECAD_SEG_texto_(tabela[0].token), tabela[0].token);
+    ok('79e e a etapa já nasce marcada como RH', tabela[0].etapa === 'RH');
+    var tokenDoNascimento = tabela[0].token;
+    chamar('encaminhar', { id: idT }, RH);
+    ok('79f encaminhar NÃO troca o token — é o mesmo do começo ao fim',
+      tabela[0].token === tokenDoNascimento, tokenDoNascimento + ' → ' + tabela[0].token);
+
+    /* ---------- criar e encaminhar numa chamada só ---------- */
+    limpar();
+    var juntos = chamar('criar', {
+      nome: 'Tudo de uma vez', cpf: '', cargo: '', obra: '',
+      encaminharAgora: true,
+      itens: [{ sku: 'CAP-01', nome: 'Capacete', qtd: 1 }],
+      kit: 'KIT OBRA'
+    }, RH);
+    ok('79g uma chamada só cria, gera o token e encaminha',
+      juntos.ok && juntos.dados.criado === true && !!juntos.dados.token, juntos.dados.token);
+    ok('79h a etapa já sai como AGUARDANDO_SEGURANCA',
+      juntos.dados.etapa === AP_PRECAD_SEG.etapas.SEGURANCA, juntos.dados.etapa);
+    ok('79i e o QR já vem montado, com a chave',
+      juntos.dados.conteudoQR.indexOf(AP_PRECAD_SEG.prefixoQR + ':' + juntos.dados.id + ':') === 0,
+      juntos.dados.conteudoQR);
+    ok('79i2 e o número do token está no formato legível',
+      /^TK-\d{4}-\d{6}$/.test(juntos.dados.token), juntos.dados.token);
+    ok('79j os EPIs foram junto na mesma chamada',
+      chamar('itens', { id: juntos.dados.id }, RH).dados.itens.length === 1);
+    ok('79k e a ficha aparece na fila da Segurança',
+      chamar('pendentesSeguranca', {}, SEG).dados.quantos === 1);
 
   } finally {
     AP_PRECAD_id_ = orig.id;
@@ -2510,6 +3239,241 @@ function AP_PRECAD_SEG_testes() {
   log.push('Nada foi lido nem gravado na sua planilha: a camada de dados');
   log.push('foi trocada por uma de mentira e devolvida no fim.');
 
+  var texto = log.join('\n');
+  try { Logger.log(texto); } catch (e) { }
+  try { console.log(texto); } catch (e) { }
+  return texto;
+}
+
+
+/* ============================================================
+   TESTE PONTA A PONTA — NA PLANILHA DE VERDADE
+   ------------------------------------------------------------
+   AP_PRECAD_testes() e AP_PRECAD_SEG_testes() não tocam na
+   planilha: trocam a camada de dados por uma de mentira. Isso
+   prova a LÓGICA e não prova a GRAVAÇÃO — e o problema estava
+   justamente na gravação.
+
+   Esta função roda no dado real. Ela cria uma ficha de teste,
+   finaliza como o RH finaliza, RELÊ A LINHA DA PLANILHA, e responde
+   uma por uma as treze perguntas da lista. No fim, arquiva a ficha
+   de teste (status EXCLUIDO, etapa EXCLUIDO) — não apaga linha
+   nenhuma, o histórico fica.
+
+   Rode direto no editor do Apps Script: escolha
+   AP_PRECAD_PONTA_A_PONTA e clique em Executar. O resultado sai no
+   Registro de execução.
+   ============================================================ */
+
+function AP_PRECAD_PONTA_A_PONTA() {
+  var log = [];
+  var marcas = [];
+  function d(t) { log.push(t); }
+  function item(rotulo, passou, detalhe) {
+    marcas.push(!!passou);
+    d((passou ? '[ok]   ' : '[FALHA]') + ' ' + rotulo + (detalhe ? '  ->  ' + detalhe : ''));
+  }
+
+  d('============================================================');
+  d('PONTA A PONTA  ·  PRE-CADASTRO -> TOKEN -> FILA DA SEGURANCA');
+  d('modulo ' + AP_PRECAD_CFG.versao + '  /  fluxo ' + AP_PRECAD_SEG.versao);
+  d('============================================================');
+  d('');
+
+  /* ---------- 0. O CABEÇALHO DA ABA ----------
+     Antes de qualquer coisa: as colunas novas existem na planilha?
+     Se não existirem, o append grava no vazio e o token se perde. */
+  d('--- 0. CABECALHO DA ABA ' + AP_PRECAD_CFG.aba + ' ---');
+  var cabAntes = [];
+  try {
+    var ss0 = SpreadsheetApp.getActiveSpreadsheet();
+    var ab0 = ss0.getSheetByName(AP_PRECAD_CFG.aba);
+    if (ab0 && ab0.getLastColumn() > 0) {
+      cabAntes = ab0.getRange(1, 1, 1, ab0.getLastColumn()).getValues()[0]
+        .map(function (c) { return String(c).trim(); });
+    }
+  } catch (e) { d('nao consegui ler o cabecalho: ' + e.message); }
+
+  var faltavam = AP_PRECAD_CFG.colunas.filter(function (c) { return cabAntes.indexOf(c) === -1; });
+  d('colunas no cabecalho ANTES: ' + cabAntes.length);
+  d('colunas que o modulo espera: ' + AP_PRECAD_CFG.colunas.length);
+  if (!cabAntes.length) {
+    d('a aba nao existe ou esta sem cabecalho — vai ser criada agora.');
+  } else if (faltavam.length) {
+    d('FALTAVAM ' + faltavam.length + ' coluna(s): ' + faltavam.join(', '));
+    d('>>> ESTA ERA A QUEBRA: o AP_Data_append gravava esses campos em');
+    d('>>> colunas que nao existiam no cabecalho, e eles se perdiam em');
+    d('>>> silencio. A ficha salvava, a resposta trazia o token, e ao');
+    d('>>> reler a linha nao havia token nenhum.');
+  } else {
+    d('nenhuma coluna faltando — o cabecalho ja estava completo.');
+  }
+
+  var rep = AP_PRECAD_SEG_garantirColunas_(true);
+  if (rep.erro) d('reparo: ' + rep.erro);
+  d('reparo: ' + rep.acrescentadas.length + ' coluna(s) acrescentada(s) no fim.');
+  if (rep.acrescentadas.length) d('  ' + rep.acrescentadas.join(', '));
+  d('');
+
+  /* ---------- 1. CRIAR + FINALIZAR, do jeito que a tela faz ---------- */
+  var marcaTeste = 'ZZ TESTE PONTA A PONTA ' + new Date().getTime();
+  var sessao = { nome: 'Teste ponta a ponta', usuario: 'teste', email: '', perfil: 'admin' };
+
+  d('--- 1. RH FINALIZA (criar com encaminharAgora, uma chamada) ---');
+  d('nome da ficha de teste: ' + marcaTeste);
+
+  var resposta;
+  try {
+    resposta = AP_Modulo_precadastro('criar', {
+      nome: marcaTeste,
+      cargo: 'Teste',
+      funcao: 'Teste',
+      obra: '',
+      cpf: '',
+      rg: '',
+      encaminharAgora: true,
+      itens: [{ sku: 'TESTE-SKU-1', nome: 'Bota de seguranca', tamanho: '41', qtd: 1, unidade: 'par' }]
+    }, sessao);
+  } catch (e) {
+    resposta = { ok: false, codigo: 'EXCECAO', mensagem: e.message };
+    d('EXCECAO ao criar: ' + e.message);
+  }
+
+  d('resposta.ok = ' + (resposta && resposta.ok));
+  d('resposta.codigo = ' + (resposta && resposta.codigo || '-'));
+  d('resposta.mensagem = ' + String((resposta && resposta.mensagem) || '-').slice(0, 200));
+  var dd = (resposta && resposta.dados) || {};
+  d('resposta.dados.id = ' + (dd.id || '-'));
+  d('resposta.dados.token = ' + (dd.token || '-'));
+  d('resposta.dados.etapa = ' + (dd.etapa || '-'));
+  if (dd.naoEncaminhou) d('NAO ENCAMINHOU: ' + dd.naoEncaminhou + ' [' + dd.codigoEncaminhar + ']');
+  d('');
+
+  if (!resposta || !resposta.ok || !dd.id) {
+    d('--- PAREI AQUI ---');
+    d('A criacao nao concluiu, entao nao ha o que conferir adiante.');
+    d('Conserte este ponto antes de olhar qualquer tela.');
+    return AP_PRECAD_PONTA_A_PONTA_fim_(log, marcas);
+  }
+
+  var id = dd.id;
+  var tokenRespondido = String(dd.token || '');
+
+  /* ---------- 2. RELER A LINHA DA PLANILHA ---------- */
+  d('--- 2. RELENDO A LINHA GRAVADA (nao a resposta) ---');
+  var linha = null;
+  try { linha = AP_PRECAD_SEG_linha_(id); } catch (e) { d('EXCECAO ao reler: ' + e.message); }
+  if (!linha) {
+    d('a linha nao foi encontrada na planilha depois de gravada.');
+  } else {
+    ['id', 'nome', 'status', 'etapa', 'token', 'tokenEstado', 'tokenChave',
+      'identificacao', 'itensSelecionados'].forEach(function (c) {
+        d('  ' + c + ' = ' + String(linha[c] === undefined ? '(coluna ausente)' : linha[c]).slice(0, 90));
+      });
+  }
+  d('');
+
+  /* ---------- 3. A FILA DA SEGURANCA ---------- */
+  d('--- 3. A FILA DA SEGURANCA ---');
+  var fila = null;
+  try { fila = AP_Modulo_precadastro('pendentesSeguranca', {}, sessao); }
+  catch (e) { d('EXCECAO na fila: ' + e.message); }
+  var naFila = null;
+  if (fila && fila.ok) {
+    d('a fila respondeu com ' + fila.dados.quantos + ' processo(s).');
+    naFila = (fila.dados.processos || []).filter(function (p) { return p.id === id; })[0] || null;
+  } else {
+    d('a fila nao respondeu: ' + ((fila && fila.codigo) || '?') + ' ' + ((fila && fila.mensagem) || ''));
+  }
+  d('a ficha de teste esta na fila? ' + (naFila ? 'SIM' : 'NAO'));
+  if (naFila) {
+    d('  fila.id = ' + naFila.id);
+    d('  fila.token = ' + (naFila.token || '-'));
+    d('  fila.etapa = ' + (naFila.etapa || '-'));
+  }
+  d('');
+
+  /* ---------- 4. A CREDENCIAL (o que o modal do token mostra) ---------- */
+  d('--- 4. CREDENCIAL / MODAL DO TOKEN ---');
+  var cred = null;
+  try { cred = AP_Modulo_precadastro('credencial', { id: id }, sessao); }
+  catch (e) { d('EXCECAO na credencial: ' + e.message); }
+  if (cred && cred.ok) {
+    d('credencial.token = ' + cred.dados.token);
+    d('credencial.conteudoQR = ' + String(cred.dados.conteudoQR || '-').slice(0, 60));
+  } else {
+    d('a credencial nao respondeu: ' + ((cred && cred.codigo) || '?') + ' ' + ((cred && cred.mensagem) || ''));
+  }
+  d('');
+
+  /* ---------- 5. A LISTA DE 13 ---------- */
+  d('--- 5. A LISTA DE VERIFICACAO ---');
+  var tokenGravado = linha ? String(linha.token || '') : '';
+  var etapaGravada = linha ? String(linha.etapa || '') : '';
+  var itensGravados = linha ? String(linha.itensSelecionados || '') : '';
+
+  item('Registro foi salvo?', !!linha, linha ? 'linha lida de volta da planilha' : 'nao achei a linha');
+  item('ID do Pre-Cadastro foi criado?', !!id, id);
+  item('EPIs foram salvos?', itensGravados.indexOf('TESTE-SKU-1') > -1,
+    itensGravados ? itensGravados.slice(0, 70) : 'coluna itensSelecionados vazia');
+  item('Pre-reserva foi salva?', itensGravados.indexOf('TESTE-SKU-1') > -1,
+    'a pre-reserva e a propria lista de itens separados');
+  item('Token foi gerado?', !!tokenRespondido, tokenRespondido || 'a resposta nao trouxe token');
+  item('Token foi gravado no banco?', !!tokenGravado,
+    tokenGravado || 'a coluna token voltou vazia da planilha');
+  item('Token retornou para o frontend?', !!tokenRespondido, tokenRespondido);
+  item('Modal do Token apareceu?', !!(cred && cred.ok && cred.dados.token),
+    (cred && cred.ok) ? 'a acao credencial devolveu o token, que e o que o modal le'
+      : 'a credencial nao respondeu, entao o modal nao teria o que mostrar');
+  item('Status virou AGUARDANDO_VALIDACAO_SEGURANCA?',
+    etapaGravada === AP_PRECAD_SEG.etapas.SEGURANCA ||
+    etapaGravada === AP_PRECAD_SEG.etapas.VALIDACAO,
+    'etapa gravada = ' + (etapaGravada || '(vazia)') +
+    '  (a etapa do processo e esta coluna; a coluna status guarda o ACESSO: ' +
+    (linha ? String(linha.status || '') : '?') + ')');
+  item('Registro entrou na fila da Seguranca?', !!naFila,
+    naFila ? 'achei na resposta de pendentesSeguranca' : 'nao esta na fila');
+  item('Seguranca consegue localizar o colaborador?',
+    !!(naFila && String(naFila.nome || '').indexOf('TESTE PONTA A PONTA') > -1),
+    naFila ? String(naFila.nome || '') : '-');
+  item('O mesmo ID aparece nos dois lados?', !!(naFila && naFila.id === id),
+    'RH: ' + id + '  /  Seguranca: ' + ((naFila && naFila.id) || '-'));
+  item('O mesmo TOKEN aparece nos dois lados?',
+    !!(tokenRespondido && naFila && String(naFila.token || '') === tokenRespondido &&
+      tokenGravado === tokenRespondido),
+    'respondido: ' + (tokenRespondido || '-') +
+    '  /  gravado: ' + (tokenGravado || '-') +
+    '  /  fila: ' + ((naFila && naFila.token) || '-'));
+  d('');
+
+  /* ---------- 6. ARQUIVAR A FICHA DE TESTE ---------- */
+  d('--- 6. LIMPEZA ---');
+  try {
+    AP_Data_update(AP_PRECAD_CFG.aba, id, {
+      status: 'EXCLUIDO',
+      etapa: 'EXCLUIDO',
+      observacao: 'Ficha criada pelo teste ponta a ponta e arquivada no fim do teste.',
+      atualizadoEm: AP_PRECAD_agora_(),
+      atualizadoPor: 'teste ponta a ponta'
+    }, 'id');
+    d('a ficha de teste ' + id + ' foi marcada EXCLUIDO — a linha continua na');
+    d('planilha, com o historico, e saiu da fila da Seguranca.');
+  } catch (e) {
+    d('NAO consegui arquivar a ficha de teste ' + id + ': ' + e.message);
+    d('marque a mao como EXCLUIDO, ou apague a linha.');
+  }
+
+  return AP_PRECAD_PONTA_A_PONTA_fim_(log, marcas);
+}
+
+function AP_PRECAD_PONTA_A_PONTA_fim_(log, marcas) {
+  var falhas = marcas.filter(function (m) { return !m; }).length;
+  log.push('');
+  log.push('============================================================');
+  log.push(falhas
+    ? '>>> ' + falhas + ' DE ' + marcas.length + ' ITEM(NS) FALHARAM — a cadeia para no primeiro [FALHA] acima.'
+    : '>>> OS ' + marcas.length + ' ITENS PASSARAM — a cadeia esta inteira: RH -> banco -> token -> fila.');
+  log.push('============================================================');
   var texto = log.join('\n');
   try { Logger.log(texto); } catch (e) { }
   try { console.log(texto); } catch (e) { }
