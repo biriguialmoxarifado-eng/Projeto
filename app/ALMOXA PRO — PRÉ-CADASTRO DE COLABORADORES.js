@@ -70,6 +70,17 @@ var AP_PRECAD_CFG = {
 function AP_Modulo_precadastro(acao, payload, sessao) {
   payload = payload || {};
   try {
+    /* O CABEÇALHO DA ABA, ANTES DE QUALQUER AÇÃO.
+       Isto estava só no criar_, e o efeito era cruel: quem validava
+       uma ficha CRIADA ANTES da atualização gravava reservaProtocolo
+       numa coluna que não existia — o campo caía no chão em silêncio,
+       a tela não mostrava reserva nenhuma, e a conferência de "já tem
+       protocolo?" lia vazio para sempre, o que fazia cada clique em
+       Validar criar OUTRA reserva.
+       Aqui é uma leitura por execução (a conferência se lembra de que
+       já rodou), e cobre todo caminho de gravação de uma vez. */
+    AP_PRECAD_aba_();
+
     switch (acao) {
       case 'criar': return AP_PRECAD_criar_(payload, sessao);
       case 'listar': return { ok: true, dados: AP_PRECAD_listar_(payload) };
@@ -2205,8 +2216,9 @@ function AP_PRECAD_SEG_crachaEmitido_(payload, sessao) {
    8. INSTALAR — só garante a aba e as colunas novas
    ------------------------------------------------------------ */
 
-/* Uma vez por execução. Conferir cabeçalho custa uma leitura, e
-   AP_PRECAD_aba_() é chamada em todo caminho de gravação. */
+/* Uma vez por execução. Conferir o cabeçalho custa uma leitura, e o
+   AP_PRECAD_aba_() roda na entrada do módulo — antes de qualquer
+   ação, seja de leitura ou de gravação. */
 var AP_PRECAD_SEG_COLUNAS_CONFERIDAS = false;
 
 /**
