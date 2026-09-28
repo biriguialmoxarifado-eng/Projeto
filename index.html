@@ -19255,8 +19255,16 @@ ttl: ttl || TTL_PADRAO
 ST.ultimaSync = Date.now();
 },
 invalidar: function(modulo) {
+/* A CHAVE NÃO COMEÇA PELO MÓDULO.
+   Ela é "perfil|matricula::modulo.acao:payload". O teste antigo
+   era indexOf(modulo + ".") === 0, e como a chave começa por
+   quem-está-logado, isso NUNCA dava zero: a limpeza não apagava
+   nada. Efeito prático: durante 60 segundos depois de qualquer
+   leitura, o que era gravado não aparecia — em toda lista, ficha,
+   catálogo e movimentação do sistema. O "::" é o que separa quem
+   do que, e é por ele que se procura. */
 Object.keys(store).forEach(function(k) {
-if (!modulo || k.indexOf(modulo + ".") === 0) delete store[k];
+if (!modulo || k.indexOf("::" + modulo + ".") > -1) delete store[k];
 });
 },
 tamanho: function() {
@@ -29166,7 +29174,15 @@ return i.status !== "Inativo" && /epi|seguran|uniform/i.test(i.categoria || "");
 function modalEntregarEPI(matriculaPreset, preSelecao) {
 epiSelecao = preSelecao ? JSON.parse(JSON.stringify(preSelecao)) : {};
 epiBusca = "";
-var usuarios = MOCK.usuarios || [];
+/* A LISTA DE PESSOAS VEM DO CORE, AQUI DENTRO.
+   Antes esta tela lia MOCK.usuarios, que só é preenchido quando a
+   TELA de EPI é desenhada. Abrindo "Entregar EPI" de qualquer outro
+   lugar — do painel, da ficha, do atalho — a lista chegava vazia e o
+   sistema dizia "Nenhum usuário cadastrado" com a obra inteira
+   cadastrada. O aviso era verdadeiro sobre a variável e mentiroso
+   sobre a realidade. */
+var usuarios = listaSegura(MOCK.usuarios);
+var listaCarregando = true;
 var itens = catalogoEPI();
 if (!itens.length) {
 UI.modal({
@@ -29195,9 +29211,9 @@ return i.sku === sku;
 })[0] || {};
 return s + epiSelecao[sku] * (Number(it.valorUnitario) || 0);
 }, 0);
-return '<div class="grid g2 mb16">' + '<div class="field"><label>Colaborador <span class="req">*</span></label><select class="select" id="epColab">' + (usuarios.length ? usuarios.map(function(u) {
+return '<div class="grid g2 mb16">' + '<div class="field"><label>Colaborador <span class="req">*</span>' + '<button class="btn-link" data-ep-novo style="float:right;font-weight:600">+ Cadastrar rápido</button></label>' + '<select class="select" id="epColab">' + (usuarios.length ? usuarios.map(function(u) {
 return '<option value="' + U.esc(u.matricula) + '" ' + (String(u.matricula) === String(matriculaPreset) ? "selected" : "") + ">" + U.esc(u.nome) + " — " + U.esc(u.matricula) + "</option>";
-}).join("") : '<option value="">Nenhum usuário cadastrado</option>') + "</select></div>" + '<div class="field"><label>Motivo</label><select class="select" id="epMotivo">' + [ "Primeira entrega", "Troca por desgaste", "Perda", "Dano", "Vencimento", "Reposição" ].map(function(m) {
+}).join("") : '<option value="">' + (listaCarregando ? "Carregando as pessoas…" : "Ninguém cadastrado ainda") + "</option>") + "</select>" + (!usuarios.length && !listaCarregando ? '<div class="small mt8" style="color:var(--laranja)">Ninguém veio do Core. Use o <b>Cadastrar rápido</b> ao lado para incluir quem vai receber agora.</div>' : "") + "</div>" + '<div class="field"><label>Motivo</label><select class="select" id="epMotivo">' + [ "Primeira entrega", "Troca por desgaste", "Perda", "Dano", "Vencimento", "Reposição" ].map(function(m) {
 return "<option>" + m + "</option>";
 }).join("") + "</select></div>" + "</div>" + '<div class="flex gap8 mb12">' + '<div class="search-wrap grow">' + ic("busca") + '<input class="input" id="epBusca" placeholder="Buscar EPI por descrição, SKU ou marca…" value="' + U.esc(epiBusca) + '"></div>' + '<button class="btn btn-ghost" data-epi-kit>' + ic("caixa") + "Usar um kit</button>" + "</div>" + (escolhidos.length ? '<div class="alert a-blue mb12">' + ic("checkC") + "<div><b>" + escolhidos.length + " EPI(s) selecionado(s)</b>" + (total ? "Valor estimado: " + U.moeda(total) : "") + "</div></div>" : "") + '<div class="grid g4" style="gap:12px">' + lista.slice(0, 24).map(function(i) {
 var qtd = epiSelecao[i.sku] || 0;
@@ -29213,6 +29229,89 @@ corpo: '<div id="epBox">' + corpo() + "</div>",
 rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' + '<button class="btn btn-green" data-ok>' + ic("checkC") + "Confirmar entrega</button>",
 aoAbrir: function(w, fechar) {
 ligar();
+
+/* busca as pessoas no Core assim que a tela abre */
+function recarregarPessoas(selecionar) {
+return API.call("usuarios", "listar", {}).then(function(r) {
+listaCarregando = false;
+var vindos = (r && r.ok) ? listaSegura(r.dados) : [];
+if (vindos.length) {
+usuarios = vindos;
+MOCK.usuarios = vindos;
+}
+if (selecionar) matriculaPreset = selecionar;
+repintar();
+return vindos;
+});
+}
+recarregarPessoas();
+
+/* CADASTRO RAPIDO, SEM SAIR DA ENTREGA.
+   So o que a entrega precisa para existir: nome, funcao e admissao.
+   O resto (e-mail, perfil, senha) se completa depois no cadastro de
+   usuarios — a ideia aqui e nao travar a fila do balcao. */
+function abrirCadastroRapido() {
+UI.modal({
+titulo: "Cadastrar quem vai receber",
+sub: "O mínimo para entregar agora. O cadastro completo pode ser feito depois.",
+tamanho: "sm",
+corpo: '<div class="field"><label>Nome completo <span class="req">*</span></label>' + '<input class="input" id="crNome" placeholder="Ex.: João Pereira da Silva"></div>' + '<div class="grid g2">' + '<div class="field"><label>Matrícula <span class="req">*</span></label>' + '<input class="input" id="crMat" placeholder="Ex.: 00912"></div>' + '<div class="field"><label>Data de admissão</label>' + '<input class="input" type="date" id="crAdm"></div>' + "</div>" + '<div class="field"><label>Função</label>' + '<input class="input" id="crFuncao" placeholder="Ex.: Eletricista"></div>' + '<div class="field"><label>Setor</label>' + '<input class="input" id="crSetor" placeholder="Ex.: Elétrica"></div>' + '<div class="alert a-blue mt12">' + ic("info") + "<div>Esta pessoa entra como <b>colaborador</b>, para receber EPI. " + "Ela ainda não tem senha e não entra no sistema — isso se define depois, " + "em Usuários.</div></div>" + '<div id="crAviso"></div>',
+rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' + '<button class="btn btn-primary" data-ok>' + ic("salvar") + "Cadastrar e usar</button>",
+aoAbrir: function(w2, fechar2) {
+w2.querySelector("[data-x]").addEventListener("click", fechar2);
+w2.querySelector("[data-ok]").addEventListener("click", function() {
+var nome = w2.querySelector("#crNome").value.trim();
+var mat = w2.querySelector("#crMat").value.trim();
+var av = w2.querySelector("#crAviso");
+if (!nome || !mat) {
+av.innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div>Nome e matrícula são obrigatórios — é a matrícula que amarra a ficha de EPI à pessoa.</div></div>";
+return;
+}
+if (usuarios.some(function(u) { return String(u.matricula).trim() === mat; })) {
+av.innerHTML = '<div class="alert a-yellow mt12">' + ic("alerta") + "<div>Já existe alguém com a matrícula <b>" + U.esc(mat) + "</b>. Use outra, ou escolha a pessoa na lista.</div></div>";
+return;
+}
+var bt = w2.querySelector("[data-ok]");
+bt.disabled = true;
+bt.innerHTML = '<span class="spinner"></span> Cadastrando…';
+API.call("usuarios", "salvar", {
+editando: false,
+nome: nome,
+matricula: mat,
+login: mat,
+cargo: w2.querySelector("#crFuncao").value.trim(),
+funcao: w2.querySelector("#crFuncao").value.trim(),
+setor: w2.querySelector("#crSetor").value.trim(),
+admissao: w2.querySelector("#crAdm").value,
+dataAdmissao: w2.querySelector("#crAdm").value,
+perfil: "colaborador",
+status: "Ativo",
+origem: "cadastro rápido na entrega de EPI"
+}).then(function(r) {
+bt.disabled = false;
+bt.innerHTML = ic("salvar") + "Cadastrar e usar";
+if (!r || !r.ok) {
+/* a recusa do Core sai inteira: e ela que diz o que falta */
+av.innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div><b>O Core não cadastrou</b>" + U.esc((r && r.mensagem) || "Sem mensagem.") + ((r && r.codigo) ? '<div class="small mt8 mono">Código: ' + U.esc(r.codigo) + "</div>" : "") + "</div></div>";
+return;
+}
+fechar2();
+toast("ok", "Cadastrado", nome + " já pode receber EPI.");
+recarregarPessoas(mat).then(function(vindos) {
+var achou = vindos.some(function(u) { return String(u.matricula).trim() === mat; });
+if (!achou) {
+toast("warn", "Gravou, mas não voltou na lista", "O Core aceitou o cadastro e a lista não trouxe " + nome + ". " + "Confira a aba USUARIOS antes de entregar.");
+}
+});
+});
+});
+}
+});
+}
+w.addEventListener("click", function(ev) {
+if (ev.target.closest("[data-ep-novo]")) abrirCadastroRapido();
+});
+
 w.querySelector("[data-x]").addEventListener("click", fechar);
 w.querySelector("[data-ok]").addEventListener("click", function() {
 var escolhidos = Object.keys(epiSelecao).filter(function(s) {
@@ -29343,15 +29442,45 @@ campo.style.display = metodo === "senha" ? "" : "none";
 });
 });
 w.querySelector("[data-x]").addEventListener("click", fechar);
+/* UMA ENTREGA, UMA VEZ SÓ — E O ESTOQUE ANTES DA FICHA.
+   Dois defeitos moravam aqui:
+   1) O botão não travava. Dois cliques no balcão viravam duas fichas
+      e duas baixas. Com o sistema lento, era o que todo mundo fazia.
+   2) A baixa do estoque era disparada SEM ESPERAR e SEM CONFERIR o
+      resultado. Se ela falhasse (saldo insuficiente, por exemplo), a
+      ficha ficava gravada, o estoque não mexia, e a tela dizia
+      "Entrega registrada" do mesmo jeito. Ficha sem baixa: o estoque
+      passa a mentir e ninguém fica sabendo.
+   Agora: o estoque sai primeiro (é ele que é escasso), a ficha só
+   nasce se a baixa aconteceu, e o que der errado é dito por item. */
+var enviando = false;
 w.querySelector("[data-ok]").addEventListener("click", function() {
+if (enviando) return;
 if (metodo === "senha" && !w.querySelector("#epSenha").value) {
 w.querySelector("#epErro").innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div>Informe a senha do colaborador para confirmar a entrega.</div></div>";
 return;
 }
-var pendentes = entregas.length;
-var registradas = [];
-entregas.forEach(function(e) {
-API.call("epi", "salvar", {
+enviando = true;
+var botaoOk = w.querySelector("[data-ok]");
+botaoOk.disabled = true;
+botaoOk.innerHTML = '<span class="spinner"></span> Registrando…';
+var completas = [], semFicha = [], semBaixa = [];
+
+function entregarUm(i) {
+if (i >= entregas.length) return Promise.resolve();
+var e = entregas[i];
+/* 1º o estoque */
+return API.call("estoque", "saida", {
+sku: e.sku,
+qtd: e.qtd,
+documento: "EPI " + colaborador.matricula
+}).then(function(rs) {
+if (!rs || !rs.ok) {
+semBaixa.push({ item: e.item, motivo: (rs && rs.mensagem) || "o Core não explicou" });
+return null;
+}
+/* 2º a ficha, só depois que o material saiu de verdade */
+return API.call("epi", "salvar", {
 colaborador: colaborador.nome,
 matricula: colaborador.matricula,
 cargo: colaborador.cargo || "",
@@ -29362,22 +29491,53 @@ qtd: e.qtd,
 entrega: (new Date).toISOString().slice(0, 10),
 status: "ENTREGUE",
 assinatura: metodo
-}).then(function(r) {
-if (r.ok) registradas.push(e);
-API.call("estoque", "saida", {
-sku: e.sku,
-qtd: e.qtd,
-documento: "EPI " + colaborador.matricula
+}).then(function(rf) {
+if (rf && rf.ok) completas.push(e);
+else semFicha.push({ item: e.item, motivo: (rf && rf.mensagem) || "o Core não explicou" });
 });
-if (--pendentes === 0) {
-fechar();
+}).then(function() {
+return entregarUm(i + 1);
+});
+}
+
+entregarUm(0).then(function() {
 if (typeof CACHE !== "undefined") CACHE.invalidar();
-toast("ok", "Entrega registrada", registradas.length + " EPI(s) para " + colaborador.nome + " · identificação por " + metodo + ".");
+fechar();
+if (completas.length && !semBaixa.length && !semFicha.length) {
+toast("ok", "Entrega registrada", completas.length + " EPI(s) para " + colaborador.nome + " · identificação por " + metodo + ".");
+} else {
+avisarEntregaIncompleta(colaborador, completas, semBaixa, semFicha);
+}
 ROUTER.render();
+}).catch(function(err) {
+enviando = false;
+botaoOk.disabled = false;
+botaoOk.innerHTML = ic("checkC") + "Registrar entrega";
+w.querySelector("#epErro").innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div><b>A entrega parou no meio</b>" + U.esc((err && err.message) || String(err)) + " Confira o estoque e a ficha antes de repetir.</div></div>";
+});
+});
 }
 });
-});
-});
+}
+
+/* O QUE NÃO FECHOU, DITO POR ITEM.
+   Nunca resumir isto num "deu certo": quem está no balcão precisa
+   saber exatamente o que saiu do estoque e o que ficou sem ficha. */
+function avisarEntregaIncompleta(colaborador, completas, semBaixa, semFicha) {
+function bloco(titulo, cor, texto, lista) {
+if (!lista.length) return "";
+return '<div class="alert ' + cor + ' mb12">' + ic("alerta") + "<div><b>" + titulo + "</b>" + texto + '<ul style="margin:8px 0 0 16px">' + lista.map(function(x) {
+return "<li>" + U.esc(x.item) + (x.motivo ? " — " + U.esc(x.motivo) : "") + "</li>";
+}).join("") + "</ul></div></div>";
+}
+UI.modal({
+titulo: "A entrega não fechou por inteiro",
+sub: colaborador.nome || "",
+tamanho: "sm",
+corpo: (completas.length ? '<div class="alert a-green mb12">' + ic("checkC") + "<div><b>" + completas.length + " item(ns) entregues por completo</b>" + "Saiu do estoque e a ficha foi gravada.</div></div>" : "") + bloco("Não saiu do estoque — e não virou ficha", "a-red", "Nada foi registrado para estes. O colaborador NÃO recebeu pelo sistema.", semBaixa) + bloco("Saiu do estoque, mas a ficha não gravou", "a-orange", "O material baixou e o registro não entrou. Lance a ficha manualmente, " + "ou o estoque fica certo e o histórico do colaborador, errado.", semFicha),
+rodape: '<button class="btn btn-primary" data-x>Entendi</button>',
+aoAbrir: function(w, fechar) {
+w.querySelector("[data-x]").addEventListener("click", fechar);
 }
 });
 }
@@ -36620,7 +36780,12 @@ trilha: [ "EPI's / Uniformes", "Painel" ],
 titulo: "EPI por colaborador",
 sub: "Quem recebeu o quê, quando, e o que está vencendo.",
 acoes: '<button class="btn btn-ghost" data-ir="#/epi-catalogo">' + ic("grade") + "Catálogo de EPI</button>" + '<button class="btn btn-ghost" data-ir="#/epi-retiradas">' + ic("calendario") + "Retiradas agendadas</button>" + '<button class="btn btn-orange" data-entregar-epi>' + ic("mais") + "Entregar EPI</button>"
-}) + (agenda && (agenda.totais.hoje || agenda.totais.atrasadas || agenda.totais.vencidas) ? '<div class="alert ' + (agenda.totais.vencidas ? "a-red" : "a-orange") + ' mb16">' + ic("calendario") + "<div><b>" + [ agenda.totais.hoje ? agenda.totais.hoje + " retirada(s) marcada(s) para hoje" : "", agenda.totais.atrasadas ? agenda.totais.atrasadas + " atrasada(s) dentro da tolerância" : "", agenda.totais.vencidas ? agenda.totais.vencidas + " passaram do prazo" : "" ].filter(Boolean).join(" · ") + "</b>" + (agenda.totais.proximas ? agenda.totais.proximas + " outra(s) marcada(s) para os próximos dias. " : "") + "O material fica guardado até o dia marcado e por mais " + agenda.toleranciaPadraoHoras + " horas." + '<button class="btn btn-ghost mt8" data-ir="#/epi-retiradas">Ver a agenda</button></div></div>' : agenda && agenda.totais.proximas ? '<div class="alert a-blue mb16">' + ic("calendario") + "<div><b>" + agenda.totais.proximas + " retirada(s) marcada(s) para os próximos dias</b>" + "O material já está guardado — ninguém pega por engano." + '<button class="btn btn-ghost mt8" data-ir="#/epi-retiradas">Ver a agenda</button></div></div>' : "") + '<div class="grid g4 mb16">' + UI.kpi({
+}) + (/* A AGENDA É UM AVISO OPCIONAL — E DERRUBAVA A TELA INTEIRA.
+     Bastava o Core responder ok sem "totais" (módulo de EPI antigo,
+     resposta vazia, meia instalação) para esta linha estourar e a
+     tela de EPI não abrir. Um enfeite no topo não pode levar junto
+     a ficha de todo mundo. */
+agenda && agenda.totais && (agenda.totais.hoje || agenda.totais.atrasadas || agenda.totais.vencidas) ? '<div class="alert ' + (agenda.totais.vencidas ? "a-red" : "a-orange") + ' mb16">' + ic("calendario") + "<div><b>" + [ agenda.totais.hoje ? agenda.totais.hoje + " retirada(s) marcada(s) para hoje" : "", agenda.totais.atrasadas ? agenda.totais.atrasadas + " atrasada(s) dentro da tolerância" : "", agenda.totais.vencidas ? agenda.totais.vencidas + " passaram do prazo" : "" ].filter(Boolean).join(" · ") + "</b>" + (agenda.totais.proximas ? agenda.totais.proximas + " outra(s) marcada(s) para os próximos dias. " : "") + "O material fica guardado até o dia marcado e por mais " + agenda.toleranciaPadraoHoras + " horas." + '<button class="btn btn-ghost mt8" data-ir="#/epi-retiradas">Ver a agenda</button></div></div>' : agenda && agenda.totais && agenda.totais.proximas ? '<div class="alert a-blue mb16">' + ic("calendario") + "<div><b>" + agenda.totais.proximas + " retirada(s) marcada(s) para os próximos dias</b>" + "O material já está guardado — ninguém pega por engano." + '<button class="btn btn-ghost mt8" data-ir="#/epi-retiradas">Ver a agenda</button></div></div>' : "") + '<div class="grid g4 mb16">' + UI.kpi({
 icone: "usuarios",
 cor: "ico-navy",
 valor: totais.pessoas,
@@ -36696,6 +36861,12 @@ b.addEventListener("click", function() {
 detalheEntregaEPI(b.getAttribute("data-epi-item"));
 });
 });
+document.querySelectorAll("[data-epi-excluir]").forEach(function(b) {
+b.addEventListener("click", function(ev) {
+ev.stopPropagation();
+modalExcluirEntregaEPI(b.getAttribute("data-epi-excluir"));
+});
+});
 document.querySelectorAll("[data-epi-ficha-imprimir]").forEach(function(b) {
 b.addEventListener("click", function() {
 var fichas = fichasPorColaborador();
@@ -36726,19 +36897,51 @@ status: String(u.status || "ATIVO").toUpperCase(),
 foto: f.foto || u.foto || c.foto || ""
 };
 }
+/* SUSPEITA DE DUPLICIDADE.
+   Mesmo item (SKU), mesma pessoa, mesmo dia de entrega: quase sempre é
+   o clique duplo do balcão. Digo SUSPEITA de propósito — existe caso
+   legítimo (duas botas no mesmo dia, uma luva que rasgou e foi trocada
+   na hora). Quem decide é você; o sistema só aponta.
+   A primeira linha do grupo fica limpa: as repetidas é que são marcadas. */
+function marcarDuplicidades_(itens) {
+var vistos = {};
+return itens.map(function(i) {
+var chave = String(i.sku || i.epi || "") + "|" + String(i.entrega || "").slice(0, 10) + "|" + String(i.qtd || "");
+var copia = {};
+Object.keys(i).forEach(function(k) { copia[k] = i[k]; });
+if (!String(i.sku || i.epi || "") || !String(i.entrega || "")) {
+copia.__dup = 0;
+return copia;
+}
+vistos[chave] = (vistos[chave] || 0) + 1;
+copia.__dup = vistos[chave];      /* 1 = a original, 2+ = repetida */
+copia.__dupTotal = 0;
+return copia;
+}).map(function(c, _, todos) {
+var chave = String(c.sku || c.epi || "") + "|" + String(c.entrega || "").slice(0, 10) + "|" + String(c.qtd || "");
+c.__dupTotal = todos.filter(function(o) {
+return String(o.sku || o.epi || "") + "|" + String(o.entrega || "").slice(0, 10) + "|" + String(o.qtd || "") === chave;
+}).length;
+return c;
+});
+}
+
 function fichaCartaoEPI_(i) {
 var dias = i.validade ? U.diasEntre(new Date, i.validade) : null;
 var st = dias === null ? [ "sem validade", "b-gray" ] : dias < 0 ? [ "vencido há " + Math.abs(dias) + " d", "b-red" ] : dias <= 30 ? [ "vence em " + dias + " d", "b-orange" ] : [ "em uso", "b-green" ];
 function linha(rot, val, forte) {
 return '<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:3px 0">' + '<span style="color:var(--texto-3)">' + rot + "</span>" + "<" + (forte ? "b" : "span") + ' style="text-align:right">' + U.esc(val) + "</" + (forte ? "b" : "span") + "></div>";
 }
-return '<button class="card" data-epi-item="' + U.esc(i.id || "") + '" style="text-align:left;padding:0;overflow:hidden;cursor:pointer">' + '<div style="position:relative;height:120px;background:var(--fundo);display:grid;place-items:center">' + (i.foto ? '<img src="' + U.esc(i.foto) + '" alt="" style="width:100%;height:100%;object-fit:contain" onerror="this.style.display=\'none\'">' : '<span style="font-size:34px;opacity:.35">' + ic("epi") + "</span>") + '<span class="badge ' + st[1] + '" style="position:absolute;top:8px;right:8px">' + st[0] + "</span></div>" + '<div style="padding:12px 14px">' + '<b style="display:block;font-size:13.5px;line-height:1.3;margin-bottom:8px">' + U.esc(i.epi) + "</b>" + linha("CA", i.ca ? i.ca : "não informado", !!i.ca) + linha("Quantidade", U.num(i.qtd) + " un.", true) + (i.tamanho ? linha("Tamanho", i.tamanho, true) : "") + linha("Entrega", i.entrega ? U.data(i.entrega) : "—", true) + linha("Próxima troca", i.validade ? U.data(i.validade) : "sem validade") + (i.entreguePor ? linha("Entregue por", i.entreguePor) : "") + "</div></button>";
+var repetida = i.__dup > 1;
+var temGrupo = i.__dupTotal > 1;
+return '<div class="card" style="text-align:left;padding:0;overflow:hidden;position:relative' + (repetida ? ';outline:2px solid var(--vermelho,#D64545);outline-offset:-2px' : "") + '">' + '<button data-epi-item="' + U.esc(i.id || "") + '" style="all:unset;display:block;width:100%;cursor:pointer">' + '<div style="position:relative;height:120px;background:var(--fundo);display:grid;place-items:center">' + (i.foto ? '<img src="' + U.esc(i.foto) + '" alt="" style="width:100%;height:100%;object-fit:contain" onerror="this.style.display=\'none\'">' : '<span style="font-size:34px;opacity:.35">' + ic("epi") + "</span>") + '<span class="badge ' + st[1] + '" style="position:absolute;top:8px;right:8px">' + st[0] + "</span></div>" + '<div style="padding:12px 14px">' + '<b style="display:block;font-size:13.5px;line-height:1.3;margin-bottom:8px">' + U.esc(i.epi) + "</b>" + linha("CA", i.ca ? i.ca : "não informado", !!i.ca) + linha("Quantidade", U.num(i.qtd) + " un.", true) + (i.tamanho ? linha("Tamanho", i.tamanho, true) : "") + linha("Entrega", i.entrega ? U.data(i.entrega) : "—", true) + linha("Próxima troca", i.validade ? U.data(i.validade) : "sem validade") + (i.entreguePor ? linha("Entregue por", i.entreguePor) : "") + (temGrupo ? '<div class="alert ' + (repetida ? "a-red" : "a-yellow") + ' mt8" style="padding:8px 10px;font-size:11.5px">' + ic("alerta") + "<div>" + (repetida ? "<b>Provável duplicidade</b>" + "É a " + i.__dup + "ª linha igual (mesmo item, mesmo dia, mesma quantidade) " + "desta pessoa. Se foi clique repetido, exclua esta." : "<b>" + i.__dupTotal + " linhas iguais neste dia</b>" + "Esta é a primeira. Confira as outras antes de excluir.") + "</div></div>" : "") + "</div></button>" + '<div style="padding:0 14px 12px"><button class="btn btn-ghost btn-sm btn-block" data-epi-excluir="' + U.esc(i.id || "") + '">' + ic("lixo") + "Excluir esta entrega</button></div>" + "</div>";
 }
 function fichaDoColaborador(f) {
 var p = fichaDadosPessoa_(f);
-var itens = f.itens.slice().sort(function(a, b) {
+var itens = marcarDuplicidades_(f.itens.slice().sort(function(a, b) {
 return new Date(b.entrega || 0) - new Date(a.entrega || 0);
-});
+}));
+var repetidas = itens.filter(function(i) { return i.__dup > 1; });
 var emUso = itens.filter(function(i) {
 var d = i.validade ? U.diasEntre(new Date, i.validade) : null;
 return d === null || d >= 0;
@@ -36747,7 +36950,7 @@ function dado(rot, val) {
 return '<div><div class="small" style="color:var(--texto-3)">' + rot + '</div><b style="font-size:13.5px">' + U.esc(val || "—") + "</b></div>";
 }
 var topo = '<div class="card mb16"><div class="card-body" style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">' + '<span class="epi-foto grande" style="width:104px;height:104px;flex:0 0 auto">' + (p.foto ? '<img src="' + U.esc(p.foto) + '" alt="">' : U.iniciais(f.nome)) + "</span>" + '<div class="grow" style="min-width:260px">' + '<div class="flex center gap8" style="flex-wrap:wrap">' + '<h2 style="font-size:20px;margin:0">' + U.esc(f.nome) + "</h2>" + '<span class="badge ' + (p.status === "ATIVO" ? "b-green" : "b-red") + '">' + U.esc(p.status) + "</span></div>" + '<p class="small" style="margin:2px 0 14px;color:var(--texto-2)">' + U.esc(f.cargo || "Colaborador") + "</p>" + '<div class="grid g3" style="gap:12px 18px">' + dado("Matrícula", f.matricula) + dado("Crachá", p.cracha) + dado("Setor", f.setor) + dado("Empresa", p.empresa) + dado("Obra", p.obra) + dado("Última entrega", itens[0] && itens[0].entrega ? U.data(itens[0].entrega) : "—") + "</div></div>" + '<div style="display:flex;flex-direction:column;gap:8px;min-width:180px">' + '<button class="btn btn-orange btn-block" data-entregar-epi>' + ic("mais") + "Entregar EPI</button>" + '<button class="btn btn-ghost btn-block" data-epi-ficha-imprimir>' + ic("impressora") + "Imprimir ficha</button>" + "</div>" + "</div></div>";
-var alerta = f.vencidos ? '<div class="alert a-red mb16">' + ic("alerta") + "<div><b>" + f.vencidos + " EPI vencido(s)</b>A retirada de novos EPIs fica bloqueada até a troca.</div></div>" : "";
+var alerta = (f.vencidos ? '<div class="alert a-red mb16">' + ic("alerta") + "<div><b>" + f.vencidos + " EPI vencido(s)</b>A retirada de novos EPIs fica bloqueada até a troca.</div></div>" : "") + (repetidas.length ? '<div class="alert a-orange mb16">' + ic("alerta") + "<div><b>" + repetidas.length + " entrega(s) com cara de duplicidade</b>" + "Mesmo item, mesmo dia e mesma quantidade, repetidos nesta ficha. " + "Elas estão marcadas em vermelho abaixo. " + "<b>Confira antes de excluir</b> — pode ser entrega legítima repetida no mesmo dia.</div></div>" : "");
 var kpis = '<div class="grid g4 mb16">' + UI.kpi({
 icone: "escudo",
 cor: "ico-green",
@@ -36772,6 +36975,74 @@ rotulo: "Total de entregas"
 var grade = itens.length ? '<div class="card"><div class="card-head"><div><h3>EPIs do colaborador</h3>' + "<p>Clique num equipamento para ver a entrega completa</p></div>" + '<span class="small">' + itens.length + " entrega(s)</span></div>" + '<div class="card-body"><div class="grid g4" style="gap:14px">' + itens.map(fichaCartaoEPI_).join("") + "</div></div></div>" : '<div class="card"><div class="card-body">' + UI.estado("vazio", "Nenhum EPI entregue", U.esc(f.nome) + " ainda não recebeu nenhum equipamento.", '<button class="btn btn-orange mt12" data-entregar-epi>' + ic("mais") + "Entregar o primeiro</button>") + "</div></div>";
 return topo + alerta + kpis + grade;
 }
+/* EXCLUIR UMA ENTREGA DE EPI.
+   Duas coisas que esta tela não faz por conta própria:
+   - não apaga a linha: marca como EXCLUIDA e guarda quem, quando e
+     por quê. Histórico apagado não se recupera, e numa auditoria de
+     EPI é justamente o histórico que vale;
+   - não devolve o material ao estoque sozinha. A linha duplicada do
+     clique repetido NÃO tirou nada do estoque — devolver ali criaria
+     material do nada. Quem sabe o que aconteceu é quem estava lá. */
+function modalExcluirEntregaEPI(id) {
+var e = listaSegura(MOCK.fichasEPI).filter(function(x) {
+return String(x.id) === String(id);
+})[0];
+if (!e) {
+toast("err", "Entrega não localizada", "Recarregue a ficha e tente de novo.");
+return;
+}
+UI.modal({
+titulo: "Excluir esta entrega",
+sub: (e.item || e.epi || "EPI") + " · " + (e.colaborador || "") + " · " + (e.entrega ? U.data(e.entrega) : "sem data"),
+tamanho: "sm",
+corpo: '<div class="card mb12"><div class="card-body" style="padding:12px">' + '<div class="info-row"><span>Item</span><b>' + U.esc(e.item || e.epi || "—") + "</b></div>" + '<div class="info-row"><span>Quantidade</span><b>' + U.esc(String(e.qtd || 1)) + "</b></div>" + '<div class="info-row"><span>Entrega</span><b>' + U.esc(e.entrega ? U.data(e.entrega) : "—") + "</b></div>" + '<div class="info-row"><span>Entregue por</span><b>' + U.esc(e.entreguePor || "—") + "</b></div>" + "</div></div>" + '<div class="alert a-blue mb12">' + ic("info") + "<div>A linha <b>não é apagada</b> da planilha: ela fica marcada como " + "<b>EXCLUÍDA</b>, com o seu nome, a data e o motivo. É isso que sustenta " + "a ficha numa auditoria.</div></div>" + '<div class="field"><label>Motivo <span class="req">*</span></label>' + '<select class="select" id="exMotivo">' + [ "Duplicidade — clique repetido", "Lançamento errado (item trocado)", "Quantidade errada", "Entrega cancelada", "Outro motivo" ].map(function(m) { return "<option>" + m + "</option>"; }).join("") + "</select></div>" + '<div class="field"><label>Detalhe</label>' + '<input class="input" id="exDetalhe" placeholder="opcional, mas ajuda quem for conferir depois"></div>' + '<div class="switch-row"><div class="sr-txt">' + "<b>Devolver " + U.esc(String(e.qtd || 1)) + " ao estoque</b>" + "<small>Só ligue se esta entrega <b>realmente tirou</b> material do estoque. " + "A linha duplicada do clique repetido não tirou nada — devolver criaria " + "material que não existe.</small></div>" + '<span class="switch" data-sw-devolver></span></div>' + '<div id="exAviso"></div>',
+rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' + '<button class="btn btn-red" data-ok>' + ic("lixo") + "Excluir a entrega</button>",
+aoAbrir: function(w, fechar) {
+var devolver = false;
+w.querySelector("[data-x]").addEventListener("click", fechar);
+var sw = w.querySelector("[data-sw-devolver]");
+sw.addEventListener("click", function() {
+devolver = !devolver;
+sw.classList.toggle("on", devolver);
+});
+var enviando = false;
+w.querySelector("[data-ok]").addEventListener("click", function() {
+if (enviando) return;
+enviando = true;
+var bt = w.querySelector("[data-ok]");
+bt.disabled = true;
+bt.innerHTML = '<span class="spinner"></span> Excluindo…';
+function devolveBotao() {
+enviando = false;
+bt.disabled = false;
+bt.innerHTML = ic("lixo") + "Excluir a entrega";
+}
+var motivo = w.querySelector("#exMotivo").value;
+var detalhe = w.querySelector("#exDetalhe").value.trim();
+API.call("epi", "excluir", {
+id: id,
+sku: e.sku || "",
+matricula: e.matricula || "",
+motivo: motivo + (detalhe ? " — " + detalhe : ""),
+devolverEstoque: devolver,
+qtd: Number(e.qtd) || 1
+}).then(function(r) {
+if (!r || !r.ok) {
+devolveBotao();
+var desconhecida = /DESCONHECID|NAO_EXISTE|não existe|not a function|ACAO/i.test(String((r && r.codigo) || "") + " " + String((r && r.mensagem) || ""));
+w.querySelector("#exAviso").innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div><b>" + (desconhecida ? "O Core ainda não sabe excluir entrega de EPI" : "O Core não excluiu") + "</b>" + U.esc((r && r.mensagem) || "Sem mensagem.") + ((r && r.codigo) ? '<div class="small mt8 mono">Código: ' + U.esc(r.codigo) + "</div>" : "") + (desconhecida ? '<div class="small mt8">Falta a ação <b class="mono">excluir</b> no módulo de EPI do Apps Script. ' + "Nada foi alterado na planilha.</div>" : "") + "</div></div>";
+return;
+}
+fechar();
+toast("ok", "Entrega excluída", (e.item || "O item") + " saiu da ficha." + (devolver ? " A quantidade voltou ao estoque." : " O estoque não foi alterado."));
+if (typeof CACHE !== "undefined") CACHE.invalidar();
+ROUTER.render();
+});
+});
+}
+});
+}
+
 function detalheEntregaEPI(id) {
 var entrega = listaSegura(MOCK.fichasEPI).filter(function(e) {
 return String(e.id) === String(id);
