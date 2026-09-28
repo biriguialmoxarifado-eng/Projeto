@@ -28909,7 +28909,8 @@ if (bloqueado) {
 var motivo = motivoBloqueioBiometria();
 return '<div class="alert a-yellow mb16">' + ic("alerta") + "<div><b>" + U.esc(motivo.titulo) + "</b>" + U.esc(motivo.texto) + "</div></div>" + '<div class="alert a-blue mb16">' + ic("digital") + "<div><b>Estação de Biometria</b>" + "Página própria, fora do quadro do Apps Script, feita para cadastrar digital e rosto. " + "Abra nela e o leitor funciona." + '<div class="mt12"><button class="btn btn-primary btn-sm" data-abrir-estacao>' + ic("digital") + "Abrir a Estação de Biometria</button></div></div></div>" + '<div class="section-title">O que dá para fazer</div>' + '<div class="info-row"><span><b>1. Crachá / QR Code</b><br><small>funciona em qualquer navegador e identifica na hora</small></span>' + '<button class="btn btn-primary btn-sm" data-ir-cracha>Vincular crachá</button></div>' + '<div class="info-row"><span><b>2. Estação dedicada</b><br><small>com o leitor ligado ao Core, sem o quadro do Apps Script</small></span>' + '<span class="badge b-gray">depende do leitor físico</span></div>' + '<div class="info-row"><span><b>3. Reconhecimento facial</b><br><small>usa a câmera e funciona aqui dentro</small></span>' + '<button class="btn btn-ghost btn-sm" data-ir-facial>Cadastrar facial</button></div>' + '<div id="crAviso"></div>';
 }
-return '<div class="alert a-blue mb16">' + ic("info") + "<div><b>Biometria do dispositivo</b>Usa o leitor do próprio aparelho (Windows Hello, Touch ID, leitor do celular). " + "O sistema recebe apenas a confirmação — a digital nunca sai do dispositivo.</div></div>" + '<div class="txt-c" style="padding:20px 0">' + '<div style="width:78px;height:78px;border-radius:50%;background:var(--azul-suave);display:grid;place-items:center;margin:0 auto">' + ic("escudo") + "</div>" + '<p class="small mt12">Toque no leitor quando o aparelho pedir.</p></div>' + '<button class="btn btn-primary btn-block" data-bio-iniciar>Iniciar leitura no dispositivo</button>' + '<div id="crAviso"></div>';
+return '<div class="alert a-blue mb16">' + ic("info") + "<div><b>Biometria do dispositivo</b>Usa o leitor do próprio aparelho (Windows Hello, Touch ID, leitor do celular). " + "O sistema recebe apenas a confirmação — a digital nunca sai do dispositivo.</div></div>" + '<div class="txt-c" style="padding:20px 0">' + '<div style="width:78px;height:78px;border-radius:50%;background:var(--azul-suave);display:grid;place-items:center;margin:0 auto">' + ic("escudo") + "</div>" + '<p class="small mt12">Toque no leitor quando o aparelho pedir.</p></div>' + /* o aviso fica na tela o tempo todo, e não só durante a leitura:
+   é aqui que a pessoa erra, e errar aqui enfraquece a prova. */ '<div class="alert a-yellow mb12">' + ic("alerta") + "<div><b>Quando o Windows perguntar onde guardar, escolha <u>este dispositivo</u></b>" + "Se escolher o Gerenciador de Senhas do Google, a digital passa a valer em " + "qualquer aparelho seu e pode ser destravada por PIN. Como prova de quem " + "estava no balcão, ela vale menos.</div></div>" + '<button class="btn btn-primary btn-block" data-bio-iniciar>Iniciar leitura no dispositivo</button>' + '<div id="crAviso"></div>';
 }
 function pararCamera() {
 CameraFoto.fechar();
@@ -29015,68 +29016,62 @@ modalCredencial("facial");
 var btnBio = w.querySelector("[data-bio-iniciar]");
 if (!btnBio) return;
 btnBio.addEventListener("click", function() {
-if (!window.PublicKeyCredential) {
-aviso.innerHTML = '<div class="alert a-yellow mt12">' + ic("alerta") + "<div><b>Sem leitor biométrico</b>Este dispositivo não expõe leitor ao navegador. " + "Use uma estação com leitor, ou vincule o crachá.</div></div>";
+/* ESTA TELA PASSOU A USAR O MÓDULO DA BIOMETRIA.
+   Antes ela lia o dedo por conta própria e guardava a credencial
+   CORTADA em 24 letras, dentro de usuarios.vincularCredencial. Uma
+   digital cadastrada assim NUNCA entrava no sistema nem confirmava
+   operação nenhuma: era um beco sem saída que parecia funcionar.
+   Agora ela chama o mesmo DIGITAL/biometria que o resto usa — uma
+   implementação só, no sistema inteiro. */
+if (!DIGITAL.disponivel()) {
+var pq = DIGITAL.porqueNao();
+aviso.innerHTML = '<div class="alert a-yellow mt12">' + ic("alerta") + "<div><b>" + U.esc(pq.titulo) + "</b>" + U.esc(pq.texto || "") + '<div class="flex gap8 mt12">' + '<button class="btn btn-primary btn-sm" data-alt-cracha>Vincular crachá</button>' + '<button class="btn btn-ghost btn-sm" data-alt-facial>Cadastrar facial</button></div></div></div>';
+var bc0 = aviso.querySelector("[data-alt-cracha]");
+if (bc0) bc0.addEventListener("click", function() { fechar(); modalCredencial("cracha"); });
+var bf0 = aviso.querySelector("[data-alt-facial]");
+if (bf0) bf0.addEventListener("click", function() { fechar(); modalCredencial("facial"); });
 return;
 }
-navigator.credentials.create({
-publicKey: {
-challenge: new Uint8Array(32),
-rp: {
-name: "ALMOX-PRO"
-},
-user: {
-id: (new TextEncoder).encode(String(matricula)),
-name: String(matricula),
-displayName: u.nome || ""
-},
-pubKeyCredParams: [ {
-type: "public-key",
-alg: -7
-} ],
-authenticatorSelection: {
-authenticatorAttachment: "platform",
-userVerification: "required"
-},
-timeout: 6e4
+var rotuloBio = btnBio.innerHTML;
+btnBio.disabled = true;
+btnBio.innerHTML = '<span class="spinner"></span> Encoste o dedo…';
+aviso.innerHTML = '<div class="alert a-blue mt12">' + ic("digital") + "<div><b>O Windows vai perguntar onde guardar</b>" + "Escolha <b>este dispositivo</b> (Windows Hello). Se escolher o Gerenciador " + "de Senhas do Google, a digital passa a valer em qualquer aparelho seu — " + "e como prova de quem estava no balcão ela vale menos.</div></div>";
+DIGITAL.cadastrar(matricula, u.nome || matricula).then(function(res) {
+btnBio.disabled = false;
+btnBio.innerHTML = rotuloBio;
+if (!res.ok) {
+aviso.innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div><b>Leitura não concluída</b>" + U.esc(res.mensagem) + "</div></div>";
+return;
 }
-}).then(function(cred) {
-referencia = "WEBAUTHN_" + (cred && cred.id ? String(cred.id).slice(0, 24) : U.id("BIO"));
+/* a credencial INTEIRA. Cortada, ela nunca mais é reconhecida. */
+referencia = res.credencialId;
 w.querySelector("[data-ok]").disabled = false;
-aviso.innerHTML = '<div class="alert a-green mt12">' + ic("checkC") + "<div><b>Leitura confirmada pelo dispositivo</b>Confirme para vincular ao usuário.</div></div>";
-}).catch(function(e) {
-var msg = String(e.message || "");
-if (/publickey-credentials-create|Permissions Policy|not enabled in this document/i.test(msg)) {
-aviso.innerHTML = '<div class="alert a-yellow mt12">' + ic("alerta") + "<div><b>O navegador bloqueou o leitor nesta janela</b>" + "O sistema roda dentro de um quadro do Apps Script e o leitor biométrico não é liberado aí. " + "Use <b>crachá</b> ou <b>reconhecimento facial</b>, que funcionam normalmente." + '<div class="flex gap8 mt12">' + '<button class="btn btn-primary btn-sm" data-alt-cracha>Vincular crachá</button>' + '<button class="btn btn-ghost btn-sm" data-alt-facial>Cadastrar facial</button></div></div></div>';
-var est = w.querySelector("[data-abrir-estacao]");
-if (est) est.addEventListener("click", function() {
-var base = typeof CFG !== "undefined" && CFG.coreUrl ? CFG.coreUrl : location.href.split("#")[0];
-var alvo2 = "ALMOXA_PRO_BIOMETRIA.html?core=" + encodeURIComponent(base);
-try {
-window.open(alvo2, "_blank");
-} catch (e) {
-location.href = alvo2;
-}
-toast("info", "Estação de biometria", "Se não abrir, salve o arquivo ALMOXA_PRO_BIOMETRIA.html na mesma pasta e abra por ele.");
-});
-var bc = aviso.querySelector("[data-alt-cracha]");
-if (bc) bc.addEventListener("click", function() {
-fechar();
-modalCredencial("cracha");
-});
-var bf = aviso.querySelector("[data-alt-facial]");
-if (bf) bf.addEventListener("click", function() {
-fechar();
-modalCredencial("facial");
-});
-return;
-}
-aviso.innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div><b>Leitura não concluída</b>" + U.esc(msg || "O usuário cancelou.") + "</div></div>";
+aviso.innerHTML = '<div class="alert a-green mt12">' + ic("checkC") + "<div><b>Dedo lido pelo aparelho</b>Agora confirme para vincular ao usuário.</div></div>";
 });
 });
 w.querySelector("[data-ok]").addEventListener("click", function() {
-salvar(w, fechar, {
-referencia: referencia
+if (!referencia) {
+aviso.innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div><b>Nenhuma digital foi lida</b>Leia o dedo antes de vincular.</div></div>";
+return;
+}
+var bok = w.querySelector("[data-ok]");
+bok.disabled = true;
+bok.innerHTML = '<span class="spinner"></span> Vinculando…';
+API.call("biometria", "registrar", {
+matricula: matricula,
+credencialId: referencia,
+apelido: "Digital",
+estacao: navigator.platform || ""
+}).then(function(r) {
+bok.disabled = false;
+bok.innerHTML = ic("checkC") + "Vincular ao usuário";
+if (!r || !r.ok) {
+aviso.innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div><b>O sistema não guardou a digital</b>" + U.esc((r && r.mensagem) || "") + "</div></div>";
+return;
+}
+fechar();
+toast("ok", "Digital cadastrada", (u.nome || matricula) + " já pode entrar e confirmar operações com o dedo.");
+ROUTER.render();
 });
 });
 }
