@@ -6595,6 +6595,25 @@ cracha: [ "Leitura de crachá", "Aproxime o crachá do leitor ou aponte o QR Cod
 a.innerHTML = '<div class="card"><div class="card-body txt-c">' + '<div class="bio-frame" id="bioFrame">' + ic(textos[2]) + "</div>" + '<h4 style="font-size:15px;font-weight:700">' + textos[0] + "</h4>" + '<p class="small mt8" style="max-width:340px;margin:8px auto 0">' + textos[1] + "</p>" + '<div class="field mt16" style="max-width:280px;margin:16px auto 0"><label>Matrícula</label>' + '<input class="input" id="lgUser" placeholder="000458" style="text-align:center"></div>' + '<button class="btn btn-orange btn-lg btn-block mt12" id="lgBio">Iniciar identificação</button>' + '<div id="lgErro" class="mt12"></div>' + "</div></div>";
 a.querySelector("#lgBio").addEventListener("click", function() {
 var b = this, f = document.getElementById("bioFrame");
+var rotulo = b.innerHTML;
+function devolver() { b.innerHTML = rotulo; b.disabled = false; }
+function recusar(txt) {
+devolver();
+f.classList.remove("ok");
+var erro = document.getElementById("lgErro");
+if (erro) erro.innerHTML = '<div class="alert a-red">' + ic("alerta") + "<div>" + U.esc(txt) + "</div></div>";
+else toast("err", "Não entrou", txt);
+}
+
+/* A DIGITAL DE VERDADE.
+   Antes isto era encenação: esperava 1,6 segundo, escrevia
+   "Identidade confirmada" e chamava o login por senha — que nem
+   campo de matrícula tinha nesta aba. Nenhum leitor, nenhuma
+   conferência.
+   Agora quem confere é o aparelho, pelo WebAuthn. O sistema
+   operacional só devolve o identificador da credencial DEPOIS
+   que o dedo bate; sem dedo, não há o que mandar. */
+if (metodo !== "biometria") {
 b.innerHTML = '<span class="spinner"></span> Validando identidade…';
 b.disabled = true;
 setTimeout(function() {
@@ -6603,6 +6622,28 @@ f.innerHTML = ic("check");
 b.innerHTML = "Identidade confirmada";
 setTimeout(entrar, 500);
 }, 1600);
+return;
+}
+
+if (!DIGITAL.disponivel()) {
+var m = DIGITAL.porqueNao();
+recusar(m.titulo + " " + (m.texto || ""));
+return;
+}
+
+b.innerHTML = '<span class="spinner"></span> Encoste o dedo…';
+b.disabled = true;
+DIGITAL.reconhecer().then(function(res) {
+if (!res.ok) { recusar(res.mensagem); return; }
+b.innerHTML = '<span class="spinner"></span> Conferindo…';
+API.call("biometria", "entrar", { credencialId: res.credencialId }).then(function(r) {
+if (!r || !r.ok) { recusar((r && r.mensagem) || "A digital não foi reconhecida."); return; }
+f.classList.add("ok");
+f.innerHTML = ic("check");
+b.innerHTML = "Identidade confirmada";
+LOGIN.entrarComResposta(r);
+});
+});
 });
 }
 }
@@ -8786,17 +8827,18 @@ titulo: aprovar ? "Aprovar reserva " + protocolo : "Recusar reserva " + protocol
 sub: aprovar ? "A aprovação libera a separação dos itens no almoxarifado" : "A recusa exige motivo e fica registrada em auditoria",
 corpo: (aprovar ? '<div class="alert a-green mb16">' + ic("checkC") + "<div>Após aprovar, o almoxarife separa os itens e marca a reserva como disponibilizada — só então o prazo de 48 horas começa.</div></div>" + '<div class="field"><label>Observação da aprovação</label><textarea class="textarea" id="apObs" placeholder="Ex.: Aprovado. Pode retirar na loja."></textarea></div>' : '<div class="alert a-red mb16">' + ic("alerta") + "<div>O solicitante recebe uma notificação com o motivo informado.</div></div>" + '<div class="field"><label>Motivo da recusa <span class="req">*</span></label><select class="select" id="apMotivoSel">' + [ "Item sem saldo disponível", "Quantidade acima do necessário", "Fora do escopo do centro de custo", "Frente de serviço remanejada", "Outro motivo" ].map(function(m) {
 return "<option>" + m + "</option>";
-}).join("") + "</select></div>" + '<div class="field"><label>Detalhamento</label><textarea class="textarea" id="apObs" placeholder="Explique para o solicitante o que precisa ser ajustado"></textarea></div>') + '<div class="field"><label>Confirmação de identidade</label>' + '<div class="flex gap8"><button class="btn btn-ghost btn-sm" disabled>' + ic("digital") + "Biometria</button>" + '<input class="input" type="password" placeholder="Senha do aprovador" id="apSenha"></div>' + '<div class="help">Aprovações são operações críticas e pedem identificação novamente.</div></div>',
+}).join("") + "</select></div>" + '<div class="field"><label>Detalhamento</label><textarea class="textarea" id="apObs" placeholder="Explique para o solicitante o que precisa ser ajustado"></textarea></div>') + /* A CONFIRMAÇÃO DE IDENTIDADE ACONTECE UMA VEZ, DEPOIS DO BOTÃO.
+   Aqui havia um campo de senha que NUNCA era enviado a lugar
+   nenhum e um botão de biometria permanentemente desligado: o
+   campo só travava o botão, sem conferir nada. Quem confere é a
+   tela "Confirme sua identidade", que abre logo em seguida e
+   aceita crachá, senha (essa sim conferida pelo Core) ou digital. */
+'<div class="alert a-gray">' + ic("cadeado") + "<div>Ao continuar, o sistema pede sua identificação: " + "<b>crachá, senha ou digital</b>. Fica registrado quem decidiu e " + "por qual método.</div></div>",
 rodape: '<button class="btn btn-ghost" data-x>Voltar</button>' + '<button class="btn ' + (aprovar ? "btn-green" : "btn-red") + '" data-ok>' + (aprovar ? "Aprovar reserva" : "Confirmar recusa") + "</button>",
 aoAbrir: function(w, fechar) {
 w.querySelector("[data-x]").addEventListener("click", fechar);
+
 w.querySelector("[data-ok]").addEventListener("click", function() {
-var senha = w.querySelector("#apSenha").value;
-if (!senha) {
-w.querySelector("#apSenha").classList.add("err");
-toast("warn", "Confirme sua identidade", "Informe a senha do aprovador para concluir.");
-return;
-}
 var btn = w.querySelector("[data-ok]");
 btn.innerHTML = '<span class="spinner"></span> Processando…';
 btn.disabled = true;
@@ -8805,6 +8847,9 @@ var motivo = (w.querySelector("#apMotivoSel") || {}).value || "";
 API.call("reservas", aprovar ? "aprovar" : "recusar", {
 protocolo: protocolo,
 aprovador: ST.usuario.nome,
+/* quem confirmou e por qual método entram no payload na camada
+   central (metodoConfirmacao / provaBiometria), depois da tela
+   "Confirme sua identidade" — não se inventa nada aqui. */
 observacao: obs,
 motivo: motivo + (obs ? " — " + obs : "")
 }).then(function(r) {
@@ -12342,6 +12387,262 @@ API.call("usuarios", "salvar", dados).then(resolve);
 }
 });
 }
+/* ############################################################
+ * DIGITAL DO COLABORADOR                      busca: [DIGITAL]
+ * ------------------------------------------------------------
+ * O QUE FAZ   Cadastra e reconhece a digital usando o mecanismo
+ *             do próprio navegador (WebAuthn) — o mesmo do
+ *             Windows Hello e da digital do celular.
+ * O QUE NÃO FAZ  Não lê, não envia e não guarda digital. O dedo
+ *             nunca sai do aparelho: quem confere é o sistema
+ *             operacional. O que sai daqui é só o IDENTIFICADOR
+ *             da credencial, um número que não reconstrói nada.
+ * DEPENDE DE  [API] e do módulo biometria no Apps Script.
+ * ONDE PROCURAR ERRO
+ *   ARQUIVO_LOCAL / IFRAME → biometriaBloqueadaNoAmbiente()
+ *   DIGITAL_NAO_RECONHECIDA → a credencial não está cadastrada
+ * REGRA       A credencial é RESIDENTE e com verificação
+ *             OBRIGATÓRIA: o aparelho só entrega o identificador
+ *             DEPOIS que a digital confere. Sem o dedo, o
+ *             navegador não tem o que mandar.
+ * ############################################################ */
+
+var DIGITAL = (function () {
+
+  function disponivel() {
+    try {
+      return typeof biometriaBloqueadaNoAmbiente !== "function" ||
+        !biometriaBloqueadaNoAmbiente();
+    } catch (e) { return false; }
+  }
+
+  function porqueNao() {
+    try {
+      if (typeof motivoBloqueioBiometria === "function") return motivoBloqueioBiometria();
+    } catch (e) {}
+    return { titulo: "O leitor de digital não está disponível aqui",
+      texto: "Abra o sistema pelo endereço https da publicação." };
+  }
+
+  function sorteio(n) {
+    var a = new Uint8Array(n);
+    try { crypto.getRandomValues(a); }
+    catch (e) { for (var i = 0; i < n; i++) a[i] = Math.floor(Math.random() * 256); }
+    return a;
+  }
+
+  /* base64 do jeito que a web usa em credencial: sem +, sem / e sem = */
+  function base64url(buf) {
+    var b = new Uint8Array(buf), t = "";
+    for (var i = 0; i < b.length; i++) t += String.fromCharCode(b[i]);
+    return btoa(t).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  function bytesDe(texto) {
+    var t = String(texto || ""), a = new Uint8Array(t.length);
+    for (var i = 0; i < t.length; i++) a[i] = t.charCodeAt(i) & 255;
+    return a;
+  }
+
+  /* O navegador fala grego quando dá errado. Aqui vira português. */
+  function explicar(e) {
+    var nome = String((e && e.name) || "");
+    if (nome === "NotAllowedError") {
+      return "A leitura foi cancelada, ou o tempo acabou. Encoste o dedo no leitor " +
+        "assim que a janela do Windows aparecer.";
+    }
+    if (nome === "InvalidStateError") {
+      return "Esta digital já está cadastrada neste aparelho para este sistema. " +
+        "Se ela não aparece na lista, revogue a antiga e cadastre de novo.";
+    }
+    if (nome === "NotSupportedError") {
+      return "Este aparelho não tem leitor de digital compatível.";
+    }
+    if (nome === "SecurityError") {
+      return "O endereço desta página não permite usar o leitor. " +
+        "Abra pelo endereço https da publicação.";
+    }
+    return (e && e.message) || "A leitura não foi concluída.";
+  }
+
+  /* --- CADASTRAR: o aparelho cria a credencial e tranca com o dedo --- */
+  function cadastrar(matricula, nome) {
+    if (!disponivel()) {
+      var m = porqueNao();
+      return Promise.resolve({ ok: false, mensagem: m.titulo + " " + (m.texto || "") });
+    }
+    var opcoes = {
+      publicKey: {
+        challenge: sorteio(32),
+        rp: { name: "ALMOX-PRO" },
+        user: {
+          id: bytesDe("almoxa:" + matricula),
+          name: String(matricula),
+          displayName: String(nome || matricula)
+        },
+        pubKeyCredParams: [
+          { type: "public-key", alg: -7 },    /* ES256 */
+          { type: "public-key", alg: -257 }   /* RS256 */
+        ],
+        /* residente + verificação obrigatória: é isto que faz o
+           identificador só existir depois que o dedo confere */
+        authenticatorSelection: {
+          residentKey: "required",
+          requireResidentKey: true,
+          userVerification: "required"
+        },
+        timeout: 60000,
+        attestation: "none"
+      }
+    };
+    return navigator.credentials.create(opcoes).then(function (cred) {
+      if (!cred || !cred.rawId) {
+        return { ok: false, mensagem: "O aparelho não devolveu a credencial." };
+      }
+      return { ok: true, credencialId: base64url(cred.rawId) };
+    }).catch(function (e) {
+      return { ok: false, mensagem: explicar(e) };
+    });
+  }
+
+  /* --- ENTRAR: sem lista de credenciais, o aparelho só devolve
+         depois de conferir o dedo --- */
+  function reconhecer() {
+    if (!disponivel()) {
+      var m = porqueNao();
+      return Promise.resolve({ ok: false, mensagem: m.titulo + " " + (m.texto || "") });
+    }
+    return navigator.credentials.get({
+      publicKey: {
+        challenge: sorteio(32),
+        userVerification: "required",
+        timeout: 60000
+      }
+    }).then(function (cred) {
+      if (!cred || !cred.rawId) {
+        return { ok: false, mensagem: "O aparelho não devolveu a credencial." };
+      }
+      return { ok: true, credencialId: base64url(cred.rawId) };
+    }).catch(function (e) {
+      return { ok: false, mensagem: explicar(e) };
+    });
+  }
+
+  return { disponivel: disponivel, porqueNao: porqueNao,
+    cadastrar: cadastrar, reconhecer: reconhecer, explicar: explicar };
+})();
+try { window.DIGITAL = DIGITAL; } catch (e) {}
+
+
+/* A janela de cadastro. Abre pelo usuário, cadastra para aquela pessoa. */
+function modalCadastrarDigital(matricula, nome, aoTerminar) {
+  var mat = String(matricula || "").trim();
+  if (!mat) { toast("warn", "Sem matrícula", "Salve o usuário antes de cadastrar a digital."); return; }
+
+  UI.modal({
+    titulo: "Digital de " + (nome || mat),
+    sub: "A digital não sai do aparelho. Aqui fica só um identificador.",
+    tamanho: "sm",
+    corpo: '<div id="dgCorpo">' + UI.carregando(2) + "</div>",
+    rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' +
+      '<button class="btn btn-primary" data-novo>' + ic("digital") + "Cadastrar esta digital</button>",
+    aoAbrir: function (w, fechar) {
+      var alvo = w.querySelector("#dgCorpo");
+      var botao = w.querySelector("[data-novo]");
+      w.querySelector("[data-x]").addEventListener("click", fechar);
+
+      function pintar() {
+        API.call("biometria", "daPessoa", { matricula: mat }).then(function (r) {
+          var lista = (r && r.ok && listaSegura(r.dados.credenciais)) || [];
+          var aviso = "";
+          if (!DIGITAL.disponivel()) {
+            var m = DIGITAL.porqueNao();
+            botao.disabled = true;
+            aviso = '<div class="alert a-yellow mb12">' + ic("alerta") +
+              "<div><b>" + U.esc(m.titulo) + "</b>" + U.esc(m.texto || "") + "</div></div>";
+          }
+          alvo.innerHTML = aviso +
+            '<div class="alert a-blue mb12">' + ic("info") +
+            "<div>Ao cadastrar, o Windows (ou o aparelho) vai pedir a digital. " +
+            "<b>Nenhuma imagem do dedo é guardada</b> — nem aqui, nem na planilha.</div></div>" +
+            (!r || !r.ok
+              ? UI.falha(r, true)
+              : lista.length
+                ? '<div class="card"><div class="card-head"><b>Digitais desta pessoa</b>' +
+                  '<span class="badge b-green">' + lista.length + "</span></div>" +
+                  '<div class="card-body">' + lista.map(function (c) {
+                    return '<div class="flex gap8 mt8" style="align-items:center">' +
+                      '<div class="grow"><b>' + U.esc(c.apelido || "Digital") + "</b>" +
+                      '<div class="muted small">' + U.esc(c.estacao || "estação não informada") +
+                      (c.criadoEm ? " · desde " + U.esc(String(c.criadoEm).slice(0, 10)) : "") +
+                      (c.ultimoUsoEm ? " · último uso " + U.esc(String(c.ultimoUsoEm).slice(0, 10)) : "") +
+                      "</div></div>" +
+                      '<button class="btn btn-ghost btn-sm" data-dg-revogar="' + U.esc(c.id) + '">Revogar</button>' +
+                      "</div>";
+                  }).join("") + "</div></div>"
+                : UI.estado("vazio", "Nenhuma digital cadastrada",
+                    "Esta pessoa ainda entra por matrícula e senha, ou pelo crachá."));
+
+          alvo.querySelectorAll("[data-dg-revogar]").forEach(function (b) {
+            b.addEventListener("click", function () {
+              var motivo = window.prompt("Por que está revogando esta digital?", "");
+              if (motivo === null) return;
+              if (!String(motivo).trim()) {
+                toast("warn", "Motivo é obrigatório", "Revogar sem motivo tira a rastreabilidade.");
+                return;
+              }
+              API.call("biometria", "revogar", {
+                id: b.getAttribute("data-dg-revogar"), motivo: String(motivo).trim()
+              }).then(function (rr) {
+                if (!rr || !rr.ok) { toast("err", "Não revogou", (rr && rr.mensagem) || ""); return; }
+                toast("ok", "Digital revogada", rr.mensagem || "");
+                pintar();
+                if (aoTerminar) aoTerminar();
+              });
+            });
+          });
+        });
+      }
+
+      botao.addEventListener("click", function () {
+        botao.disabled = true;
+        botao.innerHTML = '<span class="spinner"></span> Encoste o dedo…';
+        DIGITAL.cadastrar(mat, nome).then(function (res) {
+          function devolver() {
+            botao.disabled = false;
+            botao.innerHTML = ic("digital") + "Cadastrar esta digital";
+          }
+          if (!res.ok) {
+            devolver();
+            alvo.innerHTML = '<div class="alert a-red mb12">' + ic("alerta") +
+              "<div><b>A digital não foi cadastrada</b>" + U.esc(res.mensagem) + "</div></div>" +
+              alvo.innerHTML;
+            return;
+          }
+          API.call("biometria", "registrar", {
+            matricula: mat,
+            credencialId: res.credencialId,
+            apelido: "Digital",
+            estacao: (navigator.platform || "estação")
+          }).then(function (r2) {
+            devolver();
+            if (!r2 || !r2.ok) {
+              toast("err", "O servidor não aceitou", (r2 && r2.mensagem) || "");
+              return;
+            }
+            toast("ok", "Digital cadastrada", r2.mensagem || "");
+            pintar();
+            if (aoTerminar) aoTerminar();
+          });
+        });
+      });
+
+      pintar();
+    }
+  });
+}
+try { window.modalCadastrarDigital = modalCadastrarDigital; } catch (e) {}
+
 function modalUsuario(id) {
 var lista = (USUARIOS_TELA && USUARIOS_TELA.length ? USUARIOS_TELA : []).concat(MOCK.usuarios || []);
 var u = null;
@@ -12377,12 +12678,16 @@ return '<option value="' + k + '" ' + (u.perfil === k ? "selected" : "") + ">" +
 }).join("") + "</select></div>" + '<div class="field"><label>Obra</label><select class="select" id="usObra">' + '<option value="">— sem obra —</option>' + (MOCK.obras || []).map(function(o) {
 return '<option value="' + o.id + '" ' + (u.obra === o.id ? "selected" : "") + ">" + U.esc(o.nome) + "</option>";
 }).join("") + "</select></div>" + '<div class="field"><label>Situação</label><select class="select" id="usStatus"><option ' + (String(u.status || "ATIVO").toUpperCase() === "ATIVO" ? "selected" : "") + ">Ativo</option><option " + (String(u.status || "").toUpperCase() !== "ATIVO" && u.status ? "selected" : "") + ">Bloqueado</option></select></div>" + "</div>" + '<div class="section-title mt16">Acesso</div>' + '<div class="grid g2">' + '<div class="field"><label>' + (id ? "Nova senha" : "Senha") + (id ? "" : ' <span class="req">*</span>') + "</label>" + '<input class="input" type="password" id="usSenha" placeholder="' + (id ? "deixe em branco para manter a atual" : "mínimo de 6 caracteres") + '"></div>' + '<div class="field"><label>Confirmar senha</label>' + '<input class="input" type="password" id="usSenha2"></div>' + "</div>" + '<p class="small">O usuário entra com a matrícula ou o login e esta senha. A senha é gravada com hash — nem o administrador consegue lê-la depois.</p>' + '<div id="usAviso"></div>' + '<div class="section-title mt16">Identificação</div>' + '<div class="switch-row"><div class="sr-txt"><b>Biometria digital</b><small>Permite retirada e aprovação por leitor biométrico</small></div><span class="switch ' + (u.biometria ? "on" : "") + '" data-sw></span></div>' + '<div class="switch-row"><div class="sr-txt"><b>Reconhecimento facial</b><small>Habilita a validação por câmera na estação</small></div><span class="switch ' + (u.biometria ? "on" : "") + '" data-sw></span></div>' + '<div class="switch-row"><div class="sr-txt"><b>Crachá / QR Code</b><small>Vincula o código do crachá ao usuário</small></div><span class="switch on" data-sw></span></div>',
-rodape: '<button class="btn btn-ghost" data-x>Cancelar</button><button class="btn btn-primary" data-ok>' + ic("salvar") + "Salvar usuário</button>",
+rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' + /* a digital só existe para quem já está salvo: sem matrícula não há dono */ (id && u.matricula ? '<button class="btn btn-ghost" data-digital>' + ic("digital") + "Digital</button>" : "") + '<button class="btn btn-primary" data-ok>' + ic("salvar") + "Salvar usuário</button>",
 aoAbrir: function(w, fechar) {
 w.querySelectorAll("[data-sw]").forEach(function(s) {
 s.addEventListener("click", function() {
 s.classList.toggle("on");
 });
+});
+var bDig = w.querySelector("[data-digital]");
+if (bDig) bDig.addEventListener("click", function() {
+modalCadastrarDigital(u.matricula, u.nome);
 });
 /* as funções cadastradas entram como sugestão, e a descrição
    aparece embaixo — quem quiser digitar outra coisa, digita. */
@@ -35948,12 +36253,14 @@ return;
 var botao = this;
 botao.innerHTML = '<span class="spinner"></span> Registrando…';
 botao.disabled = true;
-function concluir(comoConfirmou) {
+function concluir(comoConfirmou, prova) {
 API.call("reservas", "retirar", {
 protocolo: r.protocolo,
-retiradoPor: nome.trim(),
-matricula: (w.querySelector("#rtMat") || {}).value || "",
+retiradoPor: (prova && prova.porQuem) || nome.trim(),
+matricula: (prova && prova.matricula) || (w.querySelector("#rtMat") || {}).value || "",
 metodo: comoConfirmou,
+/* o comprovante da digital — é isto que sustenta a prova depois */
+provaBiometria: (prova && prova.prova) || "",
 itens: levando.map(function(i) {
 return {
 sku: i.sku,
@@ -36005,19 +36312,64 @@ concluir("crachá " + cracha);
 return;
 }
 if (RETIRADA.metodo === "biometria") {
+/* NADA É REGISTRADO COMO BIOMETRIA SEM TER ACONTECIDO.
+   Antes, quando o leitor não existia, o código caía direto em
+   concluir("biometria") — e a entrega ia para a ficha e para a
+   auditoria como autenticada por digital, sem leitor nenhum,
+   sem verificação e sem aviso. A função lerBiometriaAgora que
+   deveria ler nunca existiu neste arquivo.
+   Agora, enquanto não houver leitor de verdade, a retirada é
+   recusada e a pessoa escolhe outro jeito de se identificar. */
 if (typeof lerBiometriaAgora === "function") {
 lerBiometriaAgora().then(function(bio) {
-if (!bio.ok) {
 botao.innerHTML = ic("checkC") + "Confirmar retirada";
 botao.disabled = false;
-alvo.innerHTML += '<div class="alert a-red mt12">' + ic("alerta") + "<div>" + U.esc(bio.mensagem || "Leitura não concluída.") + "</div></div>";
+if (!bio || !bio.ok) {
+alvo.innerHTML += '<div class="alert a-red mt12">' + ic("alerta") + "<div>" + U.esc(bio && bio.mensagem || "Leitura não concluída.") + "</div></div>";
 return;
 }
 concluir("biometria");
 });
 return;
 }
-concluir("biometria");
+/* A DIGITAL DE VERDADE, COM COMPROVANTE.
+   Quem confere o dedo é o aparelho; o Core devolve um número de
+   comprovante e é ELE que fica guardado na retirada — nunca o
+   identificador da credencial, que é o que destranca a entrada. */
+if (!DIGITAL.disponivel()) {
+var m = DIGITAL.porqueNao();
+botao.innerHTML = ic("checkC") + "Confirmar retirada";
+botao.disabled = false;
+alvo.innerHTML = '<div class="alert a-red">' + ic("alerta") + "<div><b>A digital não pode ser lida aqui</b>" + U.esc(m.titulo + " " + (m.texto || "")) + " Use senha, crachá, ou confirme no seu nome como responsável.</div></div>";
+return;
+}
+botao.innerHTML = '<span class="spinner"></span> Encoste o dedo…';
+DIGITAL.reconhecer().then(function(res) {
+function devolver() {
+botao.innerHTML = ic("checkC") + "Confirmar retirada";
+botao.disabled = false;
+}
+if (!res.ok) {
+devolver();
+alvo.innerHTML = '<div class="alert a-red">' + ic("alerta") + "<div><b>A digital não foi confirmada</b>" + U.esc(res.mensagem) + "</div></div>";
+return;
+}
+botao.innerHTML = '<span class="spinner"></span> Conferindo…';
+API.call("biometria", "confirmar", {
+credencialId: res.credencialId,
+operacao: "RETIRADA_EPI",
+alvo: r.protocolo,
+detalhe: levando.length + " item(ns)",
+estacao: (navigator.platform || "")
+}).then(function(c) {
+if (!c || !c.ok) {
+devolver();
+alvo.innerHTML = '<div class="alert a-red">' + ic("alerta") + "<div><b>O sistema não reconheceu esta digital</b>" + U.esc((c && c.mensagem) || "") + "</div></div>";
+return;
+}
+concluir("biometria", { prova: c.dados.prova, porQuem: c.dados.nome, matricula: c.dados.matricula });
+});
+});
 return;
 }
 concluir("confirmado por " + ((ST.usuario || {}).nome || "operador"));
@@ -44249,6 +44601,13 @@ matricula: res.matricula
 };
 var p = res.prazo || {};
 var pontePronta = typeof BIO !== "undefined" && BIO && BIO.conectado === true;
+/* A DIGITAL DESTA ESTAÇÃO.
+   A biometria daqui não depende mais da "ponte com o leitor", que
+   nunca conectou: quem lê o dedo é o próprio aparelho, e o Core
+   devolve um comprovante. A câmera (facial) continua como estava. */
+var digitalAqui = typeof DIGITAL !== "undefined" && DIGITAL.disponivel();
+/* o comprovante da digital de quem está recebendo o EPI */
+var provaBaixa = null;
 var metodos = [ {
 id: "CRACHA",
 nome: "Crachá",
@@ -44267,8 +44626,8 @@ pronto: true
 }, {
 id: "BIOMETRIA",
 nome: "Biometria digital",
-dica: pontePronta ? "Leitor conectado" : "Precisa da ponte com o leitor — indisponível agora",
-pronto: pontePronta
+dica: digitalAqui ? "O colaborador encosta o dedo cadastrado" : DIGITAL.porqueNao().titulo,
+pronto: digitalAqui
 }, {
 id: "FACIAL",
 nome: "Reconhecimento facial",
@@ -44291,7 +44650,7 @@ corpo: (p.situacao === "EXPIRADA" ? '<div class="alert a-red mb12">' + ic("alert
 return '<div class="info-row"><span>' + U.esc(i.descricao) + (i.tamanho ? " · tam. " + U.esc(i.tamanho) : "") + (i.ca ? " · CA " + U.esc(i.ca) : "") + "</span>" + "<b>" + U.num(i.falta) + " " + U.esc(i.unidade || "un") + (i.qtdEntregue ? ' <span class="muted small">(' + U.num(i.qtdEntregue) + " já entregue)</span>" : "") + "</b></div>";
 }).join("") + "</div></div>" + '<div class="section-title">Identificação do colaborador</div>' + '<div class="grid g2">' + metodos.map(function(m) {
 return '<button class="chip ' + (m.id === escolhido ? "on" : "") + '" data-met="' + m.id + '"' + (m.pronto ? "" : ' disabled title="' + U.esc(m.dica) + '"') + ' style="justify-content:flex-start;text-align:left;height:auto;padding:10px 12px">' + "<span><b>" + m.nome + '</b><br><small class="muted">' + U.esc(m.dica) + "</small></span></button>";
-}).join("") + "</div>" + '<div id="bxSenha" class="field mt12" style="display:none">' + "<label>Senha do colaborador</label>" + '<input class="input" type="password" id="bxSenhaCampo" placeholder="ele digita aqui"></div>' + '<div class="switch-row mt12"><div class="sr-txt">' + "<b>Confirmo que a identificação aconteceu agora</b>" + "<small>Sem isso nada sai do estoque. O sistema não registra uma autenticação que não houve.</small>" + '</div><span class="switch" data-sw-conf></span></div>' + (p.situacao === "AGENDADA" ? '<div class="switch-row"><div class="sr-txt"><b>Antecipar a retirada</b>' + "<small>O colaborador está aqui antes do dia marcado.</small></div>" + '<span class="switch" data-sw-adiant></span></div>' : "") + '<div class="field mt8"><label>Observação da entrega</label>' + '<input class="input" id="bxObs" placeholder="opcional"></div>',
+}).join("") + "</div>" + '<div id="bxSenha" class="field mt12" style="display:none">' + "<label>Senha do colaborador</label>" + '<input class="input" type="password" id="bxSenhaCampo" placeholder="ele digita aqui"></div>' + '<div id="bxAvisoDigital"></div>' + '<div class="switch-row mt12"><div class="sr-txt">' + "<b>Confirmo que a identificação aconteceu agora</b>" + "<small>Sem isso nada sai do estoque. O sistema não registra uma autenticação que não houve.</small>" + '</div><span class="switch" data-sw-conf></span></div>' + (p.situacao === "AGENDADA" ? '<div class="switch-row"><div class="sr-txt"><b>Antecipar a retirada</b>' + "<small>O colaborador está aqui antes do dia marcado.</small></div>" + '<span class="switch" data-sw-adiant></span></div>' : "") + '<div class="field mt8"><label>Observação da entrega</label>' + '<input class="input" id="bxObs" placeholder="opcional"></div>',
 rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' + (p.situacao === "EXPIRADA" ? '<button class="btn btn-primary" data-remarcar>' + ic("calendario") + "Remarcar a retirada</button>" : '<button class="btn btn-orange" data-ok>' + ic("checkC") + "Dar baixa e entregar</button>"),
 aoAbrir: function(w, fechar) {
 var adiantar = false;
@@ -44314,13 +44673,82 @@ w.querySelectorAll("[data-met]").forEach(function(o) {
 o.classList.toggle("on", o.getAttribute("data-met") === escolhido);
 });
 w.querySelector("#bxSenha").style.display = escolhido === "SENHA" ? "" : "none";
+/* trocar de método derruba a confirmação: o que valia para o
+   método anterior não vale para o novo. */
+confirmada = false;
+provaBaixa = null;
+var sw = w.querySelector("[data-sw-conf]");
+if (sw) sw.classList.remove("on");
+avisoDigital(escolhido === "BIOMETRIA" ? '<div class="alert a-gray mt8">' + ic("digital") + "<div>Ligue a chave abaixo para ler a digital do colaborador. " + "Ela só liga depois que o dedo for confirmado.</div></div>" : "");
 });
 });
 var swConf = w.querySelector("[data-sw-conf]");
 swConf.addEventListener("click", function() {
+/* NA DIGITAL, A CHAVINHA NÃO SE LIGA COM A MÃO.
+   Nos outros métodos o almoxarife é quem afirma que a
+   identificação aconteceu. Na digital quem afirma é o aparelho:
+   sem dedo lido e sem comprovante do Core, esta chave não liga —
+   senão o sistema registraria uma biometria que não houve. */
+if (escolhido === "BIOMETRIA") {
+if (confirmada) return;
+lerDigitalDaBaixa();
+return;
+}
+provaBaixa = null;
 confirmada = !confirmada;
 swConf.classList.toggle("on", confirmada);
 });
+
+function avisoDigital(html) {
+var caixa = w.querySelector("#bxAvisoDigital");
+if (caixa) caixa.innerHTML = html || "";
+}
+
+function lerDigitalDaBaixa() {
+if (!digitalAqui) {
+var m = DIGITAL.porqueNao();
+avisoDigital('<div class="alert a-red mt8">' + ic("alerta") + "<div><b>" + U.esc(m.titulo) + "</b>" + U.esc(m.texto || "") + " Escolha outro método.</div></div>");
+return;
+}
+avisoDigital('<div class="alert a-blue mt8">' + ic("digital") + "<div><b>Encoste o dedo agora</b>" + "Quem encosta é o colaborador que está recebendo o EPI.</div></div>");
+/* "leitura", e não "res": o res daqui de fora é a RESERVA.
+   Trocar o nome sem pensar apagaria a ficha de dentro da função. */
+DIGITAL.reconhecer().then(function(leitura) {
+if (!leitura.ok) {
+avisoDigital('<div class="alert a-red mt8">' + ic("alerta") + "<div><b>A digital não foi confirmada</b>" + U.esc(leitura.mensagem) + " Nada foi registrado.</div></div>");
+return;
+}
+API.call("biometria", "confirmar", {
+credencialId: leitura.credencialId,
+operacao: "epigestao.entregar",
+alvo: protocolo,
+detalhe: "baixa da ficha de EPI",
+estacao: navigator.platform || ""
+}).then(function(c) {
+if (!c || !c.ok) {
+avisoDigital('<div class="alert a-red mt8">' + ic("alerta") + "<div><b>Esta digital não foi reconhecida</b>" + U.esc(c && c.mensagem || "") + " Nada foi registrado.</div></div>");
+return;
+}
+var d = c.dados || {};
+/* A digital é de QUEM? Se não for do colaborador desta ficha,
+   não serve como prova do recebimento dele. */
+if (matriculaNaoEDaFicha(d.matricula)) {
+avisoDigital('<div class="alert a-red mt8">' + ic("alerta") + "<div><b>Esta digital é de outra pessoa</b>" + "Ela é de " + U.esc(d.nome || d.matricula) + ", e a ficha " + U.esc(protocolo) + " é de " + U.esc(res.colaborador || res.matricula) + ". " + "Nada foi registrado.</div></div>");
+return;
+}
+provaBaixa = d;
+confirmada = true;
+swConf.classList.add("on");
+avisoDigital('<div class="alert a-green mt8">' + ic("checkC") + "<div><b>Digital confirmada — " + U.esc(d.nome || d.matricula) + "</b>" + "Comprovante " + U.esc(d.prova) + ".</div></div>");
+});
+});
+}
+
+function matriculaNaoEDaFicha(matricula) {
+var daFicha = String(res.matricula || "").trim();
+if (!daFicha) return false;
+return String(matricula || "").trim() !== daFicha;
+}
 var swAd = w.querySelector("[data-sw-adiant]");
 if (swAd) swAd.addEventListener("click", function() {
 adiantar = !adiantar;
@@ -44391,6 +44819,11 @@ if (escolhido === "SENHA" && !w.querySelector("#bxSenhaCampo").value) {
 toast("warn", "Falta a senha", "O colaborador precisa digitar a senha dele.");
 return;
 }
+/* segunda tranca: escolheu digital, tem que ter comprovante. */
+if (escolhido === "BIOMETRIA" && !(provaBaixa && provaBaixa.prova)) {
+toast("warn", "A digital não foi lida", "Sem o comprovante da digital nada sai do estoque. " + "Leia o dedo do colaborador, ou escolha outro método.");
+return;
+}
 ok.disabled = true;
 salvarFoto().then(function() {
 return API.call("epigestao", "entregar", {
@@ -44401,7 +44834,12 @@ autenticacao: {
 metodo: escolhido,
 confirmada: true,
 por: (ST.usuario || {}).nome || "você",
-quando: (new Date).toISOString()
+quando: (new Date).toISOString(),
+/* O COMPROVANTE. Só existe quando houve digital de verdade — é
+   o número da linha na aba de provas, não a credencial. */
+provaBiometria: provaBaixa && provaBaixa.prova || "",
+conferidoDe: provaBaixa && provaBaixa.matricula || "",
+verificacaoDoDedo: provaBaixa ? "APARELHO" : ""
 }
 });
 }).then(function(r) {
@@ -48790,7 +49228,12 @@ if (!u) {
 lerCracha(motivo);
 return;
 }
-var temBio = String(u.biometria) === "true" || u.biometria === true;
+/* Quem pode oferecer a digital é o APARELHO. Se esta pessoa tem
+   ou não uma digital cadastrada só se sabe depois da leitura — e
+   é o Core que responde isso, com DIGITAL_NAO_RECONHECIDA. Por
+   isso o botão não é mais travado pelo campo "biometria" do
+   cadastro, que nada preenche hoje. */
+var temBio = typeof DIGITAL !== "undefined" && DIGITAL.disponivel();
 function porSenha() {
 UI.modal({
 titulo: "Confirmar com a senha",
@@ -48847,12 +49290,87 @@ if (ev.key === "Enter") enviar();
 }
 });
 }
+/* A DIGITAL, NO LUGAR ONDE O SISTEMA JÁ PEDIA CONFIRMAÇÃO.
+   Este é o mesmo caminho por onde passam a aprovação, a retirada,
+   a entrega de EPI e a validação do pré-cadastro — por isso a
+   digital entra aqui, e não em cada tela. Quem confere o dedo é o
+   aparelho; o Core devolve um número de comprovante, e é ele que
+   viaja no payload da operação. */
+function porDigital(motivo2) {
+if (!DIGITAL.disponivel()) {
+var pq = DIGITAL.porqueNao();
+toast("warn", pq.titulo, pq.texto || "");
+escolher(motivo2);
+return;
+}
+UI.modal({
+titulo: "Confirmar com a digital",
+sub: (APP.STATE.usuario || {}).nome || "",
+tamanho: "sm",
+corpo: '<div class="txt-c" style="padding:12px 0">' + '<div style="font-size:42px;line-height:1">' + ic("digital") + "</div>" + '<p class="mt12"><b>Encoste o dedo cadastrado</b></p>' + '<p class="small muted">' + U.esc(motivo2 || "Esta operação precisa de confirmação.") + "</p>" + '<div id="cdErro"></div></div>',
+rodape: '<button class="btn btn-ghost" data-x>Voltar</button>' + '<button class="btn btn-primary" data-ok>Ler a digital</button>',
+aoAbrir: function(w, fechar) {
+w.querySelector("[data-x]").addEventListener("click", function() {
+fechar();
+escolher(motivo2);
+});
+var bt = w.querySelector("[data-ok]");
+function falhou(texto) {
+bt.disabled = false;
+bt.innerHTML = "Tentar de novo";
+w.querySelector("#cdErro").innerHTML = '<div class="alert a-red mt12">' + ic("alerta") + "<div>" + U.esc(texto || "A digital não foi confirmada.") + "</div></div>";
+}
+function ler() {
+w.querySelector("#cdErro").innerHTML = "";
+bt.disabled = true;
+bt.innerHTML = '<span class="spinner"></span> Encoste o dedo…';
+DIGITAL.reconhecer().then(function(res) {
+if (!res.ok) {
+falhou(res.mensagem);
+return;
+}
+bt.innerHTML = '<span class="spinner"></span> Conferindo…';
+/* CRACHA.liberando está ligado aqui, então esta chamada
+   não cai de novo na confirmação — não há laço. */
+API.call("biometria", "confirmar", {
+credencialId: res.credencialId,
+/* o comprovante tem que dizer O QUE foi confirmado e SOBRE O QUÊ,
+   senão daqui a seis meses ele não prova nada. */
+operacao: opts.operacao || acao,
+alvo: opts.alvo || origem,
+detalhe: origem,
+estacao: navigator.platform || ""
+}).then(function(c) {
+if (!c || !c.ok) {
+falhou(c && c.mensagem || "O sistema não reconheceu esta digital.");
+return;
+}
+var d = c.dados || {};
+fechar();
+toast("ok", "Digital confirmada", (d.nome || d.matricula || "") + " · comprovante " + d.prova + ".");
+terminar(ok, {
+quem: {
+matricula: d.matricula || "",
+colaborador: d.nome || d.matricula || "",
+codigo: ""
+},
+via: "BIOMETRIA",
+prova: d.prova || ""
+});
+});
+});
+}
+bt.addEventListener("click", ler);
+ler();
+}
+});
+}
 function escolher(motivo2) {
 UI.modal({
 titulo: "Confirme sua identidade",
 sub: opts.titulo || "Esta operação precisa de confirmação",
 tamanho: "sm",
-corpo: '<p class="small mb16">' + U.esc(motivo2 || "Escolha como quer confirmar. Fica registrado quem fez e por qual método.") + "</p>" + '<div style="display:grid;gap:10px">' + '<button class="btn btn-orange btn-block btn-lg" data-m="cracha">' + ic("qr") + "Crachá</button>" + '<button class="btn btn-ghost btn-block btn-lg" data-m="senha">' + ic("cadeado") + "Senha do sistema</button>" + '<button class="btn btn-ghost btn-block btn-lg" data-m="bio"' + (temBio ? "" : " disabled") + ">" + ic("digital") + "Biometria" + (temBio ? "" : " (não cadastrada)") + "</button>" + "</div>",
+corpo: '<p class="small mb16">' + U.esc(motivo2 || "Escolha como quer confirmar. Fica registrado quem fez e por qual método.") + "</p>" + '<div style="display:grid;gap:10px">' + '<button class="btn btn-orange btn-block btn-lg" data-m="cracha">' + ic("qr") + "Crachá</button>" + '<button class="btn btn-ghost btn-block btn-lg" data-m="senha">' + ic("cadeado") + "Senha do sistema</button>" + '<button class="btn btn-ghost btn-block btn-lg" data-m="bio"' + (temBio ? "" : " disabled") + ">" + ic("digital") + "Biometria" + (temBio ? "" : " (não disponível nesta estação)") + "</button>" + "</div>",
 rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>',
 aoAbrir: function(w, fechar) {
 w.querySelector("[data-x]").addEventListener("click", function() {
@@ -48865,10 +49383,7 @@ var m = b.getAttribute("data-m");
 fechar();
 if (m === "cracha") lerCracha(motivo2);
 if (m === "senha") porSenha();
-if (m === "bio") {
-toast("info", "Biometria ainda não está ligada", "Use crachá ou senha por enquanto.");
-escolher(motivo2);
-}
+if (m === "bio") porDigital(motivo2);
 });
 });
 }
@@ -51053,12 +51568,21 @@ return chamadaCarimbada.call(API, modulo, acao, payload);
 }
 return CRACHA.exigir(regra.acao, {
 titulo: regra.texto,
-origem: (APP.STATE.rota || modulo) + " · " + acao
+origem: (APP.STATE.rota || modulo) + " · " + acao,
+/* nome cheio da operação e o registro que ela mexe — é isto que
+   fica no comprovante da digital */
+operacao: modulo + "." + acao,
+alvo: payload && (payload.protocolo || payload.id || payload.numero || payload.sku || payload.matricula) || ""
 }).then(function(r) {
 payload = payload || {};
 payload.cracha = r.quem.codigo;
 payload.crachaMatricula = r.quem.matricula;
 payload.crachaColaborador = r.quem.colaborador;
+/* COMO A PESSOA CONFIRMOU VIAJA COM A OPERAÇÃO.
+   Sem isto, o comprovante da digital ficava só na aba de provas e
+   a linha da operação não dizia por qual método foi confirmada. */
+if (r.via) payload.metodoConfirmacao = r.via;
+if (r.prova) payload.provaBiometria = r.prova;
 return chamadaCarimbada.call(API, modulo, acao, payload);
 }).catch(function(e) {
 if (e && e.message === "CANCELADO") {
