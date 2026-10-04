@@ -1,0 +1,317 @@
+/* ============================================================
+   ADAPTADOR DO LEITOR CONTROL iD — iDBio
+   ============================================================
+   Este arquivo é a ÚNICA parte do sistema que sabe que o leitor é
+   um iDBio. A ponte, a tela e o ALMOX-PRO não sabem e não precisam
+   saber. Trocar de leitor um dia significa trocar este arquivo.
+
+   DE ONDE VEIO ESTA API
+     Da referência C publicada pela Control iD:
+     https://www.controlid.com.br/docs/idbio-pt/2_c_reference/
+     Os nomes e as assinaturas abaixo são os de lá — não são
+     invenção minha. O que eu NÃO pude conferir é o nome do arquivo
+     .dll no pacote que você baixou, por isso ele é procurado numa
+     lista e o programa diz qual encontrou.
+
+   A DESCOBERTA QUE MUDA O DESENHO
+     O iDBio guarda os templates DENTRO DELE e faz a comparação 1:N
+     sozinho (CIDBIO_CaptureAndEnroll / CIDBIO_CaptureAndIdentify).
+     Ou seja: nenhum template passa por este programa, nem fica no
+     disco, nem vai para a planilha. O que sobra para nós guardar é
+     só a tradução "número do leitor ↔ matrícula", que não é dado
+     biométrico. É a melhor notícia deste arquivo.
+
+   O QUE ESTE ARQUIVO PRECISA PARA FUNCIONAR
+     1. o driver USB do leitor instalado (Windows enxergando ele);
+     2. a .dll do SDK numa pasta conhecida;
+     3. o pacote koffi:  npm install koffi
+   ============================================================ */
+
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+
+/* Nomes de .dll que o pacote da Control iD pode trazer. NÃO É
+   ADIVINHAÇÃO SILENCIOSA: se nenhum for encontrado, o programa diz
+   exatamente onde procurou, e você aponta o caminho certo com a
+   variável de ambiente ALMOXA_BIO_DLL. */
+const NOMES_DLL = [
+  /* O NOME DE VERDADE, conferido dentro do SDK BioUSB da Control iD
+     em 03/10/2026: libcidbio.dll, 1.622.016 bytes, 64 bits. É ela que
+     traz as funções CIDBIO_*. Vem primeiro na lista de propósito. */
+  'libcidbio.dll', 'libCIDBio.dll', 'libCIDBIO.dll',
+  'iDBio.dll', 'idbio.dll', 'CIDBIO.dll', 'cidbio.dll',
+  'libidbio.dll', 'iDBioSDK.dll',
+  'libcidbio.so', 'libidbio.so', 'libiDBio.so'          /* Linux */
+];
+
+const PASTAS = [
+  process.env.ALMOXA_BIO_DLL_DIR || '',
+  __dirname,
+  path.join(__dirname, 'sdk'),
+  path.join(__dirname, 'SDK'),
+  path.join(__dirname, 'lib'),
+  'C:\\LEITOR BIOMETRICO',
+  'C:\\Program Files\\Control iD\\iDBio',
+  'C:\\Program Files (x86)\\Control iD\\iDBio'
+].filter(Boolean);
+
+/* ---------- códigos da biblioteca, conforme a referência ---------- */
+const OK = 0;
+const AVISO_JA_INICIADA = 1;
+const AVISO_SEM_IDS = 2;
+const AVISO_SOBRESCREVEU = 3;
+
+/* score vai de 0 a 20000 segundo a documentação. O corte de fábrica
+   sugerido pela Control iD não está publicado na página que eu li,
+   então este número é NOSSO e precisa ser calibrado com o leitor na
+   mão — está escrito assim de propósito para ninguém achar que veio
+   do fabricante. */
+const CORTE_SCORE = Number(process.env.ALMOXA_BIO_SCORE || 3000);
+
+function acharBiblioteca() {
+  const tentados = [];
+  if (process.env.ALMOXA_BIO_DLL) {
+    tentados.push(process.env.ALMOXA_BIO_DLL);
+    if (fs.existsSync(process.env.ALMOXA_BIO_DLL)) {
+      return { caminho: process.env.ALMOXA_BIO_DLL, tentados };
+    }
+  }
+  for (const pasta of PASTAS) {
+    for (const nome of NOMES_DLL) {
+      const p = path.join(pasta, nome);
+      tentados.push(p);
+      try { if (fs.existsSync(p)) return { caminho: p, tentados }; } catch (e) { }
+    }
+  }
+  return { caminho: null, tentados };
+}
+
+/* ------------------------------------------------------------
+   A LIGAÇÃO COM A BIBLIOTECA
+   ------------------------------------------------------------
+   Separada numa função para o teste poder injetar uma biblioteca de
+   mentira e exercitar TODO o resto — só as chamadas em si ficam sem
+   teste automático, porque elas exigem o aparelho.
+   ------------------------------------------------------------ */
+function ligar(koffiInjetado, libInjetada) {
+  const koffi = koffiInjetado || (function () {
+    try { return require('koffi'); }
+    catch (e) { return null; }
+  })();
+
+  if (!koffi) {
+    return {
+      ok: false, codigo: 'SEM_KOFFI',
+      mensagem: 'Falta o pacote que permite o Node falar com a biblioteca do leitor. ' +
+        'Na pasta da ponte, rode: npm install koffi'
+    };
+  }
+
+  let lib = libInjetada || null;
+  let caminho = '(injetada pelo teste)';
+  if (!lib) {
+    const achado = acharBiblioteca();
+    if (!achado.caminho) {
+      return {
+        ok: false, codigo: 'DLL_NAO_ENCONTRADA',
+        mensagem: 'Não achei a biblioteca do leitor (a .dll do SDK da Control iD). ' +
+          'Copie-a para a pasta da ponte, ou aponte o caminho com a variável ' +
+          'ALMOXA_BIO_DLL.',
+        procurouEm: achado.tentados
+      };
+    }
+    caminho = achado.caminho;
+    try { lib = koffi.load(caminho); }
+    catch (e) {
+      return {
+        ok: false, codigo: 'DLL_NAO_CARREGOU',
+        mensagem: 'Achei a biblioteca em ' + caminho + ', mas o Windows não conseguiu ' +
+          'carregá-la: ' + e.message + '. Isso costuma ser 32 vs 64 bits: a .dll e o ' +
+          'Node precisam ser do mesmo. Confira com: node -p "process.arch"'
+      };
+    }
+  }
+
+  /* As assinaturas são as da referência C da Control iD. */
+  let f;
+  try {
+    f = {
+      init: lib.func('int32_t CIDBIO_Init()'),
+      terminate: lib.func('int32_t CIDBIO_Terminate()'),
+      cancelar: lib.func('int32_t CIDBIO_CancelCapture()'),
+      cadastrar: lib.func('int32_t CIDBIO_CaptureAndEnroll(int64_t id)'),
+      identificar: lib.func('int32_t CIDBIO_CaptureAndIdentify(_Out_ int64_t *id, _Out_ int32_t *score, _Out_ int32_t *quality)'),
+      conferirUm: lib.func('int32_t CIDBIO_CaptureAndMatch(int64_t id, _Out_ int32_t *score, _Out_ int32_t *quality)'),
+      apagar: lib.func('int32_t CIDBIO_DeleteTemplate(int64_t id)'),
+      apagarTudo: lib.func('int32_t CIDBIO_DeleteAllTemplates()'),
+      info: lib.func('int32_t CIDBIO_GetDeviceInfo(_Out_ char **version, _Out_ char **serial, _Out_ char **model)'),
+      erro: lib.func('int32_t CIDBIO_GetErrorMessage(int32_t erro, _Out_ char **msg)'),
+      liberarTexto: lib.func('int32_t CIDBIO_FreeString(char *s)')
+    };
+  } catch (e) {
+    return {
+      ok: false, codigo: 'FUNCOES_NAO_BATEM',
+      mensagem: 'A biblioteca carregou, mas as funções CIDBIO_* não são as que a ' +
+        'documentação descreve: ' + e.message + '. Pode ser uma versão diferente do SDK. ' +
+        'Me mande o arquivo .h do seu pacote.'
+    };
+  }
+
+  return { ok: true, koffi, lib, f, caminho };
+}
+
+/* ------------------------------------------------------------
+   O LEITOR, do jeito que a ponte espera
+   ------------------------------------------------------------ */
+function criarLeitor(opcoes) {
+  opcoes = opcoes || {};
+  const ligacao = ligar(opcoes.koffi, opcoes.lib);
+
+  const estado = {
+    pronto: false,
+    iniciado: false,
+    motivo: ligacao.ok ? '' : ligacao.mensagem,
+    codigo: ligacao.ok ? '' : ligacao.codigo,
+    procurouEm: ligacao.procurouEm || [],
+    caminho: ligacao.caminho || '',
+    modelo: '', serie: '', versao: ''
+  };
+
+  const f = ligacao.ok ? ligacao.f : null;
+  const koffi = ligacao.ok ? ligacao.koffi : null;
+
+  function textoDe(ponteiro) {
+    try {
+      const s = koffi.decode(ponteiro, 'char', -1);
+      try { f.liberarTexto(ponteiro); } catch (e) { }
+      return String(s || '');
+    } catch (e) { return ''; }
+  }
+
+  function explicar(cod) {
+    if (!f) return 'erro ' + cod;
+    try {
+      const saida = [null];
+      f.erro(cod, saida);
+      const t = textoDe(saida[0]);
+      return t || ('erro ' + cod);
+    } catch (e) { return 'erro ' + cod; }
+  }
+
+  function iniciar() {
+    if (!f) return false;
+    if (estado.iniciado) return true;
+    let r;
+    try { r = f.init(); }
+    catch (e) { estado.motivo = 'A biblioteca do leitor quebrou ao iniciar: ' + e.message; return false; }
+    if (r !== OK && r !== AVISO_JA_INICIADA) {
+      estado.motivo = 'O leitor não iniciou: ' + explicar(r);
+      estado.codigo = 'LEITOR_NAO_INICIOU';
+      return false;
+    }
+    estado.iniciado = true;
+    try {
+      const v = [null], s = [null], m = [null];
+      if (f.info(v, s, m) === OK) {
+        estado.versao = textoDe(v[0]);
+        estado.serie = textoDe(s[0]);
+        estado.modelo = textoDe(m[0]);
+      }
+    } catch (e) { }
+    estado.pronto = true;
+    estado.motivo = '';
+    return true;
+  }
+
+  return {
+    nome: 'Control iD iDBio' + (estado.modelo ? ' (' + estado.modelo + ')' : ''),
+    simulado: false,
+    /* o próprio leitor guarda e compara: a ponte não mantém template */
+    guardaSozinho: true,
+
+    diagnostico() {
+      return {
+        ligou: ligacao.ok === true,
+        codigo: estado.codigo,
+        motivo: estado.motivo,
+        biblioteca: estado.caminho,
+        procurouEm: estado.procurouEm,
+        modelo: estado.modelo,
+        serie: estado.serie,
+        versao: estado.versao,
+        corteScore: CORTE_SCORE
+      };
+    },
+
+    conectado() {
+      if (!ligacao.ok) return false;
+      return iniciar();
+    },
+
+    /* cadastra sob um número inteiro; quem traduz número ↔ matrícula
+       é a ponte, e essa tradução não é dado biométrico */
+    cadastrarId(id) {
+      if (!iniciar()) return { ok: false, codigo: estado.codigo || 'LEITOR_INDISPONIVEL', mensagem: estado.motivo };
+      let r;
+      try { r = f.cadastrar(BigInt(id)); }
+      catch (e) { return { ok: false, codigo: 'LEITOR_QUEBROU', mensagem: e.message }; }
+      if (r === OK) return { ok: true, sobrescreveu: false };
+      if (r === AVISO_SOBRESCREVEU) return { ok: true, sobrescreveu: true };
+      return { ok: false, codigo: 'CAPTURA_FALHOU', mensagem: explicar(r) };
+    },
+
+    identificar() {
+      if (!iniciar()) return { ok: false, codigo: estado.codigo || 'LEITOR_INDISPONIVEL', mensagem: estado.motivo };
+      const id = [0n], score = [0], qual = [0];
+      let r;
+      try { r = f.identificar(id, score, qual); }
+      catch (e) { return { ok: false, codigo: 'LEITOR_QUEBROU', mensagem: e.message }; }
+      if (r === AVISO_SEM_IDS) {
+        return { ok: false, codigo: 'NAO_IDENTIFICADO', mensagem: 'Não há nenhuma digital cadastrada neste leitor.' };
+      }
+      if (r !== OK) {
+        return { ok: false, codigo: 'NAO_IDENTIFICADO', mensagem: explicar(r) };
+      }
+      const nota = Number(score[0]) || 0;
+      /* O corte é nosso, não do fabricante. Abaixo dele, o sistema
+         responde NÃO IDENTIFICADO em vez de arriscar uma pessoa errada. */
+      if (nota < CORTE_SCORE) {
+        return {
+          ok: false, codigo: 'NAO_IDENTIFICADO',
+          mensagem: 'A leitura não chegou perto o bastante de nenhum cadastro ' +
+            '(' + nota + ' de mínimo ' + CORTE_SCORE + '). Tente de novo, com o dedo limpo e centralizado.'
+        };
+      }
+      return {
+        ok: true,
+        id: Number(id[0]),
+        score: nota,
+        qualidade: Number(qual[0]) || 0
+      };
+    },
+
+    apagarId(id) {
+      if (!iniciar()) return { ok: false, codigo: estado.codigo || 'LEITOR_INDISPONIVEL', mensagem: estado.motivo };
+      let r;
+      try { r = f.apagar(BigInt(id)); }
+      catch (e) { return { ok: false, codigo: 'LEITOR_QUEBROU', mensagem: e.message }; }
+      if (r !== OK) return { ok: false, codigo: 'NAO_APAGOU', mensagem: explicar(r) };
+      return { ok: true };
+    },
+
+    cancelar() {
+      try { if (f) f.cancelar(); } catch (e) { }
+    },
+
+    encerrar() {
+      try { if (f && estado.iniciado) f.terminate(); } catch (e) { }
+      estado.iniciado = false;
+      estado.pronto = false;
+    }
+  };
+}
+
+module.exports = { criarLeitor, ligar, acharBiblioteca, NOMES_DLL, CORTE_SCORE, OK, AVISO_SEM_IDS, AVISO_SOBRESCREVEU };
+
