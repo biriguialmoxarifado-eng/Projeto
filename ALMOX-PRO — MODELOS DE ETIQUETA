@@ -38,6 +38,18 @@
 
 var AP_ETQM_CFG = {
   aba: 'ALMOXA_ETIQUETA_MODELOS',
+  /* OS LOTES DE ETIQUETA FISICA.
+     A aba guarda SO a faixa comprada. Quantas foram usadas NAO fica
+     gravado aqui: e contado na hora, lendo quais patrimonios ja
+     carregam etiqueta dentro da faixa. Guardar o contador numa
+     coluna seria uma segunda verdade sobre a mesma coisa, e as duas
+     divergem no primeiro erro. */
+  abaLotes: 'ALMOXA_ETIQUETA_LOTES',
+  colunasLote: [
+    'ID', 'NOME', 'PREFIXO', 'NUMERO_INICIAL', 'NUMERO_FINAL', 'DIGITOS',
+    'FORNECEDOR', 'NOTA_FISCAL', 'OBSERVACAO',
+    'STATUS', 'CRIADO_EM', 'CRIADO_POR', 'ALTERADO_EM', 'ALTERADO_POR', 'MOTIVO'
+  ],
   caminhos: ['', '01_BANCO_DADOS/'],
 
   colunas: [
@@ -71,11 +83,16 @@ function AP_Modulo_etqmodelo(acao, payload, sessao) {
       case 'atualizar':   return AP_ETQM_atualizar_(payload, sessao);
       case 'excluir':     return AP_ETQM_excluir_(payload, sessao);
       case 'definirPadrao': return AP_ETQM_definirPadrao_(payload, sessao);
+      case 'lotes':        return AP_ETQM_lotes_(payload);
+      case 'salvarLote':   return AP_ETQM_salvarLote_(payload, sessao);
+      case 'encerrarLote': return AP_ETQM_encerrarLote_(payload, sessao);
+      case 'conferir':     return AP_ETQM_conferir_(payload);
       case 'diagnostico': return { ok: true, dados: AP_ETQM_ensaio_() };
       default:
         return { ok: false, codigo: 'ACAO_DESCONHECIDA',
           mensagem: 'Os modelos de etiqueta não conhecem a ação "' + acao + '". Conhece: ' +
-            'listar, obter, salvar, atualizar, excluir, definirPadrao, diagnostico.' };
+            'listar, obter, salvar, atualizar, excluir, definirPadrao, ' +
+            'lotes, salvarLote, encerrarLote, conferir, diagnostico.' };
     }
   } catch (e) {
     return { ok: false, codigo: 'ERRO', mensagem: e.message, onde: String(e.stack || '').slice(0, 400) };
@@ -490,6 +507,419 @@ function AP_ETQM_excluir_(payload, sessao) {
 }
 
 
+
+
+/* ============================================================
+   LOTES DE ETIQUETA FÍSICA — FASE 2
+   ------------------------------------------------------------
+   UM LOTE É UMA FAIXA COMPRADA: de ETQ-008001 a ETQ-009000, por
+   exemplo. A aba guarda só isso. Quantas já foram usadas NÃO é
+   gravado: é contado lendo o cadastro de Patrimônio e vendo quais
+   equipamentos carregam etiqueta dentro da faixa.
+
+   Por que não guardar o contador: ele seria uma segunda verdade
+   sobre a mesma coisa. Bastaria um equipamento ser excluído, uma
+   etiqueta ser trocada à mão na planilha, ou uma gravação falhar no
+   meio, para o contador e a realidade divergirem — e aí ninguém
+   sabe qual dos dois está certo. Contando na hora, a resposta é
+   sempre a que está no cadastro.
+   ============================================================ */
+
+/* A aba dos lotes.
+   AP_ETQM_aba_() e AP_ETQM_cabecalho_() que já existiam estão presas
+   às colunas de MODELO; eu não as altero, porque elas atendem bem o
+   que já funciona. Esta abre a aba dos lotes do mesmo jeito — mesma
+   procura por AP_SRV_aba_, mesma criação se não existir, mesmo
+   acréscimo de coluna que falta sem mexer nas que já estão lá. */
+function AP_ETQM_abaLotes_() {
+  var nome = AP_ETQM_CFG.abaLotes;
+  var colunas = AP_ETQM_CFG.colunasLote;
+
+  function completar(aba) {
+    var largura = aba.getLastColumn();
+    var atuais = largura
+      ? aba.getRange(1, 1, 1, largura).getValues()[0].map(function (c) {
+          return String(c === null || c === undefined ? '' : c).trim().toUpperCase();
+        })
+      : [];
+    var faltando = colunas.filter(function (c) {
+      return atuais.indexOf(String(c).toUpperCase()) < 0;
+    });
+    if (!faltando.length) return aba;
+    aba.getRange(1, largura + 1, 1, faltando.length).setValues([faltando]);
+    aba.getRange(1, largura + 1, 1, faltando.length).setFontWeight('bold');
+    return aba;
+  }
+
+  if (typeof AP_SRV_aba_ === 'function') {
+    for (var i = 0; i < AP_ETQM_CFG.caminhos.length; i++) {
+      var a = null;
+      try { a = AP_SRV_aba_(AP_ETQM_CFG.caminhos[i] + nome); } catch (e) {}
+      if (a && AP_ETQM_viva_(a)) return completar(a);
+    }
+  }
+  var ss = SpreadsheetApp.getActive();
+  if (!ss) throw new Error('Não há planilha ativa para a aba "' + nome + '".');
+  var d = ss.getSheetByName(nome);
+  if (d && AP_ETQM_viva_(d)) return completar(d);
+  if (d) return d;
+  var nova = ss.insertSheet(nome);
+  nova.getRange(1, 1, 1, colunas.length).setValues([colunas]);
+  nova.setFrozenRows(1);
+  nova.getRange(1, 1, 1, colunas.length).setFontWeight('bold');
+  return nova;
+}
+
+/** A etiqueta montada: prefixo + número com zeros à esquerda. */
+function AP_ETQM_etiqueta_(lote, numero) {
+  var n = String(Math.round(AP_ETQM_num_(numero, 0)));
+  var digitos = Math.round(AP_ETQM_num_(lote.digitos, 0));
+  while (digitos && n.length < digitos) n = '0' + n;
+  return AP_ETQM_txt_(lote.prefixo) + n;
+}
+
+/** De uma etiqueta escrita, tira o número — se ela for deste lote. */
+function AP_ETQM_numeroDa_(lote, etiqueta) {
+  var e = AP_ETQM_txt_(etiqueta).toUpperCase();
+  var p = AP_ETQM_txt_(lote.prefixo).toUpperCase();
+  if (!e) return null;
+  if (p) {
+    if (e.indexOf(p) !== 0) return null;
+    e = e.slice(p.length);
+  }
+  if (!/^[0-9]+$/.test(e)) return null;
+  var n = parseInt(e, 10);
+  if (n < AP_ETQM_num_(lote.inicial, 0) || n > AP_ETQM_num_(lote.final, 0)) return null;
+  return n;
+}
+
+function AP_ETQM_loteEmObjeto_(l, idx) {
+  function p(c) { return AP_ETQM_txt_(AP_ETQM_pegar_(l, idx, c)); }
+  var inicial = AP_ETQM_num_(AP_ETQM_pegar_(l, idx, 'NUMERO_INICIAL'), 0);
+  var final = AP_ETQM_num_(AP_ETQM_pegar_(l, idx, 'NUMERO_FINAL'), 0);
+  return {
+    id: p('ID'), nome: p('NOME'), prefixo: p('PREFIXO'),
+    inicial: inicial, final: final,
+    digitos: AP_ETQM_num_(AP_ETQM_pegar_(l, idx, 'DIGITOS'), 0),
+    fornecedor: p('FORNECEDOR'), notaFiscal: p('NOTA_FISCAL'),
+    observacao: p('OBSERVACAO'),
+    status: p('STATUS') || 'ABERTO',
+    criadoEm: p('CRIADO_EM'), criadoPor: p('CRIADO_POR'),
+    alteradoEm: p('ALTERADO_EM'), alteradoPor: p('ALTERADO_POR'),
+    quantidade: (final >= inicial) ? (final - inicial + 1) : 0
+  };
+}
+
+/** As etiquetas que o cadastro de Patrimônio já carrega.
+    Devolve {ETIQUETA: [patrimonio, patrimonio...]} — a lista, e não
+    só a contagem, porque é ela que denuncia a duplicidade. */
+function AP_ETQM_etiquetasEmUso_() {
+  var usadas = {};
+  if (typeof AP_Modulo_patrimonio !== 'function') return usadas;
+  var r = null;
+  try { r = AP_Modulo_patrimonio('listar', {}, {}); } catch (e) { return usadas; }
+  if (!r || !r.ok) return usadas;
+  var lista = r.dados;
+  if (Object.prototype.toString.call(lista) !== '[object Array]') {
+    lista = (lista && lista.dados) || (lista && lista.lista) || [];
+  }
+  lista.forEach(function (p) {
+    var e = AP_ETQM_txt_(p.etiquetaCoesa || p.etiqueta_coesa).toUpperCase();
+    if (!e) return;
+    if (!usadas[e]) usadas[e] = [];
+    usadas[e].push(AP_ETQM_txt_(p.patrimonio) || AP_ETQM_txt_(p.id));
+  });
+  return usadas;
+}
+
+function AP_ETQM_lotes_(payload) {
+  var aba = AP_ETQM_abaLotes_();
+  var idx = AP_ETQM_indice_(aba);
+  var incluirEncerrados = !!(payload && payload.incluirEncerrados);
+  var usadas = AP_ETQM_etiquetasEmUso_();
+
+  var saida = [];
+  AP_ETQM_linhas_(aba).forEach(function (l) {
+    var lote = AP_ETQM_loteEmObjeto_(l, idx);
+    if (!lote.id) return;
+    if (!incluirEncerrados && String(lote.status).toUpperCase() === 'EXCLUIDO') return;
+
+    /* a contagem, feita agora */
+    var usados = [], repetidas = [];
+    Object.keys(usadas).forEach(function (e) {
+      var n = AP_ETQM_numeroDa_(lote, e);
+      if (n === null) return;
+      usados.push(n);
+      if (usadas[e].length > 1) {
+        repetidas.push({ etiqueta: e, patrimonios: usadas[e] });
+      }
+    });
+    usados.sort(function (a, b) { return a - b; });
+
+    lote.usadas = usados.length;
+    lote.disponiveis = Math.max(0, lote.quantidade - usados.length);
+    lote.repetidas = repetidas;
+    lote.proximo = AP_ETQM_proximoLivre_(lote, usados);
+    if (String(lote.status).toUpperCase() === 'ABERTO' && !lote.disponiveis) {
+      lote.status = 'ESGOTADO';
+    }
+    saida.push(lote);
+  });
+
+  saida.sort(function (a, b) {
+    if (a.status !== b.status) return a.status === 'ABERTO' ? -1 : 1;
+    return a.inicial - b.inicial;
+  });
+  return { ok: true, dados: saida };
+}
+
+/** O menor número livre do lote. Preenche buraco: se as etiquetas
+    8001 e 8003 estão em uso, o próximo é 8002, não 8004. */
+function AP_ETQM_proximoLivre_(lote, usados) {
+  var ocupado = {};
+  (usados || []).forEach(function (n) { ocupado[n] = 1; });
+  for (var n = lote.inicial; n <= lote.final; n++) {
+    if (!ocupado[n]) return AP_ETQM_etiqueta_(lote, n);
+  }
+  return '';
+}
+
+function AP_ETQM_salvarLote_(payload, sessao) {
+  var nome = AP_ETQM_txt_(payload && payload.nome);
+  var inicial = Math.round(AP_ETQM_num_(payload && payload.inicial, 0));
+  var final = Math.round(AP_ETQM_num_(payload && payload.final, 0));
+
+  if (!nome) return { ok: false, codigo: 'SEM_NOME', mensagem: 'Dê um nome ao lote.' };
+  if (!inicial || !final) {
+    return { ok: false, codigo: 'SEM_FAIXA', mensagem: 'Informe o número inicial e o final da faixa.' };
+  }
+  if (final < inicial) {
+    return { ok: false, codigo: 'FAIXA_INVERTIDA',
+      mensagem: 'O número final (' + final + ') é menor que o inicial (' + inicial + ').' };
+  }
+  if (final - inicial + 1 > 100000) {
+    return { ok: false, codigo: 'FAIXA_GRANDE',
+      mensagem: 'A faixa tem ' + (final - inicial + 1) + ' etiquetas. Acima de 100.000 ' +
+        'quase sempre é erro de digitação — confira os números.' };
+  }
+
+  var aba = AP_ETQM_abaLotes_();
+  var idx = AP_ETQM_indice_(aba);
+  var largura = aba.getLastColumn();
+  var linhas = AP_ETQM_linhas_(aba);
+  var id = AP_ETQM_txt_(payload.id);
+
+  /* SE É EDIÇÃO, ACHAR A LINHA PRIMEIRO.
+     Isto vem antes da crítica de cruzamento de propósito: com um id
+     que não existe, o lote não é poupado da comparação consigo mesmo
+     e a resposta sairia "esta faixa cruza com o lote X" — sendo X o
+     próprio lote que a pessoa pensa estar editando. Confuso. Primeiro
+     se confirma que o lote existe; a crítica vem depois. */
+  var alvo = -1;
+  if (id) {
+    for (var i = 0; i < linhas.length; i++) {
+      if (AP_ETQM_txt_(AP_ETQM_pegar_(linhas[i], idx, 'ID')) === id) { alvo = i; break; }
+    }
+    if (alvo < 0) return { ok: false, codigo: 'NAO_ENCONTRADO', mensagem: 'Lote ' + id + ' não existe.' };
+  }
+
+  /* DUAS FAIXAS NÃO PODEM SE CRUZAR.
+     Se cruzassem, a mesma etiqueta pertenceria a dois lotes e o
+     controle de consumo perderia o sentido. */
+  var prefixo = AP_ETQM_txt_(payload.prefixo).toUpperCase();
+  var conflito = null;
+  linhas.forEach(function (l) {
+    if (conflito) return;
+    var outro = AP_ETQM_loteEmObjeto_(l, idx);
+    if (outro.id === id) return;
+    if (String(outro.status).toUpperCase() === 'EXCLUIDO') return;
+    if (AP_ETQM_txt_(outro.prefixo).toUpperCase() !== prefixo) return;
+    if (inicial <= outro.final && final >= outro.inicial) conflito = outro;
+  });
+  if (conflito) {
+    return { ok: false, codigo: 'FAIXA_CRUZADA',
+      mensagem: 'Esta faixa cruza com o lote "' + conflito.nome + '" (' +
+        AP_ETQM_etiqueta_(conflito, conflito.inicial) + ' a ' +
+        AP_ETQM_etiqueta_(conflito, conflito.final) + '). ' +
+        'Duas faixas não podem compartilhar a mesma etiqueta.' };
+  }
+
+  var agora = AP_ETQM_agora_();
+  var quem = AP_ETQM_quem_(sessao);
+  var valores = {
+    NOME: nome,
+    PREFIXO: AP_ETQM_txt_(payload.prefixo),
+    NUMERO_INICIAL: inicial,
+    NUMERO_FINAL: final,
+    DIGITOS: Math.round(AP_ETQM_num_(payload.digitos, 0)),
+    FORNECEDOR: AP_ETQM_txt_(payload.fornecedor),
+    NOTA_FISCAL: AP_ETQM_txt_(payload.notaFiscal),
+    OBSERVACAO: AP_ETQM_txt_(payload.observacao),
+    STATUS: AP_ETQM_txt_(payload.status) || 'ABERTO'
+  };
+
+  if (id) {
+    var antigo = AP_ETQM_loteEmObjeto_(linhas[alvo], idx);
+
+    /* ENCOLHER UMA FAIXA PODE DEIXAR ETIQUETA ÓRFÃ.
+       Uma etiqueta já colada num equipamento ficaria fora de
+       qualquer lote, e o sistema perderia o rastro dela. */
+    if (inicial > antigo.inicial || final < antigo.final) {
+      var usadas = AP_ETQM_etiquetasEmUso_();
+      var foraAgora = [];
+      Object.keys(usadas).forEach(function (e) {
+        if (AP_ETQM_numeroDa_(antigo, e) === null) return;
+        var novo = { prefixo: payload.prefixo, inicial: inicial, final: final };
+        if (AP_ETQM_numeroDa_(novo, e) === null) foraAgora.push(e);
+      });
+      if (foraAgora.length && !payload.confirmarEncolher) {
+        return { ok: false, codigo: 'DEIXA_ORFA',
+          mensagem: 'Encolher esta faixa deixa ' + foraAgora.length + ' etiqueta(s) já em uso ' +
+            'fora de qualquer lote: ' + foraAgora.slice(0, 5).join(', ') +
+            (foraAgora.length > 5 ? ' e mais ' + (foraAgora.length - 5) : '') + '.' };
+      }
+    }
+
+    valores.ID = id;
+    valores.CRIADO_EM = antigo.criadoEm;
+    valores.CRIADO_POR = antigo.criadoPor;
+    valores.ALTERADO_EM = agora;
+    valores.ALTERADO_POR = quem;
+    valores.MOTIVO = AP_ETQM_txt_(payload.motivo);
+    aba.getRange(alvo + 2, 1, 1, largura).setValues([AP_ETQM_montar_(idx, largura, valores)]);
+  } else {
+    id = AP_ETQM_id_();
+    valores.ID = id;
+    valores.CRIADO_EM = agora;
+    valores.CRIADO_POR = quem;
+    aba.appendRow(AP_ETQM_montar_(idx, largura, valores));
+  }
+
+  var conferencia = null;
+  AP_ETQM_lotes_({ incluirEncerrados: true }).dados.forEach(function (l) { if (l.id === id) conferencia = l; });
+  if (!conferencia) {
+    return { ok: false, codigo: 'NAO_CONFIRMOU',
+      mensagem: 'O lote foi enviado mas eu não consegui reler na planilha. NÃO considere salvo.' };
+  }
+  return { ok: true, dados: conferencia,
+    mensagem: 'Lote "' + nome + '" com ' + conferencia.quantidade + ' etiqueta(s), de ' +
+      AP_ETQM_etiqueta_(conferencia, conferencia.inicial) + ' a ' +
+      AP_ETQM_etiqueta_(conferencia, conferencia.final) + '.' };
+}
+
+function AP_ETQM_encerrarLote_(payload, sessao) {
+  var id = AP_ETQM_txt_(payload && payload.id);
+  if (!id) return { ok: false, codigo: 'SEM_ID', mensagem: 'Informe qual lote.' };
+
+  var aba = AP_ETQM_abaLotes_();
+  var idx = AP_ETQM_indice_(aba);
+  var linhas = AP_ETQM_linhas_(aba);
+  var agora = AP_ETQM_agora_();
+  var quem = AP_ETQM_quem_(sessao);
+  var novo = AP_ETQM_txt_(payload.status).toUpperCase() || 'ENCERRADO';
+
+  for (var i = 0; i < linhas.length; i++) {
+    if (AP_ETQM_txt_(AP_ETQM_pegar_(linhas[i], idx, 'ID')) !== id) continue;
+    if (idx['STATUS'] !== undefined) aba.getRange(i + 2, idx['STATUS'] + 1).setValue(novo);
+    if (idx['ALTERADO_EM'] !== undefined) aba.getRange(i + 2, idx['ALTERADO_EM'] + 1).setValue(agora);
+    if (idx['ALTERADO_POR'] !== undefined) aba.getRange(i + 2, idx['ALTERADO_POR'] + 1).setValue(quem);
+    if (idx['MOTIVO'] !== undefined) {
+      aba.getRange(i + 2, idx['MOTIVO'] + 1).setValue(AP_ETQM_txt_(payload.motivo) || novo.toLowerCase());
+    }
+    return { ok: true, dados: { id: id, status: novo },
+      mensagem: 'Lote marcado como ' + novo + '. A linha continua na planilha e as etiquetas ' +
+        'já coladas nos equipamentos não mudam.' };
+  }
+  return { ok: false, codigo: 'NAO_ENCONTRADO', mensagem: 'Lote ' + id + ' não existe.' };
+}
+
+
+/* ============================================================
+   CONFERIR ANTES DE GRAVAR — FASE 3
+   ------------------------------------------------------------
+   Recebe os pares {patrimonio, etiqueta} que a tela quer gravar e
+   devolve, um por um, o que vai acontecer. NADA É GRAVADO AQUI: é
+   a prévia que o item 3 do projeto exige.
+
+   A gravação em si vai pelo patrimonio.salvar que já existe — não
+   escrevo um segundo caminho de escrita para a mesma coisa.
+   ============================================================ */
+function AP_ETQM_conferir_(payload) {
+  var pares = (payload && payload.pares) || [];
+  if (Object.prototype.toString.call(pares) !== '[object Array]' || !pares.length) {
+    return { ok: false, codigo: 'SEM_PARES',
+      mensagem: 'Mande a lista de equipamentos e etiquetas para conferir.' };
+  }
+
+  var usadas = AP_ETQM_etiquetasEmUso_();
+  var lotes = AP_ETQM_lotes_({}).dados;
+  var vistasAqui = {};
+  var saida = [];
+  var quantos = { ok: 0, conflito: 0, troca: 0 };
+
+  pares.forEach(function (par) {
+    var pat = AP_ETQM_txt_(par.patrimonio);
+    var etq = AP_ETQM_txt_(par.etiqueta);
+    var etqU = etq.toUpperCase();
+    var item = { patrimonio: pat, etiqueta: etq, pode: true, situacao: 'NOVA', aviso: '' };
+
+    if (!pat) {
+      item.pode = false; item.situacao = 'SEM_PATRIMONIO';
+      item.aviso = 'A linha não diz qual equipamento.';
+    } else if (!etq) {
+      item.pode = false; item.situacao = 'SEM_ETIQUETA';
+      item.aviso = 'A linha não diz qual etiqueta.';
+    } else if (vistasAqui[etqU]) {
+      /* a mesma etiqueta duas vezes NA PRÓPRIA LISTA */
+      item.pode = false; item.situacao = 'REPETIDA_NA_LISTA';
+      item.aviso = 'Esta etiqueta aparece mais de uma vez nesta mesma lista (também em ' +
+        vistasAqui[etqU] + ').';
+    } else {
+      var donos = (usadas[etqU] || []).filter(function (d) { return d !== pat; });
+      if (donos.length) {
+        item.pode = false; item.situacao = 'JA_EM_USO';
+        item.aviso = 'Esta etiqueta já está no equipamento ' + donos.join(', ') + '.';
+      } else if ((usadas[etqU] || []).indexOf(pat) > -1) {
+        item.situacao = 'JA_ERA_ESTA';
+        item.aviso = 'O equipamento já tem esta etiqueta. Nada muda.';
+      }
+    }
+
+    /* de qual lote ela é */
+    if (etq) {
+      var dela = null;
+      lotes.forEach(function (l) {
+        if (dela) return;
+        if (AP_ETQM_numeroDa_(l, etq) !== null) dela = l;
+      });
+      item.lote = dela ? dela.nome : '';
+      if (!dela) {
+        item.aviso = (item.aviso ? item.aviso + ' ' : '') +
+          'Esta etiqueta não pertence a nenhum lote cadastrado.';
+      } else if (String(dela.status).toUpperCase() === 'ENCERRADO') {
+        item.aviso = (item.aviso ? item.aviso + ' ' : '') +
+          'O lote "' + dela.nome + '" está encerrado.';
+      }
+    }
+
+    if (item.pode && etq) vistasAqui[etqU] = pat;
+    if (!item.pode) quantos.conflito++;
+    else if (item.situacao === 'JA_ERA_ESTA') quantos.troca++;
+    else quantos.ok++;
+
+    saida.push(item);
+  });
+
+  return { ok: true, dados: {
+    linhas: saida,
+    resumo: quantos,
+    podeGravar: quantos.ok,
+    temConflito: quantos.conflito > 0
+  }, mensagem: quantos.ok + ' pode(m) ser gravada(s), ' + quantos.conflito +
+    ' com conflito, ' + quantos.troca + ' sem mudança. NADA foi gravado nesta conferência.' };
+}
+
+
 /* ============================================================
    ENSAIO — SÓ LEITURA. NÃO GRAVA NADA.
    ============================================================ */
@@ -544,7 +974,26 @@ function AP_ETQM_ensaio_() {
     });
   } catch (e) { diz('  ERRO: ' + e.message); }
 
-  titulo('3. O QUE ESTE ARQUIVO NÃO TOCA');
+  titulo('3. OS LOTES DE ETIQUETA');
+  try {
+    var ls = AP_ETQM_lotes_({ incluirEncerrados: true }).dados;
+    diz('  ' + ls.length + ' lote(s)');
+    ls.forEach(function (l) {
+      diz('  ' + l.nome + ' · ' + AP_ETQM_etiqueta_(l, l.inicial) + ' a ' +
+        AP_ETQM_etiqueta_(l, l.final) + ' · ' + l.status);
+      diz('     ' + l.quantidade + ' etiqueta(s): ' + l.usadas + ' usada(s), ' +
+        l.disponiveis + ' livre(s)' + (l.proximo ? ' · próxima: ' + l.proximo : ''));
+      if (l.repetidas && l.repetidas.length) {
+        diz('     >>> ATENÇÃO: ' + l.repetidas.length + ' etiqueta(s) em MAIS DE UM equipamento:');
+        l.repetidas.slice(0, 5).forEach(function (r) {
+          diz('         ' + r.etiqueta + ' em ' + r.patrimonios.join(', '));
+        });
+      }
+    });
+    if (!ls.length) diz('  >> nenhum lote cadastrado. A tela de Lotes de Etiquetas cria o primeiro.');
+  } catch (e) { diz('  ERRO: ' + e.message); }
+
+  titulo('4. O QUE ESTE ARQUIVO NÃO TOCA');
   diz('  Patrimônio, número de série, QR Code e cadastro de equipamentos:');
   diz('  este módulo guarda DESENHO, não guarda bem patrimonial. Trocar o modelo');
   diz('  da etiqueta não altera nenhum registro de patrimônio.');
@@ -552,3 +1001,4 @@ function AP_ETQM_ensaio_() {
   titulo('FIM — NADA FOI GRAVADO');
   return { texto: L.join('\n'), linhas: L };
 }
+
