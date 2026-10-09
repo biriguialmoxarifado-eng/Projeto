@@ -50,6 +50,12 @@ var AP_CCFG_CFG = {
   abaModelos: 'ALMOXA_CAUTELA_MODELOS',
   abaRegras: 'ALMOXA_CAUTELA_REGRAS',
   abaHistorico: 'ALMOXA_CAUTELA_MODELOS_HIST',
+  /* O TEXTO DO TERMO DE RESPONSABILIDADE DE TI.
+     Mora aqui, e nao num arquivo novo, para o Ismael nao ter mais
+     um .gs para colar. E uma linha so: o texto inteiro em JSON. */
+  abaTermo: 'ALMOXA_TERMO_TEXTO',
+  colunasTermo: ['ID', 'TEXTO', 'ALTERADO_EM', 'ALTERADO_POR'],
+  limiteTermo: 45000,
   caminhos: ['', '01_BANCO_DADOS/'],
 
   /* OS INTERRUPTORES — os mesmos oito do item 8 do projeto e os
@@ -102,12 +108,14 @@ function AP_Modulo_cautelacfg(acao, payload, sessao) {
       case 'excluirRegra':     return AP_CCFG_excluirRegra_(payload, sessao);
       case 'resolver':         return AP_CCFG_resolver_(payload);
       case 'historico':        return { ok: true, dados: AP_CCFG_historico_(payload) };
+      case 'termo':            return AP_CCFG_termo_();
+      case 'salvarTermo':      return AP_CCFG_salvarTermo_(payload, sessao);
       case 'diagnostico':      return { ok: true, dados: AP_CCFG_ensaio_() };
       default:
         return { ok: false, codigo: 'ACAO_DESCONHECIDA',
           mensagem: 'A Central de Cautelas não conhece a ação "' + acao + '". Conhece: ' +
             'modelos, regras, salvarModelo, atualizarModelo, salvarRegra, excluirRegra, ' +
-            'resolver, historico, diagnostico.' };
+            'resolver, historico, termo, salvarTermo, diagnostico.' };
     }
   } catch (e) {
     return { ok: false, codigo: 'ERRO', mensagem: e.message, onde: String(e.stack || '').slice(0, 400) };
@@ -804,6 +812,92 @@ function AP_CCFG_SEMEAR() {
 
 
 /* ============================================================
+   O TEXTO DO TERMO DE RESPONSABILIDADE DE TI
+   ------------------------------------------------------------
+   Uma linha so. Se nao houver nada gravado, devolve vazio e QUEM
+   decide o texto e a tela — que traz o do formulario original.
+   Este arquivo nao guarda copia do texto de fabrica de proposito:
+   duas fontes para a mesma coisa viram divergencia.
+   ============================================================ */
+function AP_CCFG_abaTermo_() {
+  return AP_CCFG_abrir_(AP_CCFG_CFG.abaTermo, AP_CCFG_CFG.colunasTermo);
+}
+
+function AP_CCFG_termo_() {
+  var aba = AP_CCFG_abaTermo_();
+  var idx = AP_CCFG_indice_(aba);
+  var linhas = AP_CCFG_linhas_(aba);
+  for (var i = 0; i < linhas.length; i++) {
+    if (AP_CCFG_txt_(AP_CCFG_pegar_(linhas[i], idx, 'ID')) !== 'TERMO_TI') continue;
+    var bruto = AP_CCFG_txt_(AP_CCFG_pegar_(linhas[i], idx, 'TEXTO'));
+    if (!bruto) break;
+    try {
+      var d = JSON.parse(bruto);
+      d.alteradoEm = AP_CCFG_txt_(AP_CCFG_pegar_(linhas[i], idx, 'ALTERADO_EM'));
+      d.alteradoPor = AP_CCFG_txt_(AP_CCFG_pegar_(linhas[i], idx, 'ALTERADO_POR'));
+      return { ok: true, dados: d };
+    } catch (e) {
+      return { ok: false, codigo: 'TEXTO_CORROMPIDO',
+        mensagem: 'O texto do Termo gravado na aba ' + AP_CCFG_CFG.abaTermo +
+          ' nao e um JSON valido: ' + e.message + '. A tela vai usar o texto original do formulario.' };
+    }
+  }
+  return { ok: true, dados: null, mensagem: 'Ainda nao ha texto salvo; vale o do formulario original.' };
+}
+
+function AP_CCFG_salvarTermo_(payload, sessao) {
+  if (!payload || !AP_CCFG_txt_(payload.abertura)) {
+    return { ok: false, codigo: 'SEM_ABERTURA',
+      mensagem: 'O Termo precisa do paragrafo de abertura.' };
+  }
+  if (AP_CCFG_txt_(payload.abertura).indexOf('{{EQUIPAMENTO}}') < 0) {
+    return { ok: false, codigo: 'SEM_EQUIPAMENTO',
+      mensagem: 'A abertura perdeu a marca {{EQUIPAMENTO}}. Sem ela o documento sai sem ' +
+        'os dados do equipamento. Ponha de volta antes de salvar.' };
+  }
+  var clausulas = payload.clausulas;
+  if (!clausulas || !clausulas.length) {
+    return { ok: false, codigo: 'SEM_CLAUSULA', mensagem: 'O Termo ficou sem clausula nenhuma.' };
+  }
+
+  var texto = JSON.stringify(payload);
+  if (texto.length > AP_CCFG_CFG.limiteTermo) {
+    return { ok: false, codigo: 'TEXTO_GRANDE',
+      mensagem: 'O texto ficou com ' + Math.round(texto.length / 1024) +
+        ' KB, acima do que cabe numa celula com folga.' };
+  }
+
+  var aba = AP_CCFG_abaTermo_();
+  var idx = AP_CCFG_indice_(aba);
+  var largura = aba.getLastColumn();
+  var linhas = AP_CCFG_linhas_(aba);
+  var agora = AP_CCFG_agora_();
+  var quem = AP_CCFG_quem_(sessao);
+
+  var valores = { ID: 'TERMO_TI', TEXTO: texto, ALTERADO_EM: agora, ALTERADO_POR: quem };
+
+  var alvo = -1;
+  for (var i = 0; i < linhas.length; i++) {
+    if (AP_CCFG_txt_(AP_CCFG_pegar_(linhas[i], idx, 'ID')) === 'TERMO_TI') { alvo = i; break; }
+  }
+  if (alvo >= 0) {
+    /* ALTERA a linha. Acrescentar outra deixaria duas versoes do
+       texto na planilha e a leitura pegaria a primeira. */
+    aba.getRange(alvo + 2, 1, 1, largura).setValues([AP_CCFG_montar_(idx, largura, valores)]);
+  } else {
+    aba.appendRow(AP_CCFG_montar_(idx, largura, valores));
+  }
+
+  var conferencia = AP_CCFG_termo_();
+  if (!conferencia.ok || !conferencia.dados) {
+    return { ok: false, codigo: 'NAO_CONFIRMOU',
+      mensagem: 'O texto foi enviado mas eu nao consegui reler na planilha. NAO considere salvo.' };
+  }
+  return { ok: true, dados: conferencia.dados, mensagem: 'Texto do Termo salvo.' };
+}
+
+
+/* ============================================================
    ENSAIO — SÓ LEITURA. NÃO GRAVA NADA.
    ============================================================ */
 function AP_CCFG_ENSAIO() {
@@ -869,7 +963,19 @@ function AP_CCFG_ensaio_() {
     if (rs.length > 20) diz('    … e mais ' + (rs.length - 20));
   } catch (e) { diz('  ERRO: ' + e.message); }
 
-  titulo('4. TESTE DO RESOLVEDOR');
+  titulo('4. O TEXTO DO TERMO DE RESPONSABILIDADE');
+  try {
+    var tr = AP_CCFG_termo_();
+    if (!tr.ok) diz('  ' + tr.mensagem);
+    else if (!tr.dados) diz('  ainda nao ha texto salvo; vale o do formulario original.');
+    else {
+      diz('  texto salvo em ' + (tr.dados.alteradoEm || '?') + ' por ' + (tr.dados.alteradoPor || '?'));
+      diz('  versao do formulario: ' + (tr.dados.versao || '?') + ' · emissao ' + (tr.dados.emissao || '?'));
+      diz('  clausulas: ' + ((tr.dados.clausulas || []).length));
+    }
+  } catch (e) { diz('  ERRO: ' + e.message); }
+
+  titulo('5. TESTE DO RESOLVEDOR');
   try {
     var teste = AP_CCFG_resolver_({ sku: 'TESTE-QUE-NAO-EXISTE', categoria: 'NADA' });
     diz('  produto sem regra -> ' + JSON.stringify(teste.dados).slice(0, 400));

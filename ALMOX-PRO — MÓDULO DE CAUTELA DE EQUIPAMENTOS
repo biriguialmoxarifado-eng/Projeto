@@ -55,10 +55,14 @@ var AP_CAUTELA_CFG = {
 
   /* prefixo e tamanho do número da cautela: CT-000158 */
   prefixo: 'CT-',
+  /* O TERMO TEM NUMERO PROPRIO.
+     Sao dois documentos da MESMA solicitacao, com numeracoes
+     separadas — e assim que o item 4 do projeto pede. */
+  prefixoTermo: 'TR-',
   digitos: 6,
 
   colunasCautela: [
-    'ID_CAUTELA', 'NUMERO', 'EMISSAO', 'EMPRESA', 'OBRA', 'SETOR',
+    'ID_CAUTELA', 'NUMERO', 'NUMERO_TERMO', 'EMISSAO', 'EMPRESA', 'OBRA', 'SETOR',
     'CONTRATO', 'NOTA_FISCAL', 'ID_COLABORADOR', 'COLABORADOR',
     'MATRICULA', 'CPF', 'CARGO', 'SETOR_COLABORADOR',
     'REQUISITANTE', 'APLICACAO', 'CATEGORIA', 'OBSERVACAO',
@@ -312,6 +316,24 @@ function AP_CAUTELA_proximoNumero_() {
 }
 
 
+/** O proximo numero do Termo. Conta a parte da aba de cautelas,
+    porque uma cautela pode nascer sem Termo (as antigas) e o
+    numero do Termo nao pode pular por causa disso. */
+function AP_CAUTELA_proximoTermo_() {
+  var aba = AP_CAUTELA_abaCautelas_();
+  var idx = AP_CAUTELA_indice_(aba);
+  var maior = 0;
+  AP_CAUTELA_linhas_(aba).forEach(function (l) {
+    var n = AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idx, 'NUMERO_TERMO'));
+    var so = n.replace(/[^0-9]/g, '');
+    if (so) { var v = parseInt(so, 10); if (v > maior) maior = v; }
+  });
+  var proximo = String(maior + 1);
+  while (proximo.length < AP_CAUTELA_CFG.digitos) proximo = '0' + proximo;
+  return AP_CAUTELA_CFG.prefixoTermo + proximo;
+}
+
+
 /* ============================================================
    LISTAR
    ============================================================ */
@@ -376,6 +398,7 @@ function AP_CAUTELA_emObjeto_(l, idx) {
   return {
     id: p('ID_CAUTELA'),
     numero: p('NUMERO'),
+    numeroTermo: p('NUMERO_TERMO'),
     emissao: (emissao instanceof Date)
       ? Utilities.formatDate(emissao, 'America/Manaus', 'yyyy-MM-dd')
       : AP_CAUTELA_texto_(emissao),
@@ -519,9 +542,14 @@ function AP_CAUTELA_salvar_(payload, sessao) {
     var quem = AP_CAUTELA_quem_(sessao);
     var id = AP_CAUTELA_id_('CT');
 
+    /* os DOIS numeros nascem juntos e ficam na MESMA linha: e isso
+       que amarra os dois documentos a uma solicitacao so. */
+    var numeroTermo = AP_CAUTELA_proximoTermo_();
+
     aba.appendRow(AP_CAUTELA_montarLinha_(idx, largura, {
       ID_CAUTELA: id,
       NUMERO: numero,
+      NUMERO_TERMO: numeroTermo,
       EMISSAO: AP_CAUTELA_texto_(payload.emissao) || agora.slice(0, 10),
       EMPRESA: AP_CAUTELA_texto_(payload.empresa),
       OBRA: AP_CAUTELA_texto_(payload.obra),
@@ -648,9 +676,15 @@ function AP_CAUTELA_atualizar_(payload, sessao) {
     var quem = AP_CAUTELA_quem_(sessao);
     var antiga = AP_CAUTELA_emObjeto_(linhas[alvo], idx);
 
+    /* REABRIR NAO GERA DOCUMENTO NOVO (item 8 do projeto): se a
+       cautela ja tem numero de Termo, ele fica. So ganha numero
+       quem ainda nao tinha. */
+    var numeroTermo = AP_CAUTELA_texto_(antiga.numeroTermo) || AP_CAUTELA_proximoTermo_();
+
     var nova = AP_CAUTELA_montarLinha_(idx, largura, {
       ID_CAUTELA: antiga.id,
       NUMERO: numero,
+      NUMERO_TERMO: numeroTermo,
       EMISSAO: AP_CAUTELA_texto_(payload.emissao) || antiga.emissao,
       EMPRESA: AP_CAUTELA_texto_(payload.empresa),
       OBRA: AP_CAUTELA_texto_(payload.obra),
