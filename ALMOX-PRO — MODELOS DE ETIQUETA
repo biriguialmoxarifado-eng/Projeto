@@ -1,0 +1,554 @@
+/* ============================================================
+   ALMOX-PRO — MODELOS DE ETIQUETA
+   ------------------------------------------------------------
+   PARA QUE SERVE
+
+   É este arquivo que guarda os modelos do Editor de Etiquetas
+   Patrimoniais: medidas, colunas, GAPs, margens, deslocamento e a
+   posição de cada elemento dentro da etiqueta.
+
+   Sem ele o editor abre, desenha e imprime — mas o que você
+   configurar some quando fechar o sistema. O item 7 do projeto diz
+   com estas palavras: "Não salvar somente no estado temporário da
+   tela." Por isso o modelo mora aqui.
+
+   ------------------------------------------------------------
+   O QUE ELE NÃO FAZ, DE PROPÓSITO
+
+   - Não toca em patrimônio. Ele guarda DESENHO, não equipamento.
+     Trocar o modelo da etiqueta nunca altera número de patrimônio,
+     número de série, QR Code ou qualquer registro de bem.
+   - Não apaga. Excluir troca o status para EXCLUIDO e guarda quem,
+     quando e por quê. As etiquetas já impressas continuam valendo.
+   - Não inventa modelo. Se não houver nenhum gravado, ele devolve
+     a lista vazia e quem sugere os modelos de partida é a tela —
+     que diz, com todas as letras, que ainda não foram salvos.
+
+   ------------------------------------------------------------
+   COMO INSTALAR
+
+   1. Planilha  Base Dado almoxarifado  →  Extensões  →  Apps Script.
+   2. No  +  ao lado de "Arquivos" → Script. Nome:
+      ALMOXA_PRO_Modulo_EtiquetaModelo
+   3. Apague o que vier e cole TODO este arquivo. Salve.
+   4. Rode uma vez  AP_ETQM_ENSAIO  (só leitura) e me mande a foto.
+   5. Implantar → Gerenciar implantações → editar → Nova versão.
+   ============================================================ */
+
+
+var AP_ETQM_CFG = {
+  aba: 'ALMOXA_ETIQUETA_MODELOS',
+  caminhos: ['', '01_BANCO_DADOS/'],
+
+  colunas: [
+    'ID', 'NOME', 'PADRAO',
+    'LARGURA_MM', 'ALTURA_MM', 'COLUNAS', 'GAP_H', 'GAP_V',
+    'MARGEM_TOPO', 'MARGEM_BAIXO', 'MARGEM_ESQ', 'MARGEM_DIR',
+    'FORMATO_PAGINA', 'ORIENTACAO',
+    'DESENHO',
+    'STATUS', 'CRIADO_EM', 'CRIADO_POR', 'ALTERADO_EM', 'ALTERADO_POR', 'MOTIVO'
+  ],
+
+  /* O desenho inteiro vai numa coluna só, em JSON. As medidas
+     principais saem DUPLICADAS em colunas próprias de propósito:
+     assim dá para conferir a olho na planilha, filtrar e ordenar
+     sem abrir o JSON. Quem manda é sempre o JSON. */
+  limiteDesenho: 45000
+};
+
+
+/* ============================================================
+   A PORTA DO ROTEADOR
+   ============================================================ */
+function AP_Modulo_etqmodelo(acao, payload, sessao) {
+  payload = payload || {};
+  sessao = sessao || {};
+  try {
+    switch (String(acao || '').trim()) {
+      case 'listar':      return { ok: true, dados: AP_ETQM_listar_(payload) };
+      case 'obter':       return AP_ETQM_obter_(payload);
+      case 'salvar':      return AP_ETQM_salvar_(payload, sessao);
+      case 'atualizar':   return AP_ETQM_atualizar_(payload, sessao);
+      case 'excluir':     return AP_ETQM_excluir_(payload, sessao);
+      case 'definirPadrao': return AP_ETQM_definirPadrao_(payload, sessao);
+      case 'diagnostico': return { ok: true, dados: AP_ETQM_ensaio_() };
+      default:
+        return { ok: false, codigo: 'ACAO_DESCONHECIDA',
+          mensagem: 'Os modelos de etiqueta não conhecem a ação "' + acao + '". Conhece: ' +
+            'listar, obter, salvar, atualizar, excluir, definirPadrao, diagnostico.' };
+    }
+  } catch (e) {
+    return { ok: false, codigo: 'ERRO', mensagem: e.message, onde: String(e.stack || '').slice(0, 400) };
+  }
+}
+
+
+/* ============================================================
+   A ABA
+   ============================================================ */
+function AP_ETQM_viva_(aba) {
+  if (!aba) return false;
+  try { aba.getLastColumn(); return true; } catch (e) { return false; }
+}
+
+function AP_ETQM_aba_() {
+  var nome = AP_ETQM_CFG.aba;
+  if (typeof AP_SRV_aba_ === 'function') {
+    for (var i = 0; i < AP_ETQM_CFG.caminhos.length; i++) {
+      var a = null;
+      try { a = AP_SRV_aba_(AP_ETQM_CFG.caminhos[i] + nome); } catch (e) {}
+      if (a && AP_ETQM_viva_(a)) { AP_ETQM_cabecalho_(a); return a; }
+    }
+  }
+  var ss = SpreadsheetApp.getActive();
+  if (!ss) throw new Error('Não há planilha ativa para a aba "' + nome + '".');
+  var d = ss.getSheetByName(nome);
+  if (d && AP_ETQM_viva_(d)) { AP_ETQM_cabecalho_(d); return d; }
+  if (d) return d;
+  var nova = ss.insertSheet(nome);
+  nova.getRange(1, 1, 1, AP_ETQM_CFG.colunas.length).setValues([AP_ETQM_CFG.colunas]);
+  nova.setFrozenRows(1);
+  nova.getRange(1, 1, 1, AP_ETQM_CFG.colunas.length).setFontWeight('bold');
+  return nova;
+}
+
+function AP_ETQM_cabecalho_(aba) {
+  var largura = aba.getLastColumn();
+  var atuais = largura
+    ? aba.getRange(1, 1, 1, largura).getValues()[0].map(function (c) {
+        return String(c === null || c === undefined ? '' : c).trim().toUpperCase();
+      })
+    : [];
+  var faltando = AP_ETQM_CFG.colunas.filter(function (c) {
+    return atuais.indexOf(String(c).toUpperCase()) < 0;
+  });
+  if (!faltando.length) return;
+  aba.getRange(1, largura + 1, 1, faltando.length).setValues([faltando]);
+  aba.getRange(1, largura + 1, 1, faltando.length).setFontWeight('bold');
+}
+
+function AP_ETQM_indice_(aba) {
+  var largura = aba.getLastColumn();
+  var porNome = {};
+  if (!largura) return porNome;
+  aba.getRange(1, 1, 1, largura).getValues()[0].forEach(function (c, i) {
+    var k = String(c === null || c === undefined ? '' : c).trim().toUpperCase();
+    if (k && porNome[k] === undefined) porNome[k] = i;
+  });
+  return porNome;
+}
+
+function AP_ETQM_linhas_(aba) {
+  var ultima = aba.getLastRow();
+  if (ultima < 2) return [];
+  return aba.getRange(2, 1, ultima - 1, aba.getLastColumn()).getValues();
+}
+
+function AP_ETQM_pegar_(linha, idx, coluna) {
+  var i = idx[String(coluna).toUpperCase()];
+  if (i === undefined) return '';
+  var v = linha[i];
+  return v === null || v === undefined ? '' : v;
+}
+
+function AP_ETQM_montar_(idx, largura, valores) {
+  var linha = [];
+  for (var i = 0; i < largura; i++) linha.push('');
+  Object.keys(valores).forEach(function (n) {
+    var i = idx[String(n).toUpperCase()];
+    if (i !== undefined && i < largura) linha[i] = valores[n];
+  });
+  return linha;
+}
+
+function AP_ETQM_txt_(v) { return String(v === null || v === undefined ? '' : v).trim(); }
+function AP_ETQM_num_(v, p) {
+  var n = Number(String(v === null || v === undefined ? '' : v).replace(',', '.'));
+  return isFinite(n) ? n : (p || 0);
+}
+function AP_ETQM_agora_() {
+  return Utilities.formatDate(new Date(), 'America/Manaus', "yyyy-MM-dd'T'HH:mm:ss");
+}
+function AP_ETQM_quem_(sessao) {
+  return AP_ETQM_txt_(sessao && (sessao.nome || sessao.usuario || sessao.matricula)) || 'sistema';
+}
+
+var AP_ETQM_SEQ = 0;
+function AP_ETQM_id_() {
+  AP_ETQM_SEQ++;
+  var sorte = Math.floor(Math.random() * 1679616).toString(36);
+  return 'ETQM' + Date.now().toString(36) + '-' + AP_ETQM_SEQ + '-' + sorte;
+}
+
+
+/* ============================================================
+   LER
+   ============================================================ */
+function AP_ETQM_listar_(payload) {
+  var aba = AP_ETQM_aba_();
+  var idx = AP_ETQM_indice_(aba);
+  var incluirExcluidos = !!(payload && payload.incluirExcluidos);
+  var saida = [];
+  AP_ETQM_linhas_(aba).forEach(function (l) {
+    var m = AP_ETQM_emObjeto_(l, idx);
+    if (!m || !m.id) return;
+    if (!incluirExcluidos && String(m.status).toUpperCase() === 'EXCLUIDO') return;
+    saida.push(m);
+  });
+  /* o padrão vem primeiro, depois por nome */
+  saida.sort(function (a, b) {
+    if (!!a.padrao !== !!b.padrao) return a.padrao ? -1 : 1;
+    return String(a.nome).localeCompare(String(b.nome));
+  });
+  return saida;
+}
+
+function AP_ETQM_emObjeto_(l, idx) {
+  var bruto = AP_ETQM_txt_(AP_ETQM_pegar_(l, idx, 'DESENHO'));
+  var desenho = null;
+  if (bruto) {
+    try { desenho = JSON.parse(bruto); }
+    catch (e) {
+      /* DESENHO QUEBRADO NÃO VIRA MODELO MUDO.
+         Devolvo o registro marcado, para a tela poder dizer que
+         aquele modelo está corrompido em vez de abrir em branco. */
+      return {
+        id: AP_ETQM_txt_(AP_ETQM_pegar_(l, idx, 'ID')),
+        nome: AP_ETQM_txt_(AP_ETQM_pegar_(l, idx, 'NOME')) || '(sem nome)',
+        status: 'CORROMPIDO',
+        erro: 'O desenho deste modelo não é um JSON válido: ' + e.message
+      };
+    }
+  }
+  if (!desenho) desenho = {};
+
+  desenho.id = AP_ETQM_txt_(AP_ETQM_pegar_(l, idx, 'ID'));
+  desenho.nome = AP_ETQM_txt_(AP_ETQM_pegar_(l, idx, 'NOME')) || desenho.nome || '(sem nome)';
+  desenho.padrao = String(AP_ETQM_pegar_(l, idx, 'PADRAO')).toUpperCase() === 'SIM';
+  desenho.status = AP_ETQM_txt_(AP_ETQM_pegar_(l, idx, 'STATUS')) || 'ATIVO';
+  desenho.criadoEm = AP_ETQM_txt_(AP_ETQM_pegar_(l, idx, 'CRIADO_EM'));
+  desenho.criadoPor = AP_ETQM_txt_(AP_ETQM_pegar_(l, idx, 'CRIADO_POR'));
+  desenho.alteradoEm = AP_ETQM_txt_(AP_ETQM_pegar_(l, idx, 'ALTERADO_EM'));
+  desenho.alteradoPor = AP_ETQM_txt_(AP_ETQM_pegar_(l, idx, 'ALTERADO_POR'));
+  return desenho;
+}
+
+function AP_ETQM_obter_(payload) {
+  var id = AP_ETQM_txt_(payload && payload.id);
+  if (!id) return { ok: false, codigo: 'SEM_ID', mensagem: 'Informe qual modelo.' };
+  var achado = null;
+  AP_ETQM_listar_({ incluirExcluidos: true }).forEach(function (m) { if (m.id === id) achado = m; });
+  if (!achado) return { ok: false, codigo: 'NAO_ENCONTRADO', mensagem: 'Modelo ' + id + ' não existe.' };
+  return { ok: true, dados: achado };
+}
+
+
+/* ============================================================
+   CRÍTICA — a mesma do editor, repetida aqui
+   A tela pode ser contornada; o servidor não.
+   ============================================================ */
+function AP_ETQM_criticar_(m) {
+  if (!AP_ETQM_txt_(m.nome)) return 'Dê um nome ao modelo.';
+  var e = m.etiqueta || {};
+  var l = AP_ETQM_num_(e.larguraMm, 0), a = AP_ETQM_num_(e.alturaMm, 0);
+  if (l <= 0 || a <= 0) return 'A etiqueta precisa de largura e altura maiores que zero.';
+  if (l > 2000 || a > 2000) return 'Largura ou altura fora do razoável (acima de 2000 mm).';
+  var cols = Math.round(AP_ETQM_num_(e.colunas, 1));
+  if (cols < 1 || cols > 50) return 'O número de colunas tem de ficar entre 1 e 50.';
+  if (AP_ETQM_num_(e.gapH, 0) < 0 || AP_ETQM_num_(e.gapV, 0) < 0) {
+    return 'O GAP não pode ser negativo.';
+  }
+  if (!m.elementos || !m.elementos.length) {
+    return 'O modelo está sem elemento nenhum. Inclua pelo menos o número de patrimônio.';
+  }
+
+  /* a mesma conta do item 2, conferida no servidor */
+  var mg = m.margens || {};
+  var larguraTotal = cols * l + Math.max(0, cols - 1) * AP_ETQM_num_(e.gapH, 0) +
+    AP_ETQM_num_(mg.esquerda, 0) + AP_ETQM_num_(mg.direita, 0);
+  var pg = m.pagina || {};
+  var folhaL = 0;
+  if (pg.formato === 'A4') folhaL = 210;
+  else if (pg.formato === 'A5') folhaL = 148;
+  else if (pg.formato === 'Carta') folhaL = 216;
+  else if (pg.formato === 'custom') folhaL = AP_ETQM_num_(pg.larguraMm, 0);
+  if (pg.orientacao === 'paisagem') {
+    if (pg.formato === 'A4') folhaL = 297;
+    else if (pg.formato === 'A5') folhaL = 210;
+    else if (pg.formato === 'Carta') folhaL = 279;
+    else if (pg.formato === 'custom') folhaL = AP_ETQM_num_(pg.alturaMm, 0);
+  }
+  if (folhaL && larguraTotal > folhaL + 0.01) {
+    return 'A largura total (' + larguraTotal.toFixed(1) + ' mm) passa da folha (' +
+      folhaL.toFixed(1) + ' mm). Tire uma coluna, diminua a etiqueta ou reduza as margens.';
+  }
+  return '';
+}
+
+
+/* ============================================================
+   GRAVAR
+   ============================================================ */
+function AP_ETQM_salvar_(payload, sessao) {
+  var erro = AP_ETQM_criticar_(payload);
+  if (erro) return { ok: false, codigo: 'DADOS_INVALIDOS', mensagem: erro };
+
+  var aba = AP_ETQM_aba_();
+  var idx = AP_ETQM_indice_(aba);
+  var largura = aba.getLastColumn();
+
+  var nome = AP_ETQM_txt_(payload.nome);
+  var repetido = null;
+  AP_ETQM_listar_({}).forEach(function (m) {
+    if (AP_ETQM_txt_(m.nome).toUpperCase() === nome.toUpperCase()) repetido = m;
+  });
+  if (repetido) {
+    return { ok: false, codigo: 'NOME_REPETIDO',
+      mensagem: 'Já existe um modelo chamado "' + repetido.nome + '". ' +
+        'Edite aquele ou dê outro nome a este.' };
+  }
+
+  var agora = AP_ETQM_agora_();
+  var quem = AP_ETQM_quem_(sessao);
+  var id = AP_ETQM_id_();
+
+  var desenho = AP_ETQM_desenho_(payload, id);
+  if (desenho.length > AP_ETQM_CFG.limiteDesenho) {
+    return { ok: false, codigo: 'DESENHO_GRANDE',
+      mensagem: 'O modelo ficou com ' + Math.round(desenho.length / 1024) + ' KB, acima do que ' +
+        'cabe numa célula com folga. Quase sempre é o logotipo: use uma imagem menor.' };
+  }
+
+  aba.appendRow(AP_ETQM_montar_(idx, largura, AP_ETQM_valores_(payload, {
+    ID: id, DESENHO: desenho, STATUS: 'ATIVO', CRIADO_EM: agora, CRIADO_POR: quem
+  })));
+
+  if (payload.padrao) AP_ETQM_soUmPadrao_(id);
+
+  var conferencia = AP_ETQM_obter_({ id: id });
+  if (!conferencia.ok) {
+    return { ok: false, codigo: 'NAO_CONFIRMOU',
+      mensagem: 'A linha foi enviada mas eu não consegui reler o modelo na planilha. ' +
+        'NÃO considere salvo — confira a aba ' + AP_ETQM_CFG.aba + '.' };
+  }
+  return { ok: true, dados: conferencia.dados, mensagem: 'Modelo "' + nome + '" salvo.' };
+}
+
+function AP_ETQM_desenho_(m, id) {
+  var copia = {};
+  ['nome', 'pagina', 'margens', 'etiqueta', 'deslocamento', 'midia', 'elementos', 'identidade']
+    .forEach(function (k) { if (m[k] !== undefined) copia[k] = m[k]; });
+  copia.id = id;
+  return JSON.stringify(copia);
+}
+
+function AP_ETQM_valores_(m, extra) {
+  var e = m.etiqueta || {}, mg = m.margens || {}, pg = m.pagina || {};
+  var v = {
+    NOME: AP_ETQM_txt_(m.nome),
+    PADRAO: m.padrao ? 'SIM' : 'NAO',
+    LARGURA_MM: AP_ETQM_num_(e.larguraMm, 0),
+    ALTURA_MM: AP_ETQM_num_(e.alturaMm, 0),
+    COLUNAS: Math.round(AP_ETQM_num_(e.colunas, 1)),
+    GAP_H: AP_ETQM_num_(e.gapH, 0),
+    GAP_V: AP_ETQM_num_(e.gapV, 0),
+    MARGEM_TOPO: AP_ETQM_num_(mg.topo, 0),
+    MARGEM_BAIXO: AP_ETQM_num_(mg.baixo, 0),
+    MARGEM_ESQ: AP_ETQM_num_(mg.esquerda, 0),
+    MARGEM_DIR: AP_ETQM_num_(mg.direita, 0),
+    FORMATO_PAGINA: AP_ETQM_txt_(pg.formato) || 'A4',
+    ORIENTACAO: AP_ETQM_txt_(pg.orientacao) || 'retrato'
+  };
+  Object.keys(extra || {}).forEach(function (k) { v[k] = extra[k]; });
+  return v;
+}
+
+
+/* ============================================================
+   ALTERAR — mexe na linha, não acrescenta outra
+   ============================================================ */
+function AP_ETQM_atualizar_(payload, sessao) {
+  var id = AP_ETQM_txt_(payload && payload.id);
+  if (!id) return { ok: false, codigo: 'SEM_ID', mensagem: 'Informe qual modelo está sendo alterado.' };
+  var erro = AP_ETQM_criticar_(payload);
+  if (erro) return { ok: false, codigo: 'DADOS_INVALIDOS', mensagem: erro };
+
+  var trava = LockService.getScriptLock();
+  try { trava.waitLock(20000); }
+  catch (e) { return { ok: false, codigo: 'OCUPADO', mensagem: 'Outra gravação está em andamento.' }; }
+
+  try {
+    var aba = AP_ETQM_aba_();
+    var idx = AP_ETQM_indice_(aba);
+    var largura = aba.getLastColumn();
+    var linhas = AP_ETQM_linhas_(aba);
+
+    var alvo = -1;
+    for (var i = 0; i < linhas.length; i++) {
+      if (AP_ETQM_txt_(AP_ETQM_pegar_(linhas[i], idx, 'ID')) === id) { alvo = i; break; }
+    }
+    if (alvo < 0) return { ok: false, codigo: 'NAO_ENCONTRADO', mensagem: 'Modelo ' + id + ' não existe.' };
+
+    var nome = AP_ETQM_txt_(payload.nome);
+    var repetido = null;
+    AP_ETQM_listar_({}).forEach(function (m) {
+      if (m.id !== id && AP_ETQM_txt_(m.nome).toUpperCase() === nome.toUpperCase()) repetido = m;
+    });
+    if (repetido) {
+      return { ok: false, codigo: 'NOME_REPETIDO',
+        mensagem: 'Já existe outro modelo chamado "' + repetido.nome + '".' };
+    }
+
+    var desenho = AP_ETQM_desenho_(payload, id);
+    if (desenho.length > AP_ETQM_CFG.limiteDesenho) {
+      return { ok: false, codigo: 'DESENHO_GRANDE',
+        mensagem: 'O modelo ficou com ' + Math.round(desenho.length / 1024) +
+          ' KB. Quase sempre é o logotipo: use uma imagem menor.' };
+    }
+
+    var agora = AP_ETQM_agora_();
+    var quem = AP_ETQM_quem_(sessao);
+    var antigo = AP_ETQM_emObjeto_(linhas[alvo], idx);
+
+    aba.getRange(alvo + 2, 1, 1, largura).setValues([
+      AP_ETQM_montar_(idx, largura, AP_ETQM_valores_(payload, {
+        ID: id, DESENHO: desenho,
+        STATUS: AP_ETQM_txt_(antigo.status) || 'ATIVO',
+        CRIADO_EM: antigo.criadoEm, CRIADO_POR: antigo.criadoPor,
+        ALTERADO_EM: agora, ALTERADO_POR: quem,
+        MOTIVO: AP_ETQM_txt_(payload.motivo)
+      }))
+    ]);
+
+    if (payload.padrao) AP_ETQM_soUmPadrao_(id);
+
+    var conferencia = AP_ETQM_obter_({ id: id });
+    if (!conferencia.ok) {
+      return { ok: false, codigo: 'NAO_CONFIRMOU',
+        mensagem: 'A alteração foi enviada mas a releitura não bateu. NÃO considere salva.' };
+    }
+    return { ok: true, dados: conferencia.dados, mensagem: 'Modelo "' + nome + '" atualizado.' };
+  } finally {
+    try { trava.releaseLock(); } catch (e) {}
+  }
+}
+
+/** SÓ UM PADRÃO POR VEZ. Dois modelos marcados como padrão
+    deixariam a escolha no sorteio. */
+function AP_ETQM_soUmPadrao_(idEscolhido) {
+  var aba = AP_ETQM_aba_();
+  var idx = AP_ETQM_indice_(aba);
+  var col = idx['PADRAO'];
+  if (col === undefined) return;
+  var linhas = AP_ETQM_linhas_(aba);
+  for (var i = 0; i < linhas.length; i++) {
+    var id = AP_ETQM_txt_(AP_ETQM_pegar_(linhas[i], idx, 'ID'));
+    var ehEste = (id === idEscolhido);
+    var atual = String(AP_ETQM_pegar_(linhas[i], idx, 'PADRAO')).toUpperCase() === 'SIM';
+    if (atual !== ehEste) aba.getRange(i + 2, col + 1).setValue(ehEste ? 'SIM' : 'NAO');
+  }
+}
+
+function AP_ETQM_definirPadrao_(payload, sessao) {
+  var id = AP_ETQM_txt_(payload && payload.id);
+  if (!id) return { ok: false, codigo: 'SEM_ID', mensagem: 'Informe qual modelo.' };
+  var existe = AP_ETQM_obter_({ id: id });
+  if (!existe.ok) return existe;
+  AP_ETQM_soUmPadrao_(id);
+  return { ok: true, dados: { id: id },
+    mensagem: 'Modelo "' + existe.dados.nome + '" virou o padrão. Os outros deixaram de ser.' };
+}
+
+
+/* ============================================================
+   EXCLUIR — nunca apaga linha
+   ============================================================ */
+function AP_ETQM_excluir_(payload, sessao) {
+  var id = AP_ETQM_txt_(payload && payload.id);
+  if (!id) return { ok: false, codigo: 'SEM_ID', mensagem: 'Informe qual modelo excluir.' };
+
+  var aba = AP_ETQM_aba_();
+  var idx = AP_ETQM_indice_(aba);
+  var linhas = AP_ETQM_linhas_(aba);
+  var agora = AP_ETQM_agora_();
+  var quem = AP_ETQM_quem_(sessao);
+
+  for (var i = 0; i < linhas.length; i++) {
+    if (AP_ETQM_txt_(AP_ETQM_pegar_(linhas[i], idx, 'ID')) !== id) continue;
+    if (idx['STATUS'] !== undefined) aba.getRange(i + 2, idx['STATUS'] + 1).setValue('EXCLUIDO');
+    if (idx['PADRAO'] !== undefined) aba.getRange(i + 2, idx['PADRAO'] + 1).setValue('NAO');
+    if (idx['ALTERADO_EM'] !== undefined) aba.getRange(i + 2, idx['ALTERADO_EM'] + 1).setValue(agora);
+    if (idx['ALTERADO_POR'] !== undefined) aba.getRange(i + 2, idx['ALTERADO_POR'] + 1).setValue(quem);
+    if (idx['MOTIVO'] !== undefined) {
+      aba.getRange(i + 2, idx['MOTIVO'] + 1).setValue(AP_ETQM_txt_(payload.motivo) || 'excluído');
+    }
+    return { ok: true, dados: { id: id },
+      mensagem: 'Modelo marcado como EXCLUIDO. A linha continua na planilha e as etiquetas ' +
+        'já impressas não mudam.' };
+  }
+  return { ok: false, codigo: 'NAO_ENCONTRADO', mensagem: 'Modelo ' + id + ' não existe.' };
+}
+
+
+/* ============================================================
+   ENSAIO — SÓ LEITURA. NÃO GRAVA NADA.
+   ============================================================ */
+function AP_ETQM_ENSAIO() {
+  var r = AP_ETQM_ensaio_();
+  Logger.log(r.texto);
+  return r.texto;
+}
+
+function AP_ETQM_ensaio_() {
+  var L = [];
+  function diz(t) { L.push(t); }
+  function titulo(t) {
+    diz(''); diz('============================================================');
+    diz('  ' + t); diz('============================================================');
+  }
+
+  diz('ENSAIO DOS MODELOS DE ETIQUETA — ALMOX-PRO');
+  diz('gerado em ' + new Date().toISOString());
+  diz('ESTE RELATÓRIO É SÓ DE LEITURA. NADA FOI GRAVADO.');
+
+  titulo('1. A ABA');
+  try {
+    var aba = AP_ETQM_aba_();
+    var largura = aba.getLastColumn();
+    diz('  ' + AP_ETQM_CFG.aba + ': ' + Math.max(0, aba.getLastRow() - 1) + ' modelo(s)');
+    diz('  colunas: ' + (largura ? aba.getRange(1, 1, 1, largura).getValues()[0].join(', ') : ''));
+  } catch (e) { diz('  ERRO: ' + e.message); }
+
+  titulo('2. OS MODELOS');
+  try {
+    var ms = AP_ETQM_listar_({ incluirExcluidos: true });
+    if (!ms.length) {
+      diz('  Nenhum modelo salvo ainda.');
+      diz('  >> Abra o Editor de Etiquetas, ajuste e clique em Salvar modelo.');
+    }
+    ms.forEach(function (m) {
+      if (m.status === 'CORROMPIDO') {
+        diz('  ' + m.nome + ' — DESENHO CORROMPIDO: ' + m.erro);
+        return;
+      }
+      var e = m.etiqueta || {};
+      diz('  ' + m.nome + (m.padrao ? '  [PADRÃO]' : '') +
+        (String(m.status).toUpperCase() === 'EXCLUIDO' ? '  [EXCLUÍDO]' : ''));
+      diz('     ' + AP_ETQM_num_(e.larguraMm, 0) + ' × ' + AP_ETQM_num_(e.alturaMm, 0) + ' mm · ' +
+        Math.round(AP_ETQM_num_(e.colunas, 1)) + ' coluna(s) · GAP ' +
+        AP_ETQM_num_(e.gapH, 0) + '/' + AP_ETQM_num_(e.gapV, 0) + ' mm');
+      diz('     elementos: ' + ((m.elementos || []).length) + ' · ' +
+        (m.elementos || []).map(function (x) { return x.tipo; }).join(', '));
+      var temLogo = !!(m.identidade && m.identidade.logo);
+      diz('     logotipo guardado: ' + (temLogo ? 'sim' : 'não'));
+    });
+  } catch (e) { diz('  ERRO: ' + e.message); }
+
+  titulo('3. O QUE ESTE ARQUIVO NÃO TOCA');
+  diz('  Patrimônio, número de série, QR Code e cadastro de equipamentos:');
+  diz('  este módulo guarda DESENHO, não guarda bem patrimonial. Trocar o modelo');
+  diz('  da etiqueta não altera nenhum registro de patrimônio.');
+
+  titulo('FIM — NADA FOI GRAVADO');
+  return { texto: L.join('\n'), linhas: L };
+}
