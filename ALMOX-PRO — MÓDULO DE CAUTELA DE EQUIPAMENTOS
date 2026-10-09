@@ -1,0 +1,869 @@
+/* ============================================================
+   ALMOX-PRO — MÓDULO DE CAUTELA DE EQUIPAMENTOS
+   ------------------------------------------------------------
+   PARA QUE SERVE
+
+   A tela "Cautela de equipamentos" do ALMOX_PRO_DESKTOP_204.html
+   fala com este arquivo. Enquanto ele não estiver colado no projeto
+   da planilha, a tela abre, mostra tudo certinho e diz com todas as
+   letras que o módulo não está instalado — ela NÃO finge que gravou.
+
+   ------------------------------------------------------------
+   O QUE ELE NÃO FAZ, DE PROPÓSITO
+
+   - Não cria banco de patrimônio. O equipamento tem de estar no
+     cadastro de Patrimônio que já existe. Aqui só se GUARDA qual
+     patrimônio foi entregue a quem.
+   - Não guarda assinatura. A rubrica continua morando no cadastro
+     central do colaborador (COLAB:<id>), gravada pelo aplicativo de
+     campo. A cautela guarda só o ID do colaborador.
+   - Não apaga linha nenhuma. Excluir é trocar o status para EXCLUIDA
+     e registrar quem excluiu, quando e por quê. O histórico fica.
+   - Não cria planilha nova nem duplica as que existem. Se as abas
+     ainda não existirem, ele CRIA AS DUAS ABAS (só as abas) dentro
+     da planilha que o Core já usa, com o cabeçalho certo.
+
+   ------------------------------------------------------------
+   COMO INSTALAR  (uma vez só)
+
+   1. Abra a planilha  Base Dado almoxarifado  →  Extensões  →
+      Apps Script.
+   2. No menu da esquerda, no + ao lado de "Arquivos", escolha
+      Script. Dê o nome  ALMOXA_PRO_Modulo_Cautela.
+   3. Apague o que vier e cole TODO este arquivo.
+   4. Salve (Ctrl+S).
+   5. ANTES de usar na tela, rode uma vez a função
+      AP_CAUTELA_ENSAIO  no seletor de função, e tire foto do
+      Registro de execução. Ela não grava nada: só diz onde as abas
+      vão ficar e o que já existe.
+   6. Implante → Gerenciar implantações → editar → Nova versão.
+
+   ============================================================ */
+
+
+/* ============================================================
+   CONFIGURAÇÃO
+   ============================================================ */
+var AP_CAUTELA_CFG = {
+  /* o nome das abas. Se a sua planilha já usa outro nome, troque
+     AQUI e em lugar nenhum mais. */
+  abaCautelas: 'ALMOXA_CAUTELAS',
+  abaItens: 'ALMOXA_CAUTELA_ITENS',
+
+  /* onde procurar as abas, na ordem */
+  caminhos: ['', '01_BANCO_DADOS/'],
+
+  /* prefixo e tamanho do número da cautela: CT-000158 */
+  prefixo: 'CT-',
+  digitos: 6,
+
+  colunasCautela: [
+    'ID_CAUTELA', 'NUMERO', 'EMISSAO', 'EMPRESA', 'OBRA', 'SETOR',
+    'CONTRATO', 'NOTA_FISCAL', 'ID_COLABORADOR', 'COLABORADOR',
+    'MATRICULA', 'CPF', 'CARGO', 'SETOR_COLABORADOR',
+    'REQUISITANTE', 'APLICACAO', 'CATEGORIA', 'OBSERVACAO',
+    'STATUS', 'CRIADO_EM', 'CRIADO_POR',
+    'ALTERADO_EM', 'ALTERADO_POR', 'MOTIVO',
+    'DEVOLVIDA_EM', 'DEVOLVIDA_POR'
+  ],
+
+  colunasItem: [
+    'ID_ITEM', 'NUMERO_CAUTELA', 'ORDEM', 'ID_PATRIMONIO', 'PATRIMONIO',
+    'DESCRICAO', 'QUANTIDADE', 'ETIQUETA_COESA', 'NUMERO_SERIE',
+    'MARCA', 'MODELO', 'NOTA_FISCAL', 'STATUS',
+    'DATA_ENTREGA', 'DATA_VENCIMENTO',
+    'CRIADO_EM', 'DEVOLVIDO_EM'
+  ]
+};
+
+
+/* ============================================================
+   A PORTA DO ROTEADOR
+   O Core chama AP_Modulo_cautela(acao, payload, sessao).
+   ============================================================ */
+function AP_Modulo_cautela(acao, payload, sessao) {
+  payload = payload || {};
+  sessao = sessao || {};
+
+  try {
+    switch (String(acao || '').trim()) {
+      case 'listar':        return AP_CAUTELA_listar_(payload);
+      case 'obter':         return AP_CAUTELA_obter_(payload);
+      case 'proximoNumero': return AP_CAUTELA_proximoNumero_();
+      case 'salvar':        return AP_CAUTELA_salvar_(payload, sessao);
+      case 'atualizar':     return AP_CAUTELA_atualizar_(payload, sessao);
+      case 'excluir':       return AP_CAUTELA_excluir_(payload, sessao);
+      case 'devolver':      return AP_CAUTELA_devolver_(payload, sessao);
+      case 'diagnostico':   return { ok: true, dados: AP_CAUTELA_ensaio_() };
+      default:
+        return { ok: false, codigo: 'ACAO_DESCONHECIDA',
+          mensagem: 'A cautela não conhece a ação "' + acao + '". ' +
+            'Conhece: listar, obter, proximoNumero, salvar, atualizar, excluir, devolver, diagnostico.' };
+    }
+  } catch (e) {
+    return { ok: false, codigo: 'ERRO', mensagem: e.message, onde: String(e.stack || '').slice(0, 400) };
+  }
+}
+
+
+/* ============================================================
+   ABRIR / CRIAR AS ABAS
+   ============================================================ */
+
+/** Uma aba só vale se der para LER de verdade. Um registro que aponta
+    para planilha movida devolve objeto e estoura no primeiro acesso. */
+function AP_CAUTELA_abaViva_(aba) {
+  if (!aba) return false;
+  try { aba.getLastColumn(); return true; } catch (e) { return false; }
+}
+
+/** Procura a aba pelos caminhos conhecidos. Um caminho que falha não
+    derruba os outros — foi exatamente esse detalhe que travou a
+    limpeza das notas quando um registro apontava para planilha morta. */
+function AP_CAUTELA_procurar_(nome) {
+  var tentativas = [];
+
+  if (typeof AP_SRV_aba_ === 'function') {
+    for (var i = 0; i < AP_CAUTELA_CFG.caminhos.length; i++) {
+      var caminho = AP_CAUTELA_CFG.caminhos[i] + nome;
+      var achada = null;
+      try { achada = AP_SRV_aba_(caminho); }
+      catch (e) { tentativas.push('AP_SRV_aba_("' + caminho + '") deu erro: ' + e.message); continue; }
+      if (!achada) { tentativas.push('AP_SRV_aba_("' + caminho + '") não achou'); continue; }
+      if (!AP_CAUTELA_abaViva_(achada)) {
+        tentativas.push('AP_SRV_aba_("' + caminho + '") devolveu aba que não abre — segui procurando');
+        continue;
+      }
+      return { aba: achada, via: 'AP_SRV_aba_("' + caminho + '")', tentativas: tentativas };
+    }
+  } else {
+    tentativas.push('AP_SRV_aba_ não existe neste projeto');
+  }
+
+  try {
+    var ss = SpreadsheetApp.getActive();
+    if (!ss) {
+      tentativas.push('não há planilha ativa');
+    } else {
+      var direta = ss.getSheetByName(nome);
+      if (direta && AP_CAUTELA_abaViva_(direta)) {
+        return { aba: direta, via: 'aba "' + nome + '" na planilha ativa', tentativas: tentativas };
+      }
+      tentativas.push(direta ? 'a aba "' + nome + '" existe mas não abre'
+        : 'não há aba "' + nome + '" na planilha ativa');
+    }
+  } catch (e) { tentativas.push('planilha ativa: ' + e.message); }
+
+  return { aba: null, via: null, tentativas: tentativas };
+}
+
+/** Abre a aba; se não existir, CRIA — só a aba, nunca uma planilha
+    nova e nunca por cima de uma que já exista. */
+function AP_CAUTELA_abrir_(nome, colunas) {
+  var achada = AP_CAUTELA_procurar_(nome);
+  if (achada.aba) {
+    AP_CAUTELA_garantirCabecalho_(achada.aba, colunas);
+    return achada.aba;
+  }
+
+  var ss = SpreadsheetApp.getActive();
+  if (!ss) {
+    throw new Error('Não há planilha ativa para criar a aba "' + nome + '". ' +
+      'Tentativas: ' + achada.tentativas.join('; '));
+  }
+  /* se por acaso existir mas estiver "morta", NÃO crio outra com (1) */
+  var jaTem = ss.getSheetByName(nome);
+  if (jaTem) return jaTem;
+
+  var nova = ss.insertSheet(nome);
+  nova.getRange(1, 1, 1, colunas.length).setValues([colunas]);
+  nova.setFrozenRows(1);
+  nova.getRange(1, 1, 1, colunas.length).setFontWeight('bold');
+  return nova;
+}
+
+/** Acrescenta ao cabeçalho as colunas que faltarem. NUNCA renomeia
+    nem reordena o que já está lá — as fórmulas e os outros módulos
+    dependem da ordem atual. */
+function AP_CAUTELA_garantirCabecalho_(aba, colunas) {
+  var largura = aba.getLastColumn();
+  var atuais = largura
+    ? aba.getRange(1, 1, 1, largura).getValues()[0].map(function (c) {
+        return String(c === null || c === undefined ? '' : c).trim().toUpperCase();
+      })
+    : [];
+
+  var faltando = [];
+  colunas.forEach(function (c) {
+    if (atuais.indexOf(String(c).toUpperCase()) < 0) faltando.push(c);
+  });
+  if (!faltando.length) return;
+
+  aba.getRange(1, largura + 1, 1, faltando.length).setValues([faltando]);
+  aba.getRange(1, largura + 1, 1, faltando.length).setFontWeight('bold');
+}
+
+function AP_CAUTELA_abaCautelas_() {
+  return AP_CAUTELA_abrir_(AP_CAUTELA_CFG.abaCautelas, AP_CAUTELA_CFG.colunasCautela);
+}
+function AP_CAUTELA_abaItens_() {
+  return AP_CAUTELA_abrir_(AP_CAUTELA_CFG.abaItens, AP_CAUTELA_CFG.colunasItem);
+}
+
+
+/* ============================================================
+   LER E ESCREVER LINHAS PELO NOME DA COLUNA
+   Assim a ordem das colunas na planilha pode mudar sem quebrar nada.
+   ============================================================ */
+function AP_CAUTELA_indice_(aba) {
+  var largura = aba.getLastColumn();
+  var porNome = {};
+  if (!largura) return porNome;
+  aba.getRange(1, 1, 1, largura).getValues()[0].forEach(function (c, i) {
+    var k = String(c === null || c === undefined ? '' : c).trim().toUpperCase();
+    if (k && porNome[k] === undefined) porNome[k] = i;
+  });
+  return porNome;
+}
+
+function AP_CAUTELA_linhas_(aba) {
+  var ultima = aba.getLastRow();
+  if (ultima < 2) return [];
+  return aba.getRange(2, 1, ultima - 1, aba.getLastColumn()).getValues();
+}
+
+function AP_CAUTELA_pegar_(linha, idx, coluna) {
+  var i = idx[String(coluna).toUpperCase()];
+  if (i === undefined) return '';
+  var v = linha[i];
+  return v === null || v === undefined ? '' : v;
+}
+
+function AP_CAUTELA_montarLinha_(idx, largura, valores) {
+  var linha = [];
+  for (var i = 0; i < largura; i++) linha.push('');
+  Object.keys(valores).forEach(function (nome) {
+    var i = idx[String(nome).toUpperCase()];
+    if (i !== undefined && i < largura) linha[i] = valores[nome];
+  });
+  return linha;
+}
+
+function AP_CAUTELA_texto_(v) {
+  return String(v === null || v === undefined ? '' : v).trim();
+}
+
+/** UM ID QUE NAO REPETE.
+    So  prefixo + Date.now()  nao basta: duas gravacoes no MESMO
+    milissegundo saem com o MESMO id. Aconteceu de verdade na
+    semeadura dos modelos da Central de Cautelas. Entra um contador
+    e um sorteio junto. */
+var AP_CAUTELA_SEQ = 0;
+function AP_CAUTELA_id_(prefixo) {
+  AP_CAUTELA_SEQ++;
+  var sorte = Math.floor(Math.random() * 1679616).toString(36);
+  return prefixo + Date.now().toString(36) + '-' + AP_CAUTELA_SEQ + '-' + sorte;
+}
+
+/** A planilha devolve Date; a tela manda "2026-10-09". Os dois viram
+    a mesma coisa aqui, senao a data ia e voltava mudando de cara. */
+function AP_CAUTELA_data_(v) {
+  if (v === null || v === undefined || v === '') return '';
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    if (isNaN(v.getTime())) return '';
+    return Utilities.formatDate(v, 'America/Manaus', 'yyyy-MM-dd');
+  }
+  var s = String(v).trim();
+  var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return m[1] + '-' + m[2] + '-' + m[3];
+  var br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (br) return br[3] + '-' + br[2] + '-' + br[1];
+  return '';
+}
+
+function AP_CAUTELA_agora_() {
+  return Utilities.formatDate(new Date(), 'America/Manaus', "yyyy-MM-dd'T'HH:mm:ss");
+}
+
+function AP_CAUTELA_quem_(sessao) {
+  return AP_CAUTELA_texto_(sessao && (sessao.nome || sessao.usuario || sessao.matricula)) || 'sistema';
+}
+
+
+/* ============================================================
+   NÚMERO DA CAUTELA
+   O número é do SERVIDOR. A tela nunca inventa — se a tela inventasse,
+   duas pessoas gerando ao mesmo tempo criariam o mesmo número.
+   ============================================================ */
+function AP_CAUTELA_proximoNumero_() {
+  var aba = AP_CAUTELA_abaCautelas_();
+  var idx = AP_CAUTELA_indice_(aba);
+  var maior = 0;
+
+  AP_CAUTELA_linhas_(aba).forEach(function (l) {
+    var n = AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idx, 'NUMERO'));
+    var so = n.replace(/[^0-9]/g, '');
+    if (so) { var v = parseInt(so, 10); if (v > maior) maior = v; }
+  });
+
+  var proximo = String(maior + 1);
+  while (proximo.length < AP_CAUTELA_CFG.digitos) proximo = '0' + proximo;
+  return { ok: true, dados: { numero: AP_CAUTELA_CFG.prefixo + proximo } };
+}
+
+
+/* ============================================================
+   LISTAR
+   ============================================================ */
+function AP_CAUTELA_listar_(payload) {
+  var aba = AP_CAUTELA_abaCautelas_();
+  var idx = AP_CAUTELA_indice_(aba);
+  var abaI = AP_CAUTELA_abaItens_();
+  var idxI = AP_CAUTELA_indice_(abaI);
+
+  /* os itens, agrupados pelo número da cautela */
+  var porCautela = {};
+  AP_CAUTELA_linhas_(abaI).forEach(function (l) {
+    var st = AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxI, 'STATUS')).toUpperCase();
+    if (st === 'EXCLUIDO') return;
+    var num = AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxI, 'NUMERO_CAUTELA'));
+    if (!num) return;
+    (porCautela[num] = porCautela[num] || []).push({
+      id: AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxI, 'ID_ITEM')),
+      ordem: Number(AP_CAUTELA_pegar_(l, idxI, 'ORDEM')) || 0,
+      patrimonioId: AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxI, 'ID_PATRIMONIO')),
+      patrimonio: AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxI, 'PATRIMONIO')),
+      descricao: AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxI, 'DESCRICAO')),
+      qtd: Number(AP_CAUTELA_pegar_(l, idxI, 'QUANTIDADE')) || 1,
+      etiquetaCoesa: AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxI, 'ETIQUETA_COESA')),
+      numeroSerie: AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxI, 'NUMERO_SERIE')),
+      marca: AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxI, 'MARCA')),
+      modelo: AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxI, 'MODELO')),
+      notaFiscal: AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxI, 'NOTA_FISCAL')),
+      status: AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxI, 'STATUS')) || 'CAUTELADO',
+      dataEntrega: AP_CAUTELA_data_(AP_CAUTELA_pegar_(l, idxI, 'DATA_ENTREGA')),
+      dataVencimento: AP_CAUTELA_data_(AP_CAUTELA_pegar_(l, idxI, 'DATA_VENCIMENTO')),
+      devolvidoEm: AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxI, 'DEVOLVIDO_EM'))
+    });
+  });
+  Object.keys(porCautela).forEach(function (n) {
+    porCautela[n].sort(function (a, b) { return a.ordem - b.ordem; });
+  });
+
+  var filtroColab = AP_CAUTELA_texto_(payload && payload.idColaborador);
+  var incluirExcluidas = !!(payload && payload.incluirExcluidas);
+
+  var saida = [];
+  AP_CAUTELA_linhas_(aba).forEach(function (l) {
+    var c = AP_CAUTELA_emObjeto_(l, idx);
+    if (!c.numero) return;
+    if (!incluirExcluidas && String(c.status).toUpperCase() === 'EXCLUIDA') return;
+    if (filtroColab && c.idColaborador !== filtroColab) return;
+    c.itens = porCautela[c.numero] || [];
+    saida.push(c);
+  });
+
+  saida.sort(function (a, b) {
+    return String(b.criadoEm || b.emissao).localeCompare(String(a.criadoEm || a.emissao));
+  });
+
+  return { ok: true, dados: saida };
+}
+
+function AP_CAUTELA_emObjeto_(l, idx) {
+  function p(c) { return AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idx, c)); }
+  var emissao = AP_CAUTELA_pegar_(l, idx, 'EMISSAO');
+  return {
+    id: p('ID_CAUTELA'),
+    numero: p('NUMERO'),
+    emissao: (emissao instanceof Date)
+      ? Utilities.formatDate(emissao, 'America/Manaus', 'yyyy-MM-dd')
+      : AP_CAUTELA_texto_(emissao),
+    empresa: p('EMPRESA'),
+    obra: p('OBRA'),
+    setor: p('SETOR'),
+    contrato: p('CONTRATO'),
+    notaFiscal: p('NOTA_FISCAL'),
+    idColaborador: p('ID_COLABORADOR'),
+    colaborador: p('COLABORADOR'),
+    matricula: p('MATRICULA'),
+    cpf: p('CPF'),
+    cargo: p('CARGO'),
+    setorColaborador: p('SETOR_COLABORADOR'),
+    requisitante: p('REQUISITANTE'),
+    aplicacao: p('APLICACAO'),
+    categoria: p('CATEGORIA'),
+    observacao: p('OBSERVACAO'),
+    status: p('STATUS') || 'EMITIDA',
+    criadoEm: p('CRIADO_EM'),
+    criadoPor: p('CRIADO_POR'),
+    emitidaPor: p('CRIADO_POR'),
+    alteradoEm: p('ALTERADO_EM'),
+    alteradoPor: p('ALTERADO_POR'),
+    motivo: p('MOTIVO'),
+    devolvidaEm: p('DEVOLVIDA_EM'),
+    devolvidaPor: p('DEVOLVIDA_POR')
+  };
+}
+
+
+/* ============================================================
+   OBTER UMA
+   ============================================================ */
+function AP_CAUTELA_obter_(payload) {
+  var numero = AP_CAUTELA_texto_(payload && (payload.numero || payload.id));
+  if (!numero) return { ok: false, codigo: 'SEM_NUMERO', mensagem: 'Informe o número da cautela.' };
+  var r = AP_CAUTELA_listar_({ incluirExcluidas: true });
+  var achada = r.dados.filter(function (c) { return c.numero === numero || c.id === numero; })[0];
+  if (!achada) return { ok: false, codigo: 'NAO_ENCONTRADA', mensagem: 'Cautela ' + numero + ' não existe.' };
+  return { ok: true, dados: achada };
+}
+
+
+/* ============================================================
+   CRÍTICA — a mesma regra que a tela aplica, repetida aqui.
+   A tela pode ser contornada; o servidor não.
+   ============================================================ */
+function AP_CAUTELA_criticar_(c) {
+  if (!AP_CAUTELA_texto_(c.colaborador)) return 'A cautela precisa do colaborador responsável.';
+  if (!AP_CAUTELA_texto_(c.idColaborador)) {
+    return 'A cautela precisa do ID único do colaborador. Sem ele a assinatura ' +
+      'cadastrada nunca é encontrada — foi o erro que já aconteceu na ficha de EPI.';
+  }
+  var itens = (c.itens && c.itens.length) ? c.itens : [];
+  if (!itens.length) return 'A cautela precisa de pelo menos um equipamento.';
+
+  var semPatrimonio = 0, vistos = {}, repetidos = [];
+  itens.forEach(function (i) {
+    var pat = AP_CAUTELA_texto_(i.patrimonio);
+    if (!pat) { semPatrimonio++; return; }
+    if (vistos[pat]) repetidos.push(pat); else vistos[pat] = 1;
+  });
+  if (semPatrimonio) {
+    return semPatrimonio + ' item(ns) sem número de patrimônio. Cada equipamento ' +
+      'tem de ser individualizado: 30 equipamentos, 30 registros.';
+  }
+  if (repetidos.length) {
+    return 'O(s) patrimônio(s) ' + repetidos.join(', ') + ' aparece(m) mais de uma vez ' +
+      'nesta cautela. Um patrimônio só pode estar numa linha.';
+  }
+  return '';
+}
+
+/** O mesmo patrimônio não pode estar em duas cautelas em vigor. */
+function AP_CAUTELA_jaCautelado_(itens, numeroDesta) {
+  var abaI = AP_CAUTELA_abaItens_();
+  var idxI = AP_CAUTELA_indice_(abaI);
+  var emVigor = {};
+
+  var abaC = AP_CAUTELA_abaCautelas_();
+  var idxC = AP_CAUTELA_indice_(abaC);
+  var statusPorNumero = {};
+  AP_CAUTELA_linhas_(abaC).forEach(function (l) {
+    statusPorNumero[AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxC, 'NUMERO'))] =
+      AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxC, 'STATUS')).toUpperCase();
+  });
+
+  AP_CAUTELA_linhas_(abaI).forEach(function (l) {
+    var num = AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxI, 'NUMERO_CAUTELA'));
+    if (num === numeroDesta) return;
+    var st = statusPorNumero[num];
+    if (st === 'EXCLUIDA' || st === 'DEVOLVIDA') return;
+    var stItem = AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxI, 'STATUS')).toUpperCase();
+    if (stItem === 'DEVOLVIDO' || stItem === 'EXCLUIDO') return;
+    var pat = AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idxI, 'PATRIMONIO'));
+    if (pat) emVigor[pat] = num;
+  });
+
+  var presos = [];
+  itens.forEach(function (i) {
+    var pat = AP_CAUTELA_texto_(i.patrimonio);
+    if (pat && emVigor[pat]) presos.push(pat + ' (cautela ' + emVigor[pat] + ')');
+  });
+  return presos;
+}
+
+
+/* ============================================================
+   SALVAR
+   ============================================================ */
+function AP_CAUTELA_salvar_(payload, sessao) {
+  var erro = AP_CAUTELA_criticar_(payload);
+  if (erro) return { ok: false, codigo: 'DADOS_INCOMPLETOS', mensagem: erro };
+
+  var trava = LockService.getScriptLock();
+  try { trava.waitLock(20000); }
+  catch (e) { return { ok: false, codigo: 'OCUPADO', mensagem: 'Outra gravação está em andamento. Tente de novo em alguns segundos.' }; }
+
+  try {
+    var aba = AP_CAUTELA_abaCautelas_();
+    var idx = AP_CAUTELA_indice_(aba);
+    var largura = aba.getLastColumn();
+
+    /* número: o da tela só vale se ainda estiver livre */
+    var numero = AP_CAUTELA_texto_(payload.numero);
+    var usados = {};
+    AP_CAUTELA_linhas_(aba).forEach(function (l) {
+      usados[AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idx, 'NUMERO'))] = 1;
+    });
+    if (!numero || usados[numero]) numero = AP_CAUTELA_proximoNumero_().dados.numero;
+
+    var presos = AP_CAUTELA_jaCautelado_(payload.itens, numero);
+    if (presos.length && !payload.confirmarJaCautelado) {
+      return { ok: false, codigo: 'JA_CAUTELADO',
+        mensagem: 'Este(s) equipamento(s) já está(ão) em outra cautela em vigor: ' +
+          presos.join('; ') + '. Devolva a cautela anterior ou confirme mesmo assim.' };
+    }
+
+    var agora = AP_CAUTELA_agora_();
+    var quem = AP_CAUTELA_quem_(sessao);
+    var id = AP_CAUTELA_id_('CT');
+
+    aba.appendRow(AP_CAUTELA_montarLinha_(idx, largura, {
+      ID_CAUTELA: id,
+      NUMERO: numero,
+      EMISSAO: AP_CAUTELA_texto_(payload.emissao) || agora.slice(0, 10),
+      EMPRESA: AP_CAUTELA_texto_(payload.empresa),
+      OBRA: AP_CAUTELA_texto_(payload.obra),
+      SETOR: AP_CAUTELA_texto_(payload.setor),
+      CONTRATO: AP_CAUTELA_texto_(payload.contrato),
+      NOTA_FISCAL: AP_CAUTELA_texto_(payload.notaFiscal),
+      ID_COLABORADOR: AP_CAUTELA_texto_(payload.idColaborador),
+      COLABORADOR: AP_CAUTELA_texto_(payload.colaborador),
+      MATRICULA: AP_CAUTELA_texto_(payload.matricula),
+      CPF: AP_CAUTELA_texto_(payload.cpf),
+      CARGO: AP_CAUTELA_texto_(payload.cargo),
+      SETOR_COLABORADOR: AP_CAUTELA_texto_(payload.setorColaborador),
+      REQUISITANTE: AP_CAUTELA_texto_(payload.requisitante),
+      APLICACAO: AP_CAUTELA_texto_(payload.aplicacao),
+      CATEGORIA: AP_CAUTELA_texto_(payload.categoria),
+      OBSERVACAO: AP_CAUTELA_texto_(payload.observacao),
+      STATUS: 'EMITIDA',
+      CRIADO_EM: agora,
+      CRIADO_POR: quem
+    }));
+
+    AP_CAUTELA_gravarItens_(numero, payload.itens, agora);
+
+    /* CONFIRMAÇÃO DE VERDADE: releio da planilha antes de dizer que gravou. */
+    var conferencia = AP_CAUTELA_obter_({ numero: numero });
+    if (!conferencia.ok) {
+      return { ok: false, codigo: 'NAO_CONFIRMOU',
+        mensagem: 'A linha foi enviada mas eu não consegui reler a cautela ' + numero +
+          ' na planilha. NÃO considere gravada — confira a aba ' + AP_CAUTELA_CFG.abaCautelas + '.' };
+    }
+    if (conferencia.dados.itens.length !== payload.itens.length) {
+      return { ok: false, codigo: 'ITENS_INCOMPLETOS',
+        mensagem: 'A cautela ' + numero + ' gravou ' + conferencia.dados.itens.length +
+          ' item(ns) dos ' + payload.itens.length + ' enviados. Confira a aba ' +
+          AP_CAUTELA_CFG.abaItens + ' antes de imprimir.' };
+    }
+
+    return { ok: true, dados: conferencia.dados, mensagem: 'Cautela ' + numero + ' gravada e conferida.' };
+  } finally {
+    try { trava.releaseLock(); } catch (e) {}
+  }
+}
+
+function AP_CAUTELA_gravarItens_(numero, itens, agora) {
+  var abaI = AP_CAUTELA_abaItens_();
+  var idxI = AP_CAUTELA_indice_(abaI);
+  var larguraI = abaI.getLastColumn();
+
+  var linhas = (itens || []).map(function (i, k) {
+    return AP_CAUTELA_montarLinha_(idxI, larguraI, {
+      ID_ITEM: AP_CAUTELA_id_('CTI') + '-' + k,
+      NUMERO_CAUTELA: numero,
+      ORDEM: k + 1,
+      ID_PATRIMONIO: AP_CAUTELA_texto_(i.patrimonioId),
+      PATRIMONIO: AP_CAUTELA_texto_(i.patrimonio),
+      DESCRICAO: AP_CAUTELA_texto_(i.descricao),
+      QUANTIDADE: Number(i.qtd) || 1,
+      ETIQUETA_COESA: AP_CAUTELA_texto_(i.etiquetaCoesa),
+      NUMERO_SERIE: AP_CAUTELA_texto_(i.numeroSerie),
+      MARCA: AP_CAUTELA_texto_(i.marca),
+      MODELO: AP_CAUTELA_texto_(i.modelo),
+      NOTA_FISCAL: AP_CAUTELA_texto_(i.notaFiscal),
+      STATUS: 'CAUTELADO',
+      /* A DATA DE ENTREGA E DO ITEM, NAO DA CAUTELA.
+         Numa cautela editada depois, o equipamento acrescentado hoje
+         nao foi entregue na data em que a cautela nasceu. */
+      DATA_ENTREGA: AP_CAUTELA_data_(i.dataEntrega) || agora.slice(0, 10),
+      DATA_VENCIMENTO: AP_CAUTELA_data_(i.dataVencimento),
+      CRIADO_EM: agora
+    });
+  });
+  if (!linhas.length) return;
+  abaI.getRange(abaI.getLastRow() + 1, 1, linhas.length, larguraI).setValues(linhas);
+}
+
+
+/* ============================================================
+   ATUALIZAR
+   Altera a linha que já existe. NÃO acrescenta outra — foi assim que
+   as notas fiscais viraram linhas em duplicidade.
+   ============================================================ */
+function AP_CAUTELA_atualizar_(payload, sessao) {
+  var numero = AP_CAUTELA_texto_(payload && payload.numero);
+  if (!numero) return { ok: false, codigo: 'SEM_NUMERO', mensagem: 'Informe o número da cautela.' };
+
+  var erro = AP_CAUTELA_criticar_(payload);
+  if (erro) return { ok: false, codigo: 'DADOS_INCOMPLETOS', mensagem: erro };
+
+  var trava = LockService.getScriptLock();
+  try { trava.waitLock(20000); }
+  catch (e) { return { ok: false, codigo: 'OCUPADO', mensagem: 'Outra gravação está em andamento.' }; }
+
+  try {
+    var aba = AP_CAUTELA_abaCautelas_();
+    var idx = AP_CAUTELA_indice_(aba);
+    var largura = aba.getLastColumn();
+    var linhas = AP_CAUTELA_linhas_(aba);
+
+    var alvo = -1;
+    for (var i = 0; i < linhas.length; i++) {
+      if (AP_CAUTELA_texto_(AP_CAUTELA_pegar_(linhas[i], idx, 'NUMERO')) === numero) { alvo = i; break; }
+    }
+    if (alvo < 0) return { ok: false, codigo: 'NAO_ENCONTRADA', mensagem: 'Cautela ' + numero + ' não existe.' };
+
+    /* quantas linhas têm este número? Se for mais de uma, há duplicidade
+       e eu NÃO escolho sozinho qual é a boa. */
+    var quantas = linhas.filter(function (l) {
+      return AP_CAUTELA_texto_(AP_CAUTELA_pegar_(l, idx, 'NUMERO')) === numero;
+    }).length;
+    if (quantas > 1) {
+      return { ok: false, codigo: 'DUPLICADA',
+        mensagem: 'A cautela ' + numero + ' aparece em ' + quantas + ' linhas da aba ' +
+          AP_CAUTELA_CFG.abaCautelas + '. Não altero enquanto houver duplicidade — ' +
+          'resolva na planilha qual é a boa e apague o status da outra para EXCLUIDA.' };
+    }
+
+    var presos = AP_CAUTELA_jaCautelado_(payload.itens, numero);
+    if (presos.length && !payload.confirmarJaCautelado) {
+      return { ok: false, codigo: 'JA_CAUTELADO',
+        mensagem: 'Já em outra cautela em vigor: ' + presos.join('; ') + '.' };
+    }
+
+    var agora = AP_CAUTELA_agora_();
+    var quem = AP_CAUTELA_quem_(sessao);
+    var antiga = AP_CAUTELA_emObjeto_(linhas[alvo], idx);
+
+    var nova = AP_CAUTELA_montarLinha_(idx, largura, {
+      ID_CAUTELA: antiga.id,
+      NUMERO: numero,
+      EMISSAO: AP_CAUTELA_texto_(payload.emissao) || antiga.emissao,
+      EMPRESA: AP_CAUTELA_texto_(payload.empresa),
+      OBRA: AP_CAUTELA_texto_(payload.obra),
+      SETOR: AP_CAUTELA_texto_(payload.setor),
+      CONTRATO: AP_CAUTELA_texto_(payload.contrato),
+      NOTA_FISCAL: AP_CAUTELA_texto_(payload.notaFiscal),
+      ID_COLABORADOR: AP_CAUTELA_texto_(payload.idColaborador),
+      COLABORADOR: AP_CAUTELA_texto_(payload.colaborador),
+      MATRICULA: AP_CAUTELA_texto_(payload.matricula),
+      CPF: AP_CAUTELA_texto_(payload.cpf),
+      CARGO: AP_CAUTELA_texto_(payload.cargo),
+      SETOR_COLABORADOR: AP_CAUTELA_texto_(payload.setorColaborador),
+      REQUISITANTE: AP_CAUTELA_texto_(payload.requisitante),
+      APLICACAO: AP_CAUTELA_texto_(payload.aplicacao),
+      CATEGORIA: AP_CAUTELA_texto_(payload.categoria),
+      OBSERVACAO: AP_CAUTELA_texto_(payload.observacao),
+      STATUS: AP_CAUTELA_texto_(payload.status) || antiga.status || 'EMITIDA',
+      CRIADO_EM: antiga.criadoEm,
+      CRIADO_POR: antiga.criadoPor,
+      ALTERADO_EM: agora,
+      ALTERADO_POR: quem,
+      MOTIVO: AP_CAUTELA_texto_(payload.motivo),
+      DEVOLVIDA_EM: antiga.devolvidaEm,
+      DEVOLVIDA_POR: antiga.devolvidaPor
+    });
+
+    aba.getRange(alvo + 2, 1, 1, largura).setValues([nova]);
+
+    /* os itens: marco os antigos como EXCLUIDO (não apago linha) e
+       gravo os novos. O histórico de quem teve o quê não se perde. */
+    AP_CAUTELA_aposentarItens_(numero, agora, quem);
+    AP_CAUTELA_gravarItens_(numero, payload.itens, agora);
+
+    var conferencia = AP_CAUTELA_obter_({ numero: numero });
+    if (!conferencia.ok || conferencia.dados.itens.length !== payload.itens.length) {
+      return { ok: false, codigo: 'NAO_CONFIRMOU',
+        mensagem: 'A alteração foi enviada mas a releitura não bateu. NÃO considere gravada. ' +
+          'Confira as abas ' + AP_CAUTELA_CFG.abaCautelas + ' e ' + AP_CAUTELA_CFG.abaItens + '.' };
+    }
+    return { ok: true, dados: conferencia.dados, mensagem: 'Cautela ' + numero + ' alterada e conferida.' };
+  } finally {
+    try { trava.releaseLock(); } catch (e) {}
+  }
+}
+
+function AP_CAUTELA_aposentarItens_(numero, agora, quem) {
+  var abaI = AP_CAUTELA_abaItens_();
+  var idxI = AP_CAUTELA_indice_(abaI);
+  var col = idxI['STATUS'];
+  if (col === undefined) return;
+  var linhas = AP_CAUTELA_linhas_(abaI);
+  for (var i = 0; i < linhas.length; i++) {
+    if (AP_CAUTELA_texto_(AP_CAUTELA_pegar_(linhas[i], idxI, 'NUMERO_CAUTELA')) !== numero) continue;
+    if (AP_CAUTELA_texto_(linhas[i][col]).toUpperCase() === 'EXCLUIDO') continue;
+    abaI.getRange(i + 2, col + 1).setValue('EXCLUIDO');
+  }
+}
+
+
+/* ============================================================
+   EXCLUIR — nunca apaga linha
+   ============================================================ */
+function AP_CAUTELA_excluir_(payload, sessao) {
+  var numero = AP_CAUTELA_texto_(payload && payload.numero);
+  var motivo = AP_CAUTELA_texto_(payload && payload.motivo);
+  if (!numero) return { ok: false, codigo: 'SEM_NUMERO', mensagem: 'Informe o número da cautela.' };
+  if (!motivo) return { ok: false, codigo: 'SEM_MOTIVO', mensagem: 'Diga o motivo da exclusão. Ele fica registrado.' };
+
+  var aba = AP_CAUTELA_abaCautelas_();
+  var idx = AP_CAUTELA_indice_(aba);
+  var linhas = AP_CAUTELA_linhas_(aba);
+  var agora = AP_CAUTELA_agora_();
+  var quem = AP_CAUTELA_quem_(sessao);
+  var mexidas = 0;
+
+  for (var i = 0; i < linhas.length; i++) {
+    if (AP_CAUTELA_texto_(AP_CAUTELA_pegar_(linhas[i], idx, 'NUMERO')) !== numero) continue;
+    if (idx['STATUS'] !== undefined) aba.getRange(i + 2, idx['STATUS'] + 1).setValue('EXCLUIDA');
+    if (idx['ALTERADO_EM'] !== undefined) aba.getRange(i + 2, idx['ALTERADO_EM'] + 1).setValue(agora);
+    if (idx['ALTERADO_POR'] !== undefined) aba.getRange(i + 2, idx['ALTERADO_POR'] + 1).setValue(quem);
+    if (idx['MOTIVO'] !== undefined) aba.getRange(i + 2, idx['MOTIVO'] + 1).setValue(motivo);
+    mexidas++;
+  }
+
+  if (!mexidas) return { ok: false, codigo: 'NAO_ENCONTRADA', mensagem: 'Cautela ' + numero + ' não existe.' };
+  AP_CAUTELA_aposentarItens_(numero, agora, quem);
+  return { ok: true, dados: { numero: numero, linhas: mexidas },
+    mensagem: 'Cautela ' + numero + ' marcada como EXCLUIDA. Nenhuma linha foi apagada — o histórico ficou.' };
+}
+
+
+/* ============================================================
+   DEVOLVER — o equipamento volta para o almoxarifado
+   ============================================================ */
+function AP_CAUTELA_devolver_(payload, sessao) {
+  var numero = AP_CAUTELA_texto_(payload && payload.numero);
+  if (!numero) return { ok: false, codigo: 'SEM_NUMERO', mensagem: 'Informe o número da cautela.' };
+
+  var agora = AP_CAUTELA_agora_();
+  var quem = AP_CAUTELA_quem_(sessao);
+
+  /* devolução de item avulso ou da cautela inteira */
+  var soEstes = {};
+  var parcial = false;
+  (payload.patrimonios || []).forEach(function (p) { soEstes[AP_CAUTELA_texto_(p)] = 1; parcial = true; });
+
+  var abaI = AP_CAUTELA_abaItens_();
+  var idxI = AP_CAUTELA_indice_(abaI);
+  var linhasI = AP_CAUTELA_linhas_(abaI);
+  var devolvidos = 0, restantes = 0;
+
+  for (var i = 0; i < linhasI.length; i++) {
+    if (AP_CAUTELA_texto_(AP_CAUTELA_pegar_(linhasI[i], idxI, 'NUMERO_CAUTELA')) !== numero) continue;
+    var st = AP_CAUTELA_texto_(AP_CAUTELA_pegar_(linhasI[i], idxI, 'STATUS')).toUpperCase();
+    if (st === 'EXCLUIDO' || st === 'DEVOLVIDO') continue;
+    var pat = AP_CAUTELA_texto_(AP_CAUTELA_pegar_(linhasI[i], idxI, 'PATRIMONIO'));
+    if (parcial && !soEstes[pat]) { restantes++; continue; }
+    if (idxI['STATUS'] !== undefined) abaI.getRange(i + 2, idxI['STATUS'] + 1).setValue('DEVOLVIDO');
+    if (idxI['DEVOLVIDO_EM'] !== undefined) abaI.getRange(i + 2, idxI['DEVOLVIDO_EM'] + 1).setValue(agora);
+    devolvidos++;
+  }
+
+  if (!devolvidos) {
+    return { ok: false, codigo: 'NADA_A_DEVOLVER',
+      mensagem: 'Não achei item em vigor nesta cautela para devolver.' };
+  }
+
+  /* a cautela só fecha quando o último item volta */
+  if (!restantes) {
+    var aba = AP_CAUTELA_abaCautelas_();
+    var idx = AP_CAUTELA_indice_(aba);
+    var linhas = AP_CAUTELA_linhas_(aba);
+    for (var k = 0; k < linhas.length; k++) {
+      if (AP_CAUTELA_texto_(AP_CAUTELA_pegar_(linhas[k], idx, 'NUMERO')) !== numero) continue;
+      if (idx['STATUS'] !== undefined) aba.getRange(k + 2, idx['STATUS'] + 1).setValue('DEVOLVIDA');
+      if (idx['DEVOLVIDA_EM'] !== undefined) aba.getRange(k + 2, idx['DEVOLVIDA_EM'] + 1).setValue(agora);
+      if (idx['DEVOLVIDA_POR'] !== undefined) aba.getRange(k + 2, idx['DEVOLVIDA_POR'] + 1).setValue(quem);
+    }
+  }
+
+  return { ok: true,
+    dados: { numero: numero, devolvidos: devolvidos, restantes: restantes },
+    mensagem: devolvidos + ' item(ns) devolvido(s)' +
+      (restantes ? '. Ainda faltam ' + restantes + ' — a cautela continua em vigor.'
+                 : '. A cautela foi encerrada.') };
+}
+
+
+/* ============================================================
+   ENSAIO — SÓ LEITURA. NÃO GRAVA NADA.
+   Rode esta antes de usar a tela e me mande a foto do registro.
+   ============================================================ */
+function AP_CAUTELA_ENSAIO() {
+  var r = AP_CAUTELA_ensaio_();
+  Logger.log(r.texto);
+  return r.texto;
+}
+
+function AP_CAUTELA_ensaio_() {
+  var L = [];
+  function diz(t) { L.push(t); }
+  function titulo(t) {
+    diz('');
+    diz('============================================================');
+    diz('  ' + t);
+    diz('============================================================');
+  }
+
+  diz('ENSAIO DO MÓDULO DE CAUTELA — ALMOX-PRO');
+  diz('gerado em ' + new Date().toISOString());
+  diz('ESTE RELATÓRIO É SÓ DE LEITURA. NADA FOI GRAVADO.');
+
+  titulo('1. O QUE O PROJETO JÁ TEM');
+  diz('  AP_SRV_aba_        : ' + (typeof AP_SRV_aba_ === 'function' ? 'existe' : 'NÃO existe'));
+  diz('  AP_DB_tabela_      : ' + (typeof AP_DB_tabela_ === 'function' ? 'existe' : 'NÃO existe'));
+  diz('  AP_Modulo_patrimonio: ' + (typeof AP_Modulo_patrimonio === 'function' ? 'existe' : 'NÃO existe'));
+  diz('  AP_Modulo_cautela  : ' + (typeof AP_Modulo_cautela === 'function' ? 'existe (este arquivo)' : 'NÃO existe'));
+
+  titulo('2. ONDE AS ABAS DA CAUTELA VÃO FICAR');
+  [[AP_CAUTELA_CFG.abaCautelas, AP_CAUTELA_CFG.colunasCautela],
+   [AP_CAUTELA_CFG.abaItens, AP_CAUTELA_CFG.colunasItem]].forEach(function (par) {
+    var nome = par[0];
+    var achada = AP_CAUTELA_procurar_(nome);
+    if (achada.aba) {
+      var largura = achada.aba.getLastColumn();
+      var cab = largura ? achada.aba.getRange(1, 1, 1, largura).getValues()[0] : [];
+      diz('  ' + nome + ': JÁ EXISTE — ' + achada.via);
+      diz('     linhas: ' + Math.max(0, achada.aba.getLastRow() - 1));
+      diz('     colunas: ' + cab.join(', '));
+      var faltam = par[1].filter(function (c) {
+        return cab.map(function (x) { return String(x).trim().toUpperCase(); }).indexOf(String(c).toUpperCase()) < 0;
+      });
+      diz('     colunas que o módulo vai ACRESCENTAR no fim: ' + (faltam.length ? faltam.join(', ') : 'nenhuma'));
+    } else {
+      diz('  ' + nome + ': ainda não existe. Vai ser CRIADA na planilha ativa no primeiro uso.');
+      diz('     por quê não achei: ' + (achada.tentativas || []).join('; '));
+      diz('     colunas que ela vai ter: ' + par[1].join(', '));
+    }
+  });
+
+  titulo('3. O QUE JÁ ESTÁ GRAVADO');
+  try {
+    var r = AP_CAUTELA_listar_({ incluirExcluidas: true });
+    diz('  cautelas: ' + r.dados.length);
+    r.dados.slice(0, 5).forEach(function (c) {
+      diz('    ' + c.numero + ' · ' + c.colaborador + ' · ' + c.itens.length + ' item(ns) · ' + c.status);
+    });
+    if (r.dados.length > 5) diz('    … e mais ' + (r.dados.length - 5));
+  } catch (e) {
+    diz('  ERRO ao ler: ' + e.message);
+  }
+
+  titulo('FIM — NADA FOI GRAVADO');
+  var texto = L.join('\n');
+  return { texto: texto, linhas: L };
+}
