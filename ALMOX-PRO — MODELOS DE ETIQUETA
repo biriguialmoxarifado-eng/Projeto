@@ -632,6 +632,28 @@ function AP_ETQM_etiquetasEmUso_() {
   return usadas;
 }
 
+/** Os numeros de serie que o cadastro de Patrimonio ja carrega.
+    Mesma ideia das etiquetas: {SERIE: [patrimonio, ...]}, a lista e
+    nao a contagem, porque e ela que denuncia a duplicidade. */
+function AP_ETQM_seriesEmUso_() {
+  var usados = {};
+  if (typeof AP_Modulo_patrimonio !== 'function') return usados;
+  var r = null;
+  try { r = AP_Modulo_patrimonio('listar', {}, {}); } catch (e) { return usados; }
+  if (!r || !r.ok) return usados;
+  var lista = r.dados;
+  if (Object.prototype.toString.call(lista) !== '[object Array]') {
+    lista = (lista && lista.dados) || (lista && lista.lista) || [];
+  }
+  lista.forEach(function (p) {
+    var n = AP_ETQM_txt_(p.numeroSerie || p.numero_serie || p.serie).toUpperCase();
+    if (!n) return;
+    if (!usados[n]) usados[n] = [];
+    usados[n].push(AP_ETQM_txt_(p.patrimonio) || AP_ETQM_txt_(p.id));
+  });
+  return usados;
+}
+
 function AP_ETQM_lotes_(payload) {
   var aba = AP_ETQM_abaLotes_();
   var idx = AP_ETQM_indice_(aba);
@@ -837,9 +859,14 @@ function AP_ETQM_encerrarLote_(payload, sessao) {
 /* ============================================================
    CONFERIR ANTES DE GRAVAR — FASE 3
    ------------------------------------------------------------
-   Recebe os pares {patrimonio, etiqueta} que a tela quer gravar e
-   devolve, um por um, o que vai acontecer. NADA É GRAVADO AQUI: é
-   a prévia que o item 3 do projeto exige.
+   Recebe os pares {patrimonio, etiqueta, serie} que a tela quer
+   gravar e devolve, um por um, o que vai acontecer. NADA É GRAVADO
+   AQUI: é a prévia que o item 3 do projeto exige.
+
+   O campo "serie" é opcional e foi acrescentado depois: sem ele, a
+   resposta é exatamente a de antes. Um equipamento pode receber só a
+   etiqueta, só a série, ou as duas — e há equipamento que não tem
+   série nenhuma, o que não é erro.
 
    A gravação em si vai pelo patrimonio.salvar que já existe — não
    escrevo um segundo caminho de escrita para a mesma coisa.
@@ -852,8 +879,10 @@ function AP_ETQM_conferir_(payload) {
   }
 
   var usadas = AP_ETQM_etiquetasEmUso_();
+  var series = AP_ETQM_seriesEmUso_();
   var lotes = AP_ETQM_lotes_({}).dados;
   var vistasAqui = {};
+  var seriesAqui = {};
   var saida = [];
   var quantos = { ok: 0, conflito: 0, troca: 0 };
 
@@ -861,14 +890,21 @@ function AP_ETQM_conferir_(payload) {
     var pat = AP_ETQM_txt_(par.patrimonio);
     var etq = AP_ETQM_txt_(par.etiqueta);
     var etqU = etq.toUpperCase();
-    var item = { patrimonio: pat, etiqueta: etq, pode: true, situacao: 'NOVA', aviso: '' };
+    var ser = AP_ETQM_txt_(par.serie || par.numeroSerie);
+    var serU = ser.toUpperCase();
+    var item = { patrimonio: pat, etiqueta: etq, serie: ser, pode: true,
+      situacao: 'NOVA', aviso: '', situacaoSerie: '', avisoSerie: '', muda: [] };
 
     if (!pat) {
       item.pode = false; item.situacao = 'SEM_PATRIMONIO';
       item.aviso = 'A linha não diz qual equipamento.';
-    } else if (!etq) {
+    } else if (!etq && !ser) {
       item.pode = false; item.situacao = 'SEM_ETIQUETA';
-      item.aviso = 'A linha não diz qual etiqueta.';
+      item.aviso = 'A linha não diz etiqueta nem número de série.';
+    } else if (!etq) {
+      /* só série: não é erro. A etiqueta de hoje fica como está. */
+      item.situacao = 'SO_SERIE';
+      item.aviso = 'Sem etiqueta nesta linha — a que o equipamento já tem não muda.';
     } else if (vistasAqui[etqU]) {
       /* a mesma etiqueta duas vezes NA PRÓPRIA LISTA */
       item.pode = false; item.situacao = 'REPETIDA_NA_LISTA';
@@ -884,6 +920,35 @@ function AP_ETQM_conferir_(payload) {
         item.aviso = 'O equipamento já tem esta etiqueta. Nada muda.';
       }
     }
+
+    /* ---- O NÚMERO DE SÉRIE ----
+       É do fabricante, não do sistema: não se gera, não se sugere e
+       não se corrige. Aqui só se confere se ele já está em outro
+       equipamento, porque duas máquinas com a mesma série quase
+       sempre querem dizer digitação errada. */
+    if (ser) {
+      if (seriesAqui[serU] && seriesAqui[serU] !== pat) {
+        item.pode = false; item.situacaoSerie = 'SERIE_REPETIDA_NA_LISTA';
+        item.avisoSerie = 'Esta série aparece mais de uma vez nesta mesma lista (também em ' +
+          seriesAqui[serU] + ').';
+      } else {
+        var outros = (series[serU] || []).filter(function (d) { return d !== pat; });
+        if (outros.length) {
+          item.pode = false; item.situacaoSerie = 'SERIE_EM_OUTRO';
+          item.avisoSerie = 'Esta série já está no equipamento ' + outros.join(', ') + '.';
+        } else if ((series[serU] || []).indexOf(pat) > -1) {
+          item.situacaoSerie = 'SERIE_JA_ERA_ESTA';
+          item.avisoSerie = 'O equipamento já tem esta série. Nada muda nela.';
+        } else {
+          item.situacaoSerie = 'SERIE_NOVA';
+          item.muda.push('serie');
+        }
+      }
+      if (item.pode) seriesAqui[serU] = pat;
+    }
+
+    /* o que de fato muda nesta linha */
+    if (etq && item.pode && item.situacao !== 'JA_ERA_ESTA') item.muda.push('etiqueta');
 
     /* de qual lote ela é */
     if (etq) {
@@ -904,7 +969,7 @@ function AP_ETQM_conferir_(payload) {
 
     if (item.pode && etq) vistasAqui[etqU] = pat;
     if (!item.pode) quantos.conflito++;
-    else if (item.situacao === 'JA_ERA_ESTA') quantos.troca++;
+    else if (!item.muda.length) quantos.troca++;
     else quantos.ok++;
 
     saida.push(item);
@@ -1001,4 +1066,3 @@ function AP_ETQM_ensaio_() {
   titulo('FIM — NADA FOI GRAVADO');
   return { texto: L.join('\n'), linhas: L };
 }
-
