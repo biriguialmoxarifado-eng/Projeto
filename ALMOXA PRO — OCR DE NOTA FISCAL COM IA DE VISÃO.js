@@ -707,7 +707,33 @@ function AP_OCR_produtosDoTexto_(linhas) {
     var qtd, vu, vt, confianca;
 
     if (decimais.length >= 3) {
-      var tres = decimais.slice(-3);
+      /**
+       * QUAL TRIO É QUANTIDADE, UNITÁRIO E TOTAL
+       *
+       * Pegar "os três últimos" funciona enquanto a linha termina no
+       * valor total. Numa DANFE com as colunas fiscais impressas —
+       * B.CALC ICMS, VALOR ICMS, VALOR IPI — a linha termina nelas, e
+       * os três últimos viram base de cálculo e imposto. Foi o que
+       * aconteceu com a nota da Dell: a quantidade saiu 38.343,18.
+       *
+       * Quem diz qual trio é o certo é a própria aritmética da nota:
+       * quantidade × unitário = total. Procuro o PRIMEIRO trio que
+       * fecha, porque as colunas de valor vêm antes das fiscais. Se
+       * nenhum fechar, caio nos três últimos, como era antes — aí a
+       * conta não bate e a linha já sai marcada.
+       */
+      var tres = null;
+      for (var t = 0; t + 2 < decimais.length; t++) {
+        var q1 = AP_OCR_numero_(decimais[t]);
+        var u1 = AP_OCR_numero_(decimais[t + 1]);
+        var v1 = AP_OCR_numero_(decimais[t + 2]);
+        if (!q1 || !v1) continue;
+        if (Math.abs(q1 * u1 - v1) <= Math.max(0.05, v1 * 0.02)) {
+          tres = [decimais[t], decimais[t + 1], decimais[t + 2]];
+          break;
+        }
+      }
+      if (!tres) tres = decimais.slice(-3);
       qtd = AP_OCR_numero_(tres[0]); vu = AP_OCR_numero_(tres[1]); vt = AP_OCR_numero_(tres[2]);
       confianca = 0.8;
     } else if (decimais.length === 2) {
@@ -731,8 +757,20 @@ function AP_OCR_produtosDoTexto_(linhas) {
     /* O CFOP vem DEPOIS do NCM. Procurando na linha inteira, o
        código do produto ("7898") era confundido com CFOP e saía
        apagado da descrição, deixando o 5102 no lugar dele. */
+    /**
+     * O CFOP NÃO PODE SAIR DE DENTRO DE UM VALOR
+     *
+     * "3.084,62" (o valor do ICMS) tem "3084" no meio, e o \b do
+     * lado do ponto e da vírgula fazia esse pedaço passar por CFOP.
+     * Foi assim que uma nota com CFOP 6108 saiu com CFOP 3084.
+     *
+     * Então o CFOP só vale quando os quatro dígitos NÃO estão
+     * encostados em separador decimal nem em outro dígito, e quando
+     * o primeiro dígito é um dos que a tabela de CFOP usa de fato
+     * (1, 2, 3 = entrada; 5, 6, 7 = saída — 4 não existe).
+     */
     var cauda = posNcm > -1 ? linha.slice(posNcm + ncm.length) : linha;
-    var cfop = (cauda.match(/\b[1-7]\d{3}\b/) || [])[0] || '';
+    var cfop = (cauda.match(/(?:^|[^\d.,])([1-35-7]\d{3})(?![\d.,])/) || [])[1] || '';
 
     /**
      * O CST/CSOSN VEM ENTRE O NCM E O CFOP
@@ -751,11 +789,27 @@ function AP_OCR_produtosDoTexto_(linhas) {
     if (posNcm > -1) {
       var posCfop = cfop ? cauda.indexOf(cfop) : -1;
       var meio = posCfop > 0 ? cauda.slice(0, posCfop) : '';
-      var achouCst = meio.match(/\b(\d{3})\b/);
+      /* mesmo cuidado do CFOP: três dígitos soltos, nunca pedaço de valor */
+      var achouCst = meio.match(/(?:^|[^\d.,])(\d{3})(?![\d.,])/);
       if (achouCst) cst = achouCst[1];
     }
 
+    /**
+     * O QUE PODE SER CÓDIGO DO PRODUTO
+     *
+     * Nem toda linha traz código: quando a coluna vem vazia, o
+     * primeiro token é a própria descrição. Era assim que "Mochila
+     * Dell 14-16 EcoLoop" perdia a palavra "Mochila" — ela virava
+     * código e sumia do nome do produto.
+     *
+     * Código de fornecedor quase sempre tem dígito (PD-0001, CAP001,
+     * 7898). Sem dígito, só aceito se vier todo em maiúscula, que é
+     * como os emissores imprimem código alfabético. Palavra escrita
+     * como palavra ("Mochila") fica onde é o lugar dela: na
+     * descrição.
+     */
     var codigo = (linha.match(/^\s*([A-Z0-9][A-Z0-9\.\-\/]{2,14})\b/i) || [])[1] || '';
+    if (codigo && !/\d/.test(codigo) && codigo !== codigo.toUpperCase()) codigo = '';
 
     /* A unidade é a coluna logo antes dos três números do fim.
        Procurar "a primeira unidade da linha" pegava o M de
@@ -808,6 +862,23 @@ function AP_OCR_produtosDoTexto_(linhas) {
      * marcado, para ser digitado na tela — ver a linha e escrever
      * duas palavras é muito melhor que não ver nada.
      */
+    /**
+     * A FAIXA DE RÓTULOS NÃO É PRODUTO — NEM COM NÚMEROS DO LADO
+     *
+     * Quando as colunas fiscais vêm apertadas, o OCR devolve o
+     * cabeçalho grudado com os valores da faixa de totais. A conta
+     * até "fecha" por acaso, e a linha entrava como item: foi assim
+     * que nasceu o produto "VALORIFI ALQUOTA", código "VALORICMS".
+     *
+     * Um produto tem nome. Se tudo o que sobrou na descrição e no
+     * código forem palavras de rótulo fiscal, isto não é item: é
+     * cabeçalho. Jogar fora é melhor que lançar lixo no estoque —
+     * e a pessoa vê a linha faltando, que é um erro visível.
+     */
+    var textoDaLinha = descricao + ' ' + codigo;
+    var temLetras = /[A-Za-zÀ-ú]{3}/.test(textoDaLinha);
+    if (temLetras && !AP_OCR_temPalavraDeProduto_(textoDaLinha)) return;
+
     var semDescricao = descricao.replace(/[^A-Za-zÀ-ú]/g, '').length < 3;
     if (semDescricao) descricao = codigo ? ('item ' + codigo) : '';
 
@@ -1073,6 +1144,23 @@ function AP_OCR_produtosPorFluxo_(linhas, unidades, jaRecortado) {
      * marcado, para ser digitado na tela — ver a linha e escrever
      * duas palavras é muito melhor que não ver nada.
      */
+    /**
+     * A FAIXA DE RÓTULOS NÃO É PRODUTO — NEM COM NÚMEROS DO LADO
+     *
+     * Quando as colunas fiscais vêm apertadas, o OCR devolve o
+     * cabeçalho grudado com os valores da faixa de totais. A conta
+     * até "fecha" por acaso, e a linha entrava como item: foi assim
+     * que nasceu o produto "VALORIFI ALQUOTA", código "VALORICMS".
+     *
+     * Um produto tem nome. Se tudo o que sobrou na descrição e no
+     * código forem palavras de rótulo fiscal, isto não é item: é
+     * cabeçalho. Jogar fora é melhor que lançar lixo no estoque —
+     * e a pessoa vê a linha faltando, que é um erro visível.
+     */
+    var textoDaLinha = descricao + ' ' + codigo;
+    var temLetras = /[A-Za-zÀ-ú]{3}/.test(textoDaLinha);
+    if (temLetras && !AP_OCR_temPalavraDeProduto_(textoDaLinha)) return;
+
     var semDescricao = descricao.replace(/[^A-Za-zÀ-ú]/g, '').length < 3;
     if (semDescricao) descricao = codigo ? ('item ' + codigo) : '';
 
@@ -1117,22 +1205,148 @@ var AP_OCR_ROTULOS_COLUNA = [
   'CODIGO', 'CÓDIGO', 'PRODUTO', 'PRODUTOS', 'DESCRICAO', 'DESCRIÇÃO', 'SERVICO', 'SERVIÇO',
   'SERVICOS', 'SERVIÇOS', 'NCM', 'SH', 'NCM/SH', 'CST', 'CSOSN', 'CFOP', 'UNID', 'UNIDADE',
   'QUANT', 'QUANTIDADE', 'VLR', 'VALOR', 'UNITARIO', 'UNITÁRIO', 'TOTAL', 'DESC', 'DESCONTO',
-  'BASE', 'CALC', 'CÁLC', 'ICMS', 'IPI', 'ALIQ', 'ALÍQ'
+  'BASE', 'CALC', 'CÁLC', 'ICMS', 'IPI', 'ALIQ', 'ALÍQ',
+  /* faltavam: são os que aparecem na faixa fiscal da direita, que é
+     justamente a mais apertada e a que o OCR mais gruda */
+  'ALIQUOTA', 'ALÍQUOTA', 'ALIQUOTAS', 'ALÍQUOTAS', 'BCALC', 'CALCULO', 'CÁLCULO',
+  'UNIT', 'QTD', 'QTDE', 'SERV', 'ITEM', 'ITENS', 'IPI%', 'ICMS%', 'PIS', 'COFINS',
+  'FCP', 'ST', 'SUBSTITUICAO', 'SUBSTITUIÇÃO',
+  /* ruído que a DANFE imprime no meio da faixa e o OCR arrasta junto:
+     o endereço de consulta da nota. Não é nome de produto nenhum. */
+  'WWW', 'HTTP', 'HTTPS', 'GOV', 'NFE', 'FAZENDA', 'PORTAL', 'CONSULTA',
+  'AUTENTICIDADE', 'SEFAZ'
 ];
 
-/** A linha é a faixa de rótulos das colunas? */
+function AP_OCR_semAcento_(s) {
+  return String(s).toUpperCase()
+    .replace(/[ÁÀÂÃÄ]/g, 'A').replace(/[ÉÈÊË]/g, 'E').replace(/[ÍÌÎÏ]/g, 'I')
+    .replace(/[ÓÒÔÕÖ]/g, 'O').replace(/[ÚÙÛÜ]/g, 'U').replace(/Ç/g, 'C');
+}
+
+var AP_OCR_ROTULOS_LIMPOS = null;
+function AP_OCR_rotulosLimpos_() {
+  if (!AP_OCR_ROTULOS_LIMPOS) {
+    AP_OCR_ROTULOS_LIMPOS = {};
+    AP_OCR_ROTULOS_COLUNA.forEach(function (r) {
+      var k = AP_OCR_semAcento_(r).replace(/[^A-Z%]/g, '');
+      if (k.length > 1) AP_OCR_ROTULOS_LIMPOS[k] = true;
+    });
+  }
+  return AP_OCR_ROTULOS_LIMPOS;
+}
+
+/**
+ * ESTE TOKEN É PALAVRA DE RÓTULO DE COLUNA?
+ *
+ * Na faixa fiscal da DANFE as colunas são estreitíssimas e o OCR
+ * entrega os rótulos grudados e mordidos: "VALOR ICMS" vira
+ * "VALORICMS", "ALÍQUOTA" vira "ALQUOTA", "VALOR IPI" vira
+ * "VALORIFI". Comparar palavra por palavra não pega nenhum dos três,
+ * e foi assim que a faixa de rótulos virou um produto chamado
+ * "VALORIFI ALQUOTA" com CFOP 3084.
+ *
+ * Então o reconhecimento tem três níveis, do mais seguro ao menos:
+ *   1. o token é um rótulo conhecido;
+ *   2. o token é a emenda de dois ou mais rótulos (VALORICMS);
+ *   3. o token está a uma letra de um rótulo (ALQUOTA → ALIQUOTA).
+ *
+ * O nível 3 só vale para token de 5 letras ou mais: abaixo disso uma
+ * letra de diferença é metade da palavra, e aí qualquer coisa casa.
+ */
+function AP_OCR_ehTokenDeRotulo_(token) {
+  var t = AP_OCR_semAcento_(token).replace(/[^A-Z%]/g, '');
+  if (t.length < 2) return false;
+  var rot = AP_OCR_rotulosLimpos_();
+  if (rot[t]) return true;
+
+  /* emenda de rótulos: VALORICMS = VALOR + ICMS */
+  if (AP_OCR_ehEmendaDeRotulos_(t, rot, 0)) return true;
+
+  /* uma letra de diferença */
+  if (t.length >= 5) {
+    var chaves = Object.keys(rot);
+    for (var i = 0; i < chaves.length; i++) {
+      if (chaves[i].length >= 5 && AP_OCR_umaLetraDeDiferenca_(t, chaves[i])) return true;
+    }
+    /* emenda com uma letra errada em um dos pedaços */
+    if (AP_OCR_ehEmendaDeRotulos_(t, rot, 1)) return true;
+  }
+  return false;
+}
+
+function AP_OCR_ehEmendaDeRotulos_(t, rot, folga) {
+  if (!t) return true;
+  var chaves = Object.keys(rot);
+  for (var i = 0; i < chaves.length; i++) {
+    var r = chaves[i];
+    if (r.length < 3) continue;
+    var pedaco = t.slice(0, r.length);
+    var casa = (pedaco === r) || (folga > 0 && pedaco.length === r.length &&
+      AP_OCR_umaLetraDeDiferenca_(pedaco, r));
+    if (casa && AP_OCR_ehEmendaDeRotulos_(t.slice(r.length), rot, casa && pedaco === r ? folga : folga - 1)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** troca, sobra ou falta de UMA letra */
+function AP_OCR_umaLetraDeDiferenca_(a, b) {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  if (a.length === b.length) {
+    var dif = 0;
+    for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) { dif++; if (dif > 1) return false; }
+    return dif === 1;
+  }
+  var curto = a.length < b.length ? a : b, longo = a.length < b.length ? b : a;
+  for (var j = 0, k = 0, pulou = 0; j < longo.length; j++) {
+    if (curto[k] === longo[j]) k++;
+    else { pulou++; if (pulou > 1) return false; }
+  }
+  return true;
+}
+
+/**
+ * A LINHA É A FAIXA DE RÓTULOS DAS COLUNAS?
+ *
+ * O que mudou: antes, bastava a linha ter UM número para deixar de
+ * ser considerada faixa de rótulos. Numa nota com as colunas
+ * apertadas o OCR junta o rótulo com o valor da coluna ao lado, a
+ * linha passa a ter número, e a faixa inteira entra como produto —
+ * exatamente o que aconteceu. Agora quem decide é a densidade de
+ * rótulos; o número deixou de ter poder de veto.
+ */
 function AP_OCR_ehLinhaDeRotulos_(texto) {
-  var limpo = String(texto).toUpperCase().replace(/[^A-ZÀ-Ú0-9\/\.\s]/g, ' ');
-  var palavras = limpo.split(/[\s\/\.]+/).filter(function (t) { return t.length > 1; });
+  var limpo = AP_OCR_semAcento_(texto).replace(/[^A-Z0-9%\/\.\s]/g, ' ');
+  var palavras = limpo.split(/[\s\/\.]+/).filter(function (t) {
+    return t.length > 1 && /[A-Z]/.test(t);
+  });
   if (palavras.length < 3) return false;
 
-  var rotulos = palavras.filter(function (t) {
-    return AP_OCR_ROTULOS_COLUNA.indexOf(t) > -1;
-  }).length;
+  /* Numa faixa curta — o pedaço de cabeçalho que escorregou sozinho
+     para dentro da tabela — exigir três rótulos deixa passar. Duas
+     palavras, ambas rótulo, já é faixa de cabeçalho. */
+  var rotulos = palavras.filter(AP_OCR_ehTokenDeRotulo_).length;
+  var minimo = palavras.length <= 4 ? 2 : 3;
+  return rotulos >= minimo && (rotulos / palavras.length) >= 0.6;
+}
 
-  /* rótulo é linha sem número de verdade e quase só de rótulos */
-  var temNumeroDeItem = /\d{1,3}(?:\.\d{3})*,\d{1,4}|\d+,\d{1,4}|\b\d{8}\b/.test(texto);
-  return !temNumeroDeItem && rotulos >= 3 && (rotulos / palavras.length) >= 0.5;
+/**
+ * SOBROU ALGUMA PALAVRA DE PRODUTO DE VERDADE?
+ *
+ * Um produto tem nome: "MICROCOMPUTADOR", "MOCHILA", "CAPACETE".
+ * Se tudo o que sobrou na descrição e no código forem palavras de
+ * rótulo fiscal, não é produto nenhum — é a faixa de cabeçalho que
+ * escorregou para dentro da tabela.
+ */
+function AP_OCR_temPalavraDeProduto_(texto) {
+  var palavras = AP_OCR_semAcento_(texto).replace(/[^A-Z\s]/g, ' ')
+    .split(/\s+/).filter(function (t) { return t.length >= 3; });
+  for (var i = 0; i < palavras.length; i++) {
+    if (!AP_OCR_ehTokenDeRotulo_(palavras[i])) return true;
+  }
+  return false;
 }
 
 /**
