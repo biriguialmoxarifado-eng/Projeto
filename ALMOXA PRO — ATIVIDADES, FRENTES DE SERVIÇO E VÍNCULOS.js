@@ -72,7 +72,13 @@ var AP_VINC_CFG = {
   abaAtividades: 'ALMOXA_ATIVIDADES',
   colunasAtividade: [
     'ID', 'CODIGO', 'NOME', 'TIPO', 'FRENTE',
-    'CENTRO_CUSTO', 'CENTRO_CUSTO_NOME', 'OBRA', 'RESPONSAVEL', 'OBSERVACAO',
+    'CENTRO_CUSTO', 'CENTRO_CUSTO_NOME', 'OBRA',
+    /* O RESPONSAVEL E UMA PESSOA DO CADASTRO, NAO UM TEXTO LIVRE.
+       RESPONSAVEL_ID é quem manda — é a chave do colaborador no
+       cadastro central, a mesma usada em todo o resto do sistema.
+       Nome e matrícula vão junto só para dar para ler a planilha a
+       olho; se a pessoa trocar de nome, quem vale é o id. */
+    'RESPONSAVEL', 'RESPONSAVEL_ID', 'RESPONSAVEL_MATRICULA', 'OBSERVACAO',
     'STATUS', 'CRIADO_EM', 'CRIADO_POR', 'ALTERADO_EM', 'ALTERADO_POR', 'MOTIVO'
   ],
 
@@ -306,6 +312,8 @@ function AP_VINC_atividadeEmObjeto_(linha, idx) {
     centroCustoNome: AP_VINC_txt_(AP_VINC_pegar_(linha, idx, 'CENTRO_CUSTO_NOME')),
     obra: AP_VINC_txt_(AP_VINC_pegar_(linha, idx, 'OBRA')),
     responsavel: AP_VINC_txt_(AP_VINC_pegar_(linha, idx, 'RESPONSAVEL')),
+    responsavelId: AP_VINC_txt_(AP_VINC_pegar_(linha, idx, 'RESPONSAVEL_ID')),
+    responsavelMatricula: AP_VINC_txt_(AP_VINC_pegar_(linha, idx, 'RESPONSAVEL_MATRICULA')),
     observacao: AP_VINC_txt_(AP_VINC_pegar_(linha, idx, 'OBSERVACAO')),
     status: AP_VINC_txt_(AP_VINC_pegar_(linha, idx, 'STATUS')) || 'ATIVA',
     criadoEm: AP_VINC_txt_(AP_VINC_pegar_(linha, idx, 'CRIADO_EM')),
@@ -402,6 +410,8 @@ function AP_VINC_atividadeSalvar_(payload, sessao) {
     CENTRO_CUSTO_NOME: AP_VINC_txt_(payload.centroCustoNome),
     OBRA: AP_VINC_txt_(payload.obra),
     RESPONSAVEL: AP_VINC_txt_(payload.responsavel),
+    RESPONSAVEL_ID: AP_VINC_txt_(payload.responsavelId),
+    RESPONSAVEL_MATRICULA: AP_VINC_txt_(payload.responsavelMatricula),
     OBSERVACAO: AP_VINC_txt_(payload.observacao),
     ALTERADO_EM: agora,
     ALTERADO_POR: autor,
@@ -865,6 +875,10 @@ function AP_VINC_testes() {
   conf('texto nulo', AP_VINC_txt_(undefined), '');
   conf('tipos conhecidos tem SAIDA', AP_VINC_CFG.tiposMov.indexOf('SAIDA') >= 0, 'true');
   conf('limite por chamada', AP_VINC_CFG.maxPorChamada > 0, 'true');
+  conf('o responsavel guarda o id do colaborador',
+    AP_VINC_CFG.colunasAtividade.indexOf('RESPONSAVEL_ID') > 0, 'true');
+  conf('e a matricula para leitura',
+    AP_VINC_CFG.colunasAtividade.indexOf('RESPONSAVEL_MATRICULA') > 0, 'true');
 
   /* as ações recusadas devem recusar sem gravar: testa só o caminho
      que não chega na aba */
@@ -878,7 +892,7 @@ function AP_VINC_testes() {
 
   var saida = falhas.length
     ? 'FALHOU (' + falhas.length + '):\n  ' + falhas.join('\n  ')
-    : 'Os ' + 15 + ' testes passaram. Nenhuma linha foi gravada.';
+    : 'Os 17 testes passaram. Nenhuma linha foi gravada.';
   Logger.log(saida);
   return saida;
 }
