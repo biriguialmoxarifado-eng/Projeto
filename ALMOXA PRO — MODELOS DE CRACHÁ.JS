@@ -156,7 +156,8 @@ function AP_CRM_oficiais_() {
         fundo: '#FFFFFF', texto: '#17202A', apoio: '#5F6B7A',
         faixa: '#0B4C8C', faixa2: '#1C9AD6', preta: '#15181C',
         fonte: 'Arial, Helvetica, sans-serif',
-        tamanhoNome: 13, tamanhoDado: 10
+        tamanhoNome: 13, tamanhoDado: 10,
+        fotoBordaCor: '#FFFFFF'
       },
       /* MEDIDO no crachá oficial, em % do cartão. Não é chute:
          logotipo 70,4 de largura a 13,5 do topo; foto 44,9 de
@@ -166,7 +167,10 @@ function AP_CRM_oficiais_() {
       campos: {
         logoLargura: 56, logoTopo: 10,
         fotoEsq: 43.3, fotoTopo: 44.3, fotoLargura: 44.9, fotoAltura: 33.6,
-        nomeTopo: 83.8, nomeTamanho: 5.5
+        nomeTopo: 83.8, nomeTamanho: 5.5,
+        /* [v230] a moldura da foto virou ajustavel na tela; estes
+           sao os valores com que o oficial sai de fabrica. */
+        fotoRaio: 9, fotoBorda: 0, fotoSombra: 28
       },
       logo: ''
     }
