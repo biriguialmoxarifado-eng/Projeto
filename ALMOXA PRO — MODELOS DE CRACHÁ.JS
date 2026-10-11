@@ -164,7 +164,7 @@ function AP_CRM_oficiais_() {
          topo com letra de 5,5% da altura (4,7 mm num cartão de
          85,6 mm). */
       campos: {
-        logoLargura: 70, logoTopo: 13.5,
+        logoLargura: 56, logoTopo: 10,
         fotoEsq: 43.3, fotoTopo: 44.3, fotoLargura: 44.9, fotoAltura: 33.6,
         nomeTopo: 83.8, nomeTamanho: 5.5
       },
