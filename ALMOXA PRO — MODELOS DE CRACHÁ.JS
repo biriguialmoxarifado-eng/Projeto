@@ -73,7 +73,7 @@ var AP_CRM_CFG = {
   colunas: [
     'ID', 'NOME', 'BASE', 'VERSAO',
     'LARGURA_MM', 'ALTURA_MM', 'ORIENTACAO', 'BORDA',
-    'FRENTE', 'VERSO', 'ESTILO', 'LOGO',
+    'FRENTE', 'VERSO', 'ESTILO', 'CAMPOS', 'LOGO',
     'PADRAO', 'STATUS', 'OBSERVACAO',
     'CRIADO_EM', 'CRIADO_POR', 'ALTERADO_EM', 'ALTERADO_POR', 'MOTIVO'
   ],
@@ -126,12 +126,19 @@ function AP_CRM_oficiais_() {
       id: 'OFICIAL-2',
       nome: 'Modelo 2 — Oficial COESA',
       base: '',
-      versao: '1.0',
-      /* a referência que o Ismael mandou é o COESA_Crachá_92x57mm.pdf */
-      larguraMm: 92,
-      alturaMm: 57,
-      orientacao: 'PAISAGEM',
-      borda: 'RETA',
+      versao: '1.1',
+      /* O CARTÃO, E NÃO A FOLHA.
+         O arquivo de referência chama-se COESA_Crachá_92x57mm.pdf,
+         e eu li 92 × 57 como se fosse o cartão. Não é: aquilo é a
+         folha com frente e verso lado a lado. O crachá em si é
+         CR80 — 85,6 × 54 mm —, que é o cartão de PVC que a
+         impressora de cartão aceita, e fica EM PÉ: 54 de largura
+         por 85,6 de altura. A proporção do desenho da referência
+         (0,63) é exatamente 54 ÷ 85,6. */
+      larguraMm: 54,
+      alturaMm: 85.6,
+      orientacao: 'RETRATO',
+      borda: 'ARREDONDADA',
       oficial: true,
       frente: {
         logo: true, marca: false, foto: true, nome: true, funcao: false,
@@ -147,8 +154,19 @@ function AP_CRM_oficiais_() {
       },
       estilo: {
         fundo: '#FFFFFF', texto: '#17202A', apoio: '#5F6B7A',
-        faixa: '#0B2A55', faixa2: '#1C9AD6', fonte: 'Arial, Helvetica, sans-serif',
-        tamanhoNome: 17, tamanhoDado: 12
+        faixa: '#0B4C8C', faixa2: '#1C9AD6', preta: '#15181C',
+        fonte: 'Arial, Helvetica, sans-serif',
+        tamanhoNome: 13, tamanhoDado: 10
+      },
+      /* MEDIDO no crachá oficial, em % do cartão. Não é chute:
+         logotipo 70,4 de largura a 13,5 do topo; foto 44,9 de
+         largura a 43,3 da esquerda e 44,3 do topo; nome a 83,8 do
+         topo com letra de 5,5% da altura (4,7 mm num cartão de
+         85,6 mm). */
+      campos: {
+        logoLargura: 70, logoTopo: 13.5,
+        fotoEsq: 43.3, fotoTopo: 44.3, fotoLargura: 44.9, fotoAltura: 33.6,
+        nomeTopo: 83.8, nomeTamanho: 5.5
       },
       logo: ''
     }
@@ -170,12 +188,18 @@ function AP_Modulo_crachaModelos(acao, payload, sessao) {
       case 'duplicar':     return AP_CRM_duplicar_(payload, sessao);
       case 'excluir':      return AP_CRM_excluir_(payload, sessao);
       case 'definirPadrao':return AP_CRM_definirPadrao_(payload, sessao);
+      case 'obterLogo':    return { ok: true, dados: { logo: AP_CRM_logoEmpresa_() } };
+      case 'salvarLogo':   return AP_CRM_salvarLogo_(payload, sessao);
+      case 'obterArte':    return { ok: true, dados: { arte: AP_CRM_arte_(payload) } };
+      case 'salvarArte':   return AP_CRM_salvarArte_(payload, sessao);
+      case 'removerArte':  return AP_CRM_removerArte_(payload, sessao);
       case 'diagnostico':  return { ok: true, dados: AP_CRM_diagnostico_() };
       default:
         return { ok: false, codigo: 'ACAO_DESCONHECIDA',
           mensagem: 'Os modelos de crachá não conhecem a ação "' + acao +
             '". Conhece: listar, obter, salvar, duplicar, excluir, ' +
-            'definirPadrao, diagnostico.' };
+            'definirPadrao, obterLogo, salvarLogo, obterArte, salvarArte, ' +
+            'removerArte, diagnostico.' };
     }
   } catch (e) {
     return { ok: false, codigo: 'ERRO', mensagem: e.message,
@@ -313,6 +337,243 @@ function AP_CRM_ehOficial_(id) { return !!AP_CRM_oficialPorId_(id); }
 
 
 /* ============================================================
+   O LOGOTIPO DA EMPRESA
+   ------------------------------------------------------------
+   Fica numa linha só, com ID fixo, e vale para TODOS os modelos
+   que não tenham um logotipo próprio.
+
+   Por que não repetir o arquivo em cada modelo: porque a marca da
+   empresa é uma só. Guardada em cada linha, trocar o logotipo
+   viraria uma caçada por todas elas, e a primeira esquecida sairia
+   impressa com a marca velha.
+
+   Isto NÃO é alterar modelo oficial: o oficial continua com a
+   mesma configuração. O que muda é de onde ele busca a marca.
+   ============================================================ */
+var AP_CRM_ID_LOGO = 'LOGO-EMPRESA';
+
+function AP_CRM_logoEmpresa_() {
+  try {
+    var aba = AP_CRM_aba_();
+    var idx = AP_CRM_indice_(aba);
+    var linhas = AP_CRM_linhas_(aba);
+    for (var i = 0; i < linhas.length; i++) {
+      if (AP_CRM_txt_(AP_CRM_pegar_(linhas[i], idx, 'ID')) === AP_CRM_ID_LOGO) {
+        return AP_CRM_txt_(AP_CRM_pegar_(linhas[i], idx, 'LOGO'));
+      }
+    }
+  } catch (e) {}
+  return '';
+}
+
+function AP_CRM_salvarLogo_(payload, sessao) {
+  var logo = AP_CRM_txt_(payload.logo);
+  if (!logo) {
+    return { ok: false, codigo: 'SEM_LOGO',
+      mensagem: 'Nenhum arquivo foi enviado.' };
+  }
+  if (logo.length > AP_CRM_CFG.limiteLogo) {
+    return { ok: false, codigo: 'LOGO_GRANDE',
+      mensagem: 'O logotipo tem ' + Math.round(logo.length / 1024) + ' KB e o limite de ' +
+        'uma célula da planilha é ' + Math.round(AP_CRM_CFG.limiteLogo / 1024) + ' KB. ' +
+        'Exporte o logotipo em PNG com uns 400 px de largura — num crachá de 54 mm ' +
+        'isso já passa de 180 dpi, que é mais do que a impressora de cartão usa.' };
+  }
+
+  var aba = AP_CRM_aba_();
+  var idx = AP_CRM_indice_(aba);
+  var largura = aba.getLastColumn();
+  var linhas = AP_CRM_linhas_(aba);
+  var agora = AP_CRM_agora_();
+  var autor = AP_CRM_quem_(sessao);
+
+  for (var i = 0; i < linhas.length; i++) {
+    if (AP_CRM_txt_(AP_CRM_pegar_(linhas[i], idx, 'ID')) !== AP_CRM_ID_LOGO) continue;
+    var nova = linhas[i].slice();
+    function por(col, v) {
+      var k = idx[col];
+      if (k !== undefined) nova[k] = v;
+    }
+    por('LOGO', logo);
+    por('ALTERADO_EM', agora);
+    por('ALTERADO_POR', autor);
+    por('MOTIVO', AP_CRM_txt_(payload.motivo) || 'logotipo substituído');
+    aba.getRange(i + 2, 1, 1, largura).setValues([nova]);
+    return { ok: true, dados: { substituido: true },
+      mensagem: 'Logotipo atualizado. Todos os modelos passam a usar o novo arquivo.' };
+  }
+
+  aba.appendRow(AP_CRM_montar_(idx, largura, {
+    ID: AP_CRM_ID_LOGO,
+    NOME: 'Logotipo da empresa',
+    STATUS: 'ATIVO',
+    LOGO: logo,
+    OBSERVACAO: 'Linha de configuração, não é um modelo.',
+    CRIADO_EM: agora, CRIADO_POR: autor
+  }));
+  return { ok: true, dados: { criado: true },
+    mensagem: 'Logotipo guardado. Todos os modelos passam a usá-lo.' };
+}
+
+
+/* ============================================================
+   A ARTE ORIGINAL DO CARTÃO
+   ------------------------------------------------------------
+   É o item 77 do prompt, e é a única forma de o crachá sair
+   IDÊNTICO ao oficial: em vez de eu redesenhar fundo e logotipo —
+   que é o que os itens 9 e 13 proíbem —, a arte verdadeira entra
+   como imagem e o sistema só escreve por cima dela a foto, o nome
+   e a matrícula.
+
+   POR QUE EM PEDAÇOS
+   Uma célula do Sheets não guarda 50.000 caracteres. A arte de um
+   cartão a 300 dpi, em base64, passa de 300 KB. Então ela é
+   partida em pedaços de 45 KB, um por linha, e remontada na
+   leitura. Não é gambiarra: é o que cabe no banco que existe.
+
+   A arte antiga não é apagada quando entra uma nova: as linhas
+   viram SUBSTITUIDA e ficam. Crachá já impresso tem direito a
+   saber com que arte foi impresso.
+   ============================================================ */
+var AP_CRM_PEDACO = 45000;
+var AP_CRM_MAX_PEDACOS = 16;
+
+function AP_CRM_chaveArte_(modeloId, lado) {
+  return 'ARTE|' + AP_CRM_txt_(modeloId).toUpperCase() + '|' +
+    AP_CRM_txt_(lado).toUpperCase();
+}
+
+/* payload: { modeloId, lado } */
+function AP_CRM_arte_(payload) {
+  payload = payload || {};
+  var chave = AP_CRM_chaveArte_(payload.modeloId, payload.lado);
+  var pedacos = [];
+  try {
+    var aba = AP_CRM_aba_();
+    var idx = AP_CRM_indice_(aba);
+    AP_CRM_linhas_(aba).forEach(function (l) {
+      var id = AP_CRM_txt_(AP_CRM_pegar_(l, idx, 'ID'));
+      if (id.indexOf(chave + '|') !== 0) return;
+      if (AP_CRM_txt_(AP_CRM_pegar_(l, idx, 'STATUS')).toUpperCase() !== 'ATIVO') return;
+      var n = parseInt(id.split('|')[3], 10);
+      if (isNaN(n)) return;
+      pedacos.push({ n: n, texto: AP_CRM_txt_(AP_CRM_pegar_(l, idx, 'LOGO')) });
+    });
+  } catch (e) { return ''; }
+
+  if (!pedacos.length) return '';
+  pedacos.sort(function (a, b) { return a.n - b.n; });
+  /* pedaço faltando = arte quebrada. Melhor devolver vazio e o
+     cartão desenhar o fundo próprio do que montar uma imagem
+     truncada que o navegador mostra pela metade. */
+  for (var i = 0; i < pedacos.length; i++) {
+    if (pedacos[i].n !== i + 1) return '';
+  }
+  return pedacos.map(function (p) { return p.texto; }).join('');
+}
+
+function AP_CRM_temArte_(modeloId, lado) {
+  return !!AP_CRM_arte_({ modeloId: modeloId, lado: lado });
+}
+
+function AP_CRM_aposentarArte_(aba, idx, chave, autor, motivo) {
+  var largura = aba.getLastColumn();
+  var linhas = AP_CRM_linhas_(aba);
+  var agora = AP_CRM_agora_();
+  var quantos = 0;
+  for (var i = 0; i < linhas.length; i++) {
+    var id = AP_CRM_txt_(AP_CRM_pegar_(linhas[i], idx, 'ID'));
+    if (id.indexOf(chave + '|') !== 0) continue;
+    if (AP_CRM_txt_(AP_CRM_pegar_(linhas[i], idx, 'STATUS')).toUpperCase() !== 'ATIVO') continue;
+    var nova = linhas[i].slice();
+    if (idx['STATUS'] !== undefined) nova[idx['STATUS']] = 'SUBSTITUIDA';
+    if (idx['ALTERADO_EM'] !== undefined) nova[idx['ALTERADO_EM']] = agora;
+    if (idx['ALTERADO_POR'] !== undefined) nova[idx['ALTERADO_POR']] = autor;
+    if (idx['MOTIVO'] !== undefined) nova[idx['MOTIVO']] = motivo;
+    aba.getRange(i + 2, 1, 1, largura).setValues([nova]);
+    quantos++;
+  }
+  return quantos;
+}
+
+/* payload: { modeloId, lado, arte } */
+function AP_CRM_salvarArte_(payload, sessao) {
+  var modeloId = AP_CRM_txt_(payload.modeloId);
+  var lado = AP_CRM_txt_(payload.lado).toLowerCase();
+  var arte = AP_CRM_txt_(payload.arte);
+
+  if (!modeloId) {
+    return { ok: false, codigo: 'SEM_MODELO', mensagem: 'Informe de qual modelo é a arte.' };
+  }
+  if (lado !== 'frente' && lado !== 'verso') {
+    return { ok: false, codigo: 'LADO_INVALIDO',
+      mensagem: 'O lado precisa ser "frente" ou "verso".' };
+  }
+  if (!arte) {
+    return { ok: false, codigo: 'SEM_ARTE', mensagem: 'Nenhuma imagem foi enviada.' };
+  }
+  if (arte.indexOf('data:image/') !== 0 && arte.indexOf('http') !== 0) {
+    return { ok: false, codigo: 'ARTE_INVALIDA',
+      mensagem: 'A arte precisa ser uma imagem (PNG, JPG) ou um endereço http.' };
+  }
+
+  var total = Math.ceil(arte.length / AP_CRM_PEDACO);
+  if (total > AP_CRM_MAX_PEDACOS) {
+    return { ok: false, codigo: 'ARTE_GRANDE',
+      mensagem: 'A arte tem ' + Math.round(arte.length / 1024) + ' KB e o máximo aqui é ' +
+        Math.round(AP_CRM_PEDACO * AP_CRM_MAX_PEDACOS / 1024) + ' KB. ' +
+        'Exporte em JPG a 300 dpi: para um cartão de 54 mm isso dá 640 px de largura, ' +
+        'que costuma ficar em torno de 150 KB.' };
+  }
+
+  var aba = AP_CRM_aba_();
+  var idx = AP_CRM_indice_(aba);
+  var largura = aba.getLastColumn();
+  var agora = AP_CRM_agora_();
+  var autor = AP_CRM_quem_(sessao);
+  var chave = AP_CRM_chaveArte_(modeloId, lado);
+
+  var aposentados = AP_CRM_aposentarArte_(aba, idx, chave, autor,
+    AP_CRM_txt_(payload.motivo) || 'arte substituída');
+
+  var novas = [];
+  for (var i = 0; i < total; i++) {
+    novas.push(AP_CRM_montar_(idx, largura, {
+      ID: chave + '|' + (i + 1),
+      NOME: 'Arte ' + lado + ' do modelo ' + modeloId + ' (' + (i + 1) + '/' + total + ')',
+      STATUS: 'ATIVO',
+      LOGO: arte.substr(i * AP_CRM_PEDACO, AP_CRM_PEDACO),
+      OBSERVACAO: 'Linha de arte, não é um modelo.',
+      CRIADO_EM: agora, CRIADO_POR: autor
+    }));
+  }
+  aba.getRange(aba.getLastRow() + 1, 1, novas.length, largura).setValues(novas);
+  SpreadsheetApp.flush();
+
+  return { ok: true,
+    dados: { modeloId: modeloId, lado: lado, pedacos: total,
+      tamanhoKb: Math.round(arte.length / 1024), aposentados: aposentados },
+    mensagem: 'Arte da ' + lado + ' guardada (' + Math.round(arte.length / 1024) +
+      ' KB em ' + total + ' pedaço(s)).' +
+      (aposentados ? ' A arte anterior ficou guardada como histórico.' : '') };
+}
+
+function AP_CRM_removerArte_(payload, sessao) {
+  var chave = AP_CRM_chaveArte_(payload.modeloId, payload.lado);
+  var aba = AP_CRM_aba_();
+  var idx = AP_CRM_indice_(aba);
+  var quantos = AP_CRM_aposentarArte_(aba, idx, chave, AP_CRM_quem_(sessao),
+    AP_CRM_txt_(payload.motivo) || 'arte removida');
+  if (!quantos) {
+    return { ok: false, codigo: 'NAO_ENCONTRADO',
+      mensagem: 'Esse modelo não tem arte guardada nesse lado.' };
+  }
+  return { ok: true, dados: { pedacos: quantos },
+    mensagem: 'Arte removida. O cartão volta a usar o desenho próprio do modelo.' };
+}
+
+
+/* ============================================================
    LER
    ============================================================ */
 function AP_CRM_emObjeto_(linha, idx) {
@@ -328,6 +589,8 @@ function AP_CRM_emObjeto_(linha, idx) {
     frente: AP_CRM_json_(AP_CRM_pegar_(linha, idx, 'FRENTE')),
     verso: AP_CRM_json_(AP_CRM_pegar_(linha, idx, 'VERSO')),
     estilo: AP_CRM_json_(AP_CRM_pegar_(linha, idx, 'ESTILO')),
+    /* onde cada campo fica no cartão, em % — o que o editor move */
+    campos: AP_CRM_json_(AP_CRM_pegar_(linha, idx, 'CAMPOS')),
     logo: AP_CRM_txt_(AP_CRM_pegar_(linha, idx, 'LOGO')),
     padrao: AP_CRM_txt_(AP_CRM_pegar_(linha, idx, 'PADRAO')).toUpperCase() === 'SIM',
     status: AP_CRM_txt_(AP_CRM_pegar_(linha, idx, 'STATUS')) || 'ATIVO',
@@ -351,6 +614,8 @@ function AP_CRM_listar_(payload) {
     AP_CRM_linhas_(aba).forEach(function (l) {
       var m = AP_CRM_emObjeto_(l, idx);
       if (!m.id) return;
+      if (m.id === AP_CRM_ID_LOGO) return;   /* é configuração, não é modelo */
+      if (m.id.indexOf('ARTE|') === 0) return;  /* é pedaço de arte */
       if (!incluirExcluidos && String(m.status).toUpperCase() === 'EXCLUIDO') return;
       salvos.push(m);
     });
@@ -360,6 +625,22 @@ function AP_CRM_listar_(payload) {
   }
 
   var fora = AP_CRM_oficiais_().concat(salvos);
+
+  /* quem tem arte original guardada. A arte em si NÃO vem na
+     listagem: seriam centenas de KB em cada abertura de tela.
+     A tela pede a arte do modelo que vai desenhar, uma por vez. */
+  fora.forEach(function (m) {
+    m.temArteFrente = AP_CRM_temArte_(m.id, 'frente');
+    m.temArteVerso = AP_CRM_temArte_(m.id, 'verso');
+  });
+
+  /* o logotipo da empresa entra em quem não tem o seu */
+  var daEmpresa = AP_CRM_logoEmpresa_();
+  if (daEmpresa) {
+    fora.forEach(function (m) {
+      if (!m.logo) { m.logo = daEmpresa; m.logoDaEmpresa = true; }
+    });
+  }
 
   /* qual é o padrão: o marcado, senão o Modelo 1 */
   var temPadrao = false;
@@ -401,7 +682,7 @@ function AP_CRM_validar_(payload) {
       'Reduza a imagem (uma PNG de 300×300 costuma bastar) ou use um link em vez do arquivo');
   }
 
-  ['frente', 'verso', 'estilo'].forEach(function (k) {
+  ['frente', 'verso', 'estilo', 'campos'].forEach(function (k) {
     var t = '';
     try { t = JSON.stringify(payload[k] || {}); } catch (e) { t = ''; }
     if (t.length > AP_CRM_CFG.limiteJson) {
@@ -459,6 +740,7 @@ function AP_CRM_salvar_(payload, sessao) {
     FRENTE: JSON.stringify(payload.frente || {}),
     VERSO: JSON.stringify(payload.verso || {}),
     ESTILO: JSON.stringify(payload.estilo || {}),
+    CAMPOS: JSON.stringify(payload.campos || {}),
     LOGO: AP_CRM_txt_(payload.logo),
     OBSERVACAO: AP_CRM_txt_(payload.observacao),
     ALTERADO_EM: agora,
@@ -512,6 +794,7 @@ function AP_CRM_duplicar_(payload, sessao) {
     frente: base.frente,
     verso: base.verso,
     estilo: base.estilo,
+    campos: base.campos,
     logo: base.logo,
     observacao: 'Criado a partir de ' + base.nome,
     motivo: AP_CRM_txt_(payload.motivo)
@@ -644,9 +927,7 @@ function AP_CRM_testes() {
   conf('existem dois oficiais', of.length, 2);
   conf('o primeiro e o Modelo 1', of[0].id, 'OFICIAL-1');
   conf('o segundo e o COESA', of[1].id, 'OFICIAL-2');
-  conf('o COESA e 92 mm de largura', of[1].larguraMm, 92);
-  conf('e 57 mm de altura', of[1].alturaMm, 57);
-  conf('o COESA e paisagem', of[1].orientacao, 'PAISAGEM');
+  conf('o COESA tem medida de cartao PVC', of[1].larguraMm, 54);
   conf('o COESA mostra matricula', of[1].frente.matricula, 'true');
   conf('o COESA NAO mostra CPF na frente', of[1].frente.cpf, 'false');
   conf('o Modelo 1 continua com CPF', of[0].frente.cpf, 'true');
@@ -683,9 +964,30 @@ function AP_CRM_testes() {
   var d = AP_Modulo_crachaModelos('acao_que_nao_existe', {}, {});
   conf('acao desconhecida recusa', d.ok, 'false');
 
+  conf('o COESA e CR80 em pe: 54 de largura', of[1].larguraMm, 54);
+  conf('e 85,6 de altura', of[1].alturaMm, 85.6);
+  conf('e RETRATO', of[1].orientacao, 'RETRATO');
+  conf('logo vazio recusa', AP_CRM_salvarLogo_({}, {}).ok, 'false');
+  conf('arte sem modelo recusa', AP_CRM_salvarArte_({ lado: 'frente', arte: 'x' }, {}).ok, 'false');
+  conf('arte com lado errado recusa',
+    AP_CRM_salvarArte_({ modeloId: 'X', lado: 'cima', arte: 'data:image/png;base64,A' }, {}).codigo,
+    'LADO_INVALIDO');
+  conf('arte que nao e imagem recusa',
+    AP_CRM_salvarArte_({ modeloId: 'X', lado: 'frente', arte: 'oi' }, {}).codigo,
+    'ARTE_INVALIDA');
+  conf('a chave da arte e previsivel',
+    AP_CRM_chaveArte_('crm-1', 'Frente'), 'ARTE|CRM-1|FRENTE');
+  conf('o COESA traz as posicoes medidas', of[1].campos.fotoEsq, 43.3);
+  conf('e o tamanho do nome medido', of[1].campos.nomeTamanho, 5.5);
+  conf('existe coluna para guardar as posicoes',
+    AP_CRM_CFG.colunas.indexOf('CAMPOS') > 0, 'true');
+  var lg = AP_CRM_salvarLogo_({ logo: grande }, {});
+  conf('logo grande recusa', lg.ok, 'false');
+  conf('e diz quantos px exportar', /400 px/.test(lg.mensagem), 'true');
+
   var saida = falhas.length
     ? 'FALHOU (' + falhas.length + '):\n  ' + falhas.join('\n  ')
-    : 'Os 25 testes passaram. Nenhuma linha foi gravada.';
+    : 'Os 36 testes passaram. Nenhuma linha foi gravada.';
   Logger.log(saida);
   return saida;
 }
