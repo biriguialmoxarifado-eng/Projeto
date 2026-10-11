@@ -1,70 +1,62 @@
 /**
- * ALMOX PRO — RAIO-X FINANCEIRO
- * =============================
+ * ALMOX PRO — RAIO-X DA PONTE FINANCEIRA
+ * ======================================
  *
- * SÓ LEITURA. Este arquivo não grava, não cria aba, não apaga nada,
- * não altera nenhum registro. Ele abre, olha e escreve um relatório.
+ * SÓ LEITURA. Não grava, não cria aba, não altera registro.
  *
  * POR QUE ELE EXISTE
  * ------------------
- * O projeto pede, no item 154, "investigar se os problemas decorrem
- * de campos ausentes, nomes de propriedades divergentes, falhas no
- * backend, filtros incorretos ou ausência de relacionamento com os
- * itens do estoque".
+ * O item 1 do prompt pergunta por que os valores aparecem quando a
+ * função roda direto no editor do Apps Script, mas não aparecem na
+ * interface publicada.
  *
- * Nenhuma dessas quatro causas dá para descobrir olhando o HTML: a
- * tela mostra o que o Core devolve. Para saber por que a tela de
- * saídas só mostra protocolo e quantidade, é preciso ver O QUE O
- * CORE DEVOLVE DE VERDADE — e isso só a planilha responde.
+ * A resposta não é uma só: entre o editor e a tela publicada há
+ * QUATRO camadas, e qualquer uma delas derruba o pedido sem que a
+ * anterior perceba:
  *
- * E o item 431 é explícito: se o banco não tiver o dado, identificar
- * a dependência ANTES de dizer que a função está pronta. Este
- * arquivo é o que torna essa frase verificável em vez de opinião.
+ *   editor  →  [1] a função existe no projeto
+ *           →  [2] o almoxaApi encaminha esse nome de módulo
+ *           →  [3] a ponte aceita a chave do aplicativo
+ *           →  [4] a implantação publicada é a versão atual
+ *   tela publicada
+ *
+ * Rodar a função no editor testa SÓ a camada 1. Por isso ela
+ * "funciona no Apps Script e não funciona no site" — não é um
+ * mistério, é que são caminhos diferentes.
+ *
+ * Este arquivo testa as quatro, uma por uma, e diz qual quebrou.
  *
  * COMO RODAR
  * ----------
  *   1. Planilha "Base Dado almoxarifado" → Extensões → Apps Script
- *   2. "+" ao lado de Arquivos → Script → nome: ALMOX_PRO_Raio_X_Financeiro
+ *   2. "+" ao lado de Arquivos → Script → nome: ALMOX_PRO_Raio_X_Ponte_Financeira
  *   3. Cole este conteúdo inteiro e salve (Ctrl+S)
- *   4. No seletor de função escolha AP_RXF_RODAR e clique em Executar
+ *   4. No seletor de função escolha AP_RXP_RODAR e clique em Executar
  *   5. Abra Registro de execução (Ctrl+Enter) e me mande o texto
  *
- * O relatório NÃO traz valores de notas, nomes de pessoas nem
- * conteúdo de célula: traz NOMES DE CAMPO e CONTAGENS. É o que eu
- * preciso para consertar, e não expõe dado da empresa.
+ * O relatório NÃO imprime a chave do aplicativo, nem valores, nem
+ * nomes de pessoas. Só nomes de módulo, códigos de resposta e
+ * contagens.
  */
 
-var AP_RXF = {
+var AP_RXP = {
   versao: '1.0.0',
-  /* os módulos que o projeto manda auditar, item 32 */
+
+  /* os módulos de que o financeiro depende, e uma ação de leitura
+     de cada um para bater na porta */
   modulos: [
-    { nome: 'saidas', acoes: ['listar'] },
-    { nome: 'reservas', acoes: ['listar'] },
-    { nome: 'transferencias', acoes: ['listar'] },
-    { nome: 'movimentacoes', acoes: ['listar'] },
-    { nome: 'estoque', acoes: ['listar'] },
-    { nome: 'itens', acoes: ['listar'] },
-    { nome: 'usuarios', acoes: ['listar'] },
-    { nome: 'obras', acoes: ['listar'] },
-    { nome: 'centros', acoes: ['listar'] },
-    { nome: 'centrocusto', acoes: ['listar'] },
-    { nome: 'setores', acoes: ['listar'] },
-    { nome: 'orcamento', acoes: ['listar'] },
-    { nome: 'nf', acoes: ['listar'] },
-    { nome: 'patrimonio', acoes: ['listar'] }
-  ],
-  /* campos que o projeto exige ver na tela de saídas (item 132) */
-  exigidosSaida: ['protocolo', 'data', 'tipo', 'produto', 'codigo', 'descricao',
-    'unidade', 'qtd', 'valorUnitario', 'valorTotal', 'solicitante', 'entregue',
-    'setorOrigem', 'setorDestino', 'centroCusto', 'reserva', 'status'],
-  exigidosReserva: ['protocolo', 'solicitante', 'setor', 'centroCusto', 'data',
-    'prazo', 'status', 'itens', 'qtd', 'valorUnitario', 'valorTotal', 'retirado'],
-  exigidosTransferencia: ['protocolo', 'data', 'setorOrigem', 'setorDestino',
-    'centroCustoOrigem', 'centroCustoDestino', 'responsavel', 'motivo', 'itens',
-    'codigo', 'descricao', 'unidade', 'qtd', 'valorUnitario', 'valorTotal', 'status']
+    { nome: 'custos', acao: 'metodo', arquivo: 'ALMOXA_PRO_Modulo_Custos.gs' },
+    { nome: 'vinculos', acao: 'listar', arquivo: 'ALMOXA_PRO_Modulo_Vinculos.gs' },
+    { nome: 'atividades', acao: 'listar', arquivo: 'ALMOXA_PRO_Modulo_Vinculos.gs' },
+    { nome: 'transferencias', acao: 'historico', arquivo: 'ALMOXA_PRO_Modulo_Transferencias.gs' },
+    { nome: 'centros', acao: 'listar', arquivo: '(Core)' },
+    { nome: 'saidas', acao: 'listar', arquivo: '(Core)' },
+    { nome: 'itens', acao: 'listar', arquivo: '(Core)' },
+    { nome: 'usuarios', acao: 'listar', arquivo: '(Core)' }
+  ]
 };
 
-function AP_RXF_RODAR() {
+function AP_RXP_RODAR() {
   var L = [];
   function diz(t) { L.push(t === undefined ? '' : String(t)); }
   function titulo(t) {
@@ -74,179 +66,239 @@ function AP_RXF_RODAR() {
     diz('============================================================');
   }
 
-  diz('RAIO-X FINANCEIRO DO ALMOXA PRO  ·  versão ' + AP_RXF.versao);
+  diz('RAIO-X DA PONTE FINANCEIRA  ·  versão ' + AP_RXP.versao);
   diz('Rodado em ' + new Date().toLocaleString('pt-BR'));
-  diz('ESTE ARQUIVO NÃO GRAVA NADA. É só leitura.');
+  diz('ESTE ARQUIVO NÃO GRAVA NADA.');
 
   /* ----------------------------------------------------------
-     1. QUE MÓDULOS EXISTEM DE VERDADE
+     CAMADA 1 — a função existe no projeto?
      ---------------------------------------------------------- */
-  titulo('1. MÓDULOS QUE RESPONDEM');
-  diz('Um módulo que não existe é diferente de um módulo que responde');
-  diz('vazio. O primeiro precisa ser escrito; o segundo, preenchido.');
+  titulo('CAMADA 1 — AS FUNÇÕES EXISTEM NESTE PROJETO');
+  diz('É só isto que você testa quando roda uma função no editor.');
   diz('');
 
-  var vivos = {};
-  AP_RXF.modulos.forEach(function (m) {
-    var fn = null;
-    try { fn = eval('typeof AP_Modulo_' + m.nome + ' === "function" ? AP_Modulo_' + m.nome + ' : null'); }
-    catch (e) { fn = null; }
-
-    if (!fn) {
-      diz('  NÃO EXISTE   AP_Modulo_' + m.nome);
-      return;
-    }
-    vivos[m.nome] = fn;
-    diz('  existe       AP_Modulo_' + m.nome);
+  var existe = {};
+  AP_RXP.modulos.forEach(function (m) {
+    var tem = false;
+    try { tem = eval('typeof AP_Modulo_' + m.nome + ' === "function"'); } catch (e) { tem = false; }
+    existe[m.nome] = tem;
+    diz('  ' + (tem ? 'existe       ' : 'NÃO EXISTE   ') + 'AP_Modulo_' + m.nome +
+      (tem ? '' : '   ← falta colar ' + m.arquivo));
   });
 
   /* ----------------------------------------------------------
-     2. O QUE CADA MÓDULO DEVOLVE
+     CAMADA 2 — o almoxaApi encaminha esse módulo?
      ---------------------------------------------------------- */
-  titulo('2. O QUE VEM DE VERDADE EM CADA LISTAGEM');
-  diz('Para cada módulo: quantos registros, e QUAIS NOMES DE CAMPO o');
-  diz('primeiro registro carrega. Nenhum valor é impresso.');
+  titulo('CAMADA 2 — O ROTEADOR (almoxaApi) CONHECE O MÓDULO?');
+  diz('A tela publicada NUNCA chama AP_Modulo_x direto. Ela chama a');
+  diz('ponte, a ponte chama o almoxaApi, e o almoxaApi decide para');
+  diz('qual módulo o pedido vai. Módulo que existe mas não está no');
+  diz('mapa do almoxaApi é invisível para o site inteiro.');
+  diz('');
 
-  var amostras = {};
-  Object.keys(vivos).forEach(function (nome) {
-    diz('');
-    diz('--- ' + nome + '.listar ---');
-    var r = null;
-    try { r = vivos[nome]('listar', {}, {}); }
-    catch (e) { diz('  ERRO AO CHAMAR: ' + e.message); return; }
-
-    if (!r) { diz('  devolveu nada'); return; }
-    if (!r.ok) { diz('  recusou: ' + (r.codigo || '') + ' ' + (r.mensagem || '')); return; }
-
-    var lista = r.dados;
-    if (Object.prototype.toString.call(lista) !== '[object Array]') {
-      lista = (lista && lista.dados) || (lista && lista.lista) || null;
-    }
-    if (Object.prototype.toString.call(lista) !== '[object Array]') {
-      diz('  dados NÃO é lista. Tipo: ' + typeof r.dados);
-      if (r.dados && typeof r.dados === 'object') {
-        diz('  chaves: ' + Object.keys(r.dados).slice(0, 30).join(', '));
+  if (typeof almoxaApi !== 'function') {
+    diz('  A FUNÇÃO almoxaApi NÃO EXISTE NESTE PROJETO.');
+    diz('  Sem ela a ponte não tem a quem entregar, e NENHUM módulo');
+    diz('  responde pelo site. Procure em qual arquivo ela está.');
+  } else {
+    AP_RXP.modulos.forEach(function (m) {
+      if (!existe[m.nome]) {
+        diz('  (pulado)     ' + m.nome + ' — a função nem existe ainda');
+        return;
       }
-      return;
-    }
+      var r = null, cru = null;
+      try {
+        cru = almoxaApi(JSON.stringify({
+          modulo: m.nome, acao: m.acao, payload: {}, sessao: null, origem: 'raiox'
+        }));
+        r = (typeof cru === 'string') ? JSON.parse(cru) : cru;
+      } catch (e) {
+        diz('  ERRO         ' + m.nome + ' — o roteador quebrou: ' + e.message);
+        return;
+      }
+      if (!r) { diz('  SEM RESPOSTA ' + m.nome); return; }
 
-    diz('  registros: ' + lista.length);
-    if (!lista.length) { diz('  (lista vazia — nada a inspecionar)'); return; }
+      var txt = String(r.codigo || '') + ' ' + String(r.mensagem || '');
+      var naoConhece = /MODULO|DESCONHECID|NAO_ENCONTRAD|INVALID|NAO_INSTALAD/i.test(txt) &&
+        !/ACAO_DESCONHECIDA/i.test(String(r.codigo || ''));
+      var pediuLogin = /SESSAO|LOGIN|AUTENTIC|PERMISS/i.test(txt);
 
-    amostras[nome] = lista[0];
-    var campos = Object.keys(lista[0]);
-    diz('  campos do 1º registro (' + campos.length + '):');
-    diz('    ' + campos.join(', '));
-
-    /* se houver itens dentro, os campos deles também importam:
-       é ali que moram descrição, unidade e valor unitário */
-    var itens = lista[0].itens || lista[0].produtos || lista[0].materiais;
-    if (Object.prototype.toString.call(itens) === '[object Array]' && itens.length) {
-      diz('  campos de CADA ITEM (' + Object.keys(itens[0]).length + '):');
-      diz('    ' + Object.keys(itens[0]).join(', '));
-    } else if (itens) {
-      diz('  tem "itens" mas não é lista, ou está vazio');
-    } else {
-      diz('  ATENÇÃO: o registro NÃO traz lista de itens.');
-      diz('  Sem itens, a tela não tem como mostrar produto, unidade');
-      diz('  nem valor unitário — por mais que a tela seja corrigida.');
-    }
-  });
-
-  /* ----------------------------------------------------------
-     3. O QUE O PROJETO EXIGE × O QUE EXISTE
-     ---------------------------------------------------------- */
-  titulo('3. CAMPOS EXIGIDOS PELO PROJETO QUE NÃO EXISTEM HOJE');
-  diz('Comparação literal com os itens 132, 170 e 206 do projeto.');
-  diz('Campo que falta aqui não é erro de tela: é dado que o Core');
-  diz('não guarda, e que precisa passar a ser guardado.');
-
-  function conferirCampos(nome, exigidos) {
-    diz('');
-    diz('--- ' + nome + ' ---');
-    var reg = amostras[nome];
-    if (!reg) { diz('  sem amostra (módulo ausente ou lista vazia)'); return; }
-
-    var tem = {};
-    Object.keys(reg).forEach(function (k) { tem[k.toLowerCase()] = 1; });
-    var itens = reg.itens || reg.produtos || reg.materiais;
-    if (Object.prototype.toString.call(itens) === '[object Array]' && itens.length) {
-      Object.keys(itens[0]).forEach(function (k) { tem[k.toLowerCase()] = 1; });
-    }
-
-    var faltando = exigidos.filter(function (c) { return !tem[c.toLowerCase()]; });
-    if (!faltando.length) { diz('  todos os campos exigidos existem'); return; }
-    diz('  FALTAM ' + faltando.length + ' de ' + exigidos.length + ':');
-    diz('    ' + faltando.join(', '));
-  }
-
-  conferirCampos('saidas', AP_RXF.exigidosSaida);
-  conferirCampos('reservas', AP_RXF.exigidosReserva);
-  conferirCampos('transferencias', AP_RXF.exigidosTransferencia);
-
-  /* ----------------------------------------------------------
-     4. CENTRO DE CUSTO: EXISTE EM ALGUM LUGAR?
-     ---------------------------------------------------------- */
-  titulo('4. CENTRO DE CUSTO E ORÇAMENTO');
-  diz('O projeto inteiro (itens 60 a 100 e 243 a 272) se apoia em');
-  diz('centro de custo e orçamento mensal. Antes de escrever uma');
-  diz('linha disso, é preciso saber se já existe alguma coisa.');
-  diz('');
-
-  var achouCC = [];
-  Object.keys(amostras).forEach(function (nome) {
-    var reg = amostras[nome];
-    Object.keys(reg).forEach(function (k) {
-      if (/centro|custo|cc$|orcament|pep/i.test(k)) {
-        achouCC.push(nome + '.' + k);
+      if (r.ok || pediuLogin || /ACAO_DESCONHECIDA/i.test(String(r.codigo || ''))) {
+        diz('  encaminha    ' + m.nome +
+          (pediuLogin ? '   (pediu sessão — normal aqui, o caminho está pronto)' : ''));
+      } else if (naoConhece) {
+        diz('  NÃO ENCAMINHA  ' + m.nome + '   ← ' + (r.codigo || '') + ' ' +
+          String(r.mensagem || '').slice(0, 90));
+        diz('       >> No arquivo onde está o almoxaApi, ache a lista (ou o');
+        diz('          switch) de módulos e acrescente a linha para "' + m.nome + '"');
+        diz('          apontando para AP_Modulo_' + m.nome + '.');
+      } else {
+        diz('  ?            ' + m.nome + '   resposta: ' +
+          String(r.codigo || r.mensagem || '').slice(0, 90));
       }
     });
-    var itens = reg.itens;
-    if (Object.prototype.toString.call(itens) === '[object Array]' && itens.length) {
-      Object.keys(itens[0]).forEach(function (k) {
-        if (/centro|custo|cc$|orcament|pep/i.test(k)) achouCC.push(nome + '.itens.' + k);
-      });
-    }
-  });
-
-  if (achouCC.length) {
-    diz('  campos parecidos com centro de custo encontrados:');
-    achouCC.forEach(function (c) { diz('    ' + c); });
-  } else {
-    diz('  NENHUM campo de centro de custo nos registros inspecionados.');
   }
 
   /* ----------------------------------------------------------
-     5. AS ABAS DA PLANILHA
+     CAMADA 3 — a chave do aplicativo
      ---------------------------------------------------------- */
-  titulo('5. ABAS QUE EXISTEM NA PLANILHA');
-  diz('Só os nomes e a contagem de linhas. Nenhum conteúdo é lido.');
+  titulo('CAMADA 3 — A CHAVE DO APLICATIVO');
+  diz('A ponte compara a chave que o site manda com a que está');
+  diz('guardada nas propriedades do script. Se as duas não baterem,');
+  diz('TUDO é recusado com APP_NAO_AUTORIZADO — e no editor nada');
+  diz('disso acontece, porque o editor não passa pela ponte.');
+  diz('');
+  diz('A chave NÃO é impressa aqui. Só o que dá para conferir sem');
+  diz('expor o segredo.');
+  diz('');
+
+  try {
+    var prop = '';
+    try {
+      prop = String(PropertiesService.getScriptProperties()
+        .getProperty((typeof AP_PONTE_CFG !== 'undefined' && AP_PONTE_CFG.propChave) ||
+          'ALMOXA_CHAVE_APP') || '').trim();
+    } catch (e) { prop = ''; }
+
+    if (!prop) {
+      diz('  A chave NÃO está configurada no servidor.');
+      diz('  Nesse caso a ponte aceita qualquer chave, então ela NÃO');
+      diz('  é a causa do problema — mas também não há proteção.');
+    } else {
+      diz('  A chave ESTÁ configurada.');
+      diz('  Tamanho: ' + prop.length + ' caracteres.');
+      diz('  Termina em: ...' + prop.slice(-4));
+      diz('');
+      diz('  CONFIRA NO SITE: abra o sistema publicado, aperte F12,');
+      diz('  aba Console, e digite        CFG.chaveApp.slice(-4)');
+      diz('  Se os quatro últimos não forem iguais aos de cima, achamos');
+      diz('  a causa: a tela está mandando outra chave, e a ponte recusa');
+      diz('  tudo antes mesmo de chegar no módulo.');
+    }
+  } catch (e) {
+    diz('  não consegui ler as propriedades: ' + e.message);
+  }
+
+  diz('');
+  diz('  A ponte existe neste projeto: ' +
+    (typeof AP_PONTE_doPost === 'function' ? 'SIM' : 'NÃO — e sem ela o site não fala com o Core'));
+  diz('  O doPost existe neste projeto: ' +
+    (typeof doPost === 'function' ? 'SIM' : 'NÃO — e sem ele o /exec não recebe nada'));
+
+  /* ----------------------------------------------------------
+     CAMADA 4 — a implantação publicada
+     ---------------------------------------------------------- */
+  titulo('CAMADA 4 — A IMPLANTAÇÃO PUBLICADA');
+  diz('O editor roda o código SALVO. O site roda o código IMPLANTADO.');
+  diz('São coisas diferentes. Salvar não publica.');
   diz('');
   try {
-    var ss = SpreadsheetApp.getActive();
-    var abas = ss.getSheets();
-    diz('  ' + abas.length + ' aba(s):');
-    abas.forEach(function (a) {
-      var ult = 0;
-      try { ult = a.getLastRow(); } catch (e) {}
-      var marca = /CENTRO|CUSTO|ORCAMENT|SETOR/i.test(a.getName()) ? '   <<< financeiro' : '';
-      diz('    ' + a.getName() + '  (' + Math.max(0, ult - 1) + ' linha(s))' + marca);
-    });
+    var url = ScriptApp.getService().getUrl();
+    diz('  URL do serviço: ' + (url || '(não publicado)'));
+    if (!url) {
+      diz('  >> O script NÃO está publicado como aplicativo da web.');
+      diz('     Implantar → Nova implantação → Aplicativo da web.');
+    }
   } catch (e) {
-    diz('  não consegui listar as abas: ' + e.message);
+    diz('  não consegui ler a URL do serviço: ' + e.message);
   }
+  diz('');
+  diz('  COMO CONFERIR SE A IMPLANTAÇÃO ESTÁ ATUAL:');
+  diz('    Implantar → Gerenciar implantações → olhe a VERSÃO.');
+  diz('    Depois de colar qualquer arquivo novo é preciso');
+  diz('    editar a implantação e escolher "Nova versão".');
+  diz('    Sem isso, o site continua rodando o código de antes —');
+  diz('    e os módulos novos simplesmente não existem para ele.');
 
   /* ----------------------------------------------------------
-     6. O QUE ESTE ARQUIVO NÃO FAZ
+     5. O QUE JÁ DÁ PARA CALCULAR
      ---------------------------------------------------------- */
-  titulo('6. O QUE ESTE ARQUIVO NÃO FEZ');
+  titulo('5. O QUE O FINANCEIRO ENCONTRA HOJE');
+  diz('Contagens, nenhum valor.');
+  diz('');
+
+  try {
+    if (typeof AP_CUSTO_diagnostico_ === 'function') {
+      var dc = AP_CUSTO_diagnostico_();
+      diz('  CUSTOS  método: ' + dc.metodo);
+      Object.keys(dc.fontes).forEach(function (k) {
+        var f = dc.fontes[k];
+        diz('    ' + (f.existe ? 'existe' : 'NÃO EXISTE') + '  ' + k +
+          (f.existe ? '  (' + f.linhas + ' linha(s))' : ''));
+      });
+      diz('    produtos identificados .. ' + dc.produtos.total);
+      diz('    com custo confiável ..... ' + dc.produtos.comCusto);
+      diz('    SEM custo (pendência) ... ' + dc.produtos.pendentes);
+    } else {
+      diz('  CUSTOS: o módulo não está neste projeto.');
+    }
+  } catch (e) { diz('  CUSTOS: erro ao diagnosticar: ' + e.message); }
+
+  diz('');
+  try {
+    if (typeof AP_VINC_diagnostico_ === 'function') {
+      var dv = AP_VINC_diagnostico_();
+      diz('  VÍNCULOS');
+      diz('    aba de atividades ....... ' +
+        (dv.abas.atividades && dv.abas.atividades.nome ? dv.abas.atividades.nome +
+          ' (' + dv.abas.atividades.linhas + ' linha(s))' : 'erro'));
+      diz('    aba de vínculos ......... ' +
+        (dv.abas.vinculos && dv.abas.vinculos.nome ? dv.abas.vinculos.nome +
+          ' (' + dv.abas.vinculos.linhas + ' linha(s))' : 'erro'));
+      diz('    atividades ativas ....... ' + (dv.atividades.ativas || 0));
+      diz('    atividades sem centro ... ' + (dv.atividades.semCentroCusto || 0));
+      diz('    movimentações ligadas ... ' + (dv.vinculos.total || 0));
+      diz('    com centro divergente ... ' + (dv.vinculos.divergentes || 0));
+    } else {
+      diz('  VÍNCULOS: o módulo não está neste projeto.');
+    }
+  } catch (e) { diz('  VÍNCULOS: erro ao diagnosticar: ' + e.message); }
+
+  diz('');
+  try {
+    if (typeof AP_Modulo_transferencias === 'function') {
+      var h = AP_Modulo_transferencias('historico', { limite: 5000 }, {});
+      var n = (h && h.ok && h.dados && h.dados.totais) ? h.dados.totais.todas : 0;
+      diz('  TRANSFERÊNCIAS no histórico: ' + n);
+    } else {
+      diz('  TRANSFERÊNCIAS: o módulo não está neste projeto.');
+    }
+  } catch (e) { diz('  TRANSFERÊNCIAS: erro: ' + e.message); }
+
+  /* ----------------------------------------------------------
+     6. O VEREDITO
+     ---------------------------------------------------------- */
+  titulo('6. ONDE O CAMINHO QUEBRA');
+
+  var faltamFuncoes = [];
+  AP_RXP.modulos.forEach(function (m) { if (!existe[m.nome]) faltamFuncoes.push(m.nome); });
+
+  if (faltamFuncoes.length) {
+    diz('  CAMADA 1: faltam os módulos ' + faltamFuncoes.join(', ') + '.');
+    diz('  Cole os arquivos correspondentes antes de olhar o resto.');
+  } else {
+    diz('  CAMADA 1: todas as funções existem.');
+  }
+  if (typeof almoxaApi !== 'function') {
+    diz('  CAMADA 2: o almoxaApi não existe. É a parada mais grave.');
+  } else {
+    diz('  CAMADA 2: veja a lista acima — todo "NÃO ENCAMINHA" é um');
+    diz('            módulo invisível para o site.');
+  }
+  diz('  CAMADA 3: confira os 4 últimos da chave no console do site.');
+  diz('  CAMADA 4: confira a versão em Gerenciar implantações.');
+  diz('');
+  diz('  Na prática, a ordem de suspeita é: 4, depois 2, depois 3.');
+  diz('  Esquecer de publicar nova versão é o motivo mais comum de');
+  diz('  "funciona no Apps Script e não funciona no site".');
+
+  titulo('O QUE ESTE ARQUIVO NÃO FEZ');
   diz('  não gravou nada');
   diz('  não criou aba');
-  diz('  não apagou registro');
-  diz('  não mexeu em estoque, nota, reserva nem saída');
+  diz('  não imprimiu a chave do aplicativo');
   diz('  não imprimiu valor, nome de pessoa nem conteúdo de célula');
   diz('');
-  diz('FIM DO RAIO-X. Mande este texto inteiro para eu continuar.');
+  diz('FIM. Mande este texto inteiro.');
 
   var texto = L.join('\n');
   Logger.log(texto);

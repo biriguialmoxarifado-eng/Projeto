@@ -151,11 +151,12 @@ function AP_Modulo_vinculos(acao, payload, sessao) {
       case 'vincular':     return AP_VINC_vincular_(payload, sessao);
       case 'desvincular':  return AP_VINC_desvincular_(payload, sessao);
       case 'resumo':       return { ok: true, dados: AP_VINC_resumo_(payload) };
+      case 'consolidado':  return { ok: true, dados: AP_VINC_consolidado_(payload) };
       case 'diagnostico':  return { ok: true, dados: AP_VINC_diagnostico_() };
       default:
         return { ok: false, codigo: 'ACAO_DESCONHECIDA',
           mensagem: 'Os vínculos não conhecem a ação "' + acao +
-            '". Conhece: listar, vincular, desvincular, resumo, diagnostico.' };
+            '". Conhece: listar, vincular, desvincular, resumo, consolidado, diagnostico.' };
     }
   } catch (e) {
     return { ok: false, codigo: 'ERRO', mensagem: e.message,
@@ -815,6 +816,198 @@ function AP_VINC_desvincular_(payload, sessao) {
   return { ok: true, dados: { removidos: mexidas },
     mensagem: mexidas + ' classificação(ões) removida(s). As linhas ficam na planilha ' +
       'marcadas como EXCLUIDO, com quem removeu e quando.' };
+}
+
+
+/* ============================================================
+   O CONSOLIDADO — A MESMA CONTA, FEITA NO SERVIDOR
+   ------------------------------------------------------------
+   O item 97 do prompt manda validar os dados no servidor, não só
+   na interface. E o item 113 manda comparar o que o relatório
+   mostra com o que está na origem.
+
+   Esta ação faz EXATAMENTE a mesma soma que a tela faz, só que
+   aqui dentro, lendo as mesmas fontes: o histórico de
+   transferências, as saídas, os vínculos e a tabela de custos.
+
+   A tela imprime os dois números lado a lado no relatório. Se eles
+   divergirem, está escrito no PDF — em vez de a pessoa descobrir
+   meses depois.
+
+   Não grava nada.
+
+   payload: { ano, mes }  — a competência. Sem eles, tudo.
+   ============================================================ */
+function AP_VINC_consolidado_(payload) {
+  payload = payload || {};
+  var ano = Number(payload.ano) || 0;
+  var mes = Number(payload.mes) || 0;
+
+  /* a competência, como texto AAAA-MM, para comparar sem fuso */
+  var competencia = (ano && mes)
+    ? (String(ano) + '-' + ('0' + mes).slice(-2))
+    : '';
+
+  function daCompetencia(dataTexto) {
+    if (!competencia) return true;
+    var d = AP_VINC_txt_(dataTexto);
+    if (!d) return false;
+    /* aceita 2026-10-11..., 11/10/2026 e Date já convertido */
+    var iso = d.match(/^(\d{4})-(\d{2})/);
+    if (iso) return (iso[1] + '-' + iso[2]) === competencia;
+    var br = d.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    if (br) return (br[3] + '-' + ('0' + br[2]).slice(-2)) === competencia;
+    return false;
+  }
+
+  /* ---- os vínculos vivos, por chave ---- */
+  var porChave = {};
+  AP_VINC_listar_({}).forEach(function (v) {
+    porChave[v.tipoMov + '|' + AP_VINC_chave_(v.chaveMov)] = v;
+  });
+
+  /* ---- a tabela de custos, se o módulo estiver instalado ---- */
+  var custos = null;
+  try {
+    if (typeof AP_CUSTO_tabela_ === 'function') custos = AP_CUSTO_tabela_({});
+  } catch (e) { custos = null; }
+
+  function custoDe(codigo, produtoId) {
+    if (!custos || !custos.fichas) return 0;
+    var ks = [AP_VINC_chave_(produtoId), AP_VINC_chave_(codigo)];
+    for (var i = 0; i < ks.length; i++) {
+      var k = ks[i];
+      if (!k) continue;
+      if (custos.fichas[k]) return Number(custos.fichas[k].aplicado) || 0;
+      if (custos.indice && custos.indice[k] && custos.fichas[custos.indice[k]]) {
+        return Number(custos.fichas[custos.indice[k]].aplicado) || 0;
+      }
+    }
+    return 0;
+  }
+
+  var centros = {};
+  var totais = { movimentacoes: 0, classificadas: 0, semVinculo: 0, semCusto: 0,
+    valor: 0, porDocumento: 0, porCusto: 0, porTipo: {} };
+  var contadas = {};   /* prova de que ninguém entra duas vezes */
+
+  function bolso(v) {
+    var k = AP_VINC_txt_(v.centroCusto) || '(sem centro)';
+    if (!centros[k]) {
+      centros[k] = { centroCusto: k, centroCustoNome: AP_VINC_txt_(v.centroCustoNome),
+        valor: 0, porDocumento: 0, porCusto: 0, quantas: 0, semCusto: 0,
+        porTipo: {}, atividades: {} };
+    }
+    return centros[k];
+  }
+
+  function somar(m) {
+    totais.movimentacoes++;
+    if (!daCompetencia(m.data)) return;
+
+    var k = m.tipoMov + '|' + AP_VINC_chave_(m.chave);
+    /* item 112: a mesma movimentação não pode entrar duas vezes */
+    if (contadas[k]) return;
+    contadas[k] = 1;
+
+    var v = porChave[k];
+    if (!v) { totais.semVinculo++; return; }
+
+    var b = bolso(v);
+    var valor = 0, doDocumento = 0, doCusto = 0, faltou = 0;
+
+    (m.itens || []).forEach(function (i) {
+      var qtd = Number(i.qtd) || 0;
+      var vu = Number(i.valorUnitario) || 0;
+      if (vu > 0) { doDocumento += qtd * vu; return; }
+      var c = custoDe(i.codigo, i.produtoId);
+      if (c > 0) { doCusto += qtd * c; return; }
+      faltou++;
+    });
+    valor = Math.round((doDocumento + doCusto) * 100) / 100;
+
+    b.quantas++;
+    b.valor += valor;
+    b.porDocumento += Math.round(doDocumento * 100) / 100;
+    b.porCusto += Math.round(doCusto * 100) / 100;
+    if (faltou) { b.semCusto++; totais.semCusto++; }
+    b.porTipo[m.tipoMov] = (b.porTipo[m.tipoMov] || 0) + valor;
+    var atv = AP_VINC_txt_(v.atividadeCodigo || v.atividadeNome) || '(sem atividade)';
+    b.atividades[atv] = (b.atividades[atv] || 0) + valor;
+
+    totais.classificadas++;
+    totais.valor += valor;
+    totais.porDocumento += Math.round(doDocumento * 100) / 100;
+    totais.porCusto += Math.round(doCusto * 100) / 100;
+    totais.porTipo[m.tipoMov] = (totais.porTipo[m.tipoMov] || 0) + valor;
+  }
+
+  /* ---- as transferências ---- */
+  try {
+    if (typeof AP_Modulo_transferencias === 'function') {
+      var h = AP_Modulo_transferencias('historico', { limite: 5000 }, {});
+      var lista = (h && h.ok && h.dados && h.dados.transferencias) || [];
+      for (var i = 0; i < lista.length; i++) {
+        var t = lista[i];
+        somar({
+          tipoMov: 'TRANSFERENCIA',
+          chave: t.protocolo,
+          data: t.data,
+          itens: [{ codigo: t.skuOrigem, qtd: Number(t.qtd) || 0,
+            valorUnitario: Number(t.valorUnitario) || 0 }]
+        });
+      }
+    }
+  } catch (e) {}
+
+  /* ---- as saídas ---- */
+  try {
+    if (typeof AP_Modulo_saidas === 'function') {
+      var rs = AP_Modulo_saidas('listar', {}, {});
+      var ls = (rs && rs.ok && rs.dados) || [];
+      if (Object.prototype.toString.call(ls) === '[object Array]') {
+        for (var j = 0; j < ls.length; j++) {
+          var sx = ls[j];
+          var its = sx.itens || sx.produtos || sx.materiais || [];
+          if (Object.prototype.toString.call(its) !== '[object Array]' || !its.length) {
+            its = [{ codigo: sx.codigo || sx.sku, qtd: Number(sx.qtd) || 0,
+              valorUnitario: Number(sx.valorUnitario) || 0 }];
+          }
+          somar({
+            tipoMov: 'SAIDA',
+            chave: sx.protocolo || sx.numero || sx.id,
+            data: sx.data || sx.dataHora || sx.retiradaEm || sx.criadoEm,
+            itens: its
+          });
+        }
+      }
+    }
+  } catch (e) {}
+
+  function arredondar(o) {
+    Object.keys(o).forEach(function (k) {
+      if (typeof o[k] === 'number') o[k] = Math.round(o[k] * 100) / 100;
+    });
+  }
+  arredondar(totais);
+  arredondar(totais.porTipo);
+  Object.keys(centros).forEach(function (k) {
+    arredondar(centros[k]);
+    arredondar(centros[k].porTipo);
+    arredondar(centros[k].atividades);
+  });
+
+  return {
+    competencia: competencia || 'todas',
+    metodoCusto: custos ? AP_CUSTO_CFG.metodo : '(módulo de custos ausente)',
+    totais: totais,
+    centros: centros,
+    /* item 112, por escrito: quantas chaves distintas entraram na
+       conta. Se este número for diferente de classificadas +
+       semVinculo, alguma coisa entrou duas vezes. */
+    chavesDistintas: Object.keys(contadas).length,
+    conferido: Object.keys(contadas).length === (totais.classificadas + totais.semVinculo)
+  };
 }
 
 
