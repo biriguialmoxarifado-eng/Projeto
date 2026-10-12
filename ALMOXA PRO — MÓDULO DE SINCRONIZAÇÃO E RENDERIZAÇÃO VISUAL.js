@@ -311,6 +311,7 @@
 
     window.PAINEL_vitrineLer_ = function (dados) {
       var meu = ++SV.sequencia;
+      SV.leitorChamado = true;      /* o servidor mandou ALGUMA configuração */
       mudarEstado(ESTADO.ATUALIZANDO);
 
       /* deixo a leitura de sempre fazer o trabalho dela */
@@ -399,7 +400,42 @@
         }
       } catch (e) { p = Promise.resolve(null); }
 
+      SV.leitorChamado = false;
       return Promise.resolve(p).then(function () {
+        /* O SERVIDOR RESPONDEU E NÃO TINHA NADA PUBLICADO.
+           Isto é diferente de "o servidor não respondeu", e a diferença é
+           justamente o que separa uma cópia de apoio de uma fonte oficial:
+           se eu continuasse pintando com a lembrança aqui, ela viraria a
+           fonte — a tela mostraria para sempre uma configuração que já não
+           existe no servidor. Então eu esqueço. */
+        var resp = SV.ultimaResposta;
+        var servidorDisseQueNaoTem = !SV.leitorChamado && !cache.tem()
+          && resp && resp.ok === true && resp.temDados === false;
+        if (!SV.leitorChamado && !cache.tem() && resp && resp.ok === false) {
+          /* o servidor NÃO respondeu direito: a lembrança FICA. É o item 5
+             da seção 4 — manter a última configuração válida quando o
+             servidor estiver indisponível. */
+          mudarEstado(ESTADO.FALHA_REDE,
+            "o servidor recusou ou não respondeu; a aparência guardada continua na tela");
+        }
+        if (servidorDisseQueNaoTem) {
+          if (SV.pinturaProvisoria) {
+            pintura.esquecer();
+            SV.pinturaProvisoria = null;
+            anotar("esqueci a pintura guardada",
+              "o servidor respondeu que não há configuração publicada");
+            try {
+              if (window.PALETA && PALETA.aplicar) PALETA.aplicar(null);
+              var raiz = document.documentElement;
+              ["fundo", "destaque", "cards", "texto"].forEach(function (k) {
+                raiz.style.removeProperty("--pv-" + k);
+              });
+              raiz.removeAttribute("data-pv-tema");
+              render.aplicar(null, true);
+            } catch (e) {}
+          }
+          mudarEstado(ESTADO.NAO_CARREGADO, "o servidor não tem configuração publicada");
+        }
         if (SV.estado === ESTADO.CONFIRMADO) render.aplicar(SV.confirmada);
         return SV.estado;
       }).catch(function (e) {
@@ -447,10 +483,154 @@
         vezesQueRecuperei: recupera.vezes,
         redesenhos: render.redesenhos,
         redesenhosEvitados: render.pulados,
+        pinturaDaTela: (function () {
+          var m = document.documentElement.getAttribute("data-pintura");
+          if (m === "confirmada") return "a do servidor, confirmada";
+          if (m === "provisoria") return "provisória, da lembrança da última confirmada"
+            + (SV.pinturaProvisoria ? " (versão " + SV.pinturaProvisoria.versao + ")" : "");
+          return "o padrão do sistema";
+        })(),
         ultimoMotivo: SV.eventos.length ? SV.eventos[0].por_que : "—"
       };
     };
     SV.historico = function () { return SV.eventos.slice(); };
+
+    /* ====================================================================
+       7. A PRIMEIRA PINTURA — o fim do azul toda vez que abre
+       --------------------------------------------------------------------
+       ELE DISSE: "a tela volta ao layout azul original sempre que o
+       sistema é aberto". Filmei a abertura, de 400 em 400 milésimos, com
+       o Core levando 1,5 segundo para responder. O que aparece:
+
+         400ms   azul         (o padrão do CSS)
+         800ms   azul
+        1200ms   azul
+        1600ms   azul
+        2000ms   a cor publicada entra
+
+       Não é que ela VOLTE ao azul: é que ela NASCE azul e demora a virar.
+       O navegador pinta o padrão do CSS na hora, e a configuração só chega
+       depois que o servidor responde. Numa obra, com o Apps Script levando
+       quatro ou seis segundos, isso é meia dúzia de segundos de tela azul
+       em TODA abertura — e quem olha jura que a personalização se perdeu.
+
+       A correção: guardo as poucas cores da última configuração CONFIRMADA
+       e pinto com elas antes de o servidor responder. Assim a tela abre
+       com a cara certa.
+
+       ISTO NÃO FAZ DO NAVEGADOR A FONTE OFICIAL, e a diferença importa:
+         · é pintura, não dado — guardo só as cores, nunca o conteúdo;
+         · a resposta do servidor SEMPRE manda, mesmo que diga outra coisa;
+         · se o servidor disser que não há configuração, isto é apagado;
+         · é marcado como provisório até o servidor confirmar.
+       É também o item 5 da seção 4 do pedido: manter a última configuração
+       válida quando o servidor estiver fora do ar.
+       ==================================================================== */
+    var LEMBRETE = "almoxa.pintura.v1";
+
+    var pintura = {
+      guardar: function (c) {
+        try {
+          if (!c) return false;
+          var cores = c.cores || {}, login = (c.login || {});
+          var pa = login.paleta || null;
+          localStorage.setItem(LEMBRETE, JSON.stringify({
+            versao: num(c.versao),
+            cores: { fundo: lp(cores.fundo), destaque: lp(cores.destaque),
+                     cards: lp(cores.cards), texto: lp(cores.texto) },
+            paleta: pa ? { fundo: lp(pa.fundo), cartao: lp(pa.cartao),
+                           destaque: lp(pa.destaque), botao: lp(pa.botao),
+                           textoSobreFundo: lp(pa.textoSobreFundo),
+                           textoSobreCartao: lp(pa.textoSobreCartao),
+                           textoSobreBotao: lp(pa.textoSobreBotao) } : null,
+            em: agora()
+          }));
+          return true;
+        } catch (e) { return false; }   /* navegador sem permissão: tudo bem */
+      },
+
+      aplicarProvisoria: function () {
+        var g = null;
+        try { g = JSON.parse(localStorage.getItem(LEMBRETE) || "null"); } catch (e) {}
+        if (!g) return false;
+        var raiz = document.documentElement;
+        try {
+          if (g.cores) {
+            if (g.cores.fundo) raiz.style.setProperty("--pv-fundo", g.cores.fundo);
+            if (g.cores.destaque) raiz.style.setProperty("--pv-destaque", g.cores.destaque);
+            if (g.cores.cards) raiz.style.setProperty("--pv-cards", g.cores.cards);
+            if (g.cores.texto) raiz.style.setProperty("--pv-texto", g.cores.texto);
+            if (g.cores.fundo || g.cores.destaque) raiz.setAttribute("data-pv-tema", "proprio");
+          }
+          if (g.paleta && g.paleta.fundo && window.PALETA && PALETA.aplicar) {
+            PALETA.aplicar(g.paleta);
+          }
+          raiz.setAttribute("data-pintura", "provisoria");
+          SV.pinturaProvisoria = { versao: g.versao, de: g.em };
+          anotar("pintei com a lembrança da última confirmada",
+            "para a tela não abrir azul enquanto o servidor não responde",
+            { versao: g.versao });
+          return true;
+        } catch (e) { return false; }
+      },
+
+      confirmar: function () {
+        try { document.documentElement.setAttribute("data-pintura", "confirmada"); } catch (e) {}
+      },
+
+      esquecer: function () {
+        try { localStorage.removeItem(LEMBRETE); } catch (e) {}
+        try { document.documentElement.removeAttribute("data-pintura"); } catch (e) {}
+      }
+    };
+    SV.pintura = pintura;
+
+    /* ====================================================================
+       ESCUTAR A RESPOSTA — para separar "não tem nada" de "não respondeu"
+       --------------------------------------------------------------------
+       As duas chegavam iguais aqui: em nenhuma das duas o leitor da
+       configuração é chamado. E elas pedem coisas OPOSTAS — num caso a
+       lembrança tem de ser esquecida, no outro tem de ser mantida. Então
+       eu escuto a resposta do painel.carregar, só para saber qual é.
+       Isto não cria rota, não grava e não decide nada: só olha.
+       ==================================================================== */
+    SV.ultimaResposta = null;
+    try {
+      if (window.API && typeof API.call === "function") {
+        var chamarOriginal = API.call;
+        API.call = function (modulo, acao) {
+          var saida = chamarOriginal.apply(this, arguments);
+          if (modulo === "painel" && acao === "carregar") {
+            try {
+              Promise.resolve(saida).then(function (r) {
+                SV.ultimaResposta = {
+                  ok: !!(r && r.ok),
+                  temDados: !!(r && r.ok && r.dados &&
+                    (typeof r.dados !== "object" || Object.keys(r.dados).length > 0)),
+                  quando: agora()
+                };
+              }).catch(function () {
+                SV.ultimaResposta = { ok: false, temDados: false, quando: agora() };
+              });
+            } catch (e) {}
+          }
+          return saida;
+        };
+      }
+    } catch (e) {}
+
+    /* pinto AGORA, antes de qualquer pedido sair */
+    pintura.aplicarProvisoria();
+
+    /* toda vez que uma configuração é confirmada, a lembrança é atualizada;
+       e quando o servidor diz que não há nada publicado, ela é apagada —
+       senão a lembrança viraria a fonte, que é o que não pode */
+    var guardarOriginal = cache.guardar;
+    cache.guardar = function (c) {
+      var r = guardarOriginal.call(cache, c);
+      if (r) { pintura.guardar(c); pintura.confirmar(); }
+      return r;
+    };
 
     /* a primeira sincronização, depois que o resto do sistema acordou */
     setTimeout(function () { SV.sincronizar("arranque"); }, 1500);
