@@ -1,5 +1,5 @@
 /**
- * ALMOXA PRO — API ÚNICA (a porta da rua)   ·   versão 5
+ * ALMOXA PRO — API ÚNICA (a porta da rua)   ·   versão 6
  *
  * Este arquivo SUBSTITUI o ALMOXA_PRO_API_UNICA que você já tem, e
  * substitui qualquer outro arquivo de ponte que exista no projeto.
@@ -312,6 +312,21 @@ function APIX_rotear_(req) {
       token: req.sessao
     })));
   }
+  /* [v6] MANIFESTO DE VERSÃO.
+     Existe porque o sistema é servido de mais de um endereço e cada um
+     entrega a cópia que tem. Sem um lugar que diga "a oficial é esta", o
+     navegador não tem como saber que carregou uma antiga.
+     A leitura (versao.manifesto) NÃO exige sessão de propósito: a
+     conferência acontece antes de alguém entrar. Gravar exige.
+     Precisa do arquivo ALMOXA_PRO_Modulo_Versao.gs. */
+  if (req.modulo === 'versao' && typeof AP_VERSAO_direto === 'function') {
+    return APIX_padronizar_(AP_VERSAO_direto(JSON.stringify({
+      acao: req.acao,
+      payload: req.payload,
+      sessao: req.sessao,
+      token: req.sessao
+    })));
+  }
   /* o repositório central no Drive fala o seu próprio idioma:
      operacao + payload, e a identidade vem do token, não do navegador */
   if (req.modulo === 'repo' && typeof REPO_direto === 'function') {
@@ -461,6 +476,7 @@ function APIX_retrato_() {
     moduloEmail: (typeof AP_EMAIL_direto === 'function'),
     moduloPreConta: (typeof AP_PRECONTA_direto === 'function'),
     repositorio: (typeof REPO_direto === 'function'),
+    moduloVersao: (typeof AP_VERSAO_direto === 'function'),
     contratoDoRepositorio: (typeof REPO_CONTRATO !== 'undefined') ? REPO_CONTRATO : '',
     moduloPermissoes: (typeof AP_PERMISSOES_direto === 'function'),
     loginCracha: (typeof AP_CRACHA_login === 'function'),
