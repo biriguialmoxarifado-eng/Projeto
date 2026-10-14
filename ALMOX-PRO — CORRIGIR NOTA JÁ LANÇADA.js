@@ -174,15 +174,25 @@ function NFED_ler_(nomeDaAba) {
 
 /** Escreve SÓ as colunas informadas, na linha informada. Não mexe no resto. */
 function NFED_escrever_(tabela, numeroDaLinha, mudancas) {
+  /* UMA LEITURA E UMA ESCRITA POR LINHA.
+     A primeira versão disto fazia um setValue por coluna: doze idas à
+     planilha para gravar uma nota, e doze por item. Cada ida ao Google
+     Sheets custa caro, e é assim que uma nota de vinte linhas leva
+     minutos. Agora a linha inteira vai de uma vez. */
   var aba = tabela.aba, cabecalho = tabela.cabecalho;
+  var largura = cabecalho.length;
+  if (!largura) return 0;
+  var faixa = aba.getRange(numeroDaLinha, 1, 1, largura);
+  var linha = faixa.getValues()[0];
   var quantas = 0;
   for (var campo in mudancas) {
     if (!mudancas.hasOwnProperty(campo)) continue;
     var col = cabecalho.indexOf(campo);
     if (col < 0) continue;                    /* coluna que não existe não é criada */
-    aba.getRange(numeroDaLinha, col + 1).setValue(mudancas[campo]);
+    linha[col] = mudancas[campo];
     quantas++;
   }
+  if (quantas) faixa.setValues([linha]);
   return quantas;
 }
 
