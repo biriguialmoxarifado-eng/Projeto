@@ -1,5 +1,5 @@
 /**
- * ALMOXA PRO — API ÚNICA (a porta da rua)   ·   versão 6
+ * ALMOXA PRO — API ÚNICA (a porta da rua)   ·   versão 7
  *
  * Este arquivo SUBSTITUI o ALMOXA_PRO_API_UNICA que você já tem, e
  * substitui qualquer outro arquivo de ponte que exista no projeto.
@@ -312,6 +312,20 @@ function APIX_rotear_(req) {
       token: req.sessao
     })));
   }
+  /* [v7] CORRIGIR NOTA JÁ LANÇADA.
+     A tela de edição de nota só sabia chamar o módulo por
+     google.script.run — que existe dentro do Apps Script e NÃO existe
+     na publicação hospedada. Na prática, a correção nunca saía do
+     navegador. Com esta rota ela passa pela porta de sempre.
+     Precisa do arquivo ALMOX_PRO_Notas_Alterar.gs. */
+  if (req.modulo === 'nfed' && typeof AP_NFED_direto === 'function') {
+    return APIX_padronizar_(AP_NFED_direto(JSON.stringify({
+      acao: req.acao,
+      payload: req.payload,
+      sessao: req.sessao,
+      token: req.sessao
+    })));
+  }
   /* [v6] MANIFESTO DE VERSÃO.
      Existe porque o sistema é servido de mais de um endereço e cada um
      entrega a cópia que tem. Sem um lugar que diga "a oficial é esta", o
@@ -477,6 +491,7 @@ function APIX_retrato_() {
     moduloPreConta: (typeof AP_PRECONTA_direto === 'function'),
     repositorio: (typeof REPO_direto === 'function'),
     moduloVersao: (typeof AP_VERSAO_direto === 'function'),
+    moduloCorrigirNota: (typeof AP_NFED_direto === 'function'),
     contratoDoRepositorio: (typeof REPO_CONTRATO !== 'undefined') ? REPO_CONTRATO : '',
     moduloPermissoes: (typeof AP_PERMISSOES_direto === 'function'),
     loginCracha: (typeof AP_CRACHA_login === 'function'),
