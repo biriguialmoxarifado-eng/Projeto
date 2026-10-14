@@ -496,24 +496,123 @@
     ].join("|");
   }
 
-  function consolidar(lista) {
-    var vistos = {}, saida = [], repetidas = 0;
+  /* ------------------------------------------------------------
+     POR QUE ISTO MUDOU — e é uma correção séria
+     ------------------------------------------------------------
+     "Existe uma trena de fibra e uma trena de bolha; ele pulou, acho
+      que por conta do mesmo nome. São produtos diferentes."
+
+     Ele está certo e a culpa era minha. A primeira versão comparava
+     QUALQUER linha com QUALQUER outra: duas linhas com texto parecido
+     e os mesmos números viravam uma só, mesmo vindo de lugares
+     distantes da tabela. Numa nota de material isso é comum —
+     ferramentas parecidas, mesma quantidade, mesmo preço — e o
+     resultado é um produto sumindo sem ninguém ver.
+
+     A repetição que eu preciso apagar NÃO é "linha parecida": é a
+     linha que eu mesmo mandei ler duas vezes, porque os blocos se
+     sobrepõem de propósito. Essa eu sei exatamente onde está: é o
+     FIM de um bloco contra o COMEÇO do bloco seguinte.
+
+     Então agora: só as linhas da emenda são candidatas, e mesmo elas
+     só somem quando são idênticas. Parecidas ficam as duas, marcadas
+     para conferência. Sobrar uma linha repetida é um aborrecimento;
+     sumir um produto da nota é um erro de estoque.
+     ------------------------------------------------------------ */
+  function consolidar(lista, blocos) {
+    var saida = [], repetidas = 0, suspeitas = 0;
+    var porBloco = {};
     lista.forEach(function (i) {
-      var k = chaveDaLinha(i);
       if (!lp(i.descricao) && !num(i.valorTotal)) return;   /* linha vazia não entra */
-      if (vistos[k] !== undefined) {
-        repetidas++;
-        /* fica a que tem mais confiança informada; empate, fica a primeira */
-        var antes = saida[vistos[k]];
-        var cA = Number(antes.confianca), cB = Number(i.confianca);
-        if (isFinite(cB) && (!isFinite(cA) || cB > cA)) saida[vistos[k]] = i;
-        return;
-      }
-      vistos[k] = saida.length;
-      saida.push(i);
+      var b = (i.__origem && i.__origem.bloco !== undefined) ? i.__origem.bloco : 0;
+      (porBloco[b] = porBloco[b] || []).push(i);
     });
-    return { itens: saida, repetidasRemovidas: repetidas };
+
+    var ordem = Object.keys(porBloco).map(Number).sort(function (a, b) { return a - b; });
+    ordem.forEach(function (b, posicao) {
+      var doBloco = porBloco[b];
+      if (!posicao) { saida = saida.concat(doBloco); return; }
+
+      /* quantas linhas se repetem entre este bloco e o anterior */
+      var quantasNaEmenda = 1;
+      try {
+        var cfg = (blocos || []).filter(function (x) { return x.indice === b; })[0];
+        var ant = (blocos || []).filter(function (x) { return x.indice === ordem[posicao - 1]; })[0];
+        if (cfg && ant) {
+          var sobrepos = ant.ateALinha - (cfg.daLinha - 1);
+          quantasNaEmenda = Math.max(0, Math.min(3, sobrepos));
+        }
+      } catch (e) {}
+
+      var inicio = 0;
+      for (var k = 0; k < quantasNaEmenda && k < doBloco.length; k++) {
+        var candidata = doBloco[k];
+        /* ela só pode ser igual a uma das ÚLTIMAS linhas já aceitas */
+        var janela = saida.slice(Math.max(0, saida.length - quantasNaEmenda - 1));
+        var igual = null;
+        janela.forEach(function (j) {
+          if (chaveDaLinha(j) === chaveDaLinha(candidata)) igual = j;
+        });
+        if (igual) {
+          repetidas++;
+          /* fica a de maior confiança informada */
+          var cA = Number(igual.confianca), cB = Number(candidata.confianca);
+          if (isFinite(cB) && (!isFinite(cA) || cB > cA)) {
+            var onde = saida.indexOf(igual);
+            if (onde > -1) saida[onde] = candidata;
+          }
+          inicio = k + 1;
+          continue;
+        }
+        /* parecida mas NÃO idêntica: as duas ficam, e a tela avisa.
+           É aqui que a trena de fibra e a trena de bolha se salvam. */
+        var parecida = null;
+        janela.forEach(function (j) {
+          var a = lp(j.descricao).toUpperCase(), bb = lp(candidata.descricao).toUpperCase();
+          if (!a || !bb) return;
+          var menor = Math.min(a.length, bb.length);
+          if (menor >= 6 && a.slice(0, Math.min(10, menor)) === bb.slice(0, Math.min(10, menor))) {
+            parecida = j;
+          }
+        });
+        if (parecida) {
+          suspeitas++;
+          candidata.possivelRepeticao = true;
+          candidata.porqueSuspeita = "começa igual a \"" + lp(parecida.descricao).slice(0, 28) +
+            "\", mas os dados não são os mesmos. Mantive as duas — confira na nota.";
+        }
+        inicio = k;
+        break;
+      }
+      saida = saida.concat(doBloco.slice(inicio));
+    });
+
+    return { itens: saida, repetidasRemovidas: repetidas, suspeitasDeRepeticao: suspeitas };
   }
+
+  /* ============================================================
+     JUNTAR PÁGINAS — a nota com mais de uma folha
+     ------------------------------------------------------------
+     O leitor chamava NFPONTE.juntarItens, que NUNCA EXISTIU neste
+     sistema. Como a função não existia, caía no "else" e os itens da
+     página nova SUBSTITUÍAM os da anterior: ler a folha 2 apagava a
+     folha 1, calado.
+
+     Aqui a regra é simples e explícita:
+       · item de outra página: fica como está;
+       · reler a MESMA página: troca só os daquela página, não duplica;
+       · página nova: entra no fim, na ordem das folhas.
+     ============================================================ */
+  M.juntarPaginas = function (itensAtuais, novos, pagina) {
+    var p = Number(pagina) || 1;
+    var fora = (Array.isArray(itensAtuais) ? itensAtuais : []).filter(function (i) {
+      return (Number(i.pagina) || 1) !== p;
+    });
+    (novos || []).forEach(function (i) { i.pagina = p; });
+    var juntos = fora.concat(novos || []);
+    juntos.sort(function (a, b) { return (Number(a.pagina) || 1) - (Number(b.pagina) || 1); });
+    return juntos;
+  };
 
   /* ============================================================
      7 · CONFERIR O QUE DÁ PARA CONFERIR SOZINHO
@@ -703,9 +802,10 @@
       return emFila(quais, o.larguraAlvoReforco, 2);
     }).then(function () {
       /* ETAPA 3 — juntar sem duplicar */
-      var junto = consolidar(achados);
+      var junto = consolidar(achados, blocos);
       relato.etapas.push({ etapa: "consolidar", itens: junto.itens.length,
-        repetidasRemovidas: junto.repetidasRemovidas, ms: Math.round(agora() - t0) });
+        repetidasRemovidas: junto.repetidasRemovidas,
+        suspeitasDeRepeticao: junto.suspeitasDeRepeticao, ms: Math.round(agora() - t0) });
       avisar({ etapa: "consolidar", texto: "Juntando os blocos…",
         itens: junto.itens.length });
 
@@ -726,6 +826,12 @@
       relato.msTotal = Math.round(agora() - t0);
       relato.itens = leitura.itens.length;
       relato.repetidasRemovidas = junto.repetidasRemovidas;
+      relato.suspeitasDeRepeticao = junto.suspeitasDeRepeticao;
+      if (junto.suspeitasDeRepeticao) {
+        leitura.avisos.push(junto.suspeitasDeRepeticao + " linha(s) começam igual a outra " +
+          "e foram MANTIDAS as duas, porque os dados não batem. Confira na imagem: " +
+          "produtos diferentes costumam ter o começo do nome parecido.");
+      }
       relato.conclusao = leitura.itens.length ? "leu" : "nada_lido";
 
       if (!leitura.itens.length) {
