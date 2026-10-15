@@ -67,7 +67,7 @@
   "use strict";
   if (typeof window === "undefined" || window.MOTORNF) return;
 
-  var CONTRATO = "motornf.v2";
+  var CONTRATO = "motornf.v4";
 
   /* ------------------------------------------------------------------
      O QUE CADA OCR PRECISA, EM PIXELS DE ALTURA DE LETRA.
@@ -309,6 +309,121 @@
     return saida;
   }
   M.perfilDeTexto = perfilDeTexto;
+
+  /* ============================================================
+     ACHAR A FAIXA DO CABECALHO DAS COLUNAS   ·  §3 do pedido
+     ------------------------------------------------------------
+     "A primeira linha sempre é o cabeçalho; ele se repete em todas
+      as folhas."  É isso, e era isso que faltava.
+
+     A região que a pessoa seleciona em cima da nota começa no
+     cabeçalho das colunas — CÓDIGO, DESCRIÇÃO, NCM/SH, CST, CFOP,
+     UNID, QUANT, VALOR UNITÁRIO, VALOR TOTAL. Enquanto o cabeçalho
+     ficar DENTRO da região de produtos, duas coisas quebram de uma
+     vez: ele é contado como se fosse mais uma linha de produto, e
+     o leitor ainda descarta a primeira linha "porque é cabeçalho"
+     — na folha 2 isso derruba um produto de verdade.
+
+     Aqui eu separo as duas regiões ANTES de qualquer leitura:
+       · cabecalho → viaja colado no topo de TODO bloco;
+       · produtos  → é a região que vira linha.
+     A primeira linha de produto passa a ser a primeira de verdade,
+     em todas as folhas, e nenhuma linha some por posição.
+
+     O corte não é chutado: é o vão de papel entre a primeira faixa
+     de texto e a segunda, medido no pixel. Sem vão medível eu
+     devolvo null e digo por quê — separar no palpite seria trocar
+     um erro silencioso por outro.
+     ============================================================ */
+  M.acharCabecalho = function (imagem, tabela) {
+    if (!imagem || !tabela || !(tabela.h > 6)) {
+      return { achou: false, porque: "não recebi imagem ou a região é pequena demais." };
+    }
+    var perfil = perfilDeTexto(imagem, tabela);
+    if (!perfil || perfil.lisa) {
+      return { achou: false,
+        porque: "não há faixa de texto medível nesta região." };
+    }
+    if (perfil.fundidas) {
+      return { achou: false,
+        porque: "as linhas estão encostadas umas nas outras nesta resolução, " +
+          "então não dá para dizer onde o cabeçalho termina sem chutar." };
+    }
+    if (perfil.bandas.length < 2 || !perfil.vales.length) {
+      return { achou: false,
+        porque: "achei " + perfil.bandas.length + " faixa(s) de texto; preciso de " +
+          "pelo menos duas para separar o cabeçalho da primeira linha de produto." };
+    }
+    var primeira = perfil.bandas[0];
+    var vao = perfil.vales[0];
+    var corte = vao.meio;
+    /* o cabeçalho não pode comer a tabela: se a primeira faixa ocupa
+       mais de um terço da região, isto não é um cabeçalho de uma
+       linha e eu não mexo. */
+    if ((corte - tabela.y) > tabela.h * 0.34) {
+      return { achou: false,
+        porque: "a primeira faixa de texto ocupa mais de um terço da região — " +
+          "isso não tem cara de cabeçalho de uma linha." };
+    }
+    return {
+      achou: true,
+      cabecalho: { x: tabela.x, y: tabela.y, w: tabela.w, h: corte - tabela.y },
+      produtos: { x: tabela.x, y: corte, w: tabela.w,
+        h: (tabela.y + tabela.h) - corte },
+      alturaDaFaixa: Math.round(primeira.altura),
+      vaoDePapel: Math.round(vao.altura),
+      faixasNaRegiao: perfil.bandas.length,
+      porque: "a primeira faixa de texto tem " + Math.round(primeira.altura) +
+        " px e depois dela vem um vão de papel de " + Math.round(vao.altura) +
+        " px. Cortei no meio desse vão."
+    };
+  };
+
+  /* ============================================================
+     O ECO DO CABECALHO ENTRE OS ITENS   ·  §3 do pedido
+     ------------------------------------------------------------
+     Mesmo separando a faixa, o cabeçalho pode reaparecer: numa
+     folha o OCR pega uma sobra, noutra a pessoa seleciona um pouco
+     acima. Então eu também reconheço o cabeçalho JÁ VIRADO EM ITEM.
+
+     A regra é estreita de propósito. Só é cabeçalho a linha que:
+       · tem duas ou mais palavras do cabeçalho da DANFE, E
+       · não tem quantidade NEM valor total.
+     Produto tem número. Cabeçalho não tem. Essa segunda condição é
+     o que torna impossível esta função apagar uma mercadoria, e é
+     por isso que ela existe.
+
+     "Nunca descarte um produto apenas porque ele aparece logo após
+      o cabeçalho" — nada aqui olha para a posição da linha.
+     ============================================================ */
+  var PALAVRAS_DE_CABECALHO = [
+    "CODIGO", "DESCRICAO", "PRODUTO", "SERVICO", "NCM", "SH", "CST", "CFOP",
+    "UNID", "QUANT", "VALOR", "UNITARIO", "TOTAL", "DESCONTO", "BASE",
+    "CALC", "ICMS", "IPI", "ALIQUOTA", "ALIQUOTAS"
+  ];
+  function semAcento(t) {
+    return lp(t).toUpperCase()
+      .replace(/[ÁÀÂÃÄ]/g, "A").replace(/[ÉÈÊË]/g, "E").replace(/[ÍÌÎÏ]/g, "I")
+      .replace(/[ÓÒÔÕÖ]/g, "O").replace(/[ÚÙÛÜ]/g, "U").replace(/[Ç]/g, "C");
+  }
+  M.ehCabecalhoDeColunas = function (item) {
+    var i = item || {};
+    var texto = semAcento([lp(i.descricao), lp(i.produto), lp(i.unidade)].join(" "));
+    if (!texto.replace(/[^A-Z]/g, "").length) return null;
+    var achadas = PALAVRAS_DE_CABECALHO.filter(function (p) {
+      return texto.indexOf(p) > -1;
+    });
+    if (achadas.length < 2) return null;
+    /* o cadeado: se tem número de mercadoria, NÃO é cabeçalho */
+    if (num(i.qtd) || num(i.quantidade) || num(i.valorTotal)) return null;
+    return {
+      ehCabecalho: true,
+      palavras: achadas.slice(0, 6),
+      porque: "esta linha tem as palavras do cabeçalho das colunas (" +
+        achadas.slice(0, 4).join(", ") + ") e não tem quantidade nem valor total. " +
+        "O cabeçalho se repete em toda folha da nota."
+    };
+  };
 
   function contarLinhasNaImagem(imagem, r) {
     if (!imagem || !r || !(r.h > 2)) return 0;
@@ -757,9 +872,97 @@
   }
   M.reconciliar = reconciliar;
 
+  /* ============================================================
+     [v4] APROVEITAR UMA LINHA QUE O OCR LEU E NAO VIROU ITEM
+     ------------------------------------------------------------
+     O motor já aponta essas linhas desde a v2, e de propósito não
+     as transformava em item: chutar onde termina a descrição e
+     começa a quantidade é como se erra calado.
+
+     Mas apontar e não dar saída também não resolve: ele fica
+     vendo o produto na tela, sabendo que ele existe, e sem como
+     trazê-lo. Então agora existe a saída, com três amarras:
+
+       1. Ela só roda quando a PESSOA pede, nessa linha.
+       2. A divisão é CONFERIDA pela aritmética: os três últimos
+          números da linha só viram quantidade, unitário e total
+          se quantidade × unitário bater com o total. Se não
+          bater, os números ficam em branco e só a descrição
+          entra — em branco dá para ver; errado, não.
+       3. O item nasce marcado para conferência e com o texto de
+          origem junto, para a conferência ser possível.
+
+     Nunca invento valor para a conta fechar.
+     ============================================================ */
+  M.linhaParaItem = function (texto) {
+    var t = lp(texto);
+    if (!t) return null;
+
+    /* os números da linha, na ordem em que aparecem */
+    var achados = [];
+    var re = /(\d{1,3}(?:\.\d{3})*,\d+|\d+,\d+|\d+\.\d+|\d+)/g;
+    var m2;
+    while ((m2 = re.exec(t))) {
+      achados.push({ cru: m2[0], fim: re.lastIndex, inicio: m2.index, valor: num(m2[0]) });
+    }
+
+    var saida = {
+      descricao: "", codigo: "", unidade: "",
+      qtd: 0, valorUnitario: 0, valorTotal: 0,
+      precisaConferir: true,
+      __veioDeTexto: t.slice(0, 160),
+      porqueConferir: "",
+      contaConfere: false
+    };
+
+    /* os três últimos números costumam ser qtd, unitário e total.
+       Só aceito se a conta fechar — é a única prova que tenho de
+       que a divisão está certa. */
+    if (achados.length >= 3) {
+      var tres = achados.slice(-3);
+      var q = tres[0].valor, u = tres[1].valor, tot = tres[2].valor;
+      if (q > 0 && u > 0 && tot > 0 &&
+          Math.abs(q * u - tot) <= Math.max(0.02, tot * 0.01)) {
+        saida.qtd = q; saida.valorUnitario = u; saida.valorTotal = tot;
+        saida.contaConfere = true;
+        saida.descricao = lp(t.slice(0, tres[0].inicio));
+        saida.porqueConferir = "esta linha o OCR leu mas o leitor não separou em " +
+          "campos. Eu separei pelos três últimos números e a conta fechou (" +
+          q + " × " + u + " = " + tot + "). Confira a descrição antes de lançar.";
+      }
+    }
+
+    if (!saida.contaConfere) {
+      /* sem prova, não preencho número nenhum */
+      saida.descricao = lp(t);
+      saida.porqueConferir = "esta linha o OCR leu mas o leitor não separou em " +
+        "campos, e a conta dos números não fechou — então NÃO preenchi " +
+        "quantidade nem valor. Preencha à mão olhando a nota. Deixar em " +
+        "branco é visível; deixar errado, não.";
+    }
+
+    /* um código no começo da linha, quando houver */
+    var cod = saida.descricao.match(/^\s*(\d{3,})\s+/);
+    if (cod) {
+      saida.codigo = cod[1];
+      saida.descricao = lp(saida.descricao.slice(cod[0].length));
+    }
+    /* unidade, quando a sigla aparece solta antes dos números */
+    var un = saida.descricao.match(/\b(PC|UN|PÇ|CX|M|KG|L|MT|PAR|RL|SC|JG)\b\s*$/i);
+    if (un) {
+      saida.unidade = un[1].toUpperCase();
+      saida.descricao = lp(saida.descricao.slice(0, un.index));
+    }
+    /* sobra de colunas fiscais no fim da descrição (NCM, CST, CFOP) */
+    saida.descricao = lp(saida.descricao.replace(/\s+\d{8}\s+\d{2,3}\s+\d{4}\s*$/, ""));
+
+    if (!saida.descricao) return null;
+    return saida;
+  };
+
   function consolidar(lista, blocos) {
     var saida = [], repetidas = 0, suspeitas = 0;
-    var descartadas = [], paraConferir = 0;
+    var descartadas = [], paraConferir = 0, cabecalhosRemovidos = 0;
     var porBloco = {};
     lista.forEach(function (i) {
       /* [v2] AQUI MORAVA UM SUMIÇO CALADO.
@@ -775,6 +978,25 @@
          Agora: só sai a linha SEM NADA. Qualquer linha com algum
          sinal de vida vai para a conferência, marcada. E o que sai
          sai registrado, com o bloco e a região de onde veio. */
+      /* [v3] O CABEÇALHO DAS COLUNAS NÃO É PRODUTO.
+         Ele se repete em cada folha da nota e, quando escapa para
+         dentro da leitura, vira um "item" sem quantidade e sem
+         valor. Sai aqui, contado e com motivo — e só sai quando é
+         cabeçalho pelo CONTEÚDO, nunca pela posição na lista. */
+      var cab = M.ehCabecalhoDeColunas(i);
+      if (cab) {
+        cabecalhosRemovidos++;
+        descartadas.push({
+          motivo: cab.porque,
+          cabecalhoDeColunas: true,
+          bloco: i.__origem && i.__origem.bloco,
+          pagina: i.pagina || (i.__origem && i.__origem.pagina) || null,
+          regiao: i.__origem && i.__origem.regiaoNaNota,
+          descricao: lp(i.descricao).slice(0, 48),
+          id: i.__id || null
+        });
+        return;
+      }
       var temAlgo = lp(i.descricao) || lp(i.codigo) || lp(i.sku) ||
         num(i.qtd) || num(i.quantidade) || num(i.valorUnitario) || num(i.valorTotal);
       if (!temAlgo) {
@@ -878,7 +1100,8 @@
       /* [v2] a conta tem de fechar na tela: entraram, saíram, e o
          que não saiu está aqui com o motivo */
       entraram: lista.length, sairam: saida.length,
-      descartadas: descartadas, marcadasParaConferir: paraConferir };
+      descartadas: descartadas, marcadasParaConferir: paraConferir,
+      cabecalhosRemovidos: cabecalhosRemovidos };
   }
   M.consolidar = consolidar;
 
@@ -986,6 +1209,10 @@
       pagina: o.pagina || 1,
       resolucaoOriginal: imagem ? (imagem.naturalWidth + " × " + imagem.naturalHeight + " px") : "—",
       regiao: tabela,
+      /* [v3] a faixa do cabecalho das colunas que viajou colada em
+         cada bloco. null aqui quer dizer que o OCR leu tiras de
+         numero sem saber de que coluna eram. */
+      cabecalhoDasColunas: o.cabecalho || null,
       etapas: [], blocos: [], erros: [],
       msTotal: 0
     };
@@ -1166,6 +1393,7 @@
       relato.itens = leitura.itens.length;
       relato.repetidasRemovidas = junto.repetidasRemovidas;
       relato.suspeitasDeRepeticao = junto.suspeitasDeRepeticao;
+      relato.cabecalhosRemovidos = junto.cabecalhosRemovidos;
 
       /* [v2] A CONTA DAS LINHAS — §4 do pedido.
          Tem de fechar na tela: quantas o OCR leu, quantas viraram
@@ -1177,6 +1405,7 @@
         devolvidasPelosBlocos: junto.entraram,
         descartadas: junto.descartadas,
         marcadasParaConferir: junto.marcadasParaConferir,
+        cabecalhosRemovidos: junto.cabecalhosRemovidos,
         /* conferido contra a lista FINAL: só fica na lista a linha que
            o OCR leu e que não está em item nenhum da nota inteira */
         naoViraramItem: relato.blocos.reduce(function (lista, b) {
@@ -1203,6 +1432,13 @@
         leitura.avisos.push(junto.marcadasParaConferir + " linha(s) entraram com " +
           "campo faltando e estão marcadas para conferência. Elas NÃO foram " +
           "descartadas de propósito.");
+      }
+
+      if (junto.cabecalhosRemovidos) {
+        leitura.avisos.push(junto.cabecalhosRemovidos + " linha(s) eram o cabeçalho das " +
+          "colunas, que se repete em toda folha da nota, e foram tiradas da lista. " +
+          "Elas estão no diagnóstico com o motivo. Nenhum produto saiu junto: só sai " +
+          "linha sem quantidade e sem valor total.");
       }
 
       if (junto.suspeitasDeRepeticao) {
