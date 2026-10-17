@@ -128,12 +128,19 @@ var NFED_APELIDOS = {
   valor:       ['valor', 'valortotal', 'valordanota', 'total'],
   status:      ['status', 'situacao'],
   origem:      ['origem'],
-  itens:       ['itens', 'listaitens', 'produtos', 'itensjson'],
+  /* A LISTA e a CONTAGEM sao colunas diferentes. No sistema,
+     "itens" é o NÚMERO de itens e "listaItens" é a lista. Procurar
+     'itens' primeiro fazia eu gravar o JSON na coluna da contagem. */
+  itens:       ['listaitens', 'itensjson', 'produtos', 'itenslista'],
+  contagem:    ['itens', 'qtditens', 'qtdeitens', 'totalitens'],
   idLanc:      ['idlanc', 'idlancamento', 'id', 'protocolo'],
   editadoPor:  ['editadopor'],
   editadoEm:   ['editadoem'],
   editadoMat:  ['editadomatricula'],
-  motivo:      ['motivoedicao', 'motivo', 'observacao', 'obs']
+  motivo:      ['motivoedicao', 'motivo', 'observacao', 'obs'],
+  statusAnterior: ['statusanterior', 'statusantes'],
+  excluidoEm:  ['excluidoem', 'dataexclusao'],
+  excluidoPor: ['excluidopor']
 };
 
 /* palavra que basta aparecer DENTRO do nome da coluna. Serve para
@@ -148,7 +155,8 @@ var NFED_PEDACOS = {
   valor:       ['valor', 'total'],
   status:      ['status', 'situacao'],
   origem:      ['origem'],
-  itens:       ['itens', 'produtos'],
+  itens:       ['listaitens', 'itensjson', 'produtos'],
+  contagem:    ['qtditens', 'totalitens'],
   idLanc:      ['idlanc', 'protocolo'],
   editadoPor:  ['editadopor'],
   editadoEm:   ['editadoem'],
@@ -160,8 +168,8 @@ var NFED_PEDACOS = {
 /* a ordem importa: quem é mais específico escolhe primeiro, senão
    "numero" roubaria a coluna "Nº do Lançamento" */
 var NFED_ORDEM = ['chave','cnpj','fornecedor','emissao','entrada','valor','status',
-                  'origem','itens','idLanc','editadoPor','editadoEm','editadoMat',
-                  'motivo','serie','numero'];
+                  'origem','itens','contagem','idLanc','editadoPor','editadoEm',
+                  'editadoMat','motivo','serie','numero'];
 
 function nfedMapa_(aba) {
   var larg = aba.getLastColumn();
@@ -192,6 +200,23 @@ function nfedMapa_(aba) {
       }
     }
     if (achou > -1) { mapa[alvo] = achou + 1; usada[achou] = true; }
+  }
+
+  /* Nenhuma coluna de LISTA? Talvez a planilha guarde o JSON na
+     própria coluna "itens". Só uso ela para isso se o conteúdo for
+     mesmo uma lista — se for número, é contagem, e gravar JSON ali
+     estragaria a coluna. */
+  if (!mapa.itens && mapa.contagem) {
+    var amostra = '';
+    try {
+      if (aba.getLastRow() > 1) {
+        amostra = nfedTexto_(aba.getRange(2, mapa.contagem).getValue());
+      }
+    } catch (e) { amostra = ''; }
+    if (amostra.charAt(0) === '[') {
+      mapa.itens = mapa.contagem;
+      delete mapa.contagem;
+    }
   }
 
   mapa.__cabecalho = cab;
@@ -235,6 +260,16 @@ function nfedLinhasDaNota_(aba, mapa, alvo) {
 }
 
 function nfedMarcarExcluida_(aba, mapa, linha, motivo, quem, matricula) {
+  /* [1.3] guarda o status de antes, para a restauração devolver a
+     nota ao estado em que ela estava — e não a um estado chutado */
+  if (mapa.status && mapa.statusAnterior) {
+    var antes = nfedTexto_(aba.getRange(linha, mapa.status).getValue()).toUpperCase();
+    if (antes && antes !== 'EXCLUIDA') {
+      aba.getRange(linha, mapa.statusAnterior).setValue(antes);
+    }
+  }
+  if (mapa.excluidoEm) aba.getRange(linha, mapa.excluidoEm).setValue(new Date().toISOString());
+  if (mapa.excluidoPor) aba.getRange(linha, mapa.excluidoPor).setValue(nfedTexto_(quem));
   if (mapa.status) aba.getRange(linha, mapa.status).setValue('EXCLUIDA');
   if (mapa.motivo) aba.getRange(linha, mapa.motivo).setValue(nfedTexto_(motivo));
   if (mapa.editadoPor) aba.getRange(linha, mapa.editadoPor).setValue(nfedTexto_(quem));
@@ -260,7 +295,7 @@ function nfedDiagnostico_() {
   var mapa = nfedMapa_(aba);
   var faltando = [];
   ['numero', 'itens', 'status'].forEach(function (c) {
-    if (!mapa[c]) faltando.push(c);
+    if (!mapa[c]) faltando.push(c === 'itens' ? 'listaItens (a LISTA, não a contagem)' : c);
   });
   return nfedResposta_(true, '', 'Diagnóstico da edição de notas', {
     aba: aba.getName(),
@@ -276,7 +311,31 @@ function nfedDiagnostico_() {
     cabecalhoDaPlanilha: mapa.__cabecalho,
     colunasEssenciaisFaltando: faltando,
     podeAlterar: faltando.length === 0,
-    versaoDoArquivo: 'nfed 1.0'
+    abaDeItens: (function () {
+      var ai = nfedAcharAbaDeItens_();
+      if (!ai) return 'NAO ENCONTRADA';
+      var mi = nfedMapaDeItens_(ai);
+      return {
+        aba: ai.getName(),
+        linhas: Math.max(0, ai.getLastRow() - 1),
+        colunas: (function () {
+          var o = {};
+          for (var k in mi) { if (k.indexOf('__') !== 0) o[k] = mi[k]; }
+          return o;
+        })(),
+        cabecalho: mi.__cabecalho
+      };
+    })(),
+    moduloDeNotasOriginal: (function () {
+      for (var i = 0; i < NFED_NOMES_DO_MODULO_DE_NOTAS.length; i++) {
+        if (nfedGlobal_(NFED_NOMES_DO_MODULO_DE_NOTAS[i])) {
+          return NFED_NOMES_DO_MODULO_DE_NOTAS[i];
+        }
+      }
+      return 'NAO ENCONTRADO — se a tela de notas parar de carregar, ' +
+             'confira se o arquivo do módulo de notas ainda existe no projeto';
+    })(),
+    versaoDoArquivo: 'nfed 1.4'
   });
 }
 
@@ -297,7 +356,13 @@ function nfedAtualizar_(p) {
   var mapa = nfedMapa_(aba);
   if (!mapa.numero || !mapa.itens) {
     return nfedResposta_(false, 'COLUNAS_FALTANDO',
-      'A aba ' + aba.getName() + ' não tem as colunas de número e de itens que eu preciso.',
+      'Na aba ' + aba.getName() + ' eu não achei ' +
+      (!mapa.numero ? 'a coluna do número da nota' : '') +
+      (!mapa.numero && !mapa.itens ? ' nem ' : '') +
+      (!mapa.itens ? 'a coluna que guarda a LISTA de itens (procurei por ' +
+        'ListaItens, ItensJson, Produtos). A coluna "Itens", quando guarda só o ' +
+        'número de itens, não serve — gravar a lista nela estragaria a contagem' : '') +
+      '. Nada foi gravado.',
       { cabecalho: mapa.__cabecalho });
   }
 
@@ -344,6 +409,8 @@ function nfedAtualizar_(p) {
     escreve('emissao', nfedTexto_(p.emissao));
     escreve('valor', nfedNumero_(p.valor) || somaItens);
     escreve('itens', itensJson);
+    /* a coluna de contagem recebe o NÚMERO, não o JSON */
+    if (mapa.contagem) aba.getRange(alvo, mapa.contagem).setValue(lista.length);
     if (mapa.status) aba.getRange(alvo, mapa.status).setValue(nfedTexto_(p.status) || 'LANCADA');
     if (mapa.editadoPor) aba.getRange(alvo, mapa.editadoPor).setValue(nfedTexto_(p.editadoPor));
     if (mapa.editadoMat) aba.getRange(alvo, mapa.editadoMat).setValue(nfedTexto_(p.editadoMatricula));
@@ -463,8 +530,351 @@ function nfedRemoverLancamento_(p) {
 }
 
 /* ============================================================
+ * OS ITENS, QUE MORAM NUMA ABA PROPRIA
+ * ------------------------------------------------------------
+ * ALMOXA_NF_ITENS: uma linha por item, ligada a nota pelas colunas
+ * "nf" e "serie". O sistema esperava a lista dentro do registro da
+ * nota e nunca foi buscar aqui — por isso as notas apareciam com o
+ * valor certo e nenhum produto.
+ *
+ * Cuidado que custou caro entender: o Google formata a coluna "nf"
+ * como numero e mostra "192.920". Comparar com o texto "192920"
+ * falha. Aqui a comparacao e feita so com os digitos.
+ * ============================================================ */
+
+var NFED_ABAS_DE_ITENS = [
+  'ALMOXA_NF_ITENS', 'NF_ITENS', 'NOTAS_ITENS', 'ITENS_NF', 'ITENS_NOTA'
+];
+
+function nfedAcharAbaDeItens_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var i, aba;
+  for (i = 0; i < NFED_ABAS_DE_ITENS.length; i++) {
+    aba = ss.getSheetByName(NFED_ABAS_DE_ITENS[i]);
+    if (aba) return aba;
+  }
+  /* pelo cabecalho: uma aba de itens tem nf e descricao (ou sku) */
+  var todas = ss.getSheets();
+  for (i = 0; i < todas.length; i++) {
+    var larg = todas[i].getLastColumn();
+    if (larg < 3) continue;
+    var cab = todas[i].getRange(1, 1, 1, larg).getValues()[0].map(nfedChaveCol_);
+    var temNf = cab.indexOf('nf') > -1 || cab.indexOf('numeronf') > -1 ||
+                cab.indexOf('numeronota') > -1;
+    var temItem = cab.indexOf('descricao') > -1 || cab.indexOf('sku') > -1;
+    var temQtd = cab.indexOf('quantidade') > -1 || cab.indexOf('qtd') > -1;
+    if (temNf && temItem && temQtd) return todas[i];
+  }
+  return null;
+}
+
+var NFED_APELIDOS_ITEM = {
+  nf:            ['nf', 'numeronf', 'numeronota', 'numero', 'nota'],
+  serie:         ['serie'],
+  sku:           ['sku', 'codigointerno'],
+  codigo:        ['codigo', 'cod', 'codigofornecedor'],
+  descricao:     ['descricao', 'produto', 'item', 'nome'],
+  ncm:           ['ncm'],
+  unidade:       ['unidade', 'und', 'um'],
+  quantidade:    ['quantidade', 'qtd', 'qtde', 'quant'],
+  valorUnitario: ['valorunitario', 'vlrunitario', 'precounitario', 'unitario'],
+  valorTotal:    ['valortotal', 'vlrtotal', 'total']
+};
+
+function nfedMapaDeItens_(aba) {
+  var larg = aba.getLastColumn();
+  var cab = aba.getRange(1, 1, 1, larg).getValues()[0].map(nfedChaveCol_);
+  var mapa = {}, usada = {};
+  for (var campo in NFED_APELIDOS_ITEM) {
+    if (!NFED_APELIDOS_ITEM.hasOwnProperty(campo)) continue;
+    var ap = NFED_APELIDOS_ITEM[campo];
+    for (var k = 0; k < ap.length; k++) {
+      var c = cab.indexOf(ap[k]);
+      if (c > -1 && !usada[c]) { mapa[campo] = c + 1; usada[c] = true; break; }
+    }
+  }
+  mapa.__cabecalho = cab;
+  mapa.__largura = larg;
+  return mapa;
+}
+
+/* "192.920", 192920 e " 192920 " sao a mesma nota */
+function nfedMesmoNumero_(a, b) {
+  var x = nfedSoNumeros_(a), y = nfedSoNumeros_(b);
+  if (!x || !y) return false;
+  return String(Number(x)) === String(Number(y));
+}
+
+function nfedItens_(p) {
+  p = p || {};
+  var numero = nfedTexto_(p.numero) || nfedTexto_(p.nf);
+  if (!numero) {
+    return nfedResposta_(false, 'SEM_NUMERO',
+      'Para buscar os itens eu preciso do número da nota.');
+  }
+  var aba = nfedAcharAbaDeItens_();
+  if (!aba) {
+    return nfedResposta_(false, 'SEM_ABA_DE_ITENS',
+      'Não achei a aba dos itens. Procurei por ' + NFED_ABAS_DE_ITENS.join(', ') +
+      ' e por um cabeçalho com nf, descrição e quantidade.');
+  }
+  var mapa = nfedMapaDeItens_(aba);
+  if (!mapa.nf) {
+    return nfedResposta_(false, 'SEM_COLUNA_NF',
+      'A aba ' + aba.getName() + ' não tem a coluna que liga o item à nota.',
+      { cabecalho: mapa.__cabecalho });
+  }
+  var ultima = aba.getLastRow();
+  if (ultima < 2) {
+    return nfedResposta_(true, '', 'A aba de itens está vazia.', []);
+  }
+  var dados = aba.getRange(2, 1, ultima - 1, mapa.__largura).getValues();
+  var serieAlvo = nfedTexto_(p.serie);
+  var achados = [];
+  function col(linha, campo) {
+    var c = mapa[campo];
+    return c ? linha[c - 1] : '';
+  }
+  for (var i = 0; i < dados.length; i++) {
+    if (!nfedMesmoNumero_(col(dados[i], 'nf'), numero)) continue;
+    /* a série só filtra quando as duas existem; nota sem série na
+       planilha não é descartada por causa disso */
+    if (serieAlvo && mapa.serie) {
+      var sLinha = nfedTexto_(col(dados[i], 'serie'));
+      if (sLinha && !nfedMesmoNumero_(sLinha, serieAlvo) && sLinha !== serieAlvo) continue;
+    }
+    var qtd = nfedNumero_(col(dados[i], 'quantidade'));
+    var vu  = nfedNumero_(col(dados[i], 'valorUnitario'));
+    var vt  = nfedNumero_(col(dados[i], 'valorTotal'));
+    achados.push({
+      sku: nfedTexto_(col(dados[i], 'sku')) || null,
+      codigo: nfedTexto_(col(dados[i], 'codigo')),
+      descricao: nfedTexto_(col(dados[i], 'descricao')),
+      ncm: nfedTexto_(col(dados[i], 'ncm')),
+      unidade: nfedTexto_(col(dados[i], 'unidade')) || 'un',
+      qtd: qtd,
+      recebido: qtd,
+      valorUnitario: vu || (qtd ? Math.round(vt / qtd * 100) / 100 : 0),
+      valorTotal: vt || Math.round(qtd * vu * 100) / 100,
+      linha: i + 2
+    });
+  }
+  return nfedResposta_(true, '',
+    achados.length + ' item(ns) da nota ' + numero + '.', achados);
+}
+
+/* ============================================================
+ * A LIXEIRA E A RESTAURACAO
+ * ------------------------------------------------------------
+ * Nota apagada aqui nunca saiu da planilha: ela virou status
+ * EXCLUIDA. Então devolvê-la é mudar o status de volta — a nota
+ * volta inteira, com o mesmo identificador e os mesmos itens.
+ * ============================================================ */
+
+function nfedLerLinhaCompleta_(valores, mapa) {
+  var n = nfedLerLinha_(valores, mapa);
+  function col(campo) { var c = mapa[campo]; return c ? valores[c - 1] : ''; }
+  n.fornecedor   = nfedTexto_(col('fornecedor'));
+  n.excluidoEm   = nfedTexto_(col('excluidoEm')) || nfedTexto_(col('editadoEm'));
+  n.excluidoPor  = nfedTexto_(col('excluidoPor')) || nfedTexto_(col('editadoPor'));
+  n.motivo       = nfedTexto_(col('motivo'));
+  n.statusAnterior = nfedTexto_(col('statusAnterior')).toUpperCase();
+  var lista = [];
+  try { lista = JSON.parse(n.itensCru || '[]'); } catch (e) { lista = []; }
+  n.quantosItens = (Object.prototype.toString.call(lista) === '[object Array]')
+    ? lista.length : 0;
+  return n;
+}
+
+function nfedLixeira_(p) {
+  p = p || {};
+  var aba = nfedAcharAba_();
+  if (!aba) return nfedResposta_(false, 'SEM_ABA_DE_NOTAS', 'Não achei a aba das notas.');
+  var mapa = nfedMapa_(aba);
+  if (!mapa.status) {
+    return nfedResposta_(false, 'SEM_COLUNA_STATUS',
+      'A aba ' + aba.getName() + ' não tem coluna de status, então não há como ' +
+      'saber quais notas foram excluídas.');
+  }
+  var ultima = aba.getLastRow();
+  if (ultima < 2) return nfedResposta_(true, '', 'Lixeira vazia.', { quantos: 0, notas: [] });
+
+  var dados = aba.getRange(2, 1, ultima - 1, mapa.__largura).getValues();
+  /* as identidades que estão VIVAS: uma nota excluída cuja identidade
+     já voltou a existir não pode ser restaurada sem decisão humana */
+  var vivas = {};
+  var i, n;
+  for (i = 0; i < dados.length; i++) {
+    n = nfedLerLinha_(dados[i], mapa);
+    if (n.status === 'EXCLUIDA') continue;
+    var idv = nfedIdentidade_(n);
+    if (idv) vivas[idv] = (n.numero || '') + (n.serie ? '/' + n.serie : '');
+  }
+
+  var busca = nfedTexto_(p.busca).toLowerCase();
+  var de = nfedTexto_(p.de), ate = nfedTexto_(p.ate);
+  var notas = [];
+  for (i = 0; i < dados.length; i++) {
+    n = nfedLerLinhaCompleta_(dados[i], mapa);
+    if (n.status !== 'EXCLUIDA') continue;
+    if (busca) {
+      var alvo = (n.numero + ' ' + n.serie + ' ' + n.fornecedor + ' ' + n.cnpj +
+                  ' ' + n.chave).toLowerCase();
+      if (alvo.indexOf(busca) === -1) continue;
+    }
+    var quando = nfedTexto_(n.excluidoEm).slice(0, 10);
+    if (de && quando && quando < de) continue;
+    if (ate && quando && quando > ate) continue;
+
+    var conflito = vivas[nfedIdentidade_(n)];
+    notas.push({
+      idLanc: n.idLanc || ('LINHA:' + (i + 2)),
+      linha: i + 2,
+      numero: n.numero, serie: n.serie, cnpj: n.cnpj,
+      fornecedor: n.fornecedor, valor: n.valor,
+      itens: n.quantosItens,
+      excluidoEm: n.excluidoEm, excluidoPor: n.excluidoPor,
+      motivoExclusao: n.motivo,
+      podeRestaurar: !conflito,
+      porqueNao: conflito
+        ? 'Já existe uma nota valendo com esta mesma identificação (' + conflito +
+          '). Restaurar agora deixaria a mesma nota em dobro.'
+        : ''
+    });
+  }
+  notas.sort(function (a, b) {
+    return String(b.excluidoEm || '').localeCompare(String(a.excluidoEm || ''));
+  });
+  return nfedResposta_(true, '', notas.length + ' nota(s) na lixeira.', {
+    quantos: notas.length, notas: notas, aba: aba.getName()
+  });
+}
+
+function nfedRestaurar_(p) {
+  p = p || {};
+  var id = nfedTexto_(p.idLanc);
+  if (!id) return nfedResposta_(false, 'SEM_ID', 'Faltou o identificador da nota.');
+  var aba = nfedAcharAba_();
+  if (!aba) return nfedResposta_(false, 'SEM_ABA_DE_NOTAS', 'Não achei a aba das notas.');
+  var mapa = nfedMapa_(aba);
+  if (!mapa.status) {
+    return nfedResposta_(false, 'SEM_COLUNA_STATUS', 'A aba não tem coluna de status.');
+  }
+  var trava = LockService.getScriptLock();
+  try { trava.waitLock(20000); } catch (e) {
+    return nfedResposta_(false, 'OCUPADO', 'Outra pessoa está gravando agora.');
+  }
+  try {
+    var ultima = aba.getLastRow();
+    var dados = aba.getRange(2, 1, Math.max(0, ultima - 1), mapa.__largura).getValues();
+    var alvo = -1, nAlvo = null, i, n;
+    for (i = 0; i < dados.length; i++) {
+      n = nfedLerLinhaCompleta_(dados[i], mapa);
+      if (n.status !== 'EXCLUIDA') continue;
+      var idDaLinha = n.idLanc || ('LINHA:' + (i + 2));
+      if (idDaLinha !== id) continue;
+      alvo = i + 2; nAlvo = n; break;
+    }
+    if (alvo < 0) {
+      return nfedResposta_(false, 'NOTA_NAO_ENCONTRADA',
+        'Não achei essa nota na lixeira. Nada foi mudado.');
+    }
+    /* conflito: a mesma nota já voltou a existir */
+    var idv = nfedIdentidade_(nAlvo);
+    for (i = 0; i < dados.length; i++) {
+      if (i + 2 === alvo) continue;
+      var outra = nfedLerLinha_(dados[i], mapa);
+      if (outra.status === 'EXCLUIDA') continue;
+      if (nfedIdentidade_(outra) !== idv) continue;
+      if (!p.resolverConflito) {
+        return nfedResposta_(false, 'CONFLITO',
+          'Já existe uma nota valendo com esta mesma identificação, na linha ' +
+          (i + 2) + '. Restaurar agora deixaria a mesma nota em dobro. ' +
+          'Nada foi mudado.', { linhaEmConflito: i + 2 });
+      }
+    }
+    var volta = nfedTexto_(nAlvo.statusAnterior) || 'LANCADA';
+    aba.getRange(alvo, mapa.status).setValue(volta);
+    if (mapa.motivo) {
+      aba.getRange(alvo, mapa.motivo).setValue(
+        'restaurada por ' + (nfedTexto_(p.por) || 'alguém') +
+        (nfedTexto_(p.motivo) ? ' — ' + nfedTexto_(p.motivo) : ''));
+    }
+    if (mapa.editadoPor) aba.getRange(alvo, mapa.editadoPor).setValue(nfedTexto_(p.por));
+    if (mapa.editadoMat) aba.getRange(alvo, mapa.editadoMat).setValue(nfedTexto_(p.matricula));
+    if (mapa.editadoEm) aba.getRange(alvo, mapa.editadoEm).setValue(new Date().toISOString());
+    SpreadsheetApp.flush();
+
+    var confere = nfedLerLinha_(aba.getRange(alvo, 1, 1, mapa.__largura).getValues()[0], mapa);
+    if (confere.status === 'EXCLUIDA') {
+      return nfedResposta_(false, 'RESTAURACAO_NAO_CONFERE',
+        'Escrevi na linha ' + alvo + ' mas ela continua marcada como excluída.');
+    }
+    return nfedResposta_(true, '',
+      'Nota ' + nAlvo.numero + (nAlvo.serie ? ' série ' + nAlvo.serie : '') +
+      ' restaurada como ' + volta + ', com ' + nAlvo.quantosItens + ' item(ns).',
+      { linha: alvo, status: volta, itens: nAlvo.quantosItens,
+        statusVeioDe: nfedTexto_(nAlvo.statusAnterior)
+          ? 'o status guardado na exclusão'
+          : 'LANCADA, porque a planilha não guardou o status anterior' });
+  } finally {
+    trava.releaseLock();
+  }
+}
+
+/* ============================================================
  * AS PORTAS
  * ============================================================ */
+
+/* ------------------------------------------------------------
+ * ESTE ARQUIVO É UM COMPLEMENTO, NÃO O DONO DA ROTA.
+ *
+ * Se o seu roteador mandar TODO o tráfego de notas para cá — e foi
+ * o que aconteceu: a tela de Notas Fiscais morreu com "a rota nfed
+ * não conhece a ação listar" — recusar seria derrubar o sistema.
+ * Então o que não é meu eu repasso para o módulo de notas de
+ * verdade, se ele existir no projeto.
+ * ------------------------------------------------------------ */
+var NFED_NOMES_DO_MODULO_DE_NOTAS = [
+  'AP_Modulo_nf', 'AP_Modulo_notas', 'AP_Modulo_notasfiscais',
+  'AP_Modulo_NotasFiscais', 'AP_Modulo_nota', 'AP_NF', 'AP_Notas'
+];
+
+function nfedGlobal_(nome) {
+  try {
+    if (typeof globalThis !== 'undefined' && typeof globalThis[nome] === 'function') {
+      return globalThis[nome];
+    }
+  } catch (e) {}
+  try {
+    if (typeof this !== 'undefined' && typeof this[nome] === 'function') {
+      return this[nome];
+    }
+  } catch (e) {}
+  return null;
+}
+
+function nfedRepassar_(acao, payload, sessao) {
+  for (var i = 0; i < NFED_NOMES_DO_MODULO_DE_NOTAS.length; i++) {
+    var nome = NFED_NOMES_DO_MODULO_DE_NOTAS[i];
+    if (nome === 'AP_Modulo_nfed') continue;          /* nunca a mim mesmo */
+    var fn = nfedGlobal_(nome);
+    if (!fn) continue;
+    try {
+      return fn(acao, payload, sessao);
+    } catch (e) {
+      return nfedResposta_(false, 'ERRO_NO_MODULO_DE_NOTAS',
+        'Repassei "' + nfedTexto_(acao) + '" para ' + nome + ' e ele falhou: ' +
+        (e && e.message ? e.message : e));
+    }
+  }
+  return nfedResposta_(false, 'ACAO_DESCONHECIDA',
+    'A ação "' + nfedTexto_(acao) + '" não é deste arquivo (ele só faz atualizar, ' +
+    'excluir, removerLancamento e diagnostico) e eu não achei o módulo de notas ' +
+    'original no projeto para repassar. Se a tela de notas parou de carregar, é ' +
+    'porque o roteador está mandando tudo para a rota nfed — confira se o arquivo ' +
+    'do módulo de notas ainda existe no Apps Script.');
+}
 
 /** A porta do roteador: almoxaApi chama isto para a rota "nfed". */
 function AP_Modulo_nfed(acao, payload, sessao) {
@@ -473,10 +883,12 @@ function AP_Modulo_nfed(acao, payload, sessao) {
       case 'atualizar':         return nfedAtualizar_(payload);
       case 'excluir':           return nfedExcluir_(payload);
       case 'removerLancamento': return nfedRemoverLancamento_(payload);
+      case 'itens':             return nfedItens_(payload);
+      case 'lixeira':           return nfedLixeira_(payload);
+      case 'restaurar':         return nfedRestaurar_(payload);
       case 'diagnostico':       return nfedDiagnostico_();
-      default:
-        return nfedResposta_(false, 'ACAO_DESCONHECIDA',
-          'A rota nfed não conhece a ação "' + nfedTexto_(acao) + '".');
+      /* qualquer outra coisa é do módulo de notas, não minha */
+      default:                  return nfedRepassar_(acao, payload, sessao);
     }
   } catch (e) {
     return nfedResposta_(false, 'ERRO_NO_MODULO',
