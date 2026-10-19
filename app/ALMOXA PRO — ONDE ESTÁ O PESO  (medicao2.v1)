@@ -1,0 +1,184 @@
+/**
+ * ============================================================
+ * ALMOXA PRO — ONDE ESTÁ O PESO  (medicao2.v1)
+ * ============================================================
+ * ESTE ARQUIVO SÓ LÊ. Não grava célula, não cria aba, não apaga
+ * nada, não muda configuração.
+ *
+ * A primeira medição mostrou que a aba ALMOXA_ITENS tem 871
+ * linhas e 44 MB de texto — 51 KB por linha. Alguma coluna está
+ * carregando isso. Esta função diz QUAL, sem adivinhação.
+ *
+ * Também termina o que ficou cortado no log da primeira vez:
+ * se findFirstBy diverge nas suas colunas, e quais abas o Core
+ * espera e não existem.
+ *
+ * O log sai em pedaços pequenos, de propósito — o anterior foi
+ * truncado pelo Google e as partes importantes se perderam.
+ *
+ * Como usar: arquivo novo, cole, escolha ALMOXA_MEDIR_PESO e
+ * rode. Nada mais precisa mudar. Pode apagar depois.
+ * ============================================================
+ */
+
+/* as abas onde um "não achei" falso vira cadastro repetido */
+var MEDP_OPERACIONAIS = [
+  'ALMOXA_ITENS', 'USUARIOS', 'ALMOXA_MOVIMENTACOES',
+  'ALMOXA_NOTAS', 'ALMOXA_NF_ITENS', 'ALMOXA_EPI_FICHAS',
+  'ALMOXA_FORNECEDORES', 'ALMOXA_PATRIMONIO'
+];
+
+/* quantas linhas olhar para descobrir o peso de cada coluna */
+var MEDP_AMOSTRA = 40;
+
+function ALMOXA_MEDIR_PESO() {
+  var ss = AP_Config_getSpreadsheet_();
+  var saida = { peso: [], busca: [], avisos: [], abas: {} };
+
+  /* ---------- PARTE 1 · DE QUE COLUNA VEM O PESO ---------- */
+  ['ALMOXA_ITENS', 'ALMOXA_SERVIDOR_OPERACOES', 'DIAGNOSTICOS',
+   'ALMOXA_PATRIMONIO', 'ALMOXA_CRACHAS'].forEach(function (nome) {
+    var aba = ss.getSheetByName(nome);
+    if (!aba) return;
+
+    var linhas = aba.getLastRow(), colunas = aba.getLastColumn();
+    if (linhas < 2 || colunas < 1) return;
+
+    var cab = aba.getRange(1, 1, 1, colunas).getValues()[0];
+    var quantas = Math.min(MEDP_AMOSTRA, linhas - 1);
+    var amostra = aba.getRange(2, 1, quantas, colunas).getValues();
+
+    var porColuna = [];
+    for (var c = 0; c < colunas; c++) {
+      var bytes = 0, maior = 0, exemplo = '';
+      for (var i = 0; i < amostra.length; i++) {
+        var v = amostra[i][c];
+        var n = 0;
+        try { n = (v === null || v === undefined) ? 0 : String(v).length; } catch (e) {}
+        bytes += n;
+        if (n > maior) {
+          maior = n;
+          /* NUNCA o conteúdo: só o começo, para dar para reconhecer
+             o que é, sem jogar dado da empresa no log */
+          exemplo = String(v).substring(0, 24).replace(/\s+/g, ' ');
+        }
+      }
+      porColuna.push({
+        coluna: String(cab[c] || ('col ' + (c + 1))),
+        mediaBytes: Math.round(bytes / amostra.length),
+        maiorBytes: maior,
+        comecaCom: maior > 200 ? exemplo : ''
+      });
+    }
+
+    porColuna.sort(function (a, b) { return b.mediaBytes - a.mediaBytes; });
+    var totalLinha = porColuna.reduce(function (t, x) { return t + x.mediaBytes; }, 0);
+
+    saida.peso.push({
+      aba: nome,
+      linhas: linhas - 1,
+      mediaPorLinha: (totalLinha / 1024).toFixed(1) + ' KB',
+      estimativaDaAba: ((totalLinha * (linhas - 1)) / 1024 / 1024).toFixed(1) + ' MB',
+      pesadas: porColuna.slice(0, 5).map(function (x) {
+        return x.coluna + ': ' + (x.mediaBytes > 1024
+          ? (x.mediaBytes / 1024).toFixed(1) + ' KB'
+          : x.mediaBytes + ' B') +
+          ' (maior ' + (x.maiorBytes > 1024 ? (x.maiorBytes / 1024).toFixed(0) + ' KB' : x.maiorBytes + ' B') + ')' +
+          (x.comecaCom ? '  começa com "' + x.comecaCom + '…"' : '');
+      }),
+      fatiaDasCincoMaiores: totalLinha ? Math.round(100 *
+        porColuna.slice(0, 5).reduce(function (t, x) { return t + x.mediaBytes; }, 0) / totalLinha) + '%' : '—'
+    });
+  });
+
+  Logger.log('PARTE 1 — DE QUE COLUNA VEM O PESO\n' + JSON.stringify(saida.peso, null, 2));
+
+  /* ---------- PARTE 2 · findFirstBy concorda? ---------- */
+  /* uma leitura completa por aba, não uma por campo */
+  MEDP_OPERACIONAIS.forEach(function (nome) {
+    var aba = ss.getSheetByName(nome);
+    if (!aba) { saida.abas[nome] = 'não existe'; return; }
+    var linhas = aba.getLastRow(), colunas = aba.getLastColumn();
+    if (linhas < 2) { saida.abas[nome] = 'vazia'; return; }
+    saida.abas[nome] = (linhas - 1) + ' linhas';
+
+    var cab = aba.getRange(1, 1, 1, colunas).getValues()[0];
+    var exemplo = aba.getRange(2, 1, 1, colunas).getValues()[0];
+    var campos = [];
+    for (var c = 0; c < Math.min(colunas, 8); c++) {
+      var campo = String(cab[c] || '');
+      var valor = exemplo[c];
+      if (!campo || valor === '' || valor === null || valor === undefined) continue;
+      if (String(valor).length > 120) continue;        /* nada de blob aqui */
+      campos.push({ campo: campo, valor: valor, coluna: c + 1 });
+    }
+    if (!campos.length) return;
+
+    /* caminho TextFinder: aba fora da memória */
+    AP_Data_limparCache();
+    campos.forEach(function (f) {
+      try { f.semLer = !!AP_Data_findFirstBy(nome, f.campo, f.valor); }
+      catch (e) { f.semLer = 'erro: ' + e.message; }
+    });
+
+    /* caminho em memória: UMA leitura, reaproveitada */
+    AP_Data_limparCache();
+    try { AP_Data_rows(nome); } catch (e) {}
+    campos.forEach(function (f) {
+      try { f.lendo = !!AP_Data_findFirstBy(nome, f.campo, f.valor); }
+      catch (e) { f.lendo = 'erro: ' + e.message; }
+    });
+    AP_Data_limparCache();
+
+    campos.forEach(function (f) {
+      if (f.semLer === f.lendo) return;
+      saida.busca.push({
+        aba: nome,
+        campo: f.campo,
+        tipo: (f.valor instanceof Date) ? 'data' : typeof f.valor,
+        formato: (function () {
+          try { return aba.getRange(2, f.coluna).getNumberFormat(); } catch (e) { return '?'; }
+        })(),
+        semLerAntes: f.semLer ? 'achou' : 'NÃO achou',
+        lendoAntes: f.lendo ? 'achou' : 'NÃO achou',
+        risco: (!f.semLer && f.lendo)
+          ? 'GRAVE: quem buscar sem ter lido a aba conclui que não existe e cadastra de novo'
+          : 'divergem'
+      });
+    });
+  });
+
+  Logger.log('PARTE 2 — findFirstBy\nabas: ' + JSON.stringify(saida.abas) +
+    '\ndivergências: ' + saida.busca.length + '\n' + JSON.stringify(saida.busca, null, 2));
+
+  /* ---------- PARTE 3 · avisos ---------- */
+  var faltam = [];
+  Object.keys(AP_SHEETS).forEach(function (k) {
+    if (!ss.getSheetByName(AP_SHEETS[k])) faltam.push(AP_SHEETS[k]);
+  });
+  if (faltam.length) {
+    saida.avisos.push('Abas que AP_SHEETS declara e que NÃO existem: ' + faltam.join(', ') +
+      '. Se um módulo pedir uma delas, AP_Data_getSheet CRIA a aba, vazia, sem avisar.');
+  }
+
+  try {
+    var cru = CacheService.getScriptCache().get(AP_CONFIG_MAP_KEY);
+    if (cru === null) {
+      saida.avisos.push('O mapa de CONFIG não está no cache neste momento.');
+    } else {
+      var uma = JSON.parse(cru);
+      var mapa = (typeof uma === 'string') ? JSON.parse(uma) : uma;
+      saida.avisos.push('Mapa de CONFIG no cache: ' + Object.keys(mapa).length + ' chave(s)' +
+        (typeof uma === 'string' ? ', serializado DUAS vezes' : '') +
+        (Object.keys(mapa).length === 0 ? '  ← VAZIO: o sistema está rodando nos defaults' : ''));
+    }
+  } catch (e) { saida.avisos.push('Não deu para ler o mapa de CONFIG: ' + e.message); }
+
+  var totalAbas = 0;
+  try { totalAbas = ss.getSheets().length; } catch (e) {}
+  saida.avisos.push('A planilha tem ' + totalAbas + ' abas.');
+  saida.avisos.push('Esta medição não gravou nada.');
+
+  Logger.log('PARTE 3 — AVISOS\n' + saida.avisos.join('\n'));
+  return saida;
+}
