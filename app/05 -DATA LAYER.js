@@ -251,11 +251,40 @@ function AP_Data_rows(sheetName) {
   return registros;
 }
 
+/**
+ * [gravar.v1] A RÉGUA ÚNICA DE COMPARAÇÃO DESTE ARQUIVO.
+ *
+ * O que estava errado: AP_Data_update, AP_Data_remove e
+ * AP_Data_findBy comparavam com ===, enquanto AP_Data_findFirstBy
+ * comparava com String(a) === String(b).
+ *
+ * A planilha guarda matrícula, número de nota e código como
+ * NÚMERO. O navegador manda tudo como TEXTO, porque é assim que
+ * JSON funciona. Então 4147 === '4147' dava falso, e a gravação
+ * voltava REGISTRO_NAO_ENCONTRADO para um registro que o próprio
+ * sistema tinha achado e mostrado na tela.
+ *
+ * É a causa de "não deixa gravar" em toda parte do sistema:
+ * salvar a senha de um usuário, acrescentar item numa nota,
+ * qualquer edição cujo registro seja localizado por campo
+ * numérico.
+ *
+ * Agora as quatro funções usam esta régua. Uma só.
+ */
+function AP_Data_mesmoValor_(naPlanilha, procurado) {
+  if (naPlanilha === procurado) return true;
+  if (naPlanilha === null || naPlanilha === undefined) return false;
+  if (procurado === null || procurado === undefined) return false;
+  return String(naPlanilha) === String(procurado);
+}
+
 function AP_Data_findBy(sheetName, criteria) {
   var rows = AP_Data_rows(sheetName);
   if (typeof criteria === 'function') return rows.filter(criteria);
   return rows.filter(function (row) {
-    return Object.keys(criteria).every(function (key) { return row[key] === criteria[key]; });
+    return Object.keys(criteria).every(function (key) {
+      return AP_Data_mesmoValor_(row[key], criteria[key]);
+    });
   });
 }
 
@@ -325,6 +354,15 @@ function AP_Data_appendBatch(sheetName, records) {
  */
 function AP_Data_update(sheetName, matchValue, patch, matchField) {
   var field = matchField || 'id';
+
+  /* [gravar.v1] chave vazia não é "o primeiro registro em branco":
+     é chamada errada. Sem esta recusa, um matchValue vazio casaria
+     com a primeira linha de campo vazio e gravaria por cima dela. */
+  if (matchValue === null || matchValue === undefined || matchValue === '') {
+    return AP_Utils_fail('CHAVE_VAZIA',
+      'Tentou atualizar em ' + sheetName + ' sem informar o valor de "' + field + '".');
+  }
+
   var sheet = AP_Data_getSheet(sheetName);
   var headers = AP_Data_headers(sheetName);
   var fieldIndex = headers.indexOf(field);
@@ -336,12 +374,17 @@ function AP_Data_update(sheetName, matchValue, patch, matchField) {
   var rows = AP_Data_rows(sheetName);
   var target = null;
   for (var i = 0; i < rows.length; i++) {
-    if (rows[i][field] === matchValue) { target = rows[i]; break; }
+    if (AP_Data_mesmoValor_(rows[i][field], matchValue)) { target = rows[i]; break; }
   }
 
   if (!target) {
+    /* a mensagem diz o que foi procurado e de que tipo. Antes dizia
+       só "não encontrado", e quem lia o log não tinha como saber
+       que o problema era texto contra número. */
     return AP_Utils_fail('REGISTRO_NAO_ENCONTRADO',
-      'Nenhum registro com ' + field + '=' + matchValue + ' em ' + sheetName);
+      'Nenhum registro com ' + field + '=' + matchValue +
+      ' (' + (typeof matchValue) + ') em ' + sheetName + '. ' +
+      'A aba tem ' + rows.length + ' registro(s).');
   }
 
   /* monta a linha completa com os valores atuais e aplica o patch */
@@ -367,17 +410,26 @@ function AP_Data_update(sheetName, matchValue, patch, matchField) {
 
 function AP_Data_remove(sheetName, matchValue, matchField) {
   var field = matchField || 'id';
+
+  /* [gravar.v1] remover com chave vazia apagaria a primeira linha
+     de campo em branco. Isso nunca é o que se quis pedir. */
+  if (matchValue === null || matchValue === undefined || matchValue === '') {
+    return AP_Utils_fail('CHAVE_VAZIA',
+      'Tentou remover de ' + sheetName + ' sem informar o valor de "' + field + '".');
+  }
+
   var sheet = AP_Data_getSheet(sheetName);
   var rows = AP_Data_rows(sheetName);
 
   var target = null;
   for (var i = 0; i < rows.length; i++) {
-    if (rows[i][field] === matchValue) { target = rows[i]; break; }
+    if (AP_Data_mesmoValor_(rows[i][field], matchValue)) { target = rows[i]; break; }
   }
 
   if (!target) {
     return AP_Utils_fail('REGISTRO_NAO_ENCONTRADO',
-      'Nenhum registro com ' + field + '=' + matchValue + ' em ' + sheetName);
+      'Nenhum registro com ' + field + '=' + matchValue +
+      ' (' + (typeof matchValue) + ') em ' + sheetName + '.');
   }
 
   sheet.deleteRow(target.__rowIndex);
@@ -419,11 +471,17 @@ function AP_Data_validateColumn(sheetName, columnName) {
 function AP_Data_findFirstBy(sheetName, campo, valor) {
   if (valor === null || valor === undefined || valor === '') return null;
 
-  /* já está em memória nesta execução: não vale procurar de novo */
+  /* A REGRA DA CASA — AP_Data_mesmoValor_, a mesma que update,
+     remove e findBy passaram a usar. */
+  function AP_Data_ehAProcurada_(registro) {
+    return !!registro && AP_Data_mesmoValor_(registro[campo], valor);
+  }
+
+  /* ---------- caminho 1: a aba já está na memória da execução ---------- */
   if (Object.prototype.hasOwnProperty.call(AP_Data_exec_.linhas, sheetName)) {
     var emMemoria = AP_Data_exec_.linhas[sheetName];
     for (var i = 0; i < emMemoria.length; i++) {
-      if (String(emMemoria[i][campo]) === String(valor)) return emMemoria[i];
+      if (AP_Data_ehAProcurada_(emMemoria[i])) return emMemoria[i];
     }
     return null;
   }
@@ -431,49 +489,70 @@ function AP_Data_findFirstBy(sheetName, campo, valor) {
   var sheet = AP_Data_getSheet(sheetName);
   var headers = AP_Data_headers(sheetName);
   var coluna = headers.indexOf(campo);
-  if (coluna === -1) return null;
+
+  if (coluna === -1) {
+    /* campo que não existe não é "registro não encontrado": é erro de
+       quem chamou. Fica registrado para não virar cadastro duplicado
+       silencioso. O devolvido continua null, para não quebrar ninguém. */
+    try {
+      AP_Logger_error('AP_Data_findFirstBy',
+        'Campo "' + campo + '" não existe na aba ' + sheetName, {});
+    } catch (e) {}
+    return null;
+  }
 
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return null;
 
   var t0 = new Date().getTime();
 
-  try {
-    /* procura só na coluna do campo, e para na primeira ocorrência */
-    var faixa = sheet.getRange(2, coluna + 1, lastRow - 1, 1);
-    var achado = faixa.createTextFinder(String(valor))
-      .matchEntireCell(true)
-      .findNext();
+  /* ---------- caminho 2: o atalho, sempre conferido ---------- */
+  /* Data não entra aqui: a célula exibe 19/10/2026 e String(Date)
+     devolve "Mon Oct 19 2026 ...". Tentar seria gastar uma ida ao
+     Google para errar. */
+  if (!(valor instanceof Date)) {
+    try {
+      var faixa = sheet.getRange(2, coluna + 1, lastRow - 1, 1);
+      var achado = faixa.createTextFinder(String(valor))
+        .matchEntireCell(true)
+        .findNext();
 
-    AP_Data_exec_.perf.buscasDirecionadas = (AP_Data_exec_.perf.buscasDirecionadas || 0) + 1;
+      if (achado) {
+        var linha = achado.getRow();
+        var valores = sheet.getRange(linha, 1, 1, headers.length).getValues()[0];
 
-    if (!achado) {
-      AP_Data_exec_.perf.msLeitura += (new Date().getTime() - t0);
-      return null;
+        var registro = {};
+        for (var c = 0; c < headers.length; c++) registro[String(headers[c])] = valores[c];
+        registro.__rowIndex = linha;
+
+        if (AP_Data_ehAProcurada_(registro)) {
+          AP_Data_exec_.perf.msLeitura += (new Date().getTime() - t0);
+          AP_Data_exec_.perf.buscasDirecionadas =
+            (AP_Data_exec_.perf.buscasDirecionadas || 0) + 1;
+          AP_Data_exec_.perf.linhasEvitadas =
+            (AP_Data_exec_.perf.linhasEvitadas || 0) + (lastRow - 2);
+          return registro;
+        }
+        /* o atalho trouxe outra linha — por exemplo porque o TextFinder
+           ignora maiúsculas. Não serve: segue para a leitura. */
+      }
+    } catch (e) {
+      /* TextFinder indisponível nesta conta: segue para a leitura */
     }
-
-    /* lê APENAS a linha encontrada */
-    var linha = achado.getRow();
-    var valores = sheet.getRange(linha, 1, 1, headers.length).getValues()[0];
-
-    var registro = {};
-    for (var c = 0; c < headers.length; c++) registro[String(headers[c])] = valores[c];
-    registro.__rowIndex = linha;
-
-    AP_Data_exec_.perf.msLeitura += (new Date().getTime() - t0);
-    AP_Data_exec_.perf.linhasEvitadas =
-      (AP_Data_exec_.perf.linhasEvitadas || 0) + (lastRow - 2);
-
-    return registro;
-
-  } catch (e) {
-    /* TextFinder indisponível: caminho antigo, resultado igual */
-    var todas = AP_Data_rows(sheetName);
-    for (var j = 0; j < todas.length; j++) {
-      if (String(todas[j][campo]) === String(valor)) return todas[j];
-    }
-    return null;
   }
+
+  /* ---------- caminho 3: lê a aba e responde pela regra ---------- */
+  /* ERA AQUI QUE SAÍA O "return null" QUE CAUSAVA O PROBLEMA.
+     O atalho não ter achado não é prova de que não existe. */
+  AP_Data_exec_.perf.msLeitura += (new Date().getTime() - t0);
+  AP_Data_exec_.perf.atalhosSemResposta =
+    (AP_Data_exec_.perf.atalhosSemResposta || 0) + 1;
+
+  var todas = AP_Data_rows(sheetName);
+  for (var j = 0; j < todas.length; j++) {
+    if (AP_Data_ehAProcurada_(todas[j])) return todas[j];
+  }
+  return null;
 }
 
 /** Atalho para o caso mais comum */
