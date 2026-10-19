@@ -1,5 +1,5 @@
 /**
- * ALMOXA PRO — API ÚNICA (a porta da rua)   ·   versão 7
+ * ALMOXA PRO — API ÚNICA (a porta da rua)   ·   versão 8
  *
  * Este arquivo SUBSTITUI o ALMOXA_PRO_API_UNICA que você já tem, e
  * substitui qualquer outro arquivo de ponte que exista no projeto.
@@ -306,6 +306,20 @@ function APIX_rotear_(req) {
      Precisa do arquivo ALMOXA_PRO_Modulo_JuntarCadastros.gs. */
   if (req.modulo === 'juntar' && typeof AP_JUNTAR_direto === 'function') {
     return APIX_padronizar_(AP_JUNTAR_direto(JSON.stringify({
+      acao: req.acao,
+      payload: req.payload,
+      sessao: req.sessao,
+      token: req.sessao
+    })));
+  }
+  /* [v8] A DIGITAL DO CELULAR.
+     Não é uma segunda biometria: é outro TIPO de credencial do mesmo
+     colaborador, ao lado do crachá e da digital do leitor de bancada.
+     A digital nunca chega aqui — o que chega é uma ASSINATURA, e esta
+     rota leva ao arquivo que confere a conta.
+     Precisa do arquivo ALMOXA_PRO_Chave_Digital.gs. */
+  if (req.modulo === 'chave' && typeof AP_CHAVE_direto === 'function') {
+    return APIX_padronizar_(AP_CHAVE_direto(JSON.stringify({
       acao: req.acao,
       payload: req.payload,
       sessao: req.sessao,
