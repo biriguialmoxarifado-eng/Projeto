@@ -14007,7 +14007,8 @@ function modalImportarColaboradores() {
           "<td>" + x.linha + "</td>" +
           "<td><b>" + U.esc(x.nome) + "</b>" +
           (x.subcontratada ? ' <span class="badge b-gray">SUB</span>' : "") + "</td>" +
-          '<td class="mono">' + U.esc(x.matricula || "—") + "</td>" +
+          '<td class="mono">' + U.esc(x.matricula || "—") +
+          (x.matriculaGerada ? ' <span class="badge b-yellow">gerada</span>' : "") + "</td>" +
           '<td class="mono">' + (x.cracha ? U.esc(x.cracha) : x.crachaPendente ? '<span class="badge b-yellow">pendente</span>' : "—") + "</td>" +
           "<td>" + U.esc(x.funcao || "—") + "</td>" +
           '<td><span class="badge ' + cor + '">' + rotulo + "</span>" +
@@ -14021,9 +14022,25 @@ function modalImportarColaboradores() {
         "São problemas de identidade: matrícula que já é de outra pessoa, ou crachá repetido. " +
         "Importar assim sobrescreveria o cadastro de alguém. Corrija na planilha e mande de novo, " +
         "ou cadastre essas na mão.</div></div>" : "") +
+      /* [MATGER] a lista dos numeros que EU inventei, para ele
+         guardar e trocar pelos do RH quando sairem */
+      ((p.geradas || []).length
+        ? '<div class="alert a-yellow mt12">' + ic("alerta") +
+          "<div><b>" + p.geradas.length + " matrícula(s) geradas por mim</b>" +
+          "Essas pessoas vieram sem número na planilha. Gerei sequencial acima da maior " +
+          "matrícula que já existe. <b>Guarde esta lista</b>: quando o RH der o número de " +
+          "verdade, troque — se o RH usar um destes para outra pessoa, duas ficam com a " +
+          "mesma matrícula." +
+          '<div class="mono small mt8" style="max-height:120px;overflow:auto">' +
+          p.geradas.map(function (g) {
+            return U.esc(g.matricula) + "  " + U.esc(g.nome) + (g.sub ? "  (SUB)" : "");
+          }).join("<br>") + "</div></div></div>"
+        : "") +
       '<div class="alert a-blue mt12">' + ic("info") +
       "<div>Vão ser gravadas <b>" + liberados + "</b> pessoa(s), uma por uma, no cadastro que já existe. " +
-      "Ninguém recebe senha por aqui — isso continua sendo feito no cadastro de acesso.</div></div>" +
+      "Quem já está cadastrado <b>não é sobrescrito</b>: a planilha só preenche o que estiver " +
+      "vazio no sistema. Ninguém recebe senha por aqui — isso continua sendo feito no cadastro " +
+      "de acesso.</div></div>" +
       "</div></div>";
     function bloco(t, n, sub) {
       return '<div class="card"><div class="card-body" style="padding:10px">' +
@@ -14061,7 +14078,14 @@ function modalImportarColaboradores() {
         '<div class="barra mt8" style="height:6px;background:var(--borda);border-radius:3px;overflow:hidden">' +
         '<div style="height:100%;width:' + Math.round((i / fila.length) * 100) + '%;background:var(--azul-acao)"></div></div>' +
         "</div></div>";
-      API.call("usuarios", "salvar", BASEMESTRE.paraCadastro(p)).then(function (r) {
+      /* [NAOAPAGA] quem ja existe vai junto, para a planilha so
+         preencher o que falta em vez de passar por cima */
+      var atual = null;
+      if (p.idExistente) {
+        atual = (JA || []).filter(function (u) {
+          return String(u.id) === String(p.idExistente); })[0] || null;
+      }
+      API.call("usuarios", "salvar", BASEMESTRE.paraCadastro(p, atual)).then(function (r) {
         if (r && r.ok) feitos++;
         else erros.push(p.nome + ": " + ((r && r.mensagem) || "recusado pelo servidor"));
         passo(i + 1);
@@ -55812,7 +55836,7 @@ return UI.cabecalho({
 trilha: [ "Configurações", "Crachás" ],
 titulo: "Crachás e validação de acesso",
 sub: "O crachá diz quem é a pessoa. O Core diz o que ela pode fazer — uma operação " + "por vez, e toda tentativa fica registrada.",
-acoes: '<button class="btn btn-ghost" data-cr-ler>' + ic("qr") + "Ler crachá</button>" + '<button class="btn btn-ghost" data-cr-imprimir-varios>' + ic("impressora") + "Imprimir vários</button>" + '<button class="btn btn-orange" data-cr-novo>' + ic("mais") + "Novo crachá</button>"
+acoes: '<button class="btn btn-ghost" data-cr-importar>' + ic("upload") + "Importar lista</button>" + '<button class="btn btn-ghost" data-cr-ler>' + ic("qr") + "Ler crachá</button>" + '<button class="btn btn-ghost" data-cr-imprimir-varios>' + ic("impressora") + "Imprimir vários</button>" + '<button class="btn btn-orange" data-cr-novo>' + ic("mais") + "Novo crachá</button>"
 }) + '<div class="grid g4 mb16">' + UI.kpi({
 icone: "escudoOk",
 cor: "ico-green",
@@ -55866,6 +55890,19 @@ CRP.aba = b.getAttribute("data-aba");
 ROUTER.render();
 });
 });
+/* [IMPCR] O MESMO IMPORTADOR, NAO UM SEGUNDO.
+   A tela de Usuarios ja tem "Importar lista do RH", com pente fino,
+   conferencia antes de gravar e linha problematica segurada. Abrir
+   um segundo importador aqui criaria duas verdades para o mesmo
+   dado — exatamente o que nao pode existir. Entao este botao chama
+   aquele. */
+var imp = document.querySelector("[data-cr-importar]");
+if (imp) imp.addEventListener("click", function() {
+  if (typeof modalImportarColaboradores === "function") modalImportarColaboradores();
+  else toast("err", "Importador nao encontrado",
+             "A tela de Usuarios e quem o carrega. Abra por la.");
+});
+
 var n = document.querySelector("[data-cr-novo]");
 if (n) n.addEventListener("click", function() {
 CRP.aba = "novo";
@@ -61443,6 +61480,10 @@ function modalBioRevogar(matricula) {
      que linha, e o que vai acontecer se ele mandar importar assim.
      ============================================================ */
   function penteFino(pessoas, jaCadastrados) {
+    /* lista vazia nao pode derrubar a tela: a janela ja confere o
+       ler() antes de chegar aqui, mas quem chamar de outro lugar
+       merece uma resposta em vez de um erro */
+    pessoas = pessoas || [];
     var existentes = (jaCadastrados || []).map(function (u) {
       return {
         id: u.id, nome: limpa(u.nome), matricula: limpa(u.matricula),
@@ -61456,6 +61497,44 @@ function modalBioRevogar(matricula) {
       if (e.cracha) (porCracha[e.cracha] = porCracha[e.cracha] || []).push(e);
       (porNome[chave(e.nome)] = porNome[chave(e.nome)] || []).push(e);
     });
+
+    /* ============================================================
+       [MATGER] MATRICULA PARA QUEM NAO TEM
+       ------------------------------------------------------------
+       Ele escolheu numero sequencial comum. Eu disse o risco e
+       mantenho o registro aqui: se o RH der esse mesmo numero a
+       alguem depois, duas pessoas ficam com a mesma matricula — e a
+       matricula e o que liga cracha, ficha de EPI e assinatura.
+
+       O que eu faco para reduzir, sem fugir da escolha dele:
+       comeco ACIMA da maior matricula que ja existe, arredondada
+       para a proxima centena, com uma centena de folga. E a tela de
+       conferencia lista quais numeros foram gerados, para ele poder
+       trocar pelos de verdade quando sairem.
+
+       Nenhum numero e gerado para quem ja tem matricula — nem na
+       planilha, nem no cadastro.
+       ============================================================ */
+    var usados = {};
+    existentes.forEach(function (e) { if (e.matricula) usados[e.matricula] = true; });
+    (pessoas || []).forEach(function (p) { if (limpa(p.matricula)) usados[limpa(p.matricula)] = true; });
+
+    var maior = 0;
+    Object.keys(usados).forEach(function (m) {
+      var so = String(m).replace(/\D+/g, '');
+      if (!so) return;
+      var v = parseInt(so, 10);
+      if (!isNaN(v) && v > maior) maior = v;
+    });
+    var proximo = (Math.floor(maior / 100) + 2) * 100 + 1;   /* centena de folga */
+    var geradas = [];
+    function gerarMatricula_() {
+      while (usados[String(proximo)]) proximo++;
+      var m = String(proximo);
+      usados[m] = true;
+      proximo++;
+      return m;
+    }
 
     var achados = [];
     var vistasMatricula = {}, vistosCracha = {}, vistosNome = {};
@@ -61475,8 +61554,23 @@ function modalBioRevogar(matricula) {
       if (p.subcontratada) {
         p.avisos.push('Matrícula "' + (p.marcaMatricula || 'SUB') + '": pessoa de subcontratada, sem matrícula própria. ' +
           'Ela NÃO é duplicidade das outras marcadas igual.');
+        /* [MATGER] sem numero ela nao tem cracha nem ficha de EPI.
+           Gero um proprio para cada uma — e por isso elas deixam de
+           colidir entre si, continuando marcadas como SUB. */
+        if (!limpa(p.matricula)) {
+          p.matricula = gerarMatricula_();
+          p.matriculaGerada = true;
+          geradas.push({ linha: p.linha, nome: p.nome, matricula: p.matricula, sub: true });
+          p.avisos.push('Gerei a matrícula ' + p.matricula + ' para ela poder ter crachá e ficha.');
+        }
       } else if (!p.matricula) {
-        p.avisos.push('Sem matrícula na lista.');
+        /* [MATGER] sem matricula na planilha: gero uma, acima de
+           tudo que ja existe, e deixo marcado para a conferencia */
+        p.matricula = gerarMatricula_();
+        p.matriculaGerada = true;
+        geradas.push({ linha: p.linha, nome: p.nome, matricula: p.matricula });
+        p.avisos.push('Sem matrícula na lista — gerei a ' + p.matricula +
+          '. Troque pela do RH quando ela sair.');
       } else {
         if (vistasMatricula[p.matricula]) {
           p.problemas.push('Matrícula ' + p.matricula + ' repetida na própria lista (linha ' + vistasMatricula[p.matricula] + ').');
@@ -61559,11 +61653,69 @@ function modalBioRevogar(matricula) {
       semBotina: pessoas.filter(function (p) { return !p.botina; }).length,
       comCapacete: pessoas.filter(function (p) { return !!p.capacete; }).length
     };
-    return { resumo: resumo, pessoas: pessoas, achados: achados };
+    return { resumo: resumo, pessoas: pessoas, achados: achados, geradas: geradas };
   }
 
   /* o registro que vai para o cadastro que já existe */
-  function paraCadastro(p) {
+  /* ============================================================
+     [NAOAPAGA] A PLANILHA PREENCHE BURACO, NUNCA APAGA
+     ------------------------------------------------------------
+     "as pessoas que ja tem o nome completo, quem ja tem o numero da
+      matricula, nao e para subir. Vai copiar as informacoes que nao
+      tiver ali — as informacoes estao no sistema."
+
+     O DEFEITO QUE ISSO CONSERTA. Antes, quando a linha era de
+     alguem que JA EXISTE, eu mandava todos os campos da planilha,
+     inclusive os vazios. Planilha so com nome e matricula apagava
+     funcao, lotacao, admissao e capacete de quem ja tinha. O
+     importador dizia "atualizado" e a pessoa saia do processo com
+     menos informacao do que entrou.
+
+     A REGRA AGORA, para cada campo: vale o que ESTA NO SISTEMA.
+     A planilha so entra onde o sistema esta vazio.
+
+     Repare que eu mando o valor do sistema de volta, em vez de
+     omitir o campo. E de proposito: omitir dependeria de o Core
+     tratar campo ausente como "mantem", e isso eu nao verifiquei.
+     Mandando o valor que ja esta la, o resultado e o mesmo faca o
+     Core o que fizer.
+     ============================================================ */
+  function manterOuPreencher(doSistema, daPlanilha) {
+    var sis = limpa(doSistema);
+    return sis ? sis : limpa(daPlanilha);
+  }
+
+  function paraCadastro(p, atual) {
+    /* pessoa nova: nao ha o que preservar, entra a planilha inteira */
+    if (!atual) return paraCadastroNovo_(p);
+
+    return {
+      id: p.idExistente || atual.id,
+      /* o Core precisa saber que isto e a MESMA pessoa sendo
+         editada, e nao alguem novo pegando a matricula de outro */
+      editando: true,
+      nome: manterOuPreencher(atual.nome, p.nome),
+      matricula: manterOuPreencher(atual.matricula, p.matricula),
+      subcontratada: (atual.subcontratada !== undefined && atual.subcontratada !== null && atual.subcontratada !== '')
+        ? !!atual.subcontratada : !!p.subcontratada,
+      crachaNumero: manterOuPreencher(atual.crachaNumero || atual.numeroCracha, p.cracha),
+      crachaPendente: !!(limpa(atual.crachaNumero || atual.numeroCracha) ? false : p.crachaPendente),
+      crachaObservacao: manterOuPreencher(atual.crachaObservacao, p.crachaObservacao || ''),
+      funcao: manterOuPreencher(atual.funcao || atual.cargo, p.funcao),
+      cargo: manterOuPreencher(atual.cargo || atual.funcao, p.funcao),
+      tipoMO: manterOuPreencher(atual.tipoMO, p.tipoMO),
+      admissao: manterOuPreencher(atual.admissao, p.admissao),
+      lotacao: manterOuPreencher(atual.lotacao || atual.setor, p.lotacao),
+      origem: manterOuPreencher(atual.origem, p.origem),
+      uniforme: manterOuPreencher(atual.uniforme, p.uniforme),
+      botina: manterOuPreencher(atual.botina, p.botina),
+      capacete: manterOuPreencher(atual.capacete, p.capacete),
+      perfil: limpa(atual.perfil) || 'colaborador',
+      status: limpa(atual.status) || 'Ativo'
+    };
+  }
+
+  function paraCadastroNovo_(p) {
     return {
       id: p.idExistente || undefined,
       nome: p.nome,
