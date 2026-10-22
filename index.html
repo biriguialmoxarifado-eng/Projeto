@@ -31660,6 +31660,31 @@ return espera;
 }
 epiSelecao = preSelecao ? JSON.parse(JSON.stringify(preSelecao)) : {};
 epiBusca = "";
+
+  /* ============================================================
+     [QUEMRECEBE] O NOME VOLTAVA SOZINHO
+     ------------------------------------------------------------
+     "eu to fazendo o lancamento da ficha de EPI do Joao, seleciono
+      uma bota, e quando coloco a bota ele volta para o meu nome"
+
+     A CAUSA. A escolha do colaborador morava SO no <select> da
+     tela. Cada vez que voce mexia num item — mais, menos, digitar
+     a quantidade, buscar, carregar um kit — o corpo da janela era
+     redesenhado inteiro, o <select> nascia de novo, e a selecao
+     voltava para matriculaPreset: a pessoa de quem a janela foi
+     aberta, ou o primeiro da lista. O motivo da entrega tinha o
+     mesmo problema e voltava para "Primeira entrega" sempre.
+
+     Isso nao e incomodo de tela: e EPI lancado na ficha de outra
+     pessoa, com data e validade, e assinatura cobrada de quem nao
+     recebeu.
+
+     A CORRECAO. A escolha passa a morar numa variavel, que o
+     redesenho le. Quem manda e o que voce escolheu, nao o que a
+     tela lembra.
+     ============================================================ */
+  var quemRecebe = matriculaPreset ? String(matriculaPreset) : "";
+  var motivoEscolhido = "";
 /* A LISTA DE PESSOAS VEM DO CORE, AQUI DENTRO.
    Antes esta tela lia MOCK.usuarios, que só é preenchido quando a
    TELA de EPI é desenhada. Abrindo "Entregar EPI" de qualquer outro
@@ -31698,10 +31723,43 @@ return i.sku === sku;
 return s + epiSelecao[sku] * (Number(it.valorUnitario) || 0);
 }, 0);
 return '<div class="grid g2 mb16">' + '<div class="field"><label>Colaborador <span class="req">*</span>' + '<button class="btn-link" data-ep-novo style="float:right;font-weight:600">+ Cadastrar rápido</button></label>' + '<select class="select" id="epColab">' + (usuarios.length ? usuarios.map(function(u) {
-return '<option value="' + U.esc(u.matricula) + '" ' + (String(u.matricula) === String(matriculaPreset) ? "selected" : "") + ">" + U.esc(u.nome) + " — " + U.esc(u.matricula) + "</option>";
+/* [QUEMRECEBE] marca quem VOCE escolheu; so cai no preset
+   enquanto voce ainda nao escolheu ninguem */
+return '<option value="' + U.esc(u.matricula) + '" ' + (String(u.matricula) === String(quemRecebe || matriculaPreset || "") ? "selected" : "") + ">" + U.esc(u.nome) + " — " + U.esc(u.matricula) + "</option>";
 }).join("") : '<option value="">' + (listaCarregando ? "Carregando as pessoas…" : "Ninguém cadastrado ainda") + "</option>") + "</select>" + (!usuarios.length && !listaCarregando ? '<div class="small mt8" style="color:var(--laranja)">Ninguém veio do Core. Use o <b>Cadastrar rápido</b> ao lado para incluir quem vai receber agora.</div>' : "") + "</div>" + '<div class="field"><label>Motivo</label><select class="select" id="epMotivo">' + [ "Primeira entrega", "Troca por desgaste", "Perda", "Dano", "Vencimento", "Reposição" ].map(function(m) {
-return "<option>" + m + "</option>";
-}).join("") + "</select></div>" + "</div>" + '<div class="flex gap8 mb12">' + '<div class="search-wrap grow">' + ic("busca") + '<input class="input" id="epBusca" placeholder="Buscar EPI por descrição, SKU ou marca…" value="' + U.esc(epiBusca) + '"></div>' + '<button class="btn btn-ghost" data-epi-kit>' + ic("caixa") + "Usar um kit</button>" + "</div>" + (escolhidos.length ? '<div class="alert a-blue mb12">' + ic("checkC") + "<div><b>" + escolhidos.length + " EPI(s) selecionado(s)</b>" + (total ? "Valor estimado: " + U.moeda(total) : "") + "</div></div>" : "") + '<div class="grid g4" style="gap:12px">' + lista.slice(0, 24).map(function(i) {
+/* [QUEMRECEBE] o motivo tinha o mesmo defeito: voltava para
+   "Primeira entrega" a cada item mexido */
+return '<option' + (motivoEscolhido === m ? " selected" : "") + ">" + m + "</option>";
+}).join("") + "</select></div>" + "</div>" + '<div class="flex gap8 mb12">' + '<div class="search-wrap grow">' + ic("busca") + '<input class="input" id="epBusca" placeholder="Buscar EPI por descrição, SKU ou marca…" value="' + U.esc(epiBusca) + '"></div>' + '<button class="btn btn-ghost" data-epi-kit>' + ic("caixa") + "Usar um kit</button>" + "</div>" + /* [VEROSITENS] A TARJA ABRE.
+   "selecionei 10 itens, aparece uma tarja azul; deveria ter a
+    opcao de ver esses itens, tirar um, ou mudar a quantidade"
+   Antes ela so contava. Agora lista o que esta marcado, com o
+   mesmo mais/menos da grade e um Tirar por linha — sem precisar
+   cacar o cartao do item no meio de 24. */
+(escolhidos.length
+  ? '<div class="card mb12" style="border-color:var(--azul-acao)"><div class="card-head" style="padding:10px 12px">' +
+    "<div><h3 style=\"font-size:13px;margin:0\">" + escolhidos.length + " EPI(s) selecionado(s)</h3>" +
+    '<p style="margin:2px 0 0">' + (total ? "Valor estimado: " + U.moeda(total) : "Confira antes de registrar") + "</p></div>" +
+    '<button class="btn-link" data-epi-limpar>Limpar todos</button></div>' +
+    '<div class="card-body" style="padding:0;max-height:200px;overflow:auto">' +
+    escolhidos.map(function (sku) {
+      var it = itens.filter(function (i) { return i.sku === sku; })[0] || {};
+      var saldo = Number(it.estoqueAtual) || 0;
+      var pedido = epiSelecao[sku];
+      return '<div class="flex gap8" style="align-items:center;padding:8px 12px;border-bottom:1px solid var(--borda)">' +
+        '<div class="grow" style="min-width:0">' +
+        "<b style=\"font-size:12.5px\">" + U.esc(it.descricao || sku) + "</b>" +
+        '<div class="muted mono" style="font-size:10.5px">' + U.esc(sku) +
+        (pedido > saldo ? ' · <span style="color:var(--laranja)">pedido ' + pedido +
+          ", saldo " + saldo + "</span>" : " · saldo " + saldo) + "</div></div>" +
+        '<div class="qty" style="flex:none">' +
+        '<button class="qbtn" data-epi-menos="' + U.esc(sku) + '">−</button>' +
+        '<input class="qinput" value="' + pedido + '" data-epi-qtd="' + U.esc(sku) + '">' +
+        '<button class="qbtn" data-epi-mais="' + U.esc(sku) + '">+</button></div>' +
+        '<button class="btn-link" data-epi-tirar="' + U.esc(sku) + '" style="flex:none">Tirar</button>' +
+        "</div>";
+    }).join("") + "</div></div>"
+  : "") + '<div class="grid g4" style="gap:12px">' + lista.slice(0, 24).map(function(i) {
 var qtd = epiSelecao[i.sku] || 0;
 var saldo = Number(i.estoqueAtual) || 0;
 return '<div class="card cat-item ' + (qtd ? "sel" : "") + '" data-epi-card="' + U.esc(i.sku) + '">' + '<div class="card-body" style="padding:10px">' + (i.foto ? '<img src="' + i.foto + '" style="width:100%;height:74px;object-fit:cover;border-radius:6px">' : '<div class="prod-img" style="height:74px;font-size:24px;margin:0">🦺</div>') + '<b style="display:block;font-size:12.5px;margin-top:8px;line-height:1.3">' + U.esc(i.descricao) + "</b>" + '<div class="muted mono" style="font-size:10.5px">' + U.esc(i.sku) + "</div>" + '<div class="small mt8">saldo: <b class="' + (saldo > 0 ? "stock-ok" : "stock-crit") + '">' + saldo + "</b></div>" + '<div class="qty mt8" style="width:100%">' + '<button class="qbtn" data-epi-menos="' + U.esc(i.sku) + '">−</button>' + '<input class="qinput" value="' + qtd + '" data-epi-qtd="' + U.esc(i.sku) + '">' + '<button class="qbtn" data-epi-mais="' + U.esc(i.sku) + '">+</button>' + "</div></div></div>";
@@ -31807,10 +31865,28 @@ if (!escolhidos.length) {
 toast("warn", "Nenhum EPI selecionado", "Informe a quantidade de pelo menos um item.");
 return;
 }
-var matricula = w.querySelector("#epColab").value;
+/* [QUEMRECEBE] le a tela e a variavel, e exige que as duas
+   concordem. Se por algum caminho elas divergirem, eu paro em vez
+   de lancar EPI na ficha de quem nao recebeu. */
+guardarEscolhas_();
+var matricula = String(quemRecebe || "");
+if (!matricula) {
+  toast("warn", "Falta dizer quem recebe", "Escolha o colaborador na lista de cima.");
+  return;
+}
+var naTela = w.querySelector("#epColab") ? String(w.querySelector("#epColab").value) : matricula;
+if (naTela && naTela !== matricula) {
+  toast("err", "Conferência falhou",
+        "A tela mostra uma pessoa e a escolha é de outra. Não vou lançar. Feche e abra de novo.");
+  return;
+}
 var colaborador = usuarios.filter(function(u) {
 return String(u.matricula) === String(matricula);
 })[0] || {};
+if (!colaborador.nome) {
+  toast("warn", "Não achei esse colaborador", "Escolha de novo na lista.");
+  return;
+}
 var entregas = escolhidos.map(function(sku) {
 var it = itens.filter(function(i) {
 return i.sku === sku;
@@ -31822,9 +31898,20 @@ qtd: epiSelecao[sku]
 };
 });
 fechar();
-confirmarIdentidadeEPI(colaborador, entregas, w.querySelector("#epMotivo").value);
+confirmarIdentidadeEPI(colaborador, entregas, motivoEscolhido || "Primeira entrega");
 });
+function guardarEscolhas_() {
+  /* [QUEMRECEBE] o que esta na tela agora vira a verdade ANTES de
+     a tela ser desmontada. Sem isto, um clique no "+" antes de
+     qualquer change perderia a escolha. */
+  var sc = w.querySelector("#epColab");
+  if (sc && sc.value) quemRecebe = sc.value;
+  var sm = w.querySelector("#epMotivo");
+  if (sm && sm.value) motivoEscolhido = sm.value;
+}
+
 function repintar() {
+guardarEscolhas_();
 var b = w.querySelector("#epBusca");
 var pos = b ? b.selectionStart : null;
 w.querySelector("#epBox").innerHTML = corpo();
@@ -31841,6 +31928,29 @@ epiSelecao[sku] = valor !== undefined ? Math.max(0, Number(valor) || 0) : Math.m
 repintar();
 }
 function ligar() {
+/* [QUEMRECEBE] e enquanto a tela vive, toda troca e registrada */
+var selColab = w.querySelector("#epColab");
+if (selColab) selColab.addEventListener("change", function () {
+  quemRecebe = selColab.value;
+});
+var selMotivo = w.querySelector("#epMotivo");
+if (selMotivo) selMotivo.addEventListener("change", function () {
+  motivoEscolhido = selMotivo.value;
+});
+
+w.querySelectorAll("[data-epi-tirar]").forEach(function (b) {
+  b.addEventListener("click", function (e) {
+    e.stopPropagation();
+    delete epiSelecao[b.getAttribute("data-epi-tirar")];
+    repintar();
+  });
+});
+var limparTudo = w.querySelector("[data-epi-limpar]");
+if (limparTudo) limparTudo.addEventListener("click", function () {
+  epiSelecao = {};
+  repintar();
+});
+
 var btnKit = w.querySelector("[data-epi-kit]");
 if (btnKit) btnKit.addEventListener("click", function() {
 modalEscolherKit(function(itensKit, kit) {
