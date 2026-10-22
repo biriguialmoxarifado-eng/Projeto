@@ -31637,13 +31637,72 @@ var epiSelecao = {};
 
 var epiBusca = "";
 
+/* ============================================================
+   [ACHAEPI] POR QUE O CATALOGO DE EPI APARECIA VAZIO
+   ------------------------------------------------------------
+   A conta antiga era esta:
+
+       /epi|seguran|uniform/i.test(i.categoria || "")
+
+   Ela olhava UM campo so, do jeito exato que estava escrito. Se o
+   item guardasse no campo categoria o ID da categoria em vez do
+   nome — e e assim que o cadastro central trabalha, porque as
+   categorias vem numa lista a parte, com id e nome —, nada casava.
+   Trezentos EPIs cadastrados e a tela dizendo "cadastre os EPIs".
+
+   Tambem nao casava com acento ("PROTECAO" x "PROTEÇÃO"), com
+   ponto ("E.P.I."), nem com o plural, nem quando a pessoa poe a
+   classificacao na subcategoria.
+
+   Agora eu resolvo o id para o nome, tiro acento e pontuacao, e
+   olho onde a classificacao costuma morar. Continuo nao chutando:
+   so as palavras que realmente querem dizer EPI entram.
+   ============================================================ */
+function epiSemAcento_(v) {
+  var t = String(v == null ? "" : v).toUpperCase();
+  try { t = t.normalize("NFD").replace(/[\u0300-\u036f]/g, ""); } catch (e) {}
+  return t.replace(/[^A-Z0-9]+/g, " ").trim();
+}
+
+function epiNomeDaCategoria_(i) {
+  var bruto = i.categoria || "";
+  if (!bruto) return "";
+  var achada = (MOCK.categorias || []).filter(function (c) {
+    return String(c.id) === String(bruto);
+  })[0];
+  return achada ? achada.nome : bruto;
+}
+
+var EPI_PALAVRAS = /(^| )(EPI|EPIS|E P I|E P IS|SEGURANCA|PROTECAO|UNIFORME|UNIFORMES)( |$)/;
+
+function epiPareceEPI_(i) {
+  var alvo = [ epiNomeDaCategoria_(i), i.subcategoria, i.grupo, i.familia, i.tipo, i.classe ]
+    .map(epiSemAcento_).join(" ");
+  return EPI_PALAVRAS.test(" " + alvo + " ");
+}
+
 function catalogoEPI() {
 return (MOCK.itens || []).filter(function(i) {
-return i.status !== "Inativo" && /epi|seguran|uniform/i.test(i.categoria || "");
+return i.status !== "Inativo" && epiPareceEPI_(i);
 });
 }
 
-function modalEntregarEPI(matriculaPreset, preSelecao, jaSincronizou) {
+/* o que o catalogo TEM, para a tela poder mostrar em vez de supor */
+function epiRetratoDoCatalogo_() {
+  var todos = MOCK.itens || [];
+  var ativos = todos.filter(function (i) { return i.status !== "Inativo"; });
+  var porCat = {};
+  ativos.forEach(function (i) {
+    var nome = epiNomeDaCategoria_(i) || "(sem categoria)";
+    porCat[nome] = (porCat[nome] || 0) + 1;
+  });
+  var lista = Object.keys(porCat).map(function (k) {
+    return { nome: k, quantos: porCat[k] };
+  }).sort(function (a, b) { return b.quantos - a.quantos; });
+  return { total: todos.length, ativos: ativos.length, categorias: lista };
+}
+
+function modalEntregarEPI(matriculaPreset, preSelecao, jaSincronizou, todosOsItens) {
 /* Antes de dizer que o catálogo está vazio, PERGUNTA ao Core. */
 if (!jaSincronizou && !catalogoEPI().length && typeof sincronizarCadastro === "function") {
 var espera = UI.modal({
@@ -31697,15 +31756,54 @@ epiBusca = "";
    sobre a realidade. */
 var usuarios = listaSegura(MOCK.usuarios);
 var listaCarregando = true;
-var itens = catalogoEPI();
+/* [ACHAEPI] por padrao, so o que e EPI. Com "Escolher do catalogo
+   inteiro", todos os ativos — e a tela diz que esta assim. */
+var itens = todosOsItens
+  ? (MOCK.itens || []).filter(function (i) { return i.status !== "Inativo"; })
+  : catalogoEPI();
 if (!itens.length) {
+/* [ACHAEPI] NAO AFIRMAR UMA CAUSA QUE EU NAO CONFERI.
+   A mensagem antiga mandava cadastrar os EPIs. Com o catalogo
+   cheio, isso e mentira: o que houve foi eu nao ter reconhecido a
+   categoria. Entao agora eu mostro o que o catalogo TEM — quantos
+   itens e quais categorias existem, com o nome exato — e deixo
+   voce escolher do catalogo inteiro, para nao travar a entrega de
+   uma bota por causa de um nome de categoria. */
+var retrato = epiRetratoDoCatalogo_();
 UI.modal({
-titulo: "Nenhum EPI no catálogo",
-tamanho: "sm",
-corpo: '<div class="alert a-yellow">' + ic("alerta") + "<div><b>O catálogo de EPI está vazio</b>Cadastre os EPIs no Cadastro Central com a categoria " + "<b>EPI</b>, <b>Segurança</b> ou <b>Uniforme</b> — é de lá que esta tela puxa os itens.</div></div>",
-rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' + '<button class="btn btn-primary" data-ir-itens>Cadastrar EPIs</button>',
+titulo: retrato.ativos ? "Não reconheci nenhum item como EPI" : "O catálogo está vazio",
+tamanho: "md",
+corpo: (retrato.ativos
+  ? '<div class="alert a-yellow">' + ic("alerta") +
+    "<div><b>O catálogo tem " + retrato.ativos + " item(ns) ativo(s), e nenhum " +
+    "está classificado como EPI</b>" +
+    "Esta tela procura pelas palavras <b>EPI</b>, <b>Segurança</b>, <b>Proteção</b> ou " +
+    "<b>Uniforme</b> na categoria. Nenhuma das categorias abaixo tem essas palavras.</div></div>" +
+    '<div class="card mt12"><div class="card-head" style="padding:10px 12px">' +
+    '<div><h3 style="font-size:13px;margin:0">O que está no catálogo agora</h3>' +
+    '<p style="margin:2px 0 0">categoria · quantos itens</p></div></div>' +
+    '<div class="card-body" style="padding:0;max-height:220px;overflow:auto">' +
+    retrato.categorias.slice(0, 20).map(function (c) {
+      return '<div class="flex gap8" style="padding:7px 12px;border-bottom:1px solid var(--borda)">' +
+        '<b class="grow" style="font-size:12.5px">' + U.esc(c.nome) + "</b>" +
+        '<span class="muted mono">' + c.quantos + "</span></div>";
+    }).join("") + "</div></div>" +
+    '<div class="alert a-blue mt12">' + ic("info") +
+    "<div>Duas saídas: renomear a categoria desses itens no Cadastro Central, ou " +
+    "escolher do catálogo inteiro agora e resolver a categoria depois.</div></div>"
+  : '<div class="alert a-yellow">' + ic("alerta") +
+    "<div><b>O catálogo não tem nenhum item</b>" +
+    "Nem EPI, nem nada. Cadastre no Cadastro Central — é de lá que esta tela lê.</div></div>"),
+rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' +
+  (retrato.ativos ? '<button class="btn btn-ghost" data-epi-todos>Escolher do catálogo inteiro</button>' : "") +
+  '<button class="btn btn-primary" data-ir-itens>Abrir o Cadastro Central</button>',
 aoAbrir: function(w, f) {
 w.querySelector("[data-x]").addEventListener("click", f);
+var bt = w.querySelector("[data-epi-todos]");
+if (bt) bt.addEventListener("click", function () {
+  f();
+  modalEntregarEPI(matriculaPreset, preSelecao, true, true);
+});
 w.querySelector("[data-ir-itens]").addEventListener("click", function() {
 f();
 location.hash = "#/itens";
@@ -31770,7 +31868,9 @@ return '<div class="card cat-item ' + (qtd ? "sel" : "") + '" data-epi-card="' +
 }
 UI.modal({
 titulo: "Entregar EPI",
-sub: "Selecione vários itens do catálogo de uma vez",
+sub: todosOsItens
+  ? "Catálogo inteiro — nenhum item está classificado como EPI"
+  : "Selecione vários itens do catálogo de uma vez",
 tamanho: "xl",
 corpo: '<div id="epBox">' + corpo() + "</div>",
 rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' + '<button class="btn btn-green" data-ok>' + ic("checkC") + "Confirmar entrega</button>",
@@ -54936,9 +55036,63 @@ w.querySelector(".modal-body").innerHTML = '<div class="cr-res">' + '<div class=
 var b = w.querySelector("#crDeNovo");
 if (b) b.addEventListener("click", tentarDeNovo);
 }
+/* ============================================================
+   [JALOGADO] LOGADO E LOGADO
+   ------------------------------------------------------------
+   "se eu tiver logado no meu usuario eu nao preciso autenticar a
+    senha porque eu ja estou logado, ja estou dentro do sistema"
+
+   COMO ERA. 65 operacoes passavam por aqui. Cada uma abria uma
+   janela e mandava auth.login para o Apps Script — uma ida ao
+   servidor por operacao, pedindo a senha do MESMO usuario que ja
+   tinha entrado com ela. Nao havia nenhuma janela de validade:
+   confirmar agora nao valia para a operacao seguinte.
+
+   O QUE ELE PEDIU, E EU FIZ. Enquanto houver sessao aberta, a
+   propria sessao confirma: nenhuma janela, nenhuma ida ao
+   servidor. Era ali que estava a lentidao — nao em onde a senha
+   mora. Mover a senha para o Drive, que foi a outra ideia, teria
+   ACRESCENTADO uma leitura em vez de tirar.
+
+   O QUE EU NAO AFROUXEI, de proposito:
+   - a operacao continua CARIMBADA com quem fez. Rapidez nao pode
+     custar rastreabilidade: o comprovante diz "confirmado pela
+     sessao", que e a verdade, em vez de fingir leitura de cracha.
+   - a confirmacao de TERCEIRO — o colaborador que recebe o EPI —
+     nao passa por aqui e continua intacta. A sessao dele nao esta
+     aberta; e a ficha dele que depende daquela confirmacao.
+   - sem sessao, tudo volta a pedir, como sempre foi.
+
+   COMO APERTAR DE NOVO, sem mim: no Doutor do Sistema, "Pedir a
+   senha em toda operacao". Liga e volta ao comportamento antigo.
+   A escolha fica neste aparelho; ela so APERTA, nunca afrouxa —
+   por isso pode morar aqui.
+   ============================================================ */
+function confirmacaoPelaSessao_() {
+  try {
+    if (localStorage.getItem("almoxa.pedirSenhaSempre") === "1") return null;
+  } catch (e) {}
+  var u = APP && APP.STATE && APP.STATE.usuario;
+  if (!u) return null;                       /* sem sessao, pede */
+  if (!u.matricula && !u.email && !u.login) return null;
+  return {
+    quem: {
+      matricula: u.matricula || "",
+      colaborador: u.nome || u.colaborador || u.email || "",
+      codigo: u.cracha || u.crachaNumero || ""
+    },
+    via: "SESSAO"
+  };
+}
+
 function exigir(acao, opts) {
 opts = opts || {};
 var origem = opts.origem || (APP.STATE.rota || "sistema");
+
+/* [JALOGADO] quem ja entrou nao entra de novo */
+var daSessao = confirmacaoPelaSessao_();
+if (daSessao) return Promise.resolve(daSessao);
+
 return new Promise(function(ok, naoDeu) {
 CRACHA.liberando = true;
 var terminar = function(fn, v) {
@@ -57413,6 +57567,9 @@ payload.crachaColaborador = r.quem.colaborador;
 /* COMO A PESSOA CONFIRMOU VIAJA COM A OPERAÇÃO.
    Sem isto, o comprovante da digital ficava só na aba de provas e
    a linha da operação não dizia por qual método foi confirmada. */
+/* [JALOGADO] o carimbo diz COMO foi confirmado. "SESSAO" e a
+   verdade — nao vou escrever "CRACHA" numa operacao em que
+   cracha nenhum foi lido. */
 if (r.via) payload.metodoConfirmacao = r.via;
 if (r.prova) payload.provaBiometria = r.prova;
 return chamadaCarimbada.call(API, modulo, acao, payload, opcoes);
@@ -62102,8 +62259,12 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 270 · 21/10";
+var ALMOXA_VERSAO = "sistema 272 · 22/10";
 var ALMOXA_NOVIDADES = [
+  "272 · logado e logado: a sessao confirma a operacao, sem pedir a senha de novo",
+  "272 · quem recebe o EPI continua confirmando — e a ficha dele que depende disso",
+  "271 · o catalogo de EPI reconhece a categoria por id, acento e sinonimo",
+  "271 · catalogo vazio mostra o que TEM, em vez de mandar cadastrar",
   "270 · o EPI deixa de ir para a ficha da pessoa errada",
   "270 · a tarja dos itens marcados abre: ver, mudar quantidade e tirar",
   "269 · importar a lista de colaboradores pela tela de cracha",
