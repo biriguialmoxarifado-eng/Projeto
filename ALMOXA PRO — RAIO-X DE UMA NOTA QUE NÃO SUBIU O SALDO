@@ -1,0 +1,139 @@
+/**
+ * ============================================================
+ * ALMOXA PRO — RAIO-X DE UMA NOTA QUE NÃO SUBIU O SALDO
+ * ============================================================
+ * ESTE ARQUIVO SÓ LÊ. Não grava célula, não cria aba, não apaga
+ * nada, não corrige nada. Serve para responder uma pergunta só:
+ *
+ *     a nota entrou? e o saldo subiu?
+ *
+ * Eu não sei de cor os nomes das suas abas, e não vou chutar. Ele
+ * procura o número da nota em TODAS as abas e mostra onde achou.
+ *
+ * COMO USAR
+ *   1. Arquivo novo no Apps Script, cole isto.
+ *   2. Troque o número ali embaixo pelo da sua nota.
+ *   3. Rode ALMOXA_RAIO_X_ENTRADA e me mande o registro.
+ * ============================================================
+ */
+
+/* ↓↓↓ TROQUE AQUI PELO NÚMERO DA SUA NOTA ↓↓↓ */
+var NOTA_PROCURADA = '123456';
+/* se quiser conferir o saldo de um item específico, ponha o SKU:  */
+var SKU_PROCURADO  = '';
+
+
+function ALMOXA_RAIO_X_ENTRADA() {
+  var ss = AP_Config_getSpreadsheet_();
+  var alvo = String(NOTA_PROCURADA).trim();
+  var sku  = String(SKU_PROCURADO || '').trim();
+
+  if (!alvo) {
+    Logger.log('Ponha o número da nota em NOTA_PROCURADA, no alto do arquivo.');
+    return;
+  }
+
+  var r = { nota: alvo, quando: new Date(), achados: [], abas: [], saldo: null, conclusao: [] };
+  var abas = ss.getSheets();
+
+  Logger.log('RAIO-X DA NOTA ' + alvo + '\n' +
+             abas.length + ' aba(s) na planilha. Procurando em todas.');
+
+  /* ---------- 1. onde o número da nota aparece ---------- */
+  abas.forEach(function (aba) {
+    var nome = aba.getName();
+    var ultima = aba.getLastRow(), larg = aba.getLastColumn();
+    r.abas.push({ aba: nome, linhas: Math.max(0, ultima - 1) });
+    if (ultima < 2 || larg < 1) return;
+
+    var tudo = aba.getRange(1, 1, ultima, larg).getValues();
+    var cab = tudo[0].map(function (x) { return String(x); });
+
+    for (var i = 1; i < tudo.length; i++) {
+      var linha = tudo[i];
+      var bate = false;
+      for (var c = 0; c < linha.length; c++) {
+        var v = String(linha[c] == null ? '' : linha[c]).trim();
+        if (!v) continue;
+        /* "NF 123456" também conta */
+        if (v === alvo || v.replace(/\D+/g, '') === alvo.replace(/\D+/g, '') && v.replace(/\D+/g,'')) {
+          bate = true; break;
+        }
+        if (v.indexOf(alvo) > -1 && alvo.length >= 4) { bate = true; break; }
+      }
+      if (!bate) continue;
+
+      var registro = { aba: nome, linha: i + 1, campos: {} };
+      for (var k = 0; k < cab.length && k < linha.length; k++) {
+        var val = String(linha[k] == null ? '' : linha[k]);
+        if (val.length > 120) val = val.substring(0, 120) + '…';
+        if (val) registro.campos[cab[k] || ('col' + (k + 1))] = val;
+      }
+      r.achados.push(registro);
+      if (r.achados.length >= 60) return;
+    }
+  });
+
+  Logger.log('1 · ONDE O NÚMERO ' + alvo + ' APARECE\n' +
+    (r.achados.length
+      ? r.achados.map(function (a) {
+          return '· aba ' + a.aba + ', linha ' + a.linha + '\n  ' +
+                 JSON.stringify(a.campos);
+        }).join('\n')
+      : 'NÃO APARECE EM ABA NENHUMA. Quer dizer que a nota não foi gravada — ' +
+        'o problema está antes do estoque.'));
+
+  /* ---------- 2. o saldo do item, se ele pediu ---------- */
+  if (sku) {
+    var achouItem = [];
+    abas.forEach(function (aba) {
+      var ultima = aba.getLastRow(), larg = aba.getLastColumn();
+      if (ultima < 2) return;
+      var tudo = aba.getRange(1, 1, ultima, larg).getValues();
+      var cab = tudo[0].map(function (x) { return String(x).toLowerCase(); });
+      var cSku = -1;
+      for (var k = 0; k < cab.length; k++) {
+        if (/^(sku|codigo|código|id)$/.test(cab[k])) { cSku = k; break; }
+      }
+      if (cSku < 0) return;
+      for (var i = 1; i < tudo.length; i++) {
+        if (String(tudo[i][cSku]).trim() !== sku) continue;
+        var reg = { aba: aba.getName(), linha: i + 1, campos: {} };
+        for (var k2 = 0; k2 < cab.length && k2 < tudo[i].length; k2++) {
+          var v2 = String(tudo[i][k2] == null ? '' : tudo[i][k2]);
+          if (v2) reg.campos[String(tudo[0][k2]) || ('col' + (k2 + 1))] = v2;
+        }
+        achouItem.push(reg);
+      }
+    });
+    r.saldo = achouItem;
+    Logger.log('2 · O ITEM ' + sku + '\n' +
+      (achouItem.length
+        ? achouItem.map(function (a) {
+            return '· aba ' + a.aba + ', linha ' + a.linha + '\n  ' + JSON.stringify(a.campos);
+          }).join('\n')
+        : 'não achei esse SKU em aba nenhuma.'));
+  }
+
+  /* ---------- 3. conclusão ---------- */
+  var abasComNota = {};
+  r.achados.forEach(function (a) { abasComNota[a.aba] = (abasComNota[a.aba] || 0) + 1; });
+  var nomes = Object.keys(abasComNota);
+
+  if (!r.achados.length) {
+    r.conclusao.push('A nota ' + alvo + ' NÃO está na planilha. Ela não chegou a ser ' +
+      'gravada — então o saldo não ter subido é consequência, não causa.');
+  } else {
+    r.conclusao.push('A nota aparece em ' + nomes.length + ' aba(s): ' + nomes.join(', ') + '.');
+    r.conclusao.push('Olhe acima se ela aparece SÓ na aba das notas ou TAMBÉM numa aba de ' +
+      'movimentação/entrada. Se aparece só na das notas, a nota gravou e a entrada ' +
+      'de estoque não aconteceu — e aí o caminho a investigar é o lançamento item a item.');
+  }
+  r.conclusao.push('Esta leitura não gravou nada.');
+
+  Logger.log('3 · CONCLUSÃO\n' + r.conclusao.join('\n\n'));
+  Logger.log('4 · AS ABAS E QUANTAS LINHAS TÊM\n' +
+    r.abas.map(function (a) { return a.aba + ': ' + a.linhas; }).join('\n'));
+
+  return r;
+}
