@@ -15198,6 +15198,129 @@ toast("warn", "Restauração agendada", "O processo roda fora do horário de pic
 }
 };
 
+/* ============================================================
+   [CRONO] MEDIR A ABERTURA DO LADO DO NAVEGADOR
+   ------------------------------------------------------------
+   O que ja foi medido, no Apps Script:
+     dashboard.mural ....... 83 ms   (o Core responde na hora)
+     acrescentar no log .... 172 ms  (barato)
+     quem le a AUDITORIA inteira sao funcoes de TESTE
+   Ou seja: nem o Core, nem o log. Duas hipoteses minhas, as duas
+   erradas. Sobrou o trajeto entre o navegador e o Core — e esse
+   so da para medir DAQUI.
+
+   Este cronometro dispara as chamadas que a abertura faz, uma de
+   cada vez, e mostra quantos milissegundos cada uma levou, por
+   onde ela foi (google.script.run ou ponte) e o que voltou.
+
+   So faz LEITURA. Nenhuma das chamadas grava.
+   ============================================================ */
+function ALMOXA_MEDIR_ABERTURA() {
+  var chamadas = [
+    ["doutor", "ping", {}],
+    ["dashboard", "mural", {}],
+    ["usuarios", "listar", {}],
+    ["itens", "listar", {}],
+    ["categorias", "listar", {}],
+    ["estoque", "listar", {}]
+  ];
+  var caminho = API.disponivelCore() ? "google.script.run (dentro do Apps Script)"
+              /* API.PONTE, não PONTE solto: a variável original vive em
+                 outro escopo deste arquivo e não chega aqui */
+              : (API.PONTE && API.PONTE.pronta()) ? "ponte (fetch para o /exec)"
+              : "nenhum — base de demonstração da própria página";
+
+  var resultados = [];
+  var t0 = Date.now();
+
+  function passo(i) {
+    if (i >= chamadas.length) {
+      return Promise.resolve({ caminho: caminho, totalMs: Date.now() - t0, chamadas: resultados });
+    }
+    var c = chamadas[i];
+    var t = Date.now();
+    return API.call(c[0], c[1], c[2]).then(function (r) {
+      resultados.push({
+        chamada: c[0] + "." + c[1],
+        ms: Date.now() - t,
+        ok: !!(r && r.ok),
+        codigo: String((r && (r.codigo || r.erro)) || ""),
+        mensagem: String((r && r.mensagem) || "").slice(0, 120)
+      });
+      return passo(i + 1);
+    }, function (e) {
+      resultados.push({ chamada: c[0] + "." + c[1], ms: Date.now() - t, ok: false,
+                        codigo: "EXCECAO", mensagem: String(e && e.message || e).slice(0, 120) });
+      return passo(i + 1);
+    });
+  }
+  return passo(0);
+}
+
+function modalMedirAbertura() {
+  var m = UI.modal({
+    titulo: "Medir a abertura",
+    sub: "uma chamada de cada vez, cronometrada daqui",
+    tamanho: "lg",
+    corpo: '<div id="cronoBox"><div class="alert a-gray">' + ic("sync") +
+      "<div>Medindo… cada chamada espera a anterior terminar, para o tempo ser " +
+      "de uma só.</div></div></div>",
+    rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' +
+      '<button class="btn btn-primary" data-crono-copiar>Copiar o resultado</button>',
+    aoAbrir: function (w, fechar) {
+      w.querySelector("[data-x]").addEventListener("click", fechar);
+      ALMOXA_MEDIR_ABERTURA().then(function (r) {
+        var lento = r.chamadas.filter(function (c) { return c.ms >= 5000; });
+        var texto = "ALMOXA-PRO " + (window.ALMOXA_VERSAO || "") + "\n" +
+          "caminho: " + r.caminho + "\n" +
+          "total: " + (r.totalMs / 1000).toFixed(1) + " s\n\n" +
+          r.chamadas.map(function (c) {
+            return c.ms + " ms · " + c.chamada + " · " + (c.ok ? "ok" : "RECUSOU " + c.codigo) +
+                   (c.mensagem ? " — " + c.mensagem : "");
+          }).join("\n");
+        window.__cronoTexto = texto;
+
+        w.querySelector("#cronoBox").innerHTML =
+          '<div class="alert ' + (lento.length ? "a-red" : "a-green") + ' mb12">' +
+          ic(lento.length ? "alerta" : "checkC") +
+          "<div><b>" + (lento.length
+            ? lento.length + " chamada(s) passaram de 5 segundos"
+            : "Nenhuma chamada passou de 5 segundos") + "</b>" +
+          "Total: " + (r.totalMs / 1000).toFixed(1) + " s · por onde passou: <b>" +
+          U.esc(r.caminho) + "</b></div></div>" +
+          '<div class="tbl-wrap"><table class="tbl"><thead><tr>' +
+          "<th>Chamada</th><th>Tempo</th><th>Resposta</th></tr></thead><tbody>" +
+          r.chamadas.map(function (c) {
+            var cor = c.ms >= 10000 ? "b-red" : c.ms >= 5000 ? "b-yellow" : "b-green";
+            return "<tr><td class=\"mono\">" + U.esc(c.chamada) + "</td>" +
+              '<td><span class="badge ' + cor + '">' + c.ms + " ms</span></td>" +
+              "<td>" + (c.ok ? "ok" : "<b>" + U.esc(c.codigo || "recusou") + "</b>" +
+                (c.mensagem ? '<div class="small muted">' + U.esc(c.mensagem) + "</div>" : "")) +
+              "</td></tr>";
+          }).join("") + "</tbody></table></div>" +
+          '<div class="alert a-blue mt12">' + ic("info") +
+          "<div>O Core, medido de dentro do Apps Script, responde <b>dashboard.mural " +
+          "em 83 ms</b>. Se aqui ele levar segundos, o tempo está no trajeto — não " +
+          "no servidor.</div></div>";
+      });
+      w.querySelector("[data-crono-copiar]").addEventListener("click", function () {
+        var t = window.__cronoTexto || "";
+        try {
+          navigator.clipboard.writeText(t).then(function () {
+            toast("ok", "Copiado", "Cole numa mensagem e mande.");
+          }, mostrar);
+        } catch (e) { mostrar(); }
+        function mostrar() {
+          w.querySelector("#cronoBox").innerHTML +=
+            '<textarea readonly rows="10" style="width:100%;font-size:11px;margin-top:10px">' +
+            U.esc(t) + "</textarea>";
+        }
+      });
+    }
+  });
+  return m;
+}
+
 SCREENS["doutor"] = {
 titulo: "Doutor do Sistema",
 modulo: "dashboard",
@@ -15211,7 +15334,7 @@ return UI.cabecalho({
 trilha: [ "Configurações", "Doutor do Sistema" ],
 titulo: "Doutor do sistema",
 sub: "Diagnóstico do Core, do Data Layer, do cache, dos locks e das integrações.",
-acoes: '<button class="btn btn-primary" data-rodar-diag>' + ic("sync") + "Rodar diagnóstico"
+acoes: '<button class="btn btn-ghost" data-medir-abertura>' + ic("relogio") + "Medir a abertura</button>" + '<button class="btn btn-primary" data-rodar-diag>' + ic("sync") + "Rodar diagnóstico"
 }) + '<div class="grid g4 mb16">' + UI.kpi({
 icone: "checkC",
 cor: "ico-green",
@@ -15273,6 +15396,10 @@ return '<div class="switch-row"><div class="flex center gap12">' + '<div class="
 });
 },
 mount: function() {
+/* [CRONO] o cronometro do lado de ca */
+var ma = document.querySelector("[data-medir-abertura]");
+if (ma) ma.addEventListener("click", function () { modalMedirAbertura(); });
+
 var d = document.querySelector("[data-rodar-diag]");
 if (d) d.addEventListener("click", function() {
 d.innerHTML = '<span class="spinner"></span> Diagnosticando…';
@@ -56160,7 +56287,40 @@ status: CRP.status
 if (!r[1] || !r[1].ok) {
 return UI.cabecalho({
 titulo: "Crachás"
-}) + '<div class="card">' + UI.estado("erro", "O módulo de crachá ainda não está instalado", "Instale o arquivo ALMOXA_PRO_Modulo_Cracha.gs no projeto do Apps Script e " + "recarregue esta tela. Detalhe: " + (r[1] && r[1].mensagem || "sem resposta do Core.")) + "</div>";
+/* ============================================================
+   [NAOCULPE] NÃO CULPAR O MÓDULO QUANDO FOI O PRAZO
+   ------------------------------------------------------------
+   Esta tela dizia SEMPRE "o módulo de crachá ainda não está
+   instalado", qualquer que fosse o motivo da recusa, e jogava o
+   motivo de verdade para um "Detalhe:" no fim.
+
+   O resultado, na tela dele: o título mandava instalar um arquivo
+   que JÁ ESTAVA instalado, e embaixo, em letra menor, dizia a
+   verdade — "O Core não respondeu em 15 segundos".
+
+   É o mesmo defeito do catálogo de EPI, que eu arrumei de manhã:
+   afirmar uma causa que não foi conferida manda a pessoa procurar
+   no lugar errado. Agora o título diz o que o servidor respondeu.
+   ============================================================ */
+}) + '<div class="card">' + (function () {
+  var resposta = r[1] || {};
+  var cod = String(resposta.codigo || resposta.erro || "");
+  var msg = String(resposta.mensagem || "");
+  var foiPrazo = /TIMEOUT|SEM_CONEXAO|CORE_FALHA|SEM_RESPOSTA/i.test(cod) ||
+                 /não respondeu|nao respondeu|segundos/i.test(msg);
+
+  if (foiPrazo) {
+    return UI.estado("erro", "O servidor não respondeu a tempo",
+      "Não é o módulo de crachá: ele pode estar instalado e funcionando. " +
+      "A chamada estourou o prazo antes de a resposta chegar. " +
+      (msg ? "O servidor disse: " + msg + " " : "") +
+      "Enquanto o servidor não responder, esta tela não tem como carregar — e " +
+      "nada que você lançar vai ser gravado.");
+  }
+  return UI.estado("erro", "O módulo de crachá ainda não está instalado",
+    "Instale o arquivo ALMOXA_PRO_Modulo_Cracha.gs no projeto do Apps Script e " +
+    "recarregue esta tela." + (msg ? " Detalhe: " + msg : ""));
+})() + "</div>";
 }
 var p = r[0] && r[0].dados || {
 crachas: {},
@@ -62357,8 +62517,10 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 274 · 22/10";
+var ALMOXA_VERSAO = "sistema 276 · 22/10";
 var ALMOXA_NOVIDADES = [
+  "276 · a tela do cracha para de culpar o modulo quando o que houve foi prazo",
+  "275 · medir a abertura do lado do navegador, chamada por chamada",
   "274 · faixa vermelha fixa quando o sistema NAO esta gravando",
   "274 · gravacao recusada pelo servidor vira aviso que nao some sozinho",
   "272 · logado e logado: a sessao confirma a operacao, sem pedir a senha de novo",
