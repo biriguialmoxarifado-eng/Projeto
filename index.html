@@ -6090,10 +6090,22 @@ a.classList.toggle("is-active", a.getAttribute("data-sub") === rota);
    no balcao lancando nota nao abre o Doutor do Sistema.
 
    Agora, quando o Core nao responde, nasce uma FAIXA VERMELHA
-   fixa no alto da tela, por cima de tudo, dizendo que nada esta
-   sendo gravado. Ela nao se fecha sozinha e nao tem botao de
-   dispensar: so some quando o Core voltar. Perder um lancamento
-   custa mais caro que uma faixa incomodando.
+   fixa no alto da tela, dizendo que a gravacao nao foi confirmada.
+
+   [v278] DUAS CORRECOES, pedidas por ele e uma delas por medicao.
+
+   A faixa nao fechava de jeito nenhum. Isso foi decidido quando o
+   problema era nao ter aviso; o problema agora e' aviso que toma a
+   tela. Ela ganhou um X. Mas fechar nao e' desligar: se uma
+   gravacao NOVA for recusada depois, ela volta — o que ele
+   dispensou foi aquele aviso, nao o proximo.
+
+   E ela MENTIA. Dizia "Lancamento feito agora nao chega na
+   planilha". Em 22/10 isso foi medido e e' falso: durante o
+   timeout, ALMOXA_CRACHA_ACESSOS foi de 334 para 336 linhas. O
+   navegador desiste em 15 s; o Apps Script tem 6 minutos e segue
+   gravando. Afirmar que nao gravou faz a pessoa lancar de novo e
+   duplicar. Agora ela diz o que de fato se sabe.
    ============================================================ */
 /* no window porque quem acende a faixa (o invólucro do API.call)
    vive em outro escopo deste arquivo — a variável solta não chegava lá,
@@ -6105,25 +6117,47 @@ function faixaNaoGrava_(estado) {
   var velha = document.getElementById(id);
   var ruim = (estado === "erro" || estado === "mock");
 
-  if (!ruim) { if (velha) velha.parentNode.removeChild(velha); return; }
+  function sumir() {
+    if (velha && velha.parentNode) velha.parentNode.removeChild(velha);
+    try { document.body.style.paddingTop = ""; } catch (e) {}
+  }
+  if (!ruim) { sumir(); return; }
+
+  /* [v278] ele fechou a faixa. Fica fechada — mas so ate' a proxima
+     recusa de gravacao. Guardo QUANDO ele fechou e comparo com a
+     hora da ultima recusa: recusa mais nova que a dispensa acende
+     de novo. Assim o X tira da frente sem desligar o aviso. */
+  var quandoFechou = 0;
+  try { quandoFechou = Number(sessionStorage.getItem("faixaNaoGravaFechadaEm")) || 0; } catch (e) {}
+  var ultimaRecusaEm = (window.NAOGRAVA && window.NAOGRAVA.quando) || 0;
+  if (quandoFechou && ultimaRecusaEm <= quandoFechou) { sumir(); return; }
 
   var texto = (estado === "mock")
     ? "Esta página não está falando com o servidor do ALMOX-PRO."
-    : "O servidor do ALMOX-PRO não está respondendo.";
+    : "O servidor do ALMOX-PRO não respondeu a tempo.";
   var ultima = (window.NAOGRAVA && window.NAOGRAVA.ultimaRecusa) || "";
   var recado = ultima
     ? '<div style="font-weight:400;opacity:.92;margin-top:3px">Última recusa: ' +
       U.esc(ultima) + "</div>"
     : "";
 
+  /* [v278] o aviso diz o que se SABE, nao o que se supoe.
+     "nao chega na planilha" era afirmacao sem prova — e medida como
+     falsa em 22/10. O que se sabe e': o servidor nao respondeu no
+     tempo da tela. Pode ter gravado. Por isso o pedido e' CONFERIR
+     antes de lancar de novo, que e' o que evita duplicata. */
   var html =
-    '<div style="display:flex;gap:10px;align-items:center;justify-content:center;' +
-    'flex-wrap:wrap;padding:9px 14px">' +
-      '<b style="font-size:13.5px">NADA ESTÁ SENDO GRAVADO</b>' +
-      '<span style="font-size:12.5px;opacity:.95">' + texto +
-      " Lançamento feito agora <b>não</b> chega na planilha." + recado + "</span>" +
+    '<div style="display:flex;gap:10px;align-items:center;' +
+    'flex-wrap:wrap;padding:7px 12px 7px 14px">' +
+      '<b style="font-size:13px;white-space:nowrap">GRAVAÇÃO NÃO CONFIRMADA</b>' +
+      '<span style="font-size:12.5px;opacity:.95;flex:1 1 320px;min-width:0">' + texto +
+      " O lançamento <b>pode</b> ter entrado mesmo assim — confira na planilha antes de lançar de novo." +
+      recado + "</span>" +
       '<button class="btn btn-sm" id="faixaDoutor" style="background:#fff;color:#A8071A;' +
-      'font-weight:700;border:0">Ver o diagnóstico</button>' +
+      'font-weight:700;border:0;white-space:nowrap">Ver o diagnóstico</button>' +
+      '<button id="faixaFechar" title="Fechar. Volta sozinha se outra gravação for recusada." ' +
+      'style="all:unset;cursor:pointer;font-size:19px;line-height:1;padding:0 6px;' +
+      'opacity:.85;font-weight:700">&times;</button>' +
     "</div>";
 
   if (!velha) {
@@ -6136,6 +6170,14 @@ function faixaNaoGrava_(estado) {
     document.body.appendChild(velha);
   }
   if (velha.__html !== html) { velha.innerHTML = html; velha.__html = html; }
+  var x = velha.querySelector("#faixaFechar");
+  if (x && !x.__ligado) {
+    x.__ligado = true;
+    x.addEventListener("click", function () {
+      try { sessionStorage.setItem("faixaNaoGravaFechadaEm", String(Date.now())); } catch (e) {}
+      sumir();
+    });
+  }
   var b = velha.querySelector("#faixaDoutor");
   if (b && !b.__ligado) {
     b.__ligado = true;
@@ -12213,6 +12255,15 @@ modalExcluirEntregaEPI(b.getAttribute("data-epi-excluir"));
 document.querySelectorAll("[data-entregar-epi]").forEach(function(b) {
 b.addEventListener("click", modalEntregarEPI);
 });
+document.querySelectorAll("[data-epi-juntar]").forEach(function(b) {
+b.addEventListener("click", function() {
+if (typeof EPIJUNTA === "undefined" || !EPIJUNTA.abrir) {
+toast("warn", "Modulo nao carregado", "O bloco [EPIJUNTA] nao esta nesta versao.");
+return;
+}
+EPIJUNTA.abrir();
+});
+});
 epiLigarCopiarAssinatura();
 epiLigarDiagnosticoAssinatura();
 }
@@ -12224,7 +12275,7 @@ return UI.cabecalho({
 trilha: [ "EPI's / Uniformes", "Fichas ativas" ],
 titulo: "Fichas de EPI ativas",
 sub: "Histórico de entregas por colaborador, com validade e assinatura.",
-acoes: '<button class="btn btn-ghost" data-exportar="Fichas de EPI">' + ic("pdf") + "Exportar fichas</button>"
+acoes: '<button class="btn btn-ghost" data-epi-juntar>' + ic("sync") + "Juntar fichas da mesma pessoa</button>" + '<button class="btn btn-ghost" data-exportar="Fichas de EPI">' + ic("pdf") + "Exportar fichas</button>"
 }) + (!listaSegura(fichas).length ? '<div class="card">' + UI.estado("vazio", "Nenhuma ficha de EPI", "As fichas aparecem aqui assim que houver a primeira entrega de EPI.", '<button class="btn btn-orange mt12" data-entregar-epi>' + ic("mais") + "Entregar EPI</button>") + "</div>" : "") + listaSegura(fichas).map(function(f) {
 return '<div class="card mb12"><div class="card-body">' + '<div class="flex between center wrap gap12 mb12">' + '<div class="flex center gap12"><span class="avatar" style="width:40px;height:40px;font-size:13px">' + U.iniciais(f.colaborador || "?") + "</span>" + '<div><b style="font-size:14px">' + U.esc(f.colaborador) + "</b>" + '<p class="small">' + U.esc(f.cargo || "Não informado") + " · " + U.esc(f.setor || "Não informado") + " · matrícula " + U.esc(f.matricula || "não informada") + (listaSegura(f.matriculasAnteriores).length ? ' · <span class="badge b-blue" title="as entregas destas matrículas foram juntadas nesta ficha">ficha única · antes ' + U.esc(listaSegura(f.matriculasAnteriores).join(", ")) + "</span>" : "") + "</p></div></div>" + '<div class="flex gap8 center">' + UI.badge(f.status) + '<button class="btn btn-ghost btn-sm" data-entregar-epi>' + ic("mais") + "Entregar EPI</button></div></div>" + epiFaixaAssinatura(f) + (function() {
 var rep = marcarDuplicidades_(listaSegura(f.itens)).filter(function(x) { return x.__dup > 1; });
@@ -35447,6 +35498,693 @@ function juntarFichasDaMesmaPessoa_(lista) {
   });
 }
 
+</script>
+
+<script>
+/* ############################################################
+ * A MESMA PESSOA, DUAS FICHAS DE EPI     busca: [EPIJUNTA]
+ * ------------------------------------------------------------
+ * O QUE ACONTECEU, NAS PALAVRAS DELE
+ *   "Suponha que a gente tem os usuários A e B, mesmo nome, mesma
+ *   pessoa. Muitos itens estão vinculados à matrícula provisória e
+ *   agora já tem a matrícula definitiva. Quero transferir essa
+ *   ficha de EPI para a matrícula certa. E depois um botão de
+ *   excluir as fichas duplicadas."
+ *
+ * POR QUE A TELA JÁ PARECIA CERTA E MESMO ASSIM ESTAVA ERRADA
+ *   juntarFichasDaMesmaPessoa_() já junta as duas na TELA, e até
+ *   mostra "ficha única · antes 408220". Mas isso é desenho: no
+ *   banco as linhas continuam amarradas à matrícula provisória.
+ *   Quem olha a tela acha que está resolvido. Quem consulta a
+ *   planilha, não.
+ *
+ * O QUE ESTE BLOCO FAZ
+ *   1. Acha as pessoas cujas linhas estão em duas matrículas.
+ *   2. Mostra o plano: quantas linhas saem de qual número para
+ *      qual, item por item, ANTES de mexer.
+ *   3. Transfere — mas move UMA linha primeiro e relê para
+ *      conferir. Veja o porquê em [EPIPROVA].
+ *   4. Mostra as linhas repetidas e deixa marcá-las como
+ *      excluídas, uma a uma, com o motivo registrado.
+ *
+ * O QUE ELE NÃO FAZ
+ *   · Não cria rota nova no Core: usa epi.fichas, epi.salvar e
+ *     epi.excluir, que já existem.
+ *   · Não cria um segundo agrupador: usa fichaChaveMat_,
+ *     fichaChaveNome_ e marcarDuplicidades_, que já existem.
+ *   · Não apaga linha fisicamente. Marca como excluída pela rota
+ *     de sempre, com motivo, e sem devolver nada ao estoque —
+ *     numa junção de cadastro o material não voltou para a
+ *     prateleira, só trocou de dono no papel.
+ *   · Não escolhe sozinho qual matrícula fica. Quem escolhe é ele.
+ *   · Não transfere linha já devolvida por inteiro sem avisar.
+ *
+ * ONDE PROCURAR ERRO
+ *   EPIJUNTA.lerLinhas()   o que o Core devolveu, achatado
+ *   EPIJUNTA.grupos()      quem está em duas matrículas
+ *   EPIJUNTA.transferir()  a transferência, com a prova
+ *   EPIJUNTA.abrir()       a tela
+ * ############################################################ */
+(function epiJunta() {
+
+  var J = { ultimaLeitura: null, linhas: [], ultimoErro: null, movidas: 0 };
+  try { window.EPIJUNTA = J; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(s) { return (typeof U !== "undefined" && U.esc) ? U.esc(s) : lp(s); }
+  function icone_(n) { return (typeof ic === "function") ? ic(n) : ""; }
+  function mat_(v) {
+    return (typeof fichaChaveMat_ === "function") ? fichaChaveMat_(v)
+      : lp(v).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+  }
+  function nome_(v) {
+    return (typeof fichaChaveNome_ === "function") ? fichaChaveNome_(v)
+      : lp(v).toUpperCase();
+  }
+  function aviso_(tipo, titulo, texto) {
+    try { if (typeof toast === "function") toast(tipo, titulo, texto); } catch (e) {}
+  }
+
+  /* ============================================================
+     1. O QUE O CORE DEVOLVEU, ACHATADO EM LINHAS
+     ------------------------------------------------------------
+     epi.fichas às vezes volta agrupado (objetos com .itens) e às
+     vezes volta plano. normalizarFichasEPI já sabe disso para
+     desenhar; aqui eu preciso do contrário — das LINHAS, uma a
+     uma, com id e matrícula, que é o que se transfere.
+     ============================================================ */
+  function achatar(resposta) {
+    var saida = [];
+    lista_(resposta).forEach(function (f) {
+      if (f && Array.isArray(f.itens)) {
+        lista_(f.itens).forEach(function (i) {
+          saida.push({
+            id: lp(i.id),
+            /* a linha manda na matrícula; o cabeçalho só vale quando
+               a linha não trouxe a dela */
+            matricula: lp(i.matricula) || lp(f.matricula),
+            colaborador: lp(i.colaborador) || lp(f.colaborador),
+            cargo: lp(i.cargo) || lp(f.cargo),
+            setor: lp(i.setor) || lp(f.setor),
+            sku: lp(i.sku),
+            item: lp(i.item) || lp(i.epi),
+            ca: lp(i.ca),
+            qtd: Number(i.qtd) || 0,
+            entrega: lp(i.entrega) || lp(i.data),
+            validade: lp(i.validade),
+            status: lp(i.status) || "ENTREGUE",
+            assinatura: lp(i.assinatura),
+            entreguePor: lp(i.entreguePor),
+            devolvidoTotal: !!i.devolvidoTotal,
+            cru: i
+          });
+        });
+        return;
+      }
+      if (!f) return;
+      saida.push({
+        id: lp(f.id),
+        matricula: lp(f.matricula),
+        colaborador: lp(f.colaborador) || lp(f.nome),
+        cargo: lp(f.cargo), setor: lp(f.setor),
+        sku: lp(f.sku), item: lp(f.item) || lp(f.epi), ca: lp(f.ca),
+        qtd: Number(f.qtd) || 0,
+        entrega: lp(f.entrega) || lp(f.data),
+        validade: lp(f.validade),
+        status: lp(f.status) || "ENTREGUE",
+        assinatura: lp(f.assinatura), entreguePor: lp(f.entreguePor),
+        devolvidoTotal: !!f.devolvidoTotal,
+        cru: f
+      });
+    });
+    return saida;
+  }
+  J.achatar = achatar;
+
+  J.lerLinhas = function () {
+    try { if (typeof CACHE !== "undefined" && CACHE.invalidar) CACHE.invalidar("epi"); } catch (e) {}
+    return Promise.resolve(API.call("epi", "fichas", {})).then(function (r) {
+      if (!r || !r.ok) {
+        J.ultimoErro = lp(r && r.mensagem) || "O Core não devolveu as fichas.";
+        return { ok: false, mensagem: J.ultimoErro, codigo: r && r.codigo, linhas: [] };
+      }
+      var linhas = achatar(r.dados);
+      J.linhas = linhas;
+      J.ultimaLeitura = new Date().getTime();
+      return { ok: true, linhas: linhas };
+    })["catch"](function (e) {
+      J.ultimoErro = String(e && e.message || e);
+      return { ok: false, mensagem: J.ultimoErro, linhas: [] };
+    });
+  };
+
+  /* quem perguntar "o que esta pessoa tem amarrado" usa isto, em vez
+     do MOCK que em produção está vazio */
+  J.linhasConhecidas = function () { return J.linhas; };
+
+  /* ============================================================
+     2. QUEM ESTÁ EM DUAS MATRÍCULAS
+     ------------------------------------------------------------
+     Agrupo pelo NOME limpo, porque é justamente a matrícula que
+     está diferente. Só entra no resultado quem tem linha em mais
+     de uma matrícula — uma pessoa inteira numa matrícula só não é
+     problema de ninguém.
+     ============================================================ */
+  J.grupos = function (linhas, usuarios) {
+    var por = {}, ordem = [];
+    lista_(linhas).forEach(function (l) {
+      var k = nome_(l.colaborador);
+      if (!k) return;
+      if (!por[k]) { por[k] = { nome: lp(l.colaborador), chave: k, linhas: [], matriculas: [] }; ordem.push(k); }
+      por[k].linhas.push(l);
+      var m = mat_(l.matricula);
+      var jaTem = por[k].matriculas.filter(function (x) { return mat_(x) === m; }).length;
+      if (lp(l.matricula) && !jaTem) por[k].matriculas.push(lp(l.matricula));
+    });
+
+    return ordem.map(function (k) { return por[k]; })
+      .filter(function (g) { return g.matriculas.length > 1; })
+      .map(function (g) {
+        /* qual é a definitiva? A que está no cadastro da pessoa.
+           Se o cadastro não disser, eu NÃO escolho: deixo sem
+           sugestão e a tela obriga ele a escolher. */
+        var doCadastro = "";
+        lista_(usuarios).forEach(function (u) {
+          if (doCadastro) return;
+          if (nome_(u.nome) !== g.chave) return;
+          var temLinha = g.matriculas.filter(function (m) {
+            return mat_(m) === mat_(u.matricula);
+          }).length;
+          if (lp(u.matricula) && temLinha) doCadastro = lp(u.matricula);
+        });
+        g.sugerida = doCadastro;
+        g.porMatricula = g.matriculas.map(function (m) {
+          var dela = g.linhas.filter(function (l) { return mat_(l.matricula) === mat_(m); });
+          return {
+            matricula: m, quantas: dela.length, linhas: dela,
+            maisNova: dela.reduce(function (a, l) {
+              var t = Date.parse(l.entrega || "") || 0; return t > a ? t : a;
+            }, 0)
+          };
+        }).sort(function (a, b) { return b.quantas - a.quantas; });
+        return g;
+      });
+  };
+
+  J.planoDe = function (grupo, matDestino) {
+    var d = mat_(matDestino);
+    var movem = lista_(grupo && grupo.linhas).filter(function (l) { return mat_(l.matricula) !== d; });
+    var ficam = lista_(grupo && grupo.linhas).filter(function (l) { return mat_(l.matricula) === d; });
+    return {
+      movem: movem, ficam: ficam,
+      devolvidas: movem.filter(function (l) { return l.devolvidoTotal; }).length,
+      semId: movem.filter(function (l) { return !lp(l.id); }).length
+    };
+  };
+
+  /* ============================================================
+     3. A TRANSFERÊNCIA — busca: [EPIPROVA]
+     ------------------------------------------------------------
+     POR QUE MOVER UMA SÓ ANTES DE MOVER TODAS
+     No sistema inteiro, epi.salvar é chamado QUATRO vezes — na
+     entrega, na devolução, na troca e na geração em massa — e
+     NENHUMA delas manda id. Todas criam linha nova. Então eu não
+     tenho prova de que o Core saiba ATUALIZAR uma linha. Se ele
+     não souber, mandar a linha com a matrícula nova não
+     transfere: duplica.
+     Por isso: move uma, relê, e confere o total. Se o total
+     cresceu, o Core duplicou — e aí eu paro na primeira, não na
+     quadragésima.
+     ============================================================ */
+  function cargaDaLinha(l, destino, grupo) {
+    return {
+      id: l.id,
+      matricula: lp(destino.matricula),
+      colaborador: lp(destino.colaborador) || lp(grupo && grupo.nome) || l.colaborador,
+      cargo: lp(destino.cargo) || l.cargo,
+      setor: lp(destino.setor) || l.setor,
+      sku: l.sku, item: l.item, ca: l.ca, qtd: l.qtd,
+      entrega: l.entrega, validade: l.validade,
+      status: l.status, assinatura: l.assinatura, entreguePor: l.entreguePor,
+      /* o rastro: de onde veio, para quem conferir a planilha depois
+         conseguir reconstruir o que foi feito hoje */
+      transferidaDe: lp(l.matricula),
+      motivo: "Transferência de ficha de EPI: matrícula " + lp(l.matricula) +
+              " para " + lp(destino.matricula) + " (mesma pessoa)",
+      origem: "ALMOX-PRO · juntar fichas"
+    };
+  }
+
+  function contarPorId(linhas) {
+    var c = {};
+    lista_(linhas).forEach(function (l) { if (lp(l.id)) c[lp(l.id)] = l; });
+    return c;
+  }
+
+  J.transferir = function (grupo, destino, aoAndar) {
+    var plano = J.planoDe(grupo, destino.matricula);
+    if (!plano.movem.length) {
+      return Promise.resolve({ ok: true, nada: true, mensagem: "não há linha para mover" });
+    }
+    if (plano.semId) {
+      return Promise.resolve({ ok: false, semId: plano.semId,
+        mensagem: plano.semId + " linha(s) vieram do Core sem id. Sem id eu não " +
+          "tenho como dizer ao Core QUAL linha mudar, e não vou adivinhar." });
+    }
+
+    var totalAntes = J.linhas.length;
+    var feitas = [], falhas = [];
+
+    function mover(l) {
+      return Promise.resolve(API.call("epi", "salvar", cargaDaLinha(l, destino, grupo)))
+        .then(function (r) { return r || {}; },
+              function (e) { return { ok: false, mensagem: String(e && e.message || e) }; });
+    }
+
+    function andar(feito, total, texto) {
+      try { if (typeof aoAndar === "function") aoAndar(feito, total, texto); } catch (e) {}
+    }
+
+    /* --- a prova: uma linha, e releitura --- */
+    var primeira = plano.movem[0];
+    andar(0, plano.movem.length, "Movendo uma linha para conferir…");
+
+    return mover(primeira).then(function (r) {
+      if (!r.ok) {
+        var faltaAcao = /ACAO_DESCONHECIDA|NAO_EXISTE|não existe|not a function|DESCONHECID/i
+          .test(lp(r.codigo) + " " + lp(r.mensagem));
+        return { ok: false, naPrimeira: true, faltaAcao: faltaAcao,
+          codigo: r.codigo, mensagem: lp(r.mensagem) || "O Core recusou a primeira linha." };
+      }
+      return J.lerLinhas().then(function (depois) {
+        if (!depois.ok) {
+          return { ok: false, naPrimeira: true, naoConferi: true,
+            mensagem: "Mandei a primeira linha e o Core disse ok, mas não consegui " +
+              "reler para conferir: " + lp(depois.mensagem) +
+              " Confira a planilha ANTES de mandar o resto." };
+        }
+        var total2 = depois.linhas.length;
+        var porId = contarPorId(depois.linhas);
+        var achada = porId[lp(primeira.id)];
+        var mudou = achada && mat_(achada.matricula) === mat_(destino.matricula);
+
+        if (total2 > totalAntes) {
+          return { ok: false, naPrimeira: true, duplicou: true,
+            antes: totalAntes, depois: total2,
+            mensagem: "O Core NÃO atualizou a linha: ele criou outra. Antes havia " +
+              totalAntes + " linha(s), agora há " + total2 + ". Parei na primeira " +
+              "de propósito, para não duplicar as outras " + (plano.movem.length - 1) + "." };
+        }
+        if (!mudou) {
+          return { ok: false, naPrimeira: true, naoMudou: true,
+            mensagem: "O Core respondeu ok, mas ao reler a linha continua na " +
+              "matrícula " + lp(achada ? achada.matricula : primeira.matricula) +
+              ". Nada foi transferido. Parei aqui." };
+        }
+
+        /* --- a prova passou: move o resto --- */
+        feitas.push(primeira);
+        var resto = plano.movem.slice(1);
+
+        function passo(i) {
+          if (i >= resto.length) return Promise.resolve();
+          andar(i + 1, plano.movem.length, resto[i].item || "linha " + (i + 2));
+          return mover(resto[i]).then(function (r2) {
+            if (r2.ok) feitas.push(resto[i]);
+            else falhas.push({ linha: resto[i], mensagem: lp(r2.mensagem) || "sem mensagem" });
+            return passo(i + 1);
+          });
+        }
+
+        return passo(0).then(function () {
+          return J.lerLinhas().then(function (fim) {
+            J.movidas += feitas.length;
+            var totalFim = fim.ok ? fim.linhas.length : null;
+            return {
+              ok: true, feitas: feitas.length, falhas: falhas,
+              totalAntes: totalAntes, totalDepois: totalFim,
+              cresceu: (totalFim !== null && totalFim > totalAntes),
+              mensagem: feitas.length + " linha(s) transferida(s) para a matrícula " +
+                lp(destino.matricula) + "."
+            };
+          });
+        });
+      });
+    });
+  };
+
+  /* ============================================================
+     4. AS LINHAS REPETIDAS
+     ------------------------------------------------------------
+     marcarDuplicidades_ já sabe dizer qual linha é repetida:
+     mesmo item, mesmo dia, mesma quantidade. Não vou escrever
+     outra. Aqui eu só pego as que ela marcou como 2ª em diante.
+     ============================================================ */
+  J.duplicadas = function (linhas) {
+    var l = lista_(linhas).map(function (x) {
+      return { id: x.id, sku: x.sku, epi: x.item, item: x.item, qtd: x.qtd,
+               entrega: x.entrega, matricula: x.matricula, colaborador: x.colaborador,
+               status: x.status };
+    });
+    var marcadas = (typeof marcarDuplicidades_ === "function") ? marcarDuplicidades_(l) : l;
+    return marcadas.filter(function (x) { return x.__dup > 1; });
+  };
+
+  /* NÃO APAGA. Marca como excluída pela rota que já existe, com o
+     motivo escrito, e sem devolver ao estoque: numa junção de
+     cadastro o material não voltou para a prateleira. */
+  J.marcarExcluidas = function (linhas, motivo, aoAndar) {
+    var fila = lista_(linhas), feitas = [], falhas = [];
+    function passo(i) {
+      if (i >= fila.length) return Promise.resolve();
+      var l = fila[i];
+      try { if (typeof aoAndar === "function") aoAndar(i, fila.length, l.epi || l.item || ""); } catch (e) {}
+      if (!lp(l.id)) {
+        falhas.push({ linha: l, mensagem: "a linha veio sem id" });
+        return passo(i + 1);
+      }
+      return Promise.resolve(API.call("epi", "excluir", {
+        id: lp(l.id), sku: lp(l.sku), matricula: lp(l.matricula),
+        motivo: lp(motivo) || "Linha duplicada na junção de fichas da mesma pessoa",
+        devolverEstoque: false,
+        qtd: Number(l.qtd) || 1
+      })).then(function (r) {
+        if (r && r.ok) feitas.push(l);
+        else falhas.push({ linha: l, mensagem: lp(r && r.mensagem) || "o Core recusou",
+                           codigo: r && r.codigo });
+        return passo(i + 1);
+      }, function (e) {
+        falhas.push({ linha: l, mensagem: String(e && e.message || e) });
+        return passo(i + 1);
+      });
+    }
+    return passo(0).then(function () {
+      return J.lerLinhas().then(function () {
+        return { ok: falhas.length === 0, feitas: feitas.length, falhas: falhas };
+      });
+    });
+  };
+
+  /* ============================================================
+     5. A TELA
+     ============================================================ */
+  function painel(html) {
+    var alvo = document.getElementById("epiJuntaCorpo");
+    if (alvo) alvo.innerHTML = html;
+  }
+
+  function linhaResumo(l) {
+    return "<tr><td>" + esc_(l.item || "—") + "</td><td>" + esc_(l.sku || "—") +
+      "</td><td style=\"text-align:right\">" + esc_(l.qtd) + "</td><td>" +
+      esc_(l.entrega || "—") + "</td><td>" + esc_(l.matricula || "—") + "</td><td>" +
+      esc_(l.status || "—") + (l.devolvidoTotal ? " · devolvida" : "") + "</td></tr>";
+  }
+
+  function tabela(linhas, limite) {
+    var mostra = linhas.slice(0, limite || 12);
+    return '<div class="tbl-wrap mt8"><table class="tbl"><thead><tr>' +
+      "<th>Item</th><th>SKU</th><th style=\"text-align:right\">Qtd</th>" +
+      "<th>Entrega</th><th>Matrícula</th><th>Situação</th></tr></thead><tbody>" +
+      mostra.map(linhaResumo).join("") + "</tbody></table>" +
+      (linhas.length > mostra.length
+        ? '<p class="small muted mt8">e mais ' + (linhas.length - mostra.length) + " linha(s)</p>"
+        : "") + "</div>";
+  }
+
+  function cartaoGrupo(g, ix) {
+    var id = "epiJG" + ix;
+    return '<div class="card mb12" data-grupo="' + ix + '"><div class="card-body">' +
+      '<div class="flex between center wrap gap12 mb8">' +
+      "<div><b style=\"font-size:14px\">" + esc_(g.nome) + "</b>" +
+      '<p class="small">' + g.linhas.length + " linha(s) de EPI espalhadas em " +
+      g.matriculas.length + " matrículas</p></div>" +
+      '<span class="badge b-orange">precisa juntar</span></div>' +
+      '<div class="section-title">Qual matrícula fica?</div>' +
+      '<p class="small muted" style="margin-top:-6px">As linhas das outras passam para ela. ' +
+      "Nada é apagado: cada linha guarda de qual matrícula veio.</p>" +
+      '<div class="grid g2 mt8">' +
+      g.porMatricula.map(function (p, i) {
+        var sugerida = g.sugerida && mat_(g.sugerida) === mat_(p.matricula);
+        return '<label class="card" style="cursor:pointer;margin:0"><div class="card-body">' +
+          '<div class="flex gap8 center mb8">' +
+          '<input type="radio" name="' + id + '" value="' + esc_(p.matricula) + '"' +
+          (sugerida ? " checked" : (!g.sugerida && i === 0 ? "" : "")) + ">" +
+          "<b>" + esc_(p.matricula) + "</b>" +
+          (sugerida ? ' <span class="badge b-green">é a do cadastro</span>' : "") +
+          "</div><p class=\"small\">" + p.quantas + " linha(s)" +
+          (p.maisNova ? " · última entrega " + esc_(new Date(p.maisNova).toLocaleDateString("pt-BR")) : "") +
+          "</p></div></label>";
+      }).join("") + "</div>" +
+      (!g.sugerida ? '<div class="alert a-yellow mt12">' + icone_("alerta") +
+        "<div><b>O cadastro não aponta qual é a definitiva</b>" +
+        "Nenhum usuário cadastrado com este nome tem uma destas matrículas. " +
+        "Escolha você — eu não vou chutar.</div></div>" : "") +
+      '<div class="flex gap8 mt12">' +
+      '<button class="btn btn-primary" data-epij-plano="' + ix + '">' + icone_("sync") +
+      "Ver o plano</button>" +
+      '<button class="btn btn-ghost" data-epij-dup="' + ix + '">' + icone_("alerta") +
+      "Linhas repetidas</button></div>" +
+      '<div class="mt12" data-epij-saida="' + ix + '"></div>' +
+      "</div></div>";
+  }
+
+  function escolhida(ix) {
+    var r = document.querySelector('input[name="epiJG' + ix + '"]:checked');
+    return r ? r.value : "";
+  }
+  function saidaDe(ix) { return document.querySelector('[data-epij-saida="' + ix + '"]'); }
+
+  function desenharPlano(ix) {
+    var g = J.__grupos[ix], destino = escolhida(ix), alvo = saidaDe(ix);
+    if (!alvo) return;
+    if (!destino) {
+      alvo.innerHTML = '<div class="alert a-yellow">' + icone_("alerta") +
+        "<div>Escolha primeiro qual matrícula fica.</div></div>";
+      return;
+    }
+    var p = J.planoDe(g, destino);
+    if (!p.movem.length) {
+      alvo.innerHTML = '<div class="alert a-green">' + icone_("checkC") +
+        "<div>Todas as linhas já estão na matrícula " + esc_(destino) + ". Nada a fazer.</div></div>";
+      return;
+    }
+    alvo.innerHTML = '<div class="alert a-gray">' + icone_("sync") +
+      "<div><b>" + p.movem.length + " linha(s) passam para a matrícula " + esc_(destino) + "</b>" +
+      p.ficam.length + " já está(ão) nela." +
+      (p.devolvidas ? "<br>" + p.devolvidas + " dessas já foi(ram) devolvida(s) por inteiro — " +
+        "elas vão junto, porque o histórico pertence à pessoa." : "") +
+      (p.semId ? "<br><b>" + p.semId + " linha(s) vieram sem id</b> e não podem ser movidas." : "") +
+      "</div></div>" + tabela(p.movem) +
+      '<div class="alert a-yellow mt12">' + icone_("alerta") +
+      "<div><b>Vou mover UMA linha primeiro e reler</b>" +
+      "No sistema inteiro, epi.salvar nunca foi chamado com id — ele sempre cria linha nova. " +
+      "Então eu não tenho prova de que o Core saiba atualizar. Se ele duplicar, eu paro na " +
+      "primeira e te mostro, em vez de duplicar as " + p.movem.length + ".</div></div>" +
+      '<div class="flex gap8 mt12">' +
+      '<button class="btn btn-orange" data-epij-mover="' + ix + '">' + icone_("check") +
+      "Transferir as " + p.movem.length + " linha(s)</button>" +
+      '<button class="btn btn-ghost" data-epij-cancelar="' + ix + '">Cancelar</button></div>';
+    ligarSaida(ix);
+  }
+
+  function desenharDuplicadas(ix) {
+    var g = J.__grupos[ix], alvo = saidaDe(ix);
+    if (!alvo) return;
+    var reps = J.duplicadas(g.linhas);
+    if (!reps.length) {
+      alvo.innerHTML = '<div class="alert a-green">' + icone_("checkC") +
+        "<div>Nenhuma linha repetida nesta pessoa. " +
+        "(Repetida = mesmo item, mesmo dia e mesma quantidade.)</div></div>";
+      return;
+    }
+    alvo.innerHTML = '<div class="alert a-orange">' + icone_("alerta") +
+      "<div><b>" + reps.length + " linha(s) com cara de duplicidade</b>" +
+      "Mesmo item, mesmo dia, mesma quantidade. A primeira de cada grupo NÃO entra " +
+      "nesta lista — só as repetições.</div></div>" + tabela(reps, 20) +
+      '<div class="alert a-gray mt12">' + icone_("alerta") +
+      "<div><b>O que o botão abaixo faz</b>" +
+      "Marca cada uma como excluída pela rota que o sistema já usa, com o motivo " +
+      "registrado. <b>Não devolve nada ao estoque</b> — numa junção de cadastro o " +
+      "material não voltou para a prateleira, só trocou de dono no papel. " +
+      "Se alguma linha dessas for entrega de verdade, use Devolver, não isto.</div></div>" +
+      '<div class="field mt12"><label>Motivo (fica registrado em cada linha)</label>' +
+      '<input class="input" data-epij-motivo="' + ix + '" value="Linha duplicada — fichas da mesma pessoa juntadas"></div>' +
+      '<div class="flex gap8 mt12">' +
+      '<button class="btn btn-danger" data-epij-excluir="' + ix + '">' + icone_("lixo") +
+      "Marcar as " + reps.length + " como excluídas</button>" +
+      '<button class="btn btn-ghost" data-epij-cancelar="' + ix + '">Cancelar</button></div>';
+    J.__dupDe = J.__dupDe || {};
+    J.__dupDe[ix] = reps;
+    ligarSaida(ix);
+  }
+
+  function contar(alvo, texto) {
+    if (alvo) alvo.innerHTML = '<div class="alert a-gray">' + icone_("sync") +
+      "<div>" + esc_(texto) + "</div></div>";
+  }
+
+  function ligarSaida(ix) {
+    var alvo = saidaDe(ix);
+    if (!alvo) return;
+    var bc = alvo.querySelector('[data-epij-cancelar="' + ix + '"]');
+    if (bc) bc.addEventListener("click", function () { alvo.innerHTML = ""; });
+
+    var bm = alvo.querySelector('[data-epij-mover="' + ix + '"]');
+    if (bm) bm.addEventListener("click", function () {
+      var destino = escolhida(ix);
+      if (!destino) return;
+      var g = J.__grupos[ix];
+      bm.disabled = true;
+      var dados = { matricula: destino, colaborador: g.nome, cargo: "", setor: "" };
+      lista_(g.linhas).forEach(function (l) {
+        if (mat_(l.matricula) === mat_(destino)) {
+          dados.cargo = dados.cargo || l.cargo;
+          dados.setor = dados.setor || l.setor;
+        }
+      });
+      J.transferir(g, dados, function (feito, total, texto) {
+        contar(alvo, "Transferindo " + feito + " de " + total + "… " + texto);
+      }).then(function (r) {
+        if (!r.ok) {
+          alvo.innerHTML = '<div class="alert a-red">' + icone_("alerta") +
+            "<div><b>" + (r.duplicou ? "O Core duplicou em vez de transferir"
+              : r.faltaAcao ? "O Core não sabe atualizar uma linha de ficha"
+              : r.naoMudou ? "O Core disse ok mas nada mudou"
+              : "A transferência parou") + "</b>" + esc_(r.mensagem) +
+            (r.codigo ? '<div class="small mt8 mono">Código: ' + esc_(r.codigo) + "</div>" : "") +
+            (r.duplicou || r.faltaAcao ? '<div class="small mt8">' +
+              "<b>O que falta no Apps Script:</b> o módulo de EPI precisa aceitar " +
+              "<b class=\"mono\">id</b> em <b class=\"mono\">epi.salvar</b> e ATUALIZAR a " +
+              "linha, ou ganhar uma ação <b class=\"mono\">epi.transferir</b> que troque a " +
+              "matrícula da linha sem criar outra. Enquanto isso não existir, nenhuma " +
+              "ficha pode ser transferida — e eu prefiro te dizer isso a mexer errado " +
+              "em " + J.linhas.length + " linha(s).</div>" : "") +
+            "</div></div>";
+          aviso_("warn", "Transferência parada", r.duplicou ? "O Core criou linha nova." : "Veja o aviso na tela.");
+          bm.disabled = false;
+          return;
+        }
+        alvo.innerHTML = '<div class="alert ' + (r.falhas.length ? "a-yellow" : "a-green") + '">' +
+          icone_(r.falhas.length ? "alerta" : "checkC") +
+          "<div><b>" + r.feitas + " linha(s) transferida(s)</b>" + esc_(r.mensagem) +
+          (r.falhas.length ? "<br>" + r.falhas.length + " não passaram — veja abaixo." : "") +
+          (r.totalDepois !== null ? "<br>Total de linhas antes: " + r.totalAntes +
+            " · depois: " + r.totalDepois + (r.cresceu ? " <b>(cresceu — confira)</b>" : "") : "") +
+          "</div></div>" +
+          (r.falhas.length ? '<div class="tbl-wrap mt8"><table class="tbl"><thead><tr>' +
+            "<th>Item</th><th>O que houve</th></tr></thead><tbody>" +
+            r.falhas.map(function (f) {
+              return "<tr><td>" + esc_(f.linha.item) + "</td><td>" + esc_(f.mensagem) + "</td></tr>";
+            }).join("") + "</tbody></table></div>" : "");
+        aviso_(r.falhas.length ? "warn" : "ok", "Fichas juntadas", r.mensagem);
+        J.abrir(true);
+      });
+    });
+
+    var bx = alvo.querySelector('[data-epij-excluir="' + ix + '"]');
+    if (bx) bx.addEventListener("click", function () {
+      var reps = (J.__dupDe || {})[ix] || [];
+      if (!reps.length) return;
+      var campo = alvo.querySelector('[data-epij-motivo="' + ix + '"]');
+      var motivo = campo ? campo.value.trim() : "";
+      bx.disabled = true;
+      J.marcarExcluidas(reps, motivo, function (feito, total, texto) {
+        contar(alvo, "Marcando " + (feito + 1) + " de " + total + "… " + texto);
+      }).then(function (r) {
+        alvo.innerHTML = '<div class="alert ' + (r.falhas.length ? "a-yellow" : "a-green") + '">' +
+          icone_(r.falhas.length ? "alerta" : "checkC") +
+          "<div><b>" + r.feitas + " linha(s) marcada(s) como excluída(s)</b>" +
+          (r.falhas.length ? r.falhas.length + " não foram — veja abaixo." :
+            "O histórico continua na planilha, com o motivo registrado.") + "</div></div>" +
+          (r.falhas.length ? '<div class="tbl-wrap mt8"><table class="tbl"><thead><tr>' +
+            "<th>Item</th><th>O que houve</th></tr></thead><tbody>" +
+            r.falhas.map(function (f) {
+              return "<tr><td>" + esc_(f.linha.epi || f.linha.item) + "</td><td>" +
+                esc_(f.mensagem) + "</td></tr>";
+            }).join("") + "</tbody></table></div>" : "");
+        aviso_(r.falhas.length ? "warn" : "ok", "Duplicadas tratadas",
+          r.feitas + " linha(s) marcada(s).");
+      });
+    });
+  }
+
+  J.abrir = function (recarregar) {
+    var alvo = document.getElementById("epiJuntaCorpo");
+    if (!alvo) {
+      var cx = document.createElement("div");
+      cx.id = "epiJuntaCaixa";
+      cx.innerHTML = '<div id="epiJuntaCorpo"></div>';
+      var onde = document.querySelector("[data-tela]") || document.querySelector("main") || document.body;
+      onde.insertBefore(cx, onde.firstChild);
+    }
+    painel('<div class="card"><div class="card-body">' +
+      '<div class="alert a-gray" style="margin:0">' + icone_("sync") +
+      "<div>Lendo as fichas no Core…</div></div></div></div>");
+
+    return J.lerLinhas().then(function (r) {
+      if (!r.ok) {
+        painel('<div class="card"><div class="card-body"><div class="alert a-red">' +
+          icone_("alerta") + "<div><b>Não consegui ler as fichas</b>" +
+          esc_(r.mensagem) + "</div></div></div></div>");
+        return;
+      }
+      return Promise.resolve(API.call("usuarios", "listar", {}))["catch"](function () {
+        return { ok: false };
+      }).then(function (ur) {
+        var usuarios = (ur && ur.ok) ? lista_(ur.dados) : [];
+        var grupos = J.grupos(r.linhas, usuarios);
+        J.__grupos = grupos;
+        if (!grupos.length) {
+          painel('<div class="card"><div class="card-body"><div class="alert a-green">' +
+            icone_("checkC") + "<div><b>Nenhuma pessoa com ficha em duas matrículas</b>" +
+            "Li " + r.linhas.length + " linha(s) de EPI. Todas as pessoas estão numa " +
+            "matrícula só.</div></div></div></div>");
+          return;
+        }
+        painel('<div class="card mb12"><div class="card-body">' +
+          '<div class="flex between center wrap gap12">' +
+          "<div><b style=\"font-size:15px\">Fichas da mesma pessoa em matrículas diferentes</b>" +
+          '<p class="small">' + grupos.length + " pessoa(s) · " + r.linhas.length +
+          " linha(s) de EPI lidas do Core</p></div>" +
+          '<button class="btn btn-ghost btn-sm" data-epij-fechar>Fechar</button>' +
+          "</div></div></div>" +
+          grupos.map(cartaoGrupo).join(""));
+
+        var bf = document.querySelector("[data-epij-fechar]");
+        if (bf) bf.addEventListener("click", function () {
+          var c = document.getElementById("epiJuntaCaixa");
+          if (c && c.parentNode) c.parentNode.removeChild(c); else painel("");
+        });
+        grupos.forEach(function (g, ix) {
+          var bp = document.querySelector('[data-epij-plano="' + ix + '"]');
+          if (bp) bp.addEventListener("click", function () { desenharPlano(ix); });
+          var bd = document.querySelector('[data-epij-dup="' + ix + '"]');
+          if (bd) bd.addEventListener("click", function () { desenharDuplicadas(ix); });
+        });
+        try {
+          var caixa = document.getElementById("epiJuntaCaixa");
+          if (caixa && caixa.scrollIntoView) caixa.scrollIntoView({ behavior: "smooth", block: "start" });
+        } catch (e) {}
+      });
+    });
+  };
+
+  J.diagnostico = function () {
+    return {
+      linhasLidas: J.linhas.length,
+      ultimaLeitura: J.ultimaLeitura ? new Date(J.ultimaLeitura).toLocaleString("pt-BR") : null,
+      gruposNaTela: (J.__grupos || []).length,
+      jaMovidas: J.movidas,
+      ultimoErro: J.ultimoErro
+    };
+  };
+})();
+</script>
+
+<script>
 function normalizarFichasEPI(resposta) {
 var lista = listaSegura(resposta);
 if (!lista.length) return [];
@@ -41751,6 +42489,10 @@ function fichaCasa_(registro, f, campoNome) {
   return !!(nr && nf && nr === nf);
 }
 
+/* [v279] ajudante de texto deste bloco. Nome proprio para nao
+   esbarrar com os lp() que ja existem dentro de outros fechamentos. */
+function lp_279_(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+
 function fichaDadosPessoa_(f) {
 var u = (MOCK.usuarios || []).filter(function(x) {
 return fichaCasa_(x, f, "nome");
@@ -41758,6 +42500,28 @@ return fichaCasa_(x, f, "nome");
 var c = listaSegura(MOCK.crachas).filter(function(x) {
 return fichaCasa_(x, f, "colaborador");
 })[0] || {};
+/* [v279] MOCK.crachas NUNCA e' preenchido pelo Core: a unica linha que
+   o toca e' "MOCK.crachas = MOCK.crachas || []". Entao, em producao, o
+   terceiro degrau de "cargo: u.cargo || u.funcao || c.funcao" era codigo
+   morto, e as 67 pessoas sem cargo no cadastro apareciam sem funcao —
+   mesmo com a funcao delas 100% preenchida no crachá.
+   O FOTOCRACHA ja carregou essa lista; so pego dela o que falta. */
+if (!lp_279_(c.funcao) && typeof FOTOCRACHA !== "undefined") {
+  try {
+    var doFichario_279 = listaSegura(FOTOCRACHA.fichario).filter(function (x) {
+      return fichaCasa_(x, f, "nome");
+    })[0];
+    if (doFichario_279) {
+      c = { funcao: lp_279_(c.funcao) || lp_279_(doFichario_279.funcao),
+            setor: lp_279_(c.setor) || lp_279_(doFichario_279.setor),
+            codigo: lp_279_(c.codigo) || lp_279_(doFichario_279.codigo),
+            colaborador: lp_279_(c.colaborador) || lp_279_(doFichario_279.nome),
+            matricula: lp_279_(c.matricula) || lp_279_(doFichario_279.matricula),
+            unidade: lp_279_(c.unidade), obra: lp_279_(c.obra), foto: c.foto || "",
+            setorOriginal: lp_279_(c.setor) };
+    }
+  } catch (e279) {}
+}
 var obra = (MOCK.obras || []).filter(function(o) {
 return o.id === u.obra || o.nome === u.obra;
 })[0];
@@ -62517,7 +63281,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 276 · 22/10";
+var ALMOXA_VERSAO = "sistema 279 · 22/10";
 var ALMOXA_NOVIDADES = [
   "276 · a tela do cracha para de culpar o modulo quando o que houve foi prazo",
   "275 · medir a abertura do lado do navegador, chamada por chamada",
@@ -64696,6 +65460,13 @@ function modalPendencias() {
           return { matricula: limpar(c.matricula), curta: chaveCurta(c),
             nome: limpar(c.colaborador || c.nome || c.funcionario),
             codigo: limpar(c.codigo), status: limpar(c.status),
+            /* [v279] a funcao e o setor passam a ficar guardados aqui.
+               Medido em 23/10: ALMOXA_CRACHAS.funcao esta 100% preenchida
+               (85 de 85), enquanto USUARIOS.cargo so tem 62% (108 de 175).
+               A ficha de EPI ja sabia procurar no crachá — mas o fichario
+               descartava justamente a coluna que ela precisava. Nao custa
+               ida nova ao Core: a lista ja esta aqui na mao. */
+            funcao: limpar(c.funcao || c.cargo), setor: limpar(c.setor),
             temFoto: !!fotoDoCadastro(c), campos: Object.keys(c || {}) };
         });
         FOTOCRACHA.contagem.crachasLidos = lista.length;
@@ -84484,8 +85255,23 @@ function modalPendencias() {
     var mat = lp(u.matricula), tem = [];
     if (!mat) return tem;
     try {
-      var fichas = lista_(typeof MOCK !== "undefined" && MOCK.fichasEPI);
-      var n = fichas.filter(function (f) { return lp(f.matricula) === mat; }).length;
+      /* [EPIJUNTA] isto lia so o MOCK, que em producao esta vazio: a
+         tela dizia "sem historico" para quem tinha ficha cheia, e a
+         pessoa bloqueava o cadastro achando que nao perdia nada.
+         Agora usa o que o EPIJUNTA leu do Core, e compara pela
+         matricula LIMPA — comparar em bruto ja era sabido errado
+         (veja o comentario em fichaChaveMat_). */
+      var fichas = (typeof EPIJUNTA !== "undefined" && EPIJUNTA.linhasConhecidas &&
+                    lista_(EPIJUNTA.linhasConhecidas()).length)
+        ? lista_(EPIJUNTA.linhasConhecidas())
+        : lista_(typeof MOCK !== "undefined" && MOCK.fichasEPI);
+      var chaveMat = (typeof fichaChaveMat_ === "function")
+        ? fichaChaveMat_(mat) : String(mat);
+      var n = fichas.filter(function (f) {
+        var fm = (typeof fichaChaveMat_ === "function")
+          ? fichaChaveMat_(f.matricula) : String(f.matricula || "");
+        return fm && fm === chaveMat;
+      }).length;
       if (n) tem.push(n + " ficha(s) de EPI");
     } catch (e) {}
     try {
