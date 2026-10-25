@@ -12264,6 +12264,18 @@ return;
 EPIJUNTA.abrir();
 });
 });
+/* [v291] a migracao completa: campos, foto, movimentacoes e so
+   entao o cadastro. Botao separado do "juntar" de proposito —
+   sao operacoes diferentes e o operador precisa saber qual pediu. */
+document.querySelectorAll("[data-epi-migrar]").forEach(function(b) {
+b.addEventListener("click", function() {
+if (typeof EPIMIGRA === "undefined" || !EPIMIGRA.abrir) {
+toast("warn", "Modulo nao carregado", "O bloco [EPIMIGRA] nao esta nesta versao.");
+return;
+}
+EPIMIGRA.abrir();
+});
+});
 epiLigarCopiarAssinatura();
 epiLigarDiagnosticoAssinatura();
 }
@@ -12275,7 +12287,7 @@ return UI.cabecalho({
 trilha: [ "EPI's / Uniformes", "Fichas ativas" ],
 titulo: "Fichas de EPI ativas",
 sub: "Histórico de entregas por colaborador, com validade e assinatura.",
-acoes: '<button class="btn btn-ghost" data-epi-juntar>' + ic("sync") + "Juntar fichas da mesma pessoa</button>" + '<button class="btn btn-ghost" data-exportar="Fichas de EPI">' + ic("pdf") + "Exportar fichas</button>"
+acoes: '<button class="btn btn-ghost" data-epi-migrar title="Transfere movimenta\u00e7\u00f5es, completa campos em branco, leva a foto e s\u00f3 ent\u00e3o encerra o cadastro que sai">' + ic("usuarios") + "Migrar tudo e juntar</button>" + '<button class="btn btn-ghost" data-epi-juntar>' + ic("sync") + "Juntar fichas da mesma pessoa</button>" + '<button class="btn btn-ghost" data-exportar="Fichas de EPI">' + ic("pdf") + "Exportar fichas</button>"
 }) + (!listaSegura(fichas).length ? '<div class="card">' + UI.estado("vazio", "Nenhuma ficha de EPI", "As fichas aparecem aqui assim que houver a primeira entrega de EPI.", '<button class="btn btn-orange mt12" data-entregar-epi>' + ic("mais") + "Entregar EPI</button>") + "</div>" : "") + listaSegura(fichas).map(function(f) {
 return '<div class="card mb12"><div class="card-body">' + '<div class="flex between center wrap gap12 mb12">' + '<div class="flex center gap12"><span class="avatar" style="width:40px;height:40px;font-size:13px">' + U.iniciais(f.colaborador || "?") + "</span>" + '<div><b style="font-size:14px">' + U.esc(f.colaborador) + "</b>" + '<p class="small">' + U.esc(f.cargo || "Não informado") + " · " + U.esc(f.setor || "Não informado") + " · matrícula " + U.esc(f.matricula || "não informada") + (listaSegura(f.matriculasAnteriores).length ? ' · <span class="badge b-blue" title="as entregas destas matrículas foram juntadas nesta ficha">ficha única · antes ' + U.esc(listaSegura(f.matriculasAnteriores).join(", ")) + "</span>" : "") + "</p></div></div>" + '<div class="flex gap8 center">' + UI.badge(f.status) + '<button class="btn btn-ghost btn-sm" data-entregar-epi>' + ic("mais") + "Entregar EPI</button></div></div>" + epiFaixaAssinatura(f) + (function() {
 var rep = marcarDuplicidades_(listaSegura(f.itens)).filter(function(x) { return x.__dup > 1; });
@@ -13482,6 +13494,16 @@ render: function() {
 return API.call("usuarios", "listar", {}).then(function(r) {
 if (!r.ok) return UI.estado("erro", "Não foi possível carregar os usuários", r.mensagem);
 var lista = listaSegura(r.dados);
+/* [v281] quem foi excluido sai da lista operacional. Conferido: nem
+   o Core nem esta tela filtravam, entao o cadastro continuava
+   aparecendo mesmo depois de marcado — e dava a impressao de que a
+   exclusao nao tinha funcionado. O historico fica na planilha. */
+var _excluidos = 0;
+lista = lista.filter(function (u) {
+  var st = String((u && u.status) || "").trim().toUpperCase();
+  if (st.indexOf("EXCLUIDO") === 0 || st.indexOf("EXCLUÍDO") === 0) { _excluidos++; return false; }
+  return true;
+});
 USUARIOS_TELA = lista;
 /* [v256] quantas PESSOAS, e quantos cadastros sobrando */
 var _grupos = [], _repetidos = 0;
@@ -13496,8 +13518,14 @@ return UI.cabecalho({
 trilha: [ "Configurações", "Usuários e Perfis" ],
 titulo: "Usuários e perfis",
 sub: "Cadastro, vínculo com obra, perfil de acesso e situação de cada usuário.",
-acoes: '<button class="btn btn-ghost" data-importar-colab>' + ic("upload") + "Importar lista do RH</button>" + '<button class="btn btn-ghost" data-ir="#/permissoes">' + ic("cadeado") + "Matriz de permissões</button>" + '<button class="btn btn-primary" data-novo-usuario>' + ic("mais") + "Novo usuário</button>"
-}) + '<div class="grid g4 mb16">' + UI.kpi({
+acoes: '<button class="btn btn-ghost" data-dg-abrir title="Descobre se o servidor consegue atualizar um cadastro que já existe">' + ic("doutor") + "Diagnóstico da gravação</button>" + '<button class="btn btn-ghost" data-importar-colab>' + ic("upload") + "Importar lista do RH</button>" + '<button class="btn btn-ghost" data-ir="#/permissoes">' + ic("cadeado") + "Matriz de permissões</button>" + '<button class="btn btn-primary" data-novo-usuario>' + ic("mais") + "Novo usuário</button>"
+}) + /* [v284] procurar na lista de usuarios. Com 206 cadastros,
+        achar uma pessoa rolando a tela e' trabalho inutil. */
+'<label class="field mb12"><span>Procurar pessoa</span>' +
+'<input class="input" id="usBusca" autocomplete="off" ' +
+'placeholder="nome, matrícula, e-mail, login ou cargo"></label>' +
+'<div class="muted small mb12" id="usBuscaConta"></div>' +
+'<div class="grid g4 mb16">' + UI.kpi({
 icone: "usuarios",
 cor: "ico-blue",
 valor: _pessoas,
@@ -13588,20 +13616,62 @@ render: function(u) {
    com o triplo da altura — e a lista inteira com cara de bagunça. */
 return '<div class="flex gap4" style="justify-content:flex-end">' +
 '<button class="btn-icon" data-edit-user="' + U.esc(u.id || u.matricula || u.email) + '">' + ic("editar") + "</button>" + ' <button class="btn-icon" data-bloq-user="' + U.esc(u.id || u.matricula || u.email) + '" title="' + (usuarioAtivo_(u) ? "Bloquear" : "Desbloquear") + '">' + ic(usuarioAtivo_(u) ? "bloqueio" : "checkC") + "</button>" +
-/* EXCLUIR. Só em quem já não está ativo — bloquear primeiro
-   é uma decisão a mais antes da que não se desfaz com um clique.
-   A exclusão é lógica: o arquivo fica no Drive, marcado, com motivo
-   e autor, e dá para voltar. */
-(usuarioAtivo_(u) ? "" :
-  ' <button class="btn-icon" data-excl-user="' + U.esc(u.id || "") +
-  '" title="Excluir este cadastro (sai da lista; o arquivo fica guardado)">' +
-  ic("lixo") + "</button>") + "</div>";
+/* EXCLUIR.
+   [v283] Antes só aparecia para quem JÁ estava bloqueado. A ideia
+   era obrigar a bloquear primeiro. Na prática, com 206 pessoas
+   ativas e 37 cadastros repetidos, o botão simplesmente não existia
+   para ninguém — e ele procurou por ele sem achar.
+   Volta para todos. A trava que importa não é esconder o botão: é
+   a janela pedir o motivo, conferir o histórico amarrado e exigir
+   reconhecimento quando há ficha de EPI ou crachá na matrícula.
+   E a exclusão continua lógica: a linha fica, marcada, com autor e
+   motivo, e dá para voltar. */
+' <button class="btn-icon" data-excl-user="' + U.esc(u.id || "") +
+'" title="Excluir este cadastro (sai da lista; o registro fica guardado)">' +
+ic("lixo") + "</button>" + "</div>";
 }
 } ]
 }) + "</div>";
 });
 },
 mount: function() {
+/* [v284] liga a busca: filtra as linhas da tabela, sem tocar em dado */
+(function ligarBuscaUsuarios() {
+  var campo = document.getElementById("usBusca");
+  var conta = document.getElementById("usBuscaConta");
+  if (!campo) return;
+  function linhas() {
+    var t = document.querySelector("#appMain table tbody");
+    return t ? [].slice.call(t.querySelectorAll("tr")) : [];
+  }
+  function atualizar() {
+    var q = String(campo.value || "").trim().toLowerCase();
+    var ls = linhas(), vistos = 0;
+    ls.forEach(function (tr) {
+      var txt = (tr.innerText || tr.textContent || "").toLowerCase();
+      var mostra = !q || txt.indexOf(q) > -1;
+      tr.style.display = mostra ? "" : "none";
+      if (mostra) vistos++;
+    });
+    if (conta) conta.textContent = q
+      ? vistos + " de " + ls.length + " mostrando"
+      : ls.length + " cadastro(s) na lista";
+  }
+  var t = null;
+  campo.addEventListener("input", function () {
+    clearTimeout(t); t = setTimeout(atualizar, 180);
+  });
+  atualizar();
+})();
+var dg = document.querySelector("[data-dg-abrir]");
+if (dg) dg.addEventListener("click", function () {
+  if (typeof DIAGGRAV === "undefined" || !DIAGGRAV.abrir) {
+    toast("warn", "Bloco não carregado", "O [DIAGGRAV] não está nesta versão.");
+    return;
+  }
+  var lista = listaSegura(USUARIOS_TELA);
+  DIAGGRAV.abrir(lista[0]);
+});
 var imp = document.querySelector("[data-importar-colab]");
 if (imp) imp.addEventListener("click", modalImportarColaboradores);
 var n = document.querySelector("[data-novo-usuario]");
@@ -62557,6 +62627,20 @@ function modalBioRevogar(matricula) {
       .replace(/[ÚÙÛÜúùûü]/g, 'u').replace(/[Çç]/g, 'c').replace(/[Ññ]/g, 'n');
   }
   function chave(t) { return semAcento(t).toLowerCase().replace(/[^a-z0-9]/g, ''); }
+  /* [v280] A CHAVE DE MATRICULA. Em 23/10 a importacao duplicou
+     gente porque comparava matricula em bruto: a planilha guarda
+     "0408194", a lista do RH traz "408194", texto diferente, nao
+     casava, e cada pessoa entrava como nova.
+     O sistema ja tinha fichaChaveMat_ para isso, com o comentario
+     "o cracha guarda 0407917, a ficha traz 407917, e o cadastro as
+     vezes traz 1" — mas ela vive em outro escopo e este bloco nao
+     a enxerga. Entao aqui vai a mesma regra: sem pontuacao, sem
+     espaco, sem zero a esquerda.
+     Isto muda SO a comparacao. O valor exibido continua o da
+     planilha. */
+  function chaveMat(t) {
+    return semAcento(t).toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^0+/, '');
+  }
   function limpa(t) { return String(t === null || t === undefined ? '' : t).replace(/\s+/g, ' ').trim(); }
 
   /* ---------- o que é e o que não é matrícula ---------- */
@@ -62785,8 +62869,11 @@ function modalBioRevogar(matricula) {
     });
     var porMatricula = {}, porCracha = {}, porNome = {};
     existentes.forEach(function (e) {
-      if (e.matricula) (porMatricula[e.matricula] = porMatricula[e.matricula] || []).push(e);
-      if (e.cracha) (porCracha[e.cracha] = porCracha[e.cracha] || []).push(e);
+      /* [v280] indexado pela matricula LIMPA, nao pelo texto cru */
+      var km = chaveMat(e.matricula);
+      if (km) (porMatricula[km] = porMatricula[km] || []).push(e);
+      var kc = chaveMat(e.cracha);
+      if (kc) (porCracha[kc] = porCracha[kc] || []).push(e);
       (porNome[chave(e.nome)] = porNome[chave(e.nome)] || []).push(e);
     });
 
@@ -62808,8 +62895,14 @@ function modalBioRevogar(matricula) {
        planilha, nem no cadastro.
        ============================================================ */
     var usados = {};
-    existentes.forEach(function (e) { if (e.matricula) usados[e.matricula] = true; });
-    (pessoas || []).forEach(function (p) { if (limpa(p.matricula)) usados[limpa(p.matricula)] = true; });
+    /* [v280] guardo as duas formas: a crua, para nao repetir texto, e
+       a limpa, para nao gerar "409" quando ja existe "0409" */
+    existentes.forEach(function (e) {
+      if (e.matricula) { usados[e.matricula] = true; usados[chaveMat(e.matricula)] = true; }
+    });
+    (pessoas || []).forEach(function (p) {
+      if (limpa(p.matricula)) { usados[limpa(p.matricula)] = true; usados[chaveMat(p.matricula)] = true; }
+    });
 
     var maior = 0;
     Object.keys(usados).forEach(function (m) {
@@ -62864,11 +62957,14 @@ function modalBioRevogar(matricula) {
         p.avisos.push('Sem matrícula na lista — gerei a ' + p.matricula +
           '. Troque pela do RH quando ela sair.');
       } else {
-        if (vistasMatricula[p.matricula]) {
-          p.problemas.push('Matrícula ' + p.matricula + ' repetida na própria lista (linha ' + vistasMatricula[p.matricula] + ').');
+        /* [v280] tambem aqui: duas grafias do mesmo numero na mesma
+           lista sao a mesma pessoa, e precisam ser acusadas */
+        var kmP = chaveMat(p.matricula);
+        if (vistasMatricula[kmP]) {
+          p.problemas.push('Matrícula ' + p.matricula + ' repetida na própria lista (linha ' + vistasMatricula[kmP] + ').');
         }
-        vistasMatricula[p.matricula] = p.linha;
-        var jaM = porMatricula[p.matricula] || [];
+        vistasMatricula[kmP] = p.linha;
+        var jaM = porMatricula[kmP] || [];
         if (jaM.length) {
           p.acao = 'ATUALIZA';
           p.idExistente = jaM[0].id;
@@ -62885,12 +62981,13 @@ function modalBioRevogar(matricula) {
       } else if (!p.cracha) {
         p.avisos.push('Sem número de crachá.');
       } else {
-        if (vistosCracha[p.cracha]) {
-          p.problemas.push('Crachá ' + p.cracha + ' repetido na própria lista (linha ' + vistosCracha[p.cracha] + '). ' +
+        var kcP = chaveMat(p.cracha);
+        if (vistosCracha[kcP]) {
+          p.problemas.push('Crachá ' + p.cracha + ' repetido na própria lista (linha ' + vistosCracha[kcP] + '). ' +
             'Dois crachás iguais é erro de digitação ou de emissão.');
         }
-        vistosCracha[p.cracha] = p.linha;
-        var jaC = (porCracha[p.cracha] || []).filter(function (e) { return !p.idExistente || e.id !== p.idExistente; });
+        vistosCracha[kcP] = p.linha;
+        var jaC = (porCracha[kcP] || []).filter(function (e) { return !p.idExistente || e.id !== p.idExistente; });
         if (jaC.length) {
           p.problemas.push('O crachá ' + p.cracha + ' já está cadastrado para ' + jaC[0].nome + '.');
         }
@@ -63281,7 +63378,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 279 · 22/10";
+var ALMOXA_VERSAO = "sistema 292 · 22/10";
 var ALMOXA_NOVIDADES = [
   "276 · a tela do cracha para de culpar o modulo quando o que houve foi prazo",
   "275 · medir a abertura do lado do navegador, chamada por chamada",
@@ -66548,9 +66645,12 @@ function modalPendencias() {
   /* ONDE ISTO MORA NO REPOSITÓRIO.
      "assinaturas" não é um conjunto que exista — pedir por ele dava
      CONJUNTO_DESCONHECIDO. E não precisava existir: a assinatura do
-     COLABORADOR é cadastro dele, então vai para "usuarios"
-     (13_USUARIOS_PERMISSOES), o mesmo armazenamento oficial dos
-     colaboradores. O que é assinado POR FICHA é documento, e vai
+     COLABORADOR é cadastro dele, então vai para o conjunto "usuarios"
+     do repositório, o mesmo armazenamento dos colaboradores.
+     [v288] Aqui dizia "(13_USUARIOS_PERMISSOES)". Nome errado, e ainda
+     por cima misturava duas coisas: "usuarios" é CONJUNTO do repositório
+     do Drive; a ABA da planilha chama-se USUARIOS. São lugares
+     diferentes e não devem ser tratados como o mesmo nome. O que é assinado POR FICHA é documento, e vai
      para "documentos" (11_DOCUMENTOS_PDFS). Os dois conjuntos já
      existem: nada novo para criar nem instalar. */
   var CONJUNTO_COLAB = "usuarios";
@@ -84956,6 +85056,364 @@ function modalPendencias() {
 <script src="ALMOXA_PRO_Motor_NF.js" onerror="try{console.warn('[ALMOXA] o motor de leitura de NF nao esta ao lado do index.html; o leitor segue no modo antigo');}catch(e){}"></script>
 
 <script>
+</script>
+
+<script>
+/* ############################################################
+ * DIAGNÓSTICO DA GRAVAÇÃO            busca: [DIAGGRAV]
+ * ------------------------------------------------------------
+ * POR QUE ELE EXISTE
+ *
+ * Em três dias, quatro operações diferentes falharam:
+ *   · a importação do RH CRIOU 56 duplicados em vez de atualizar
+ *   · epi.salvar com id respondeu ok e não atualizou nada
+ *   · editar usuário recusa com USUARIO_DUPLICADO
+ *   · excluir cadastro repetido não grava na planilha
+ *
+ * Todas são a mesma pergunta: o Core consegue ATUALIZAR um
+ * registro que já existe? Criar ele consegue — a lista foi de
+ * 150 para 206. Ler ele consegue. Atualizar é a dúvida.
+ *
+ * E tem um beco sem saída já escrito no [EDITAGRAVA]:
+ *   com matrícula  -> a checagem de duplicidade acusa a pessoa
+ *                     contra ela mesma e recusa
+ *   sem matrícula  -> "o Core não achava ninguém e criava um
+ *                     registro em branco" (v252b)
+ *
+ * Esta tela responde isso com evidência, não com palpite.
+ *
+ * ------------------------------------------------------------
+ * COMO ELE É SEGURO
+ *
+ * FASE 1 — SÓ LEITURA. Pergunta ao Core se ele acha a pessoa
+ *   pelo id e pela matrícula. Nada é gravado. É esta fase que
+ *   diz qual é a CHAVE que o Core usa para achar um registro.
+ *
+ * FASE 2 — GRAVAÇÃO QUE NÃO MUDA NADA. Só com o botão apertado.
+ *   Manda usuarios.salvar com a situação IGUAL à que já está lá.
+ *   Se o Core aceitar, a linha fica idêntica. Se recusar, a gente
+ *   finalmente vê o código.
+ *   Antes e depois de cada tentativa ele CONTA os cadastros. Se
+ *   nascer um, ele para na hora e diz qual é — porque criar
+ *   registro em branco é exatamente o risco conhecido.
+ *
+ * Nenhuma senha, token ou hash é exibido.
+ * ############################################################ */
+(function diagGravacao() {
+
+  var D = { ultimo: null };
+  try { window.DIAGGRAV = D; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function esc_(s) { return (typeof U !== "undefined" && U.esc) ? U.esc(s) : lp(s); }
+  function ic_(n) { return (typeof ic === "function") ? ic(n) : ""; }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+
+  /* campos que nunca saem daqui */
+  var SEGREDO = /^(senha|senhahash|senha_hash|hash|salt|token|password|biometria|facial|assinatura|foto)$/i;
+
+  function pedir(modulo, acao, carga) {
+    var t0 = new Date().getTime();
+    return Promise.resolve(API.call(modulo, acao, carga || {}))
+      .then(function (r) {
+        r = r || {};
+        return { ok: !!r.ok, codigo: lp(r.codigo || r.erro), mensagem: lp(r.mensagem),
+                 dados: r.dados, ms: new Date().getTime() - t0 };
+      }, function (e) {
+        return { ok: false, codigo: "SEM_RESPOSTA", mensagem: lp(e && e.message) || "sem resposta",
+                 ms: new Date().getTime() - t0 };
+      });
+  }
+
+  function quantos() {
+    return pedir("usuarios", "listar", {}).then(function (r) {
+      return r.ok ? lista_(r.dados).length : null;
+    });
+  }
+
+  /* ============================================================
+     FASE 1 — POR QUAL CHAVE O CORE ACHA UMA PESSOA
+     ============================================================ */
+  D.fase1 = function (u) {
+    var passos = [];
+    var id = lp(u && u.id), mat = lp(u && u.matricula);
+
+    function anotar(nome, carga, r, leitura) {
+      var achou = null;
+      if (r.ok) {
+        var d = r.dados;
+        if (Array.isArray(d)) achou = d.length ? d.length + " registro(s)" : "nenhum";
+        else if (d && typeof d === "object") achou = lp(d.id) ? "1 registro · id " + lp(d.id) : "objeto sem id";
+        else achou = "respondeu sem dados";
+      }
+      passos.push({ nome: nome, carga: carga, ok: r.ok, codigo: r.codigo,
+                    mensagem: r.mensagem, ms: r.ms, achou: achou, leitura: leitura !== false });
+    }
+
+    return quantos().then(function (antes) {
+      passos.push({ nome: "quantos cadastros existem agora", carga: "usuarios.listar {}",
+                    ok: antes !== null, achou: antes === null ? null : antes + " cadastro(s)",
+                    leitura: true });
+      D.antes = antes;
+      return pedir("usuarios", "obter", { id: id });
+    }).then(function (r) {
+      anotar("achar PELO ID", "usuarios.obter { id }", r);
+      return pedir("usuarios", "obter", { matricula: mat });
+    }).then(function (r) {
+      anotar("achar PELA MATRÍCULA", "usuarios.obter { matricula }", r);
+      return passos;
+    });
+  };
+
+  /* ============================================================
+     FASE 2 — GRAVAR SEM MUDAR NADA
+     ------------------------------------------------------------
+     A situação enviada é a MESMA que já está no cadastro. Se o
+     Core aceitar, a linha fica idêntica. O que interessa é a
+     resposta, não o efeito.
+     ============================================================ */
+  D.fase2 = function (u) {
+    var passos = [];
+    var id = lp(u && u.id);
+    var statusAtual = lp(u && u.status) || "Ativo";
+
+    function limpo(o) {
+      var saida = {};
+      Object.keys(o || {}).forEach(function (k) {
+        if (SEGREDO.test(k)) return;
+        if (k.indexOf("__") === 0) return;
+        saida[k] = o[k];
+      });
+      return saida;
+    }
+
+    /* o pedido GORDO: tudo que veio da lista, com a matrícula */
+    var gordo = limpo(u);
+    gordo.id = id; gordo.editando = true; gordo.status = statusAtual;
+
+    /* o pedido MAGRO: sem matrícula, e-mail e login */
+    var magro = limpo(u);
+    magro.id = id; magro.editando = true; magro.status = statusAtual;
+    delete magro.matricula; delete magro.email; delete magro.login;
+
+    function tentar(nome, carga, descricao) {
+      return quantos().then(function (antes) {
+        return pedir("usuarios", "salvar", carga).then(function (r) {
+          return quantos().then(function (depois) {
+            var nasceu = (antes !== null && depois !== null) ? (depois - antes) : null;
+            passos.push({ nome: nome, carga: descricao, ok: r.ok, codigo: r.codigo,
+                          mensagem: r.mensagem, ms: r.ms,
+                          antes: antes, depois: depois, nasceu: nasceu });
+            return nasceu;
+          });
+        });
+      });
+    }
+
+    return tentar("gravar COM a matrícula", gordo,
+      "usuarios.salvar { id, editando, matricula, status igual }")
+      .then(function (nasceu) {
+        if (nasceu) {
+          passos.push({ parou: true,
+            nome: "PAREI AQUI",
+            mensagem: "nasceu " + nasceu + " cadastro(s) novo(s). Não vou tentar a " +
+              "segunda forma: isso confirma que o Core CRIA quando devia atualizar." });
+          return passos;
+        }
+        return tentar("gravar SEM a matrícula", magro,
+          "usuarios.salvar { id, editando, status igual } — sem matrícula/e-mail/login")
+          .then(function () { return passos; });
+      });
+  };
+
+  /* ============================================================
+     A TELA
+     ============================================================ */
+  function linhaPasso(p) {
+    if (p.parou) {
+      return '<div class="alert a-red mb8">' + ic_("alerta") +
+        "<div><b>" + esc_(p.nome) + "</b>" + esc_(p.mensagem) + "</div></div>";
+    }
+    var cor = p.ok ? "b-green" : "b-red";
+    var rotulo = p.ok ? "respondeu" : "recusou";
+    return '<div class="card mb8"><div class="card-body" style="padding:11px 13px">' +
+      '<div class="flex between center gap8" style="flex-wrap:wrap">' +
+      "<b style=\"font-size:13px\">" + esc_(p.nome) + "</b>" +
+      '<span class="badge ' + cor + '">' + rotulo + (p.ms ? " · " + p.ms + " ms" : "") + "</span></div>" +
+      '<div class="small mono muted mt4">' + esc_(p.carga || "") + "</div>" +
+      (p.achou ? '<div class="small mt4">achou: <b>' + esc_(p.achou) + "</b></div>" : "") +
+      (p.codigo ? '<div class="small mt4">código: <b class="mono">' + esc_(p.codigo) + "</b></div>" : "") +
+      (p.mensagem ? '<div class="small mt4">' + esc_(p.mensagem) + "</div>" : "") +
+      (p.nasceu !== undefined && p.nasceu !== null
+        ? '<div class="small mt4">cadastros: ' + p.antes + " → " + p.depois +
+          (p.nasceu > 0 ? ' <b class="erro">(nasceu ' + p.nasceu + ")</b>"
+            : p.nasceu < 0 ? " (sumiu " + Math.abs(p.nasceu) + ")" : " (igual)") + "</div>"
+        : "") +
+      "</div></div>";
+  }
+
+  function veredito(p1, p2) {
+    var porId = p1.filter(function (x) { return /PELO ID/.test(x.nome); })[0];
+    var porMat = p1.filter(function (x) { return /PELA MATRÍCULA/.test(x.nome); })[0];
+    var gordo = (p2 || []).filter(function (x) { return /COM a matrícula/.test(x.nome); })[0];
+    var magro = (p2 || []).filter(function (x) { return /SEM a matrícula/.test(x.nome); })[0];
+
+    var t = "";
+    /* a chave */
+    if (porId && porId.ok && porId.achou && porId.achou.indexOf("1 registro") === 0) {
+      t += "<b>O Core acha a pessoa PELO ID.</b> Então dá para atualizar sem mandar " +
+        "a matrícula — e a checagem de duplicidade não tem por que disparar.<br><br>";
+    } else if (porMat && porMat.ok) {
+      t += "<b>O Core NÃO acha pelo id, só pela MATRÍCULA.</b> É a raiz de tudo: " +
+        "para atualizar é obrigatório mandar a matrícula, e aí a checagem de " +
+        "duplicidade acusa a pessoa contra ela mesma.<br><br>";
+    } else {
+      t += "<b>O Core não achou a pessoa nem pelo id nem pela matrícula.</b> " +
+        "Pode ser que usuarios.obter espere outro formato. Veja os códigos acima.<br><br>";
+    }
+    /* a gravação */
+    if (!p2) {
+      t += "A fase 2 não foi executada. Sem ela não dá para afirmar se a gravação " +
+        "funciona — só que a leitura funciona.";
+    } else if (gordo && gordo.nasceu > 0) {
+      t += "<b>Gravar COM a matrícula CRIOU um cadastro novo</b> em vez de atualizar. " +
+        "É exatamente o defeito do v252b, e explica os 56 duplicados da importação. " +
+        "O conserto é no módulo de usuários do Apps Script, não aqui.";
+    } else if (gordo && gordo.ok && magro && magro.ok) {
+      t += "<b>As duas formas de gravar foram aceitas</b>, e nenhum cadastro nasceu. " +
+        "Então a gravação funciona — e a falha da exclusão é outra coisa. " +
+        "Mande esta tela que eu sigo daqui.";
+    } else if (gordo && !gordo.ok && magro && !magro.ok) {
+      t += "<b>As duas formas foram recusadas.</b> Códigos: " +
+        esc_(gordo.codigo || "—") + " e " + esc_(magro.codigo || "—") + ". " +
+        "Nenhuma mudança no HTML resolve isso: o Core está recusando a atualização " +
+        "de um registro que existe. O conserto é no módulo de usuários do Apps Script.";
+    } else if (gordo && gordo.ok && magro && !magro.ok) {
+      t += "<b>Só funciona COM a matrícula.</b> Então a exclusão tem de mandar a " +
+        "matrícula — e eu conserto isso aqui, no HTML, hoje.";
+    } else if (gordo && !gordo.ok && magro && magro.ok) {
+      t += "<b>Só funciona SEM a matrícula.</b> É o que o sistema já faz, e aí a falha " +
+        "da exclusão está noutro campo do pedido. Mande esta tela.";
+    }
+    return t;
+  }
+
+  D.abrir = function (u) {
+    if (!u) {
+      try {
+        var lista = lista_(typeof USUARIOS_TELA !== "undefined" ? USUARIOS_TELA : []);
+        u = lista[0];
+      } catch (e) {}
+    }
+    if (!u) {
+      if (typeof toast === "function") toast("warn", "Sem cadastro para testar",
+        "Abra a lista de usuários antes.");
+      return;
+    }
+
+    var w = UI.modal({
+      titulo: "Diagnóstico da gravação",
+      sub: "Responde se o Core consegue atualizar um registro que já existe",
+      tamanho: "md",
+      corpo: '<div class="alert a-gray mb12">' + ic_("info") +
+        "<div><b>Pessoa usada no teste</b>" + esc_(lp(u.nome)) +
+        " · matrícula " + esc_(lp(u.matricula) || "—") +
+        '<div class="small mono mt4">id ' + esc_(lp(u.id) || "—") + "</div></div></div>" +
+        '<div id="dgCorpo"></div>',
+      rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' +
+        '<button class="btn btn-ghost" data-dg-copiar>Copiar resultado</button>' +
+        '<button class="btn btn-primary" data-dg-ler>Começar pelo que é só leitura</button>',
+      aoAbrir: function (w, fechar) {
+        var corpo = w.querySelector("#dgCorpo");
+        var p1 = null, p2 = null;
+
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+
+        function pintar() {
+          var h = "";
+          if (p1) h += '<div class="section-title">Fase 1 — só leitura</div>' +
+            p1.map(linhaPasso).join("");
+          if (p2) h += '<div class="section-title mt12">Fase 2 — gravação que não muda nada</div>' +
+            p2.map(linhaPasso).join("");
+          if (p1) h += '<div class="alert a-blue mt12">' + ic_("info") +
+            "<div><b>Leitura do resultado</b>" + veredito(p1, p2) + "</div></div>";
+          if (p1 && !p2) h += '<div class="alert a-yellow mt12">' + ic_("alerta") +
+            "<div><b>Falta a parte que grava</b>" +
+            "A fase 2 manda <b>a mesma situação que já está lá</b> — se o Core aceitar, " +
+            "a linha fica idêntica. Ela conta os cadastros antes e depois: se nascer um, " +
+            "para na hora.<br><br>" +
+            '<button class="btn btn-orange mt8" data-dg-gravar>' + ic_("alerta") +
+            "Rodar a fase 2 (grava sem mudar nada)</button></div></div>";
+          corpo.innerHTML = h;
+          ligar();
+        }
+
+        function ligar() {
+          var bg = corpo.querySelector("[data-dg-gravar]");
+          if (bg) bg.addEventListener("click", function () {
+            bg.disabled = true;
+            bg.innerHTML = '<span class="spinner"></span> Testando…';
+            D.fase2(u).then(function (r) { p2 = r; D.ultimo = { p1: p1, p2: p2 }; pintar(); });
+          });
+        }
+
+        w.querySelector("[data-dg-ler]").addEventListener("click", function (ev) {
+          var b = ev.currentTarget;
+          b.disabled = true;
+          b.innerHTML = '<span class="spinner"></span> Lendo…';
+          D.fase1(u).then(function (r) {
+            p1 = r; D.ultimo = { p1: p1, p2: null };
+            b.style.display = "none";
+            pintar();
+          });
+        });
+
+        w.querySelector("[data-dg-copiar]").addEventListener("click", function () {
+          var txt = D.comoTexto();
+          try {
+            navigator.clipboard.writeText(txt);
+            if (typeof toast === "function") toast("ok", "Copiado", "Cole na conversa.");
+          } catch (e) {
+            if (typeof toast === "function") toast("warn", "Não copiei", "Tire um print da tela.");
+          }
+        });
+      }
+    });
+    return w;
+  };
+
+  D.comoTexto = function () {
+    var u = D.ultimo;
+    if (!u) return "nada rodado ainda";
+    var L = ["DIAGNÓSTICO DA GRAVAÇÃO · " + new Date().toLocaleString("pt-BR")];
+    function bloco(titulo, ps) {
+      if (!ps) return;
+      L.push("", titulo);
+      ps.forEach(function (p) {
+        if (p.parou) { L.push("  >>> " + p.nome + ": " + p.mensagem); return; }
+        L.push("  " + p.nome);
+        if (p.carga) L.push("     " + p.carga);
+        L.push("     " + (p.ok ? "respondeu" : "recusou") +
+          (p.codigo ? " · " + p.codigo : "") + (p.ms ? " · " + p.ms + " ms" : ""));
+        if (p.achou) L.push("     achou: " + p.achou);
+        if (p.mensagem) L.push("     " + p.mensagem);
+        if (p.nasceu !== undefined && p.nasceu !== null)
+          L.push("     cadastros: " + p.antes + " -> " + p.depois +
+            (p.nasceu ? "  (nasceu " + p.nasceu + ")" : "  (igual)"));
+      });
+    }
+    bloco("FASE 1 — só leitura", u.p1);
+    bloco("FASE 2 — gravação que não muda nada", u.p2);
+    L.push("", "VEREDITO",
+      "  " + String(veredito(u.p1 || [], u.p2) || "").replace(/<[^>]+>/g, ""));
+    return L.join("\n");
+  };
+})();
+</script>
+
+<script>
 /* ############################################################
  * A MESMA PESSOA, DOIS CADASTROS     busca: [MESMAPESSOA]
  * ------------------------------------------------------------
@@ -85362,7 +85820,22 @@ function modalPendencias() {
    *   faria na mão. Com a aba, a matrícula, o id e a coluna.
    * ############################################################ */
 
-  var ABA_USUARIOS = "13_USUARIOS_PERMISSOES";
+  /* [v288] O NOME REAL DA ABA.
+     Estava "13_USUARIOS_PERMISSOES", que NAO EXISTE na planilha. O nome
+     real, conferido nas colunas da base (id, nome, email, senha_hash,
+     perfil, status, criado_em, matricula, login, cargo, setor, ...), e'
+     USUARIOS. A receita manual mandava o administrador procurar uma aba
+     inexistente — e eu repeti esse nome errado em diagnostico, o que
+     custou tempo dele.
+
+     DISTINCAO QUE NAO PODE SE PERDER:
+       ABA_USUARIOS  = nome da ABA da PLANILHA. Fonte oficial do cadastro.
+       conjunto:"usuarios" = nome do CONJUNTO LOGICO do repositorio do
+                             Drive, usado em pedirRepo(). Coisa diferente,
+                             outro lugar, e NAO deve ser renomeado junto.
+     Esta constante e' so TEXTO de tela: nenhuma chamada ao servidor
+     carrega nome de aba. Quem decide a aba e' o backend. */
+  var ABA_USUARIOS = "USUARIOS";
 
   function pedirRepo(operacao, carga) {
     return Promise.resolve(API.call("repo", operacao, carga))["catch"](function (e) {
@@ -85420,6 +85893,84 @@ function modalPendencias() {
       })["catch"](function () { return { erro: true }; });
   }
 
+  /* ============================================================
+     GRAVAR NA FONTE QUE A LISTA LE     busca: [JUNTAGRAVA]
+     ------------------------------------------------------------
+     [v281] Ate aqui, excluir e bloquear escreviam no repositorio
+     do Drive, e a lista de usuarios vem da PLANILHA. A gravacao
+     nunca chegava onde a lista procura — e a tela, honesta,
+     dizia "o repositorio marcou como excluido, mas a lista ainda
+     mostra este cadastro".
+
+     Agora vai por usuarios.salvar, que e' a mesma rota que o
+     formulario de usuario usa para escrever na planilha. Nao e'
+     rota nova: e' a oficial, que ja existia.
+
+     O PEDIDO VAI GORDO, de proposito. O [EDITAGRAVA] ja tinha
+     descoberto: "Quebra mesmo — se for magro SEMPRE, como a
+     ferramenta de juntar faz. Mandando so o que mudou, nao
+     quebra." Mandar {id, status} apagaria o resto da linha.
+     Entao mando o registro inteiro com o status trocado, e tiro
+     matricula, email e login — que nao mudaram, e sao exatamente
+     os que fazem o Core recusar com USUARIO_DUPLICADO ao
+     conferir a pessoa contra ela mesma.
+     ============================================================ */
+/* [v287] QUEM FOI QUE ATENDEU.
+     Depois que o AP_USUARIOS_GRAVACAO.gs entra no Apps Script, passam a
+     existir dois modulos capazes de responder a "usuarios.salvar": o novo,
+     que atualiza, e o antigo, que so sabe criar. Eles sao distinguiveis
+     pela resposta — so o novo devolve "etapa" e "aba".
+     Sem isso, a recusa do modulo antigo e a do novo chegam na tela com a
+     mesma cara, e nao da para saber se o problema e' o dado ou se a
+     ligacao no roteador nao foi feita. Isto nao conserta gravacao
+     nenhuma: so para de esconder qual dos dois respondeu. */
+  function quemAtendeu_(r) {
+    var etapa = lp(r && r.etapa);
+    var aba = lp(r && r.aba);
+    if (etapa && aba) {
+      return { quem: "novo", etapa: etapa,
+        sufixo: " \u00b7 respondeu o m\u00f3dulo novo de grava\u00e7\u00e3o, na etapa " +
+                etapa + " (aba " + aba + ")" };
+    }
+    return { quem: "antigo", etapa: "",
+      sufixo: " \u00b7 respondeu o m\u00f3dulo ANTIGO de usu\u00e1rios: a resposta n\u00e3o " +
+              "trouxe \u201cetapa\u201d nem \u201caba\u201d, que s\u00f3 o novo devolve. " +
+              "A LIGA\u00c7\u00c3O 1 do AP_USUARIOS_GRAVACAO.gs n\u00e3o est\u00e1 pegando esta " +
+              "chamada. Rode AP_USR_conferirLigacao() no Apps Script." };
+  }
+
+  function gravarNoCadastro(u, novoStatus, motivo) {
+    var dados = copia(u) || {};
+    dados.id = lp(u && u.id);
+    dados.editando = true;
+    dados.status = novoStatus;
+    if (lp(motivo)) dados.observacao = lp(motivo);
+    /* nao mudaram: nao vao, para nao disparar a checagem de
+       duplicidade do Core contra o proprio registro */
+    delete dados.matricula;
+    delete dados.email;
+    delete dados.login;
+    /* campos de controle da tela nao sao do cadastro */
+    delete dados.foto;
+    delete dados.__ass;
+    /* [v290] A MESMA PORTA QUE O "JUNTAR" USA.
+       Ate aqui, excluir chamava API.call direto e o juntar chamava
+       salvarUsuarioNoCore. Duas operacoes que fazem a MESMA coisa —
+       mudar a situacao de um cadastro — por portas diferentes.
+       salvarUsuarioNoCore tenta primeiro o AP_ADAPT_salvarUsuarioDireto
+       (que so existe dentro da URL /exec) e cai sozinho no API.call
+       quando ele nao esta disponivel. Entao: no github.io nada muda, e
+       no /exec a exclusao passa a ter a mesma chance que o juntar.
+       Nao e' funcao nova: e' a que ja existia, agora usada pelos dois. */
+    var porta = (typeof salvarUsuarioNoCore === "function")
+      ? salvarUsuarioNoCore(dados)
+      : API.call("usuarios", "salvar", dados);
+    return Promise.resolve(porta)
+      ["catch"](function (e) {
+        return { ok: false, mensagem: lp(e && e.message) || "sem resposta do servidor" };
+      });
+  }
+
   M.excluir = function (u, motivo) {
     var id = lp(u && u.id);
     if (!id) {
@@ -85430,26 +85981,43 @@ function modalPendencias() {
     if (lp(motivo).length < 3) {
       return Promise.resolve({ ok: false, mensagem: "escreva o motivo: ele fica na auditoria." });
     }
-    return pedirRepo("excluirRegistro", {
-      conjunto: "usuarios", id: id, motivo: lp(motivo), modulo: "usuarios"
-    }).then(function (r) {
-      if (!(r && r.ok)) {
-        return M.ondeMoram(id).then(function (o) {
-          return { ok: false, naMao: true, onde: o.onde, porque: o.detalhe,
-            mensagem: lp(r && r.mensagem) || lp(r && r.codigo) || "o repositório recusou" };
+    /* [v281] primeiro a FONTE OFICIAL — a planilha, por usuarios.salvar */
+    return gravarNoCadastro(u, "EXCLUIDO", motivo).then(function (rg) {
+      if (rg && rg.ok) {
+        return aindaAparece(id).then(function (c) {
+          if (c.erro) {
+            return { ok: true, conferiu: false,
+              mensagem: "gravei no cadastro, mas não consegui reler a lista para " +
+                "conferir. Atualize a tela e veja se o cadastro saiu." };
+          }
+          var saiu = !c.aparece ||
+            lp(c.registro && c.registro.status).toUpperCase().indexOf("EXCLUIDO") === 0;
+          if (saiu) return { ok: true, conferiu: true, quantos: c.quantos, via: "planilha" };
+          return { ok: false, conferiu: true, naMao: true, onde: "planilha",
+            porque: "o cadastro foi gravado, mas ao reler a situação continua \"" +
+              lp(c.registro && c.registro.status) + "\"",
+            mensagem: "o servidor aceitou a gravação e a situação não mudou" };
         });
       }
-      return aindaAparece(id).then(function (c) {
-        if (c.erro) {
-          return { ok: true, conferiu: false,
-            mensagem: "o repositório excluiu, mas eu não consegui reler a lista para conferir. " +
-              "Atualize a tela e veja se o cadastro saiu." };
-        }
-        if (!c.aparece) return { ok: true, conferiu: true, quantos: c.quantos };
-        return { ok: false, conferiu: true, naMao: true, onde: "planilha",
-          porque: "a lista de usuários do sistema é lida da planilha, não do repositório",
-          mensagem: "o repositório marcou como excluído, mas a lista ainda mostra este cadastro" };
-      });
+      /* [v286] O DRIVE SAIU DAQUI, E ELE TINHA RAZAO.
+         Ate o 285, quando a planilha recusava, o sistema ia gravar no
+         repositorio do Drive. O repositorio aceitava, a planilha nao
+         mudava, e a tela dizia "o repositorio marcou como excluido mas
+         a lista ainda mostra" — o sistema CRIAVA a divergencia sozinho.
+
+         A regra agora e' a que ele escreveu: a planilha e' a fonte
+         oficial dos dados cadastrais; o Drive guarda foto e documento.
+         Se a planilha recusa, a resposta e' a recusa dela, com o
+         codigo. Nao existe segundo lugar para gravar cadastro. */
+      var pq = lp(rg && rg.codigo) || "";
+      var msg = lp(rg && rg.mensagem) || "";
+      var dq = quemAtendeu_(rg);
+      return { ok: false, naMao: true, onde: "planilha", codigo: pq,
+        quem: dq.quem, etapa: dq.etapa,
+        porque: "a planilha é a fonte oficial do cadastro, e ela recusou" +
+          (pq ? " · código " + pq : "") + dq.sufixo,
+        mensagem: msg || (pq ? "o servidor recusou com o código " + pq
+                             : "o servidor recusou e não disse o motivo") };
     });
   };
 
@@ -85459,6 +86027,33 @@ function modalPendencias() {
   M.situacao = function (u, novoStatus, motivo) {
     var id = lp(u && u.id);
     if (!id) return Promise.resolve({ ok: false, mensagem: "este cadastro não tem id." });
+    /* [v281] mesma correcao do excluir: a fonte oficial primeiro */
+    return gravarNoCadastro(u, novoStatus, motivo).then(function (rg) {
+      if (rg && rg.ok) {
+        return aindaAparece(id).then(function (c) {
+          if (c.erro || !c.registro) return { ok: true, conferiu: false };
+          var ficou = lp(c.registro.status).toUpperCase() === lp(novoStatus).toUpperCase();
+          if (ficou) return { ok: true, conferiu: true, via: "planilha" };
+          return { ok: false, conferiu: true, naMao: true, onde: "planilha",
+            porque: "gravei no cadastro, mas na releitura a situação continua \"" +
+              lp(c.registro.status) + "\"",
+            mensagem: "o servidor aceitou a gravação e a situação não mudou" };
+        });
+      }
+      /* [v286] idem: sem segundo lugar para gravar cadastro */
+      return { ok: false, naMao: true, onde: "planilha",
+        codigo: lp(rg && rg.codigo),
+        quem: quemAtendeu_(rg).quem,
+        porque: "a planilha é a fonte oficial do cadastro, e ela recusou" +
+          (lp(rg && rg.codigo) ? " · código " + lp(rg.codigo) : "") +
+          quemAtendeu_(rg).sufixo,
+        mensagem: lp(rg && rg.mensagem) || "o servidor recusou a gravação" };
+    });
+  };
+
+  /* o caminho antigo, mantido como plano B */
+  M.situacaoPeloRepositorio = function (u, novoStatus, motivo) {
+    var id = lp(u && u.id);
     return pedirRepo("lerRegistro", { conjunto: "usuarios", id: id }).then(function (lr) {
       if (!(lr && lr.ok && lr.dados)) {
         return M.ondeMoram(id).then(function (o) {
@@ -85543,21 +86138,53 @@ function modalPendencias() {
      meses ninguém lembra por que o cadastro saiu. */
   function formExcluir(u, oQueFica) {
     var amarrado = oQueTemAmarrado(u);
+    var vinc = M.vinculosDe(u);
+    var vincFica = oQueFica ? M.vinculosDe(oQueFica) : null;
     var motivoPadrao = "Cadastro repetido de " + lp(u.nome) +
       (oQueFica ? " — a pessoa fica com a matrícula " + (lp(oQueFica.matricula) || "(sem)") : "") +
       ". Excluído a pedido do administrador em " + new Date().toLocaleDateString("pt-BR") + ".";
-    return '<div class="alert a-red mb12">' + ic("alerta") +
-      "<div><b>Sai da lista, não do Drive</b>O arquivo deste cadastro continua guardado, " +
-      "marcado como excluído, com a data, com quem excluiu e com o motivo. Dá para voltar. " +
-      "O que acaba é ele aparecer na lista e na contagem.</div></div>" +
-      (amarrado.length
+    return '<div class="alert a-red mb12" data-mp-promessa>' + ic("alerta") +
+      /* [v286] este texto descrevia o mecanismo ANTIGO, pelo Drive, e
+         ficou para tras quando a gravacao passou para a planilha. Ele
+         perguntou, com razao: "a informacao esta na planilha, por que
+         esta buscando no Drive?" Nao estava mais — so o texto estava. */
+      "<div><b>Some da lista, fica na planilha</b>A linha deste cadastro continua " +
+      "na planilha, marcada como excluída, com a data, com quem excluiu e com o " +
+      "motivo. Dá para voltar. O que acaba é ela aparecer na lista e na contagem.</div></div>" +
+      /* [v283] ANTES ERA UMA PAREDE COM CAIXINHA OBRIGATORIA.
+         Ele clicava em excluir e recebia dez linhas de explicacao e um
+         checkbox para destravar o botao. Protecao demais para uma
+         operacao REVERSIVEL — a linha fica na planilha, marcada, com
+         autor e motivo. Agora: duas linhas de aviso e, quando o outro
+         cadastro tem menos historico, um botao que faz a coisa certa
+         num clique, em vez de so dizer qual seria. */
+      (vinc.total
         ? '<div class="alert a-yellow mb12">' + ic("alerta") +
-          "<div><b>Este cadastro tem histórico amarrado</b>" + esc_(amarrado.join(" · ")) +
-          "<br>Isso é achado pela MATRÍCULA " + esc_(lp(u.matricula) || "(sem)") +
-          ". Se este sair, o histórico fica procurando uma matrícula que não está mais na lista. " +
-          "Quando é este o caso, costuma ser melhor excluir o OUTRO e corrigir a matrícula deste." +
-          "</div></div>"
-        : "") +
+          "<div><b>Este tem " + esc_(vinc.detalhe.join(" e ")) + "</b>" +
+          "Amarrado pela matrícula " + esc_(lp(u.matricula) || "(sem)") + ". " +
+          "Excluindo este, o histórico fica sem dono." +
+          (vincFica && vincFica.total < vinc.total
+            ? "<br>O outro cadastro tem " +
+              (vincFica.total ? esc_(vincFica.detalhe.join(" e ")) : "nenhum histórico") +
+              " — excluir ele preserva tudo."
+            : "") +
+          "</div></div>" +
+          (vincFica && vincFica.total < vinc.total && lp(oQueFica.id)
+            ? '<button class="btn btn-primary btn-block mb12" data-mp-trocar="' +
+              esc_(oQueFica.id) + '">' + ic("sync") +
+              "Excluir o outro em vez deste (mantém o histórico)</button>"
+            : "")
+        : (amarrado.length
+          ? '<div class="alert a-yellow mb12">' + ic("alerta") +
+            "<div><b>Este cadastro tem histórico amarrado</b>" + esc_(amarrado.join(" · ")) +
+            "</div></div>"
+          : (!M.vinculosProntos
+            ? '<div class="alert a-yellow mb12">' + ic("alerta") +
+              "<div><b>Ainda não conferi o histórico deste cadastro</b>" +
+              "A leitura das fichas de EPI e dos crachás não terminou. Posso excluir " +
+              "assim mesmo, mas aí não sei dizer se sobra histórico órfão. Se puder, " +
+              "feche e abra de novo em alguns segundos.</div></div>"
+            : ""))) +
       '<div class="flex gap8 center mb8">' + M.avatar(u, 56, true) +
       "<div><b>" + esc_(u.nome) + "</b>" +
       '<div class="muted small">matrícula ' + esc_(lp(u.matricula) || "—") + "</div></div></div>" +
@@ -85585,6 +86212,14 @@ function modalPendencias() {
 
   function ligarFormExcluir(cont, u, oQueFica, depois) {
     var res = cont.querySelector("[data-mp-xres]");
+    /* [v283] um clique faz a coisa certa: troca o alvo para o outro
+       cadastro, que e' o que preserva o historico */
+    var bTrocar = cont.querySelector("[data-mp-trocar]");
+    if (bTrocar) bTrocar.addEventListener("click", function () {
+      cont.innerHTML = formExcluir(oQueFica, u);
+      ligarFormExcluir(cont, oQueFica, u, depois);
+      try { cont.scrollIntoView({ block: "center" }); } catch (e) {}
+    });
     var bOk = cont.querySelector("[data-mp-xok]");
     var bNao = cont.querySelector("[data-mp-xcancel]");
     if (bNao) bNao.addEventListener("click", function () {
@@ -85628,12 +86263,25 @@ function modalPendencias() {
         }
         bOk.disabled = false;
         bNao.disabled = false;
+        /* [v289] UMA FALHA NAO PODE PARECER SUCESSO.
+           A caixa "Some da lista, fica na planilha" descreve o que o
+           botao VAI fazer. Numa recusa ela continuava no topo, grande,
+           e a recusa de verdade ficava la embaixo, fora da vista — ele
+           leu a tela como se tivesse excluido, e nao tinha. Entao:
+           quando nao excluiu, a promessa sai da tela e a recusa sobe. */
+        try {
+          var promessa = document.querySelector("[data-mp-promessa]");
+          if (promessa) promessa.style.display = "none";
+        } catch (e) {}
         res.innerHTML = '<div class="alert a-red mt8">' + ic("alerta") +
-          "<div><b>Não excluí</b>" + esc_(lp(r && r.mensagem)) +
+          "<div><b>NÃO EXCLUÍ — o cadastro continua na lista</b>" +
+          esc_(lp(r && r.mensagem)) +
           (lp(r && r.porque) ? "<br><b>Por quê:</b> " + esc_(lp(r.porque)) : "") +
+          "<br><b>A contagem não muda</b> enquanto esta gravação não passar." +
           "</div></div>" +
           ((r && r.naMao) ? M.receitaNaMao(u, "excluir", oQueFica) : "");
         ligarCopiar(res);
+        try { res.scrollIntoView({ block: "center" }); } catch (e2) {}
         if (typeof depois === "function") depois(r);
       });
     });
@@ -85667,7 +86315,86 @@ function modalPendencias() {
   M.formExcluir = formExcluir;
   M.ligarFormExcluir = ligarFormExcluir;
 
+  /* ============================================================
+     OS VINCULOS, DE VERDADE            busca: [JUNTAVINC]
+     ------------------------------------------------------------
+     [v282] oQueTemAmarrado() le as fichas de EPIJUNTA.linhasConhecidas().
+     Na tela de Usuarios ninguem leu as fichas ainda — entao a conta
+     dava ZERO e a tela dizia "sem historico" para quem tem ficha
+     cheia. E o mesmo defeito que o 279 consertou noutro ponto: a
+     peca certa lendo de uma fonte vazia.
+
+     Agora a tela de repetidos carrega as fichas e os crachas ANTES
+     de desenhar. Uma vez por abertura, pelas rotas que ja existem.
+     ============================================================ */
+  M.carregarVinculos = function () {
+    var tarefas = [];
+    try {
+      if (typeof EPIJUNTA !== "undefined" && EPIJUNTA.lerLinhas &&
+          !lista_(EPIJUNTA.linhasConhecidas && EPIJUNTA.linhasConhecidas()).length) {
+        tarefas.push(Promise.resolve(EPIJUNTA.lerLinhas())["catch"](function () { return null; }));
+      }
+    } catch (e) {}
+    try {
+      if (typeof FOTOCRACHA !== "undefined" && FOTOCRACHA.carregar &&
+          !lista_(FOTOCRACHA.fichario).length) {
+        tarefas.push(Promise.resolve(FOTOCRACHA.carregar())["catch"](function () { return null; }));
+      }
+    } catch (e) {}
+    if (!tarefas.length) { M.vinculosProntos = true; return Promise.resolve(true); }
+    return Promise.all(tarefas).then(function () { M.vinculosProntos = true; return true; },
+                                     function () { return false; });
+  };
+
+  /* quantos vinculos este cadastro tem, por MATRICULA limpa */
+  M.vinculosDe = function (u) {
+    var out = { fichas: 0, cracha: "", total: 0, detalhe: [] };
+    var mat = (typeof fichaChaveMat_ === "function")
+      ? fichaChaveMat_(u && u.matricula) : lp(u && u.matricula);
+    if (!mat) return out;
+    try {
+      lista_(typeof EPIJUNTA !== "undefined" && EPIJUNTA.linhasConhecidas
+        ? EPIJUNTA.linhasConhecidas() : []).forEach(function (l) {
+        var m = (typeof fichaChaveMat_ === "function")
+          ? fichaChaveMat_(l.matricula) : lp(l.matricula);
+        if (m && m === mat) out.fichas++;
+      });
+    } catch (e) {}
+    try {
+      lista_(typeof FOTOCRACHA !== "undefined" ? FOTOCRACHA.fichario : []).forEach(function (c) {
+        if (out.cracha) return;
+        var m = (typeof fichaChaveMat_ === "function")
+          ? fichaChaveMat_(c.matricula) : lp(c.matricula);
+        if (m && m === mat) out.cracha = lp(c.codigo) || "sim";
+      });
+    } catch (e) {}
+    if (out.fichas) out.detalhe.push(out.fichas + " linha(s) de ficha de EPI");
+    if (out.cracha) out.detalhe.push("crachá " + out.cracha);
+    out.total = out.fichas + (out.cracha ? 1 : 0);
+    return out;
+  };
+
+  M.vinculosProntos = false;
+
+  /* [v283] ABRIR PRIMEIRO, CONFERIR DEPOIS.
+     No 282 eu fiz esta tela esperar epi.fichas e cracha.listar antes
+     de desenhar. São 407 fichas e 85 crachás: ele clicava e ficava
+     olhando para nada, e se uma das duas demorasse a tela não abria
+     NUNCA. Foi regressão minha, e das piores — tirou do ar o botão
+     que ele mais precisa.
+     Agora a tela abre na hora. A conferência dos vínculos corre por
+     trás, e quem a usa (formExcluir) olha M.vinculosProntos: se
+     ainda não terminou, avisa que não conseguiu conferir em vez de
+     dizer que não há histórico. */
   M.abrir = function () {
+    try {
+      M.carregarVinculos().then(function () { M.vinculosProntos = true; },
+                                function () { M.vinculosProntos = false; });
+    } catch (e) {}
+    return M.abrirAgora();
+  };
+
+  M.abrirAgora = function () {
     var achados = M.procurar();
     if (typeof UI === "undefined" || !UI.modal) return achados;
 
@@ -85701,7 +86428,14 @@ function modalPendencias() {
       "<b>Excluir este cadastro</b>, no botão de cada cartão, tira o repetido da " +
       "lista e da contagem — serve para o que você falou: a contagem não mostrar " +
       "40 e pouco quando são os mesmos repetidos. O arquivo continua no Drive, " +
-      "marcado como excluído, e dá para voltar.</div></div>";
+      "marcado como excluído, e dá para voltar.</div></div>" +
+      /* [v282] item 5 do prompt: com 37 grupos, procurar na mão não
+         é conforto, é necessidade. A busca filtra o que está na tela
+         e não toca em dado nenhum. */
+      '<label class="field mb12"><span>Procurar</span>' +
+      '<input class="input" data-mp-busca autocomplete="off" ' +
+      'placeholder="nome, matrícula, e-mail, login ou crachá"></label>' +
+      '<div class="muted small mb12" data-mp-conta></div>';
 
     achados.forEach(function (g, n) {
       /* do mais novo para o mais velho: ele perguntou se vale a última,
@@ -85801,6 +86535,39 @@ function modalPendencias() {
             });
           });
         });
+        /* [v282] a busca: filtra os cartoes na tela, sem tocar em dado */
+        (function ligarBusca() {
+          var campo = w.querySelector("[data-mp-busca]");
+          var conta = w.querySelector("[data-mp-conta]");
+          if (!campo) return;
+          var grupos = [].slice.call(w.querySelectorAll("[data-mp-grupo]"));
+          if (!grupos.length) {
+            /* a tela nao marca os grupos; uso o cartao de cada pessoa */
+            grupos = [].slice.call(w.querySelectorAll(".card")).filter(function (c) {
+              return c.querySelector("[data-mp-excluir]") || c.querySelector("[data-mp-juntar]");
+            });
+          }
+          function atualizar() {
+            var q = lp(campo.value).toLowerCase();
+            var vistos = 0;
+            grupos.forEach(function (g) {
+              var txt = (g.innerText || g.textContent || "").toLowerCase();
+              var mostra = !q || txt.indexOf(q) > -1;
+              g.style.display = mostra ? "" : "none";
+              if (mostra) vistos++;
+            });
+            if (conta) {
+              conta.textContent = q
+                ? vistos + " de " + grupos.length + " mostrando"
+                : grupos.length + " grupo(s) de cadastros repetidos";
+            }
+          }
+          var t = null;
+          campo.addEventListener("input", function () {
+            clearTimeout(t); t = setTimeout(atualizar, 180);
+          });
+          atualizar();
+        })();
         w.querySelectorAll("[data-mp-juntar]").forEach(function (b) {
           b.addEventListener("click", function () {
             var n = Number(b.getAttribute("data-mp-juntar"));
@@ -85906,9 +86673,10 @@ function modalPendencias() {
                      Parei de pedir para ele colar arquivo. A rota "repo" já
                      existe na API única dele há semanas, e o
                      ALMOXA_PRO_Repositorio.gs também — o sistema inteiro
-                     depende dos dois. Os usuários moram no conjunto
-                     "usuarios" (13_USUARIOS_PERMISSOES), e o repositório
-                     grava por ID, sem conferir matrícula contra nada.
+                     depende dos dois. No repositório os usuários moram
+                     no conjunto "usuarios" — que NÃO é a aba da planilha,
+                     cujo nome real é USUARIOS — e o repositório grava por
+                     ID, sem conferir matrícula contra nada. [v288]
                      Então: leio o registro, mudo só a situação e a
                      observação, e gravo de volta. Não passa pelo módulo de
                      usuários e não esbarra nas regras que se contradizem.
@@ -86716,6 +87484,831 @@ function modalPendencias() {
       });
     }
   };
+})();
+
+
+/* ############################################################
+ * MIGRAR TUDO E JUNTAR                   busca: [EPIMIGRA]
+ * ------------------------------------------------------------
+ * O QUE ACONTECEU, NAS PALAVRAS DELE
+ *   "Na hora que eu estiver excluindo, eu vou migrar essas
+ *   movimentações para outra ficha de EPI que tiver duplicada.
+ *   Não só isso: todas as informações serão amarradas. Foto, se
+ *   não tiver foto, vai transferir a foto também. E se estiver
+ *   faltando algum campo dentro da ficha nova, a gente vai
+ *   transferir essas informações nos campos específicos lá."
+ *
+ * O PROBLEMA QUE ISTO RESOLVE
+ *   As peças já existiam, cada uma de um lado: transferir linha
+ *   de EPI no [EPIJUNTA], levar foto no MESMAPESSOA, completar
+ *   campo em branco na importação, excluir cadastro na tela de
+ *   perfis. Fazer uma junção de verdade exigia quatro operações
+ *   em quatro telas, na ordem certa — e, se a terceira falhasse
+ *   depois da quarta, sobrava um cadastro excluído com a ficha
+ *   ainda presa na matrícula velha.
+ *
+ * O QUE ESTE BLOCO FAZ
+ *   Uma ação só, em quatro passos, NESTA ordem, e cada um
+ *   conferido antes do seguinte:
+ *     1. completa os campos vazios do cadastro que FICA;
+ *     2. leva a foto, se o que fica não tiver nenhuma;
+ *     3. transfere as movimentações de EPI;
+ *     4. só então encerra o cadastro que SAI.
+ *   Se qualquer passo falhar, PARA ali. O passo 4 nunca roda
+ *   sozinho: nenhum cadastro é encerrado com ficha pendurada.
+ *
+ * O QUE ELE NÃO FAZ
+ *   · Não cria rota nova no Core. Usa epi.fichas, epi.salvar,
+ *     epi.excluir e usuarios.salvar, que já existem.
+ *   · Não cria função nova de transferência: chama a do
+ *     [EPIJUNTA], que move UMA linha e relê antes do resto.
+ *   · Não cria outro jeito de levar foto: chama MESMAPESSOA.
+ *     levarFoto, que confere no repositório se o destino já tem.
+ *   · Não sobrescreve campo preenchido. Só preenche vazio.
+ *   · Não escolhe quem fica. Quem escolhe é o operador.
+ *   · Não junta pessoas de nomes diferentes sem confirmação
+ *     escrita na tela.
+ *   · Não apaga histórico, assinatura nem documento.
+ *
+ * ONDE PROCURAR ERRO
+ *   EPIMIGRA.planoDe(sai, fica)   o que vai acontecer, antes
+ *   EPIMIGRA.migrar(...)          a execução, passo a passo
+ *   EPIMIGRA.ultimo               o relatório do último uso
+ *   EPIMIGRA.abrir()              a tela
+ * ############################################################ */
+(function epiMigra() {
+
+  var E = { ultimo: null, rodando: false, busca: "" };
+  try { window.EPIMIGRA = E; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(s) { return (typeof U !== "undefined" && U.esc) ? U.esc(s) : lp(s); }
+  function icone_(n) { return (typeof ic === "function") ? ic(n) : ""; }
+  function mat_(v) {
+    return (typeof fichaChaveMat_ === "function") ? fichaChaveMat_(v)
+      : lp(v).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+  }
+  function nome_(v) {
+    return (typeof fichaChaveNome_ === "function") ? fichaChaveNome_(v)
+      : lp(v).toUpperCase().replace(/\s+/g, " ");
+  }
+  function aviso_(t, a, b) {
+    try { if (typeof toast === "function") toast(t, a, b); } catch (e) {}
+  }
+
+  /* "mantém o que já tem, preenche o que falta". A importação tem uma
+     função igual, mas ela mora dentro de outro fecho e não alcança
+     daqui. São duas linhas; não vale abrir aquele módulo para exportar. */
+  function manterOu(oQueFica, oQueSai) {
+    var a = lp(oQueFica);
+    return a ? a : lp(oQueSai);
+  }
+
+  /* ============================================================
+     1. OS CAMPOS QUE PODEM SER COMPLETADOS
+     ------------------------------------------------------------
+     Só campos de cadastro. Fora daqui, de propósito:
+       id, matricula, email, login  → identidade. Trocar isso é
+         outra operação, com outras consequências.
+       senha_hash, biometria, facial → segredo. Não se copia
+         credencial de uma pessoa para outra linha, nem da mesma
+         pessoa: ela volta a cadastrar.
+       status  → quem decide é o passo 4.
+       foto    → tem passo próprio, porque mora no repositório.
+     ============================================================ */
+  var CAMPOS = ["nome", "cargo", "funcao", "setor", "telefone", "obra",
+                "empresa", "perfil", "cracha", "crachaNumero", "admissao",
+                "cpf", "rg", "nascimento", "observacao"];
+
+  E.camposQueFaltam = function (sai, fica) {
+    var faltam = [];
+    if (!sai || !fica) return faltam;
+    CAMPOS.forEach(function (c) {
+      var temFica = lp(fica[c]);
+      var temSai = lp(sai[c]);
+      if (!temFica && temSai) faltam.push({ campo: c, valor: temSai });
+    });
+    return faltam;
+  };
+
+  /* ============================================================
+     2. O PLANO — tudo que vai acontecer, antes de acontecer
+     ============================================================ */
+  E.planoDe = function (sai, fica) {
+    var p = {
+      ok: false, sai: sai || null, fica: fica || null,
+      movimentacoes: 0, linhas: [], camposFaltando: [],
+      levaFoto: false, fotoDe: "", mesmaPessoa: true,
+      vinculosQueSaem: null, avisos: [], impedimentos: []
+    };
+    if (!sai || !lp(sai.id)) { p.impedimentos.push("o cadastro que sai não tem id"); return p; }
+    if (!fica || !lp(fica.id)) { p.impedimentos.push("o cadastro que fica não tem id"); return p; }
+    if (lp(sai.id) === lp(fica.id)) {
+      p.impedimentos.push("os dois são o mesmo cadastro");
+      return p;
+    }
+
+    /* mesma pessoa? comparo o nome normalizado. Nomes diferentes NÃO
+       bloqueiam — às vezes é a mesma pessoa com o nome digitado de
+       outro jeito — mas exigem confirmação escrita na tela. */
+    p.mesmaPessoa = !!(nome_(sai.nome) && nome_(sai.nome) === nome_(fica.nome));
+    if (!p.mesmaPessoa) {
+      p.avisos.push("Os nomes não batem: \"" + lp(sai.nome) + "\" e \"" + lp(fica.nome) +
+        "\". Se forem pessoas diferentes, isto move o histórico de uma para a outra.");
+    }
+
+    /* as movimentações de EPI presas à matrícula que sai */
+    var mSai = mat_(sai.matricula), mFica = mat_(fica.matricula);
+    if (!mSai) {
+      p.avisos.push("O cadastro que sai não tem matrícula, então não há ficha de EPI " +
+        "amarrada a ele para transferir.");
+    }
+    /* [v292] SEM A LEITURA DO EPI, O PLANO NAO VALE.
+       "0 movimentacoes" pode significar duas coisas opostas: a pessoa
+       nao tem ficha, ou eu nao consegui ler as fichas. Tratando as duas
+       igual, o passo 4 encerraria um cadastro com a ficha ainda presa
+       nele — exatamente o que este bloco existe para impedir. */
+    if (!E.__epiPronto) {
+      p.impedimentos.push("ainda não li as fichas de EPI do Core" +
+        (lp(E.__epiErro) ? " (" + lp(E.__epiErro) + ")" : "") +
+        ". Sem essa leitura, “nenhuma movimentação” pode significar " +
+        "só que eu não consegui ler — e eu encerraria um cadastro com a " +
+        "ficha ainda presa nele.");
+    }
+    var todas = [];
+    try {
+      todas = (typeof EPIJUNTA !== "undefined" && EPIJUNTA.linhasConhecidas)
+        ? lista_(EPIJUNTA.linhasConhecidas()) : [];
+    } catch (e) { todas = []; }
+    p.linhas = mSai ? todas.filter(function (l) { return mat_(l.matricula) === mSai; }) : [];
+    p.movimentacoes = p.linhas.length;
+    p.semId = p.linhas.filter(function (l) { return !lp(l.id); }).length;
+    if (p.semId) {
+      p.impedimentos.push(p.semId + " movimentação(ões) vieram do Core sem id. " +
+        "Sem id eu não sei qual linha alterar, e não vou adivinhar.");
+    }
+    if (!mFica && p.movimentacoes) {
+      p.impedimentos.push("o cadastro que fica não tem matrícula, e é a matrícula que " +
+        "amarra a ficha de EPI à pessoa");
+    }
+
+    /* campos que dá para completar */
+    p.camposFaltando = E.camposQueFaltam(sai, fica);
+
+    /* foto: só leva se o que fica não tiver, e o que sai tiver */
+    try {
+      if (typeof MESMAPESSOA !== "undefined" && MESMAPESSOA.fotoDe) {
+        var fSai = MESMAPESSOA.fotoDe(sai, true);
+        var fFica = MESMAPESSOA.fotoDe(fica, true);
+        p.levaFoto = !!fSai && !fFica;
+        p.fotoDe = p.levaFoto ? "o cadastro que sai" : (fFica ? "já tem" : "nenhum dos dois tem");
+      }
+    } catch (e) {}
+
+    /* o que mais está amarrado no que sai, para ele ver antes */
+    try {
+      if (typeof MESMAPESSOA !== "undefined" && MESMAPESSOA.vinculosDe) {
+        p.vinculosQueSaem = MESMAPESSOA.vinculosDe(sai);
+      }
+    } catch (e) {}
+
+    p.ok = p.impedimentos.length === 0;
+    return p;
+  };
+
+  /* ============================================================
+     3. A EXECUÇÃO — quatro passos, e para na primeira falha
+     ------------------------------------------------------------
+     A ORDEM NÃO É ARBITRÁRIA.
+     Encerrar o cadastro primeiro seria mais rápido na tela e
+     deixaria a ficha presa na matrícula de um cadastro que já
+     não aparece. Por isso o que SAI só é encerrado no fim, e só
+     se tudo antes deu certo e foi conferido.
+     ============================================================ */
+  E.migrar = function (sai, fica, motivo, aoAndar) {
+    if (E.rodando) {
+      return Promise.resolve({ ok: false, jaRodando: true,
+        mensagem: "já existe uma migração em andamento" });
+    }
+    var plano = E.planoDe(sai, fica);
+    if (!plano.ok) {
+      return Promise.resolve({ ok: false, passos: [],
+        mensagem: plano.impedimentos.join(" · ") });
+    }
+    if (lp(motivo).length < 3) {
+      return Promise.resolve({ ok: false, passos: [],
+        mensagem: "escreva o motivo: ele fica na auditoria" });
+    }
+
+    E.rodando = true;
+    var passos = [];
+    var quando = new Date().toISOString();
+
+    function anda(nome, texto) {
+      try { if (typeof aoAndar === "function") aoAndar(nome, texto); } catch (e) {}
+    }
+    function registra(nome, ok, detalhe, extra) {
+      var p = { passo: nome, ok: !!ok, detalhe: lp(detalhe) };
+      if (extra) for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) p[k] = extra[k];
+      passos.push(p);
+      return p;
+    }
+    function parar(ondeParou, mensagem) {
+      E.rodando = false;
+      var r = { ok: false, passos: passos, parouEm: ondeParou, mensagem: lp(mensagem),
+        quando: quando, sai: lp(sai.id), fica: lp(fica.id),
+        precisaRecuperar: passos.filter(function (p) { return p.ok && p.reversivel; })
+          .map(function (p) { return p.passo; }) };
+      E.ultimo = r;
+      return r;
+    }
+
+    /* ---------- PASSO 1: completar os campos do que fica ---------- */
+    anda("campos", "Completando o cadastro que fica…");
+    var completar = plano.camposFaltando;
+    var p1;
+    if (!completar.length) {
+      p1 = Promise.resolve(registra("campos", true, "nada a completar", { nenhum: true }));
+    } else {
+      var pedido = { id: lp(fica.id), editando: true };
+      completar.forEach(function (c) { pedido[c.campo] = c.valor; });
+      p1 = Promise.resolve(
+        (typeof salvarUsuarioNoCore === "function")
+          ? salvarUsuarioNoCore(pedido)
+          : API.call("usuarios", "salvar", pedido)
+      )["catch"](function (e) {
+        return { ok: false, mensagem: lp(e && e.message) || "sem resposta do servidor" };
+      }).then(function (r) {
+        if (!(r && r.ok)) {
+          return registra("campos", false,
+            lp(r && r.mensagem) || "o servidor recusou", { codigo: lp(r && r.codigo) });
+        }
+        return registra("campos", true,
+          completar.length + " campo(s) preenchidos: " +
+          completar.map(function (c) { return c.campo; }).join(", "),
+          { reversivel: true, campos: completar.map(function (c) { return c.campo; }) });
+      });
+    }
+
+    return p1.then(function (r1) {
+      if (!r1.ok) {
+        return parar("campos", "Não consegui completar o cadastro que fica. " +
+          "Nada foi transferido e nenhum cadastro foi encerrado. " + r1.detalhe);
+      }
+
+      /* ---------- PASSO 2: levar a foto ---------- */
+      anda("foto", "Levando a foto…");
+      if (!plano.levaFoto) {
+        registra("foto", true, "não havia foto para levar (" + plano.fotoDe + ")", { nenhum: true });
+        return true;
+      }
+      if (typeof MESMAPESSOA === "undefined" || !MESMAPESSOA.levarFoto) {
+        registra("foto", true, "o bloco das fotos não está nesta versão; segui sem a foto",
+          { nenhum: true });
+        return true;
+      }
+      return Promise.resolve(MESMAPESSOA.levarFoto(sai, fica))["catch"](function (e) {
+        return { ok: false, mensagem: lp(e && e.message) };
+      }).then(function (rf) {
+        if (rf && rf.ok) {
+          registra("foto", true, rf.jaTinha ? "o cadastro que fica já tinha foto" : "foto levada",
+            { reversivel: !rf.jaTinha });
+        } else {
+          /* a foto NÃO interrompe a migração: ela é acessório, e
+             travar a junção inteira por causa dela seria pior. Mas
+             fica escrito no relatório que não foi. */
+          registra("foto", true, "não consegui levar a foto: " +
+            (lp(rf && rf.mensagem) || "o repositório recusou") + ". Siga sem ela e leve depois.",
+            { aviso: true });
+        }
+        return true;
+      });
+
+    }).then(function (seguiu) {
+      if (seguiu !== true) return seguiu;
+
+      /* ---------- PASSO 3: transferir as movimentações ---------- */
+      if (!plano.movimentacoes) {
+        registra("movimentacoes", true, "não havia movimentação de EPI para transferir",
+          { nenhum: true });
+        return true;
+      }
+      anda("movimentacoes", "Transferindo " + plano.movimentacoes + " movimentação(ões)…");
+      if (typeof EPIJUNTA === "undefined" || !EPIJUNTA.transferir) {
+        registra("movimentacoes", false, "o bloco [EPIJUNTA] não está nesta versão");
+        return parar("movimentacoes",
+          "O bloco que transfere ficha de EPI não está nesta versão do sistema. " +
+          "Nenhum cadastro foi encerrado.");
+      }
+      /* o grupo no formato que o EPIJUNTA espera: as linhas que saem
+         mais o destino. Ele move UMA e relê antes de mover o resto. */
+      var grupo = { nome: lp(sai.nome) || lp(fica.nome), linhas: plano.linhas };
+      var destino = {
+        matricula: lp(fica.matricula), colaborador: lp(fica.nome),
+        cargo: lp(fica.cargo) || lp(fica.funcao), setor: lp(fica.setor)
+      };
+      return Promise.resolve(EPIJUNTA.transferir(grupo, destino, function (i, n, item) {
+        anda("movimentacoes", "Transferindo " + (i + 1) + " de " + n +
+          (item ? " — " + item : "") + "…");
+      }))["catch"](function (e) {
+        return { ok: false, mensagem: lp(e && e.message) || "falhou sem dizer por quê" };
+      }).then(function (rt) {
+        var movidas = Number(rt && (rt.movidas || rt.feitas)) || 0;
+        var faltaram = Math.max(0, plano.movimentacoes - movidas);
+        if (rt && rt.ok && !faltaram) {
+          registra("movimentacoes", true, movidas + " movimentação(ões) transferidas e conferidas",
+            { movidas: movidas, reversivel: true });
+          return true;
+        }
+        registra("movimentacoes", false,
+          movidas + " de " + plano.movimentacoes + " transferidas. " +
+          (lp(rt && rt.mensagem) || "a transferência não terminou"),
+          { movidas: movidas, faltaram: faltaram });
+        return parar("movimentacoes",
+          "A transferência parou no meio: " + movidas + " de " + plano.movimentacoes +
+          " movimentação(ões) já estão na matrícula " + lp(fica.matricula) + ", e " +
+          faltaram + " continuam na " + lp(sai.matricula) + ". " +
+          "NÃO encerrei o cadastro que sai — ele precisa continuar existindo " +
+          "enquanto houver ficha presa nele. Rode de novo para terminar.");
+      });
+
+    }).then(function (seguiu) {
+      if (seguiu !== true) return seguiu;
+
+      /* ---------- PASSO 4: encerrar o que sai ---------- */
+      anda("cadastro", "Encerrando o cadastro que sai…");
+      if (typeof MESMAPESSOA === "undefined" || !MESMAPESSOA.excluir) {
+        registra("cadastro", false, "o bloco que encerra cadastro não está nesta versão");
+        return parar("cadastro", "Transferi tudo, mas não consigo encerrar o cadastro que sai " +
+          "nesta versão. As movimentações já estão no lugar certo.");
+      }
+      var texto = lp(motivo) + " — migrado para a matrícula " +
+        (lp(fica.matricula) || "(sem)") + " em " + new Date().toLocaleDateString("pt-BR") + ".";
+      return Promise.resolve(MESMAPESSOA.excluir(sai, texto))["catch"](function (e) {
+        return { ok: false, mensagem: lp(e && e.message) };
+      }).then(function (rc) {
+        if (rc && rc.ok) {
+          registra("cadastro", true, "cadastro encerrado e conferido na lista");
+          E.rodando = false;
+          var bom = { ok: true, passos: passos, quando: quando,
+            sai: lp(sai.id), fica: lp(fica.id),
+            movidas: plano.movimentacoes, campos: plano.camposFaltando.length,
+            mensagem: "Migração concluída." };
+          E.ultimo = bom;
+          return bom;
+        }
+        registra("cadastro", false, lp(rc && rc.mensagem) || "o servidor recusou",
+          { codigo: lp(rc && rc.codigo), porque: lp(rc && rc.porque) });
+        return parar("cadastro",
+          "As movimentações JÁ FORAM transferidas e os campos já foram completados — " +
+          "essa parte está feita e não precisa repetir. O que não deu foi encerrar o " +
+          "cadastro que sai: " + (lp(rc && rc.mensagem) || "o servidor recusou") +
+          (lp(rc && rc.codigo) ? " (código " + lp(rc.codigo) + ")" : "") +
+          ". Ele continua aparecendo na lista, agora sem ficha de EPI amarrada.");
+      });
+    })["catch"](function (e) {
+      return parar("excecao", "Erro inesperado: " + lp(e && e.message || e));
+    });
+  };
+
+  /* ============================================================
+     4. A TELA
+     ============================================================ */
+  function caixa(html) {
+    var alvo = document.getElementById("epiMigraCorpo");
+    if (!alvo) {
+      var cx = document.createElement("div");
+      cx.id = "epiMigraCaixa";
+      cx.innerHTML = '<div id="epiMigraCorpo"></div>';
+      var onde = document.querySelector("[data-tela]") ||
+                 document.querySelector("main") || document.body;
+      onde.insertBefore(cx, onde.firstChild);
+      alvo = document.getElementById("epiMigraCorpo");
+    }
+    alvo.innerHTML = html;
+    try { alvo.scrollIntoView({ block: "start" }); } catch (e) {}
+    return alvo;
+  }
+
+  function linhaDado(rotulo, valor, mono) {
+    return '<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0">' +
+      '<span class="muted small">' + esc_(rotulo) + "</span>" +
+      '<span class="small"' + (mono ? ' style="font-family:ui-monospace,monospace"' : "") + ">" +
+      esc_(valor || "—") + "</span></div>";
+  }
+
+  function cartao(u, papel) {
+    if (!u) return "";
+    var foto = "";
+    try {
+      if (typeof MESMAPESSOA !== "undefined" && MESMAPESSOA.avatar) foto = MESMAPESSOA.avatar(u, 44);
+    } catch (e) {}
+    return '<div class="card" style="margin:0"><div class="card-body" style="padding:12px">' +
+      '<div class="small" style="font-weight:700;letter-spacing:.04em;text-transform:uppercase;' +
+      'opacity:.7;margin-bottom:8px">' + esc_(papel) + "</div>" +
+      '<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">' +
+      (foto || "") + "<b>" + esc_(u.nome || "(sem nome)") + "</b></div>" +
+      linhaDado("Matrícula", u.matricula) +
+      linhaDado("E-mail", u.email) +
+      linhaDado("Cargo", u.cargo || u.funcao) +
+      linhaDado("Setor", u.setor) +
+      linhaDado("Situação", u.status) +
+      linhaDado("ID interno", u.id, true) +
+      "</div></div>";
+  }
+
+  E.desenharPlano = function (sai, fica) {
+    var p = E.planoDe(sai, fica);
+    E.__sai = sai; E.__fica = fica; E.__plano = p;
+
+    var html = '<div class="card mb16"><div class="card-body">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;' +
+      'flex-wrap:wrap;margin-bottom:12px">' +
+      "<h3 style=\"margin:0\">Migrar tudo e juntar</h3>" +
+      '<button class="btn btn-ghost btn-sm" data-em-fechar>Fechar</button></div>' +
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px">' +
+      cartao(sai, "sai — vira excluído") + cartao(fica, "fica — recebe tudo") +
+      "</div>";
+
+    if (p.impedimentos.length) {
+      html += '<div class="alert a-red mt16">' + icone_("alerta") +
+        "<div><b>Não dá para migrar</b>" +
+        p.impedimentos.map(esc_).join("<br>") + "</div></div>";
+      html += "</div></div>";
+      var alvo0 = caixa(html);
+      ligar(alvo0);
+      return p;
+    }
+
+    html += '<div class="mt16"><b>O que vai acontecer, nesta ordem</b></div>' +
+      '<ol style="margin:8px 0 0;padding-left:20px;line-height:1.7">' +
+      "<li>" + (p.camposFaltando.length
+        ? "Completar <b>" + p.camposFaltando.length + " campo(s)</b> em branco no que fica: " +
+          esc_(p.camposFaltando.map(function (c) { return c.campo; }).join(", "))
+        : "Nenhum campo a completar — o cadastro que fica já tem tudo que o outro tinha") +
+      "</li>" +
+      "<li>" + (p.levaFoto ? "Levar a <b>foto</b> do que sai"
+        : "Foto: " + esc_(p.fotoDe) + " — nada a fazer") + "</li>" +
+      "<li>" + (p.movimentacoes
+        ? "Transferir <b>" + p.movimentacoes + " movimentação(ões)</b> de EPI da matrícula " +
+          esc_(lp(sai.matricula) || "(sem)") + " para a " + esc_(lp(fica.matricula) || "(sem)")
+        : "Nenhuma movimentação de EPI amarrada ao que sai") + "</li>" +
+      "<li>Encerrar o cadastro que sai — <b>só se os passos acima derem certo</b></li>" +
+      "</ol>";
+
+    if (p.vinculosQueSaem && p.vinculosQueSaem.total) {
+      html += '<div class="alert a-gray mt12">' + icone_("info") +
+        "<div><b>O que está amarrado no que sai</b>" +
+        esc_(p.vinculosQueSaem.detalhe.join(" · ")) +
+        "<br>Nada disso é apagado: a ficha muda de matrícula e a linha do cadastro " +
+        "fica na planilha, marcada, com autor e motivo.</div></div>";
+    }
+
+    p.avisos.forEach(function (a) {
+      html += '<div class="alert a-yellow mt12">' + icone_("alerta") + "<div>" + esc_(a) + "</div></div>";
+    });
+
+    html += '<label class="field mt16"><span>Motivo (fica na auditoria)</span>' +
+      '<textarea class="input" id="emMotivo" rows="2">' +
+      esc_("Cadastro repetido de " + lp(sai.nome) + " — migrado para a matrícula " +
+           (lp(fica.matricula) || "(sem)") + ".") + "</textarea></label>";
+
+    if (!p.mesmaPessoa) {
+      html += '<label class="flex gap8 mt8" style="align-items:flex-start">' +
+        '<input type="checkbox" id="emCiente" style="margin-top:3px">' +
+        '<span class="small">Confirmo que são a mesma pessoa, mesmo com os nomes ' +
+        "diferentes, e que o histórico deve ir para o cadastro que fica.</span></label>";
+    }
+
+    html += '<div id="emResultado"></div>' +
+      '<div class="flex gap8 mt16" style="flex-wrap:wrap">' +
+      '<button class="btn btn-primary" data-em-ir>' + icone_("sync") + "Migrar e juntar</button>" +
+      '<button class="btn btn-ghost" data-em-fechar>Cancelar</button>' +
+      "</div></div></div>";
+
+    var alvo = caixa(html);
+    ligar(alvo);
+    return p;
+  };
+
+  function ligar(alvo) {
+    alvo.querySelectorAll("[data-em-fechar]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var cx = document.getElementById("epiMigraCaixa");
+        if (cx && cx.parentNode) cx.parentNode.removeChild(cx);
+      });
+    });
+    var ir = alvo.querySelector("[data-em-ir]");
+    if (!ir) return;
+    ir.addEventListener("click", function () {
+      if (E.rodando) return;                      /* trava de clique duplo */
+      var res = alvo.querySelector("#emResultado");
+      var ciente = alvo.querySelector("#emCiente");
+      if (ciente && !ciente.checked) {
+        res.innerHTML = '<div class="alert a-red mt12">' + icone_("alerta") +
+          "<div>Os nomes são diferentes. Marque a confirmação antes de seguir.</div></div>";
+        return;
+      }
+      var motivo = lp((alvo.querySelector("#emMotivo") || {}).value);
+      if (motivo.length < 3) {
+        res.innerHTML = '<div class="alert a-red mt12">' + icone_("alerta") +
+          "<div>Escreva o motivo: ele fica na auditoria.</div></div>";
+        return;
+      }
+      ir.disabled = true;
+      ir.textContent = "Migrando…";
+      res.innerHTML = '<div class="alert a-gray mt12">' + icone_("sync") +
+        '<div id="emAndamento">Começando…</div></div>';
+      var andamento = alvo.querySelector("#emAndamento");
+
+      E.migrar(E.__sai, E.__fica, motivo, function (passo, texto) {
+        if (andamento) andamento.textContent = texto;
+      }).then(function (r) {
+        ir.disabled = false;
+        ir.textContent = "Migrar e juntar";
+        res.innerHTML = relatorio(r);
+        if (r.ok) {
+          aviso_("ok", "Migração concluída",
+            lp(E.__sai.nome) + " agora tem um cadastro só.");
+        }
+      });
+    });
+  }
+
+  function relatorio(r) {
+    var linhas = lista_(r && r.passos).map(function (p) {
+      var cor = p.ok ? (p.aviso ? "a-yellow" : "a-green") : "a-red";
+      var nome = { campos: "Campos do cadastro", foto: "Foto",
+                   movimentacoes: "Movimentações de EPI", cadastro: "Cadastro que sai" }[p.passo] ||
+                 p.passo;
+      return '<div class="alert ' + cor + '" style="margin:6px 0">' +
+        icone_(p.ok ? (p.aviso ? "alerta" : "checkC") : "alerta") +
+        "<div><b>" + esc_(nome) + "</b>" + esc_(p.detalhe) + "</div></div>";
+    }).join("");
+
+    var topo = r && r.ok
+      ? '<div class="alert a-green mt12">' + icone_("checkC") +
+        "<div><b>Migração concluída</b>" +
+        esc_((r.movidas || 0) + " movimentação(ões) transferidas, " +
+             (r.campos || 0) + " campo(s) completados, cadastro encerrado e conferido.") +
+        "</div></div>"
+      : '<div class="alert a-red mt12">' + icone_("alerta") +
+        "<div><b>Parou em: " + esc_({ campos: "completar os campos", foto: "a foto",
+          movimentacoes: "as movimentações", cadastro: "encerrar o cadastro",
+          excecao: "erro inesperado" }[r && r.parouEm] || "um passo") + "</b>" +
+        esc_(lp(r && r.mensagem)) + "</div></div>";
+
+    return topo + linhas;
+  }
+
+  /* ============================================================
+     5. A PORTA: procurar a pessoa e escolher quem fica
+     ============================================================ */
+  /* [v292] ABRE PRIMEIRO, LE DEPOIS.
+     A primeira versao esperava DUAS leituras — fichas de EPI e
+     cadastros — antes de desenhar qualquer coisa, e nao tinha catch
+     no fim da corrente. Uma leitura lenta, ou um erro em qualquer
+     ponto, deixava a tela em "Lendo fichas e cadastros..." para
+     sempre, sem mensagem nenhuma: foi o que aconteceu com ele.
+     E' o mesmo erro que eu ja tinha cometido no MESMAPESSOA.abrir e
+     corrigido na 283. Repeti aqui.
+     Agora a lista de cadastros desenha assim que chega, as fichas de
+     EPI vao em segundo plano, e qualquer falha aparece escrita. */
+  E.abrir = function () {
+    /* [v292] limpa a busca: um termo guardado da vez anterior escondia
+       todo mundo e a tela dizia "Nenhuma pessoa com esse termo" numa
+       lista que estava cheia */
+    E.busca = "";
+    E.__usuarios = []; E.__grupos = [];
+    E.__epiPronto = false; E.__epiErro = ""; E.__epiLendo = true;
+    E.__erro = ""; E.__lendoUsuarios = true;
+    desenharLista();
+
+    lerEpiEmSegundoPlano();
+
+    return Promise.resolve(API.call("usuarios", "listar", {}))
+      ["catch"](function (e) {
+        return { ok: false, mensagem: lp(e && e.message) || "sem resposta do servidor" };
+      })
+      .then(function (ur) {
+        E.__lendoUsuarios = false;
+        if (!(ur && ur.ok)) {
+          E.__erro = lp(ur && ur.mensagem) || "o servidor não devolveu os cadastros";
+          desenharLista();
+          return;
+        }
+        E.__usuarios = lista_(ur.dados).filter(function (u) {
+          var st = lp(u.status).toUpperCase();
+          return st.indexOf("EXCLUIDO") !== 0 && st.indexOf("EXCLUÍDO") !== 0;
+        });
+        E.__grupos = agrupar(E.__usuarios);
+        desenharLista();
+      })
+      ["catch"](function (e) {
+        E.__lendoUsuarios = false;
+        E.__erro = "erro ao montar a lista: " + lp(e && e.message || e);
+        desenharLista();
+      });
+  };
+
+  function lerEpiEmSegundoPlano() {
+    if (typeof EPIJUNTA === "undefined" || !EPIJUNTA.lerLinhas) {
+      E.__epiLendo = false;
+      E.__epiErro = "o bloco [EPIJUNTA] não está nesta versão";
+      desenharLista();
+      return;
+    }
+    Promise.resolve(EPIJUNTA.lerLinhas())
+      ["catch"](function (e) {
+        return { ok: false, mensagem: lp(e && e.message) || "falhou sem dizer por quê" };
+      })
+      .then(function (r) {
+        E.__epiLendo = false;
+        if (r && r.ok) { E.__epiPronto = true; E.__epiErro = ""; }
+        else { E.__epiPronto = false; E.__epiErro = lp(r && r.mensagem) || "não consegui ler"; }
+        desenharLista();
+      })
+      ["catch"](function (e) {
+        E.__epiLendo = false;
+        E.__epiErro = lp(e && e.message || e);
+        desenharLista();
+      });
+  }
+
+  E.relerEpi = function () {
+    E.__epiLendo = true; E.__epiErro = "";
+    desenharLista();
+    lerEpiEmSegundoPlano();
+  };
+
+  function agrupar(usuarios) {
+    var porNome = {};
+    lista_(usuarios).forEach(function (u) {
+      var k = nome_(u.nome);
+      if (!k) return;
+      (porNome[k] = porNome[k] || []).push(u);
+    });
+    var saida = [];
+    Object.keys(porNome).forEach(function (k) {
+      if (porNome[k].length < 2) return;
+      saida.push({ nome: lp(porNome[k][0].nome), registros: porNome[k] });
+    });
+    saida.sort(function (a, b) { return a.nome.localeCompare(b.nome); });
+    return saida;
+  }
+
+  function movimentacoesDe(u) {
+    if (!E.__epiPronto) return null;           /* null = ainda nao sei */
+    var m = mat_(u && u.matricula);
+    if (!m) return 0;
+    try {
+      return lista_(EPIJUNTA.linhasConhecidas()).filter(function (l) {
+        return mat_(l.matricula) === m;
+      }).length;
+    } catch (e) { return null; }
+  }
+
+  function desenharLista() {
+    var grupos = E.__grupos || [];
+    var q = lp(E.busca).toLowerCase();
+    var vistos = grupos.filter(function (g) {
+      if (!q) return true;
+      return g.registros.some(function (u) {
+        return (lp(u.nome) + " " + lp(u.matricula) + " " + lp(u.email) + " " +
+                lp(u.login) + " " + lp(u.id)).toLowerCase().indexOf(q) > -1;
+      });
+    });
+
+    var html = '<div class="card mb16"><div class="card-body">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;' +
+      'flex-wrap:wrap">' +
+      "<h3 style=\"margin:0\">Fichas e cadastros repetidos</h3>" +
+      '<button class="btn btn-ghost btn-sm" data-em-fechar>Fechar</button></div>' +
+      '<label class="field mt12" style="margin-bottom:4px"><span>Procurar</span>' +
+      '<input class="input" id="emBusca" autocomplete="off" value="' + esc_(E.busca) + '" ' +
+      'placeholder="nome, matrícula, e-mail, login ou ID interno"></label>' +
+      '<div class="muted small mb12">' + vistos.length + " de " + grupos.length +
+      " pessoa(s) com mais de um cadastro</div>";
+
+    /* [v292] O ESTADO DAS DUAS LEITURAS, ESCRITO.
+       Antes isto era invisivel: a tela ou mostrava a lista, ou ficava
+       em "Lendo...". Agora cada leitura diz onde esta, e a de EPI tem
+       um botao para tentar de novo sem fechar a tela. */
+    if (E.__epiLendo) {
+      html += '<div class="alert a-gray mb12">' + icone_("sync") +
+        "<div>Lendo as fichas de EPI\u2026 a lista abaixo j\u00e1 serve para procurar, " +
+        "mas a migra\u00e7\u00e3o s\u00f3 libera quando esta leitura terminar.</div></div>";
+    } else if (!E.__epiPronto) {
+      html += '<div class="alert a-red mb12">' + icone_("alerta") +
+        "<div><b>N\u00e3o li as fichas de EPI</b>" + esc_(E.__epiErro) +
+        "<br>Sem essa leitura eu n\u00e3o migro nada: \u201c0 movimenta\u00e7\u00f5es\u201d " +
+        "poderia ser s\u00f3 a leitura que falhou, e eu encerraria um cadastro com a " +
+        "ficha presa nele." +
+        '<div class="mt8"><button class="btn btn-ghost btn-sm" data-em-reler>' +
+        icone_("sync") + "Tentar ler de novo</button></div></div></div>";
+    }
+    if (lp(E.__erro)) {
+      html += '<div class="alert a-red mb12">' + icone_("alerta") +
+        "<div><b>N\u00e3o consegui ler os cadastros</b>" + esc_(E.__erro) + "</div></div>";
+    }
+
+    if (!vistos.length) {
+      html += '<div class="alert a-gray" style="margin:0">' + icone_("info") +
+        "<div>" + (E.__lendoUsuarios ? "Lendo os cadastros\u2026"
+          : lp(E.__erro) ? "A lista n\u00e3o carregou."
+          : grupos.length ? "Nenhuma pessoa com esse termo."
+          : "Nenhuma pessoa com mais de um cadastro ativo.") + "</div></div>";
+    }
+
+    vistos.forEach(function (g, ix) {
+      html += '<div class="card mb12" style="margin-top:12px"><div class="card-body">' +
+        "<b>" + esc_(g.nome) + "</b>" +
+        '<div class="muted small mb8">' + g.registros.length + " cadastros</div>" +
+        '<div style="overflow-x:auto"><table class="tbl" style="width:100%">' +
+        "<thead><tr><th>Fica</th><th>Matrícula</th><th>Cargo</th><th>Situação</th>" +
+        "<th>Movim.</th><th>ID interno</th></tr></thead><tbody>";
+      g.registros.forEach(function (u, j) {
+        html += "<tr><td><input type=\"radio\" name=\"em-fica-" + ix + "\" value=\"" +
+          esc_(u.id) + "\"" + (j === 0 ? " checked" : "") + "></td>" +
+          "<td>" + esc_(u.matricula || "(sem)") + "</td>" +
+          "<td>" + esc_(u.cargo || u.funcao || "—") + "</td>" +
+          "<td>" + esc_(u.status || "—") + "</td>" +
+          "<td>" + (movimentacoesDe(u) === null ? "\u2014" : movimentacoesDe(u)) + "</td>" +
+          '<td style="font-family:ui-monospace,monospace;font-size:11px">' +
+          esc_(u.id) + "</td></tr>";
+      });
+      html += "</tbody></table></div>" +
+        '<div class="muted small mt8">Marque o que FICA. Os outros são migrados para ele, ' +
+        "um de cada vez.</div>" +
+        '<div class="flex gap8 mt8" style="flex-wrap:wrap">';
+      g.registros.forEach(function (u, j) {
+        html += '<button class="btn btn-ghost btn-sm" data-em-plano="' + ix + ":" + j + '">' +
+          "Migrar o de matrícula " + esc_(u.matricula || "(sem)") + "</button>";
+      });
+      html += "</div></div></div>";
+    });
+
+    html += "</div></div>";
+    var alvo = caixa(html);
+
+    alvo.querySelectorAll("[data-em-fechar]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var cx = document.getElementById("epiMigraCaixa");
+        if (cx && cx.parentNode) cx.parentNode.removeChild(cx);
+      });
+    });
+    alvo.querySelectorAll("[data-em-reler]").forEach(function (b) {
+      b.addEventListener("click", function () { E.relerEpi(); });
+    });
+    var campo = alvo.querySelector("#emBusca");
+    if (campo) {
+      campo.addEventListener("input", function () {
+        E.busca = campo.value;
+        var pos = campo.selectionStart;
+        desenharLista();
+        var novo = document.getElementById("emBusca");
+        if (novo) { novo.focus(); try { novo.setSelectionRange(pos, pos); } catch (e) {} }
+      });
+    }
+    alvo.querySelectorAll("[data-em-plano]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var par = b.getAttribute("data-em-plano").split(":");
+        var g = vistos[Number(par[0])];
+        if (!g) return;
+        var sai = g.registros[Number(par[1])];
+        var marcado = alvo.querySelector('input[name="em-fica-' + par[0] + '"]:checked');
+        var fica = g.registros.filter(function (u) {
+          return lp(u.id) === lp(marcado && marcado.value);
+        })[0];
+        if (!fica) {
+          aviso_("warn", "Escolha quem fica", "Marque o cadastro que deve permanecer.");
+          return;
+        }
+        if (lp(fica.id) === lp(sai.id)) {
+          aviso_("warn", "Esse é o que fica",
+            "Escolha outro cadastro para migrar, ou marque outro como o que fica.");
+          return;
+        }
+        E.desenharPlano(sai, fica);
+      });
+    });
+  }
+
+  E.diagnostico = function () {
+    return {
+      rodando: E.rodando,
+      pessoasComRepetido: (E.__grupos || []).length,
+      ultimo: E.ultimo,
+      temEpijunta: typeof EPIJUNTA !== "undefined" && !!(EPIJUNTA && EPIJUNTA.transferir),
+      temMesmapessoa: typeof MESMAPESSOA !== "undefined" && !!(MESMAPESSOA && MESMAPESSOA.excluir),
+      temLevarFoto: typeof MESMAPESSOA !== "undefined" && !!(MESMAPESSOA && MESMAPESSOA.levarFoto),
+      campos: CAMPOS.slice()
+    };
+  };
+
 })();
 
 </script>
