@@ -12580,27 +12580,79 @@ render: function() {
    Agrupar sem ele não tem como saber que a ficha da matrícula 1 e a
    da 408220 são da mesma pessoa — e saíam dois cartões para o mesmo
    colaborador, cada um com metade dos itens. */
+/* [v319] O ÍNDICE ANTES DAS FICHAS.
+   Sem isto, cada uma das 40 fichas saía procurando sozinha no
+   conjunto — e a tela não terminava de carregar. Uma leitura do
+   conjunto resolve as 40. */
+/* [v322] A FICHA E O CONTEUDO; A ASSINATURA E ENFEITE.        [FICHAJA]
+   Em 27/10 ele avisou: "nao esta puxando a ficha de EPI". Reproduzi
+   com o repositorio travado e a tela NEM CHEGAVA A PEDIR as fichas —
+   epi.fichas nunca era chamado. O motivo era esta ordem, que eu mesmo
+   escrevi na v319: primeiro o cadastro, depois o indice de assinaturas
+   e SO ENTAO as fichas. Com o repositorio lento, a tela ficava em
+   branco esperando um enfeite, enquanto o Core respondia na hora.
+   Agora o pedido das fichas sai NA FRENTE e o preparo das assinaturas
+   corre em paralelo, com prazo. Estourou o prazo, a ficha desenha do
+   mesmo jeito e as rubricas que nao deu tempo de conferir ficam
+   marcadas como NAO CONFERIDAS — nunca como "nao assinou". */
+function comPrazo_(pr, ms, saidaPadrao) {
+return new Promise(function(resolve) {
+var fechou = false;
+var t = setTimeout(function() { if (!fechou) { fechou = true; resolve(saidaPadrao); } }, ms);
+pr.then(function(v) { if (!fechou) { fechou = true; clearTimeout(t); resolve(v); } },
+        function() { if (!fechou) { fechou = true; clearTimeout(t); resolve(saidaPadrao); } });
+});
+}
+/* UM orcamento para TODO o trabalho de assinatura, nao um por etapa.
+   Somando 12s do indice + 12s da leitura a tela levava 24s para
+   aparecer — era lentidao que eu mesmo tinha criado. */
+var FIM_ASS_ = Date.now() + 12000;
+function sobra_() { return Math.max(500, FIM_ASS_ - Date.now()); }
+var pedido_ = API.call("epi", "fichas", {});
 var prontos = (typeof EPIASS !== "undefined" && EPIASS.garantirCadastroDeUsuarios)
 ? EPIASS.garantirCadastroDeUsuarios().then(function() { return true; }, function() { return true; })
 : Promise.resolve(true);
+prontos = prontos.then(function() {
+  if (typeof EPIASS === "undefined" || !EPIASS.carregarIndice) return true;
+  return EPIASS.carregarIndice().then(function() { return true; },
+                                      function() { return true; });
+});
+prontos = comPrazo_(prontos, sobra_(), "prazo");
+return pedido_.then(function(r) {
 return prontos.then(function() {
-return API.call("epi", "fichas", {}).then(function(r) {
 var fichas = normalizarFichasEPI(r && r.dados);
 /* A ASSINATURA CADASTRADA DE CADA PESSOA, ANTES DE DESENHAR.
    A tela mostrava só o número do crachá na coluna de recebimento.
    O crachá diz COMO a pessoa foi identificada; a assinatura é o que
    ela deixou. Agora as duas aparecem, como no aplicativo de campo. */
 var deFila = listaSegura(fichas).slice(0, 40);
+/* marcadas como NAO CONFERIDAS antes de comecar: quem nao for lido
+   a tempo continua assim, e a faixa diz "nao consegui conferir" em
+   vez de afirmar que a pessoa nao assinou. */
+deFila.forEach(function(f) { f.__assIncompleta = true; });
 var carga = (typeof EPIASS !== "undefined" && EPIASS.lerCadastro)
 ? Promise.all(deFila.map(function(f) {
-    return EPIASS.lerCadastro(f).then(function(c) { f.__ass = c; return c; },
+    return EPIASS.lerCadastro(f).then(function(c) { f.__ass = c; f.__assIncompleta = false; return c; },
       function() { f.__ass = null; return null; });
   }))
 : Promise.resolve([]);
-return carga.then(function() {
+return comPrazo_(carga, sobra_(), "prazo").then(function() {
 try { EPIASS.__fichasNaTela = listaSegura(fichas); } catch (e) {}
 return epiFichasTela(fichas); });
 });
+}, function(e) {
+/* O CORE NAO RESPONDEU AS FICHAS. Isto se diz; nao se esconde
+   atras de uma tela vazia. */
+return UI.cabecalho({
+trilha: [ "EPI's / Uniformes", "Fichas" ],
+titulo: "Fichas de EPI Ativas",
+sub: "Nao deu para carregar agora."
+}) + '<div class="alert a-red mb16">' + ic("alerta") +
+"<div><b>O Core nao respondeu as fichas de EPI.</b>" +
+"Motivo: " + String((e && e.message) || e || "sem resposta") + ". " +
+"As fichas continuam gravadas no servidor — isto e uma falha de " +
+"comunicacao, nao perda de dado. Nada foi apagado." +
+'<button class="btn btn-ghost mt8" data-recarregar-epi>Tentar de novo</button></div></div>';
 });
 },
 mount: function() {
@@ -12612,6 +12664,14 @@ modalExcluirEntregaEPI(b.getAttribute("data-epi-excluir"));
 });
 document.querySelectorAll("[data-entregar-epi]").forEach(function(b) {
 b.addEventListener("click", modalEntregarEPI);
+});
+/* [v322] o "Tentar de novo" do aviso de Core fora precisa funcionar.
+   Botao que nao faz nada e pior do que botao nenhum.      [COREFORA] */
+document.querySelectorAll("[data-recarregar-epi]").forEach(function(b) {
+b.addEventListener("click", function() {
+try { if (typeof EPIASS !== "undefined" && EPIASS.carregarIndice) EPIASS.__indicePronto = false; } catch (e) {}
+try { ROUTER.render ? ROUTER.render() : location.reload(); } catch (e) { location.reload(); }
+});
 });
 document.querySelectorAll("[data-epi-juntar]").forEach(function(b) {
 b.addEventListener("click", function() {
@@ -12640,6 +12700,37 @@ epiLigarDiagnosticoAssinatura();
 };
 
 /* o corpo da tela, separado de quem traz os dados */
+/* [v320] A FOTO DA PESSOA, NA LISTA DE FICHAS.
+   Ele apontou: "não tá puxando a fotinha da pessoa que tem, e no
+   ALMOXA CAMPO mostra". Estava certo, e a causa era direta: o avatar
+   aqui era SEMPRE U.iniciais(...). A foto nunca era consultada nesta
+   tela — não era falha de busca, era campo que ninguém leu.
+
+   A foto sai de fichaDadosPessoa_, a mesma fonte que o resto do
+   sistema usa (cadastro e, na falta dele, o fichário do crachá).
+   Regra dele, ao pé da letra: "Não utilize iniciais fictícias quando
+   houver uma fotografia cadastrada." */
+function epiAvatarDaFicha_(f, tamanho) {
+  var px = tamanho || 40;
+  var foto = "";
+  try {
+    var d = (typeof fichaDadosPessoa_ === "function") ? fichaDadosPessoa_(f) : {};
+    foto = String((d && d.foto) || f.foto || "").trim();
+  } catch (e) { foto = String(f.foto || "").trim(); }
+  var estilo = "width:" + px + "px;height:" + px + "px;font-size:" +
+    Math.round(px / 3) + "px";
+  if (!foto) {
+    return '<span class="avatar" style="' + estilo + '">' +
+      U.iniciais(f.colaborador || f.nome || "?") + "</span>";
+  }
+  return '<span class="avatar" style="' + estilo + ';padding:0;overflow:hidden">' +
+    '<img src="' + U.esc(foto) + '" alt="" ' +
+    'style="width:100%;height:100%;object-fit:cover;border-radius:inherit" ' +
+    "onerror=\"this.parentNode.textContent='" +
+    String(U.iniciais(f.colaborador || f.nome || "?")).replace(/'/g, "") + "'\">" +
+    "</span>";
+}
+
 function epiFichasTela(fichas) {
 return UI.cabecalho({
 trilha: [ "EPI's / Uniformes", "Fichas ativas" ],
@@ -12647,7 +12738,7 @@ titulo: "Fichas de EPI ativas",
 sub: "Histórico de entregas por colaborador, com validade e assinatura.",
 acoes: '<button class="btn btn-ghost" data-epi-migrar title="Transfere movimenta\u00e7\u00f5es, completa campos em branco, leva a foto e s\u00f3 ent\u00e3o encerra o cadastro que sai">' + ic("usuarios") + "Migrar tudo e juntar</button>" + '<button class="btn btn-ghost" data-epi-juntar>' + ic("sync") + "Juntar fichas da mesma pessoa</button>" + '<button class="btn btn-ghost" data-exportar="Fichas de EPI">' + ic("pdf") + "Exportar fichas</button>"
 }) + (!listaSegura(fichas).length ? '<div class="card">' + UI.estado("vazio", "Nenhuma ficha de EPI", "As fichas aparecem aqui assim que houver a primeira entrega de EPI.", '<button class="btn btn-orange mt12" data-entregar-epi>' + ic("mais") + "Entregar EPI</button>") + "</div>" : "") + listaSegura(fichas).map(function(f) {
-return '<div class="card mb12"><div class="card-body">' + '<div class="flex between center wrap gap12 mb12">' + '<div class="flex center gap12"><span class="avatar" style="width:40px;height:40px;font-size:13px">' + U.iniciais(f.colaborador || "?") + "</span>" + '<div><b style="font-size:14px">' + U.esc(f.colaborador) + "</b>" + '<p class="small">' + U.esc(f.cargo || "Não informado") + " · " + U.esc(f.setor || "Não informado") + " · matrícula " + U.esc(f.matricula || "não informada") + (listaSegura(f.matriculasAnteriores).length ? ' · <span class="badge b-blue" title="as entregas destas matrículas foram juntadas nesta ficha">ficha única · antes ' + U.esc(listaSegura(f.matriculasAnteriores).join(", ")) + "</span>" : "") + "</p></div></div>" + '<div class="flex gap8 center">' + UI.badge(f.status) + '<button class="btn btn-ghost btn-sm" data-entregar-epi>' + ic("mais") + "Entregar EPI</button></div></div>" + epiFaixaAssinatura(f) + (function() {
+return '<div class="card mb12"><div class="card-body">' + '<div class="flex between center wrap gap12 mb12">' + '<div class="flex center gap12">' + epiAvatarDaFicha_(f, 40) + '<div><b style="font-size:14px">' + U.esc(f.colaborador) + "</b>" + '<p class="small">' + U.esc(f.cargo || "Não informado") + " · " + U.esc(f.setor || "Não informado") + " · matrícula " + U.esc(f.matricula || "não informada") + (listaSegura(f.matriculasAnteriores).length ? ' · <span class="badge b-blue" title="as entregas destas matrículas foram juntadas nesta ficha">ficha única · antes ' + U.esc(listaSegura(f.matriculasAnteriores).join(", ")) + "</span>" : "") + "</p></div></div>" + '<div class="flex gap8 center">' + UI.badge(f.status) + '<button class="btn btn-ghost btn-sm" data-entregar-epi>' + ic("mais") + "Entregar EPI</button></div></div>" + epiFaixaAssinatura(f) + (function() {
 var rep = marcarDuplicidades_(listaSegura(f.itens)).filter(function(x) { return x.__dup > 1; });
 return rep.length ? '<div class="alert a-orange mb12">' + ic("alerta") + "<div><b>" + rep.length + " linha(s) com cara de duplicidade</b>" + "Mesmo item, mesmo dia e mesma quantidade. Estão marcadas abaixo. " + "Confira antes de excluir.</div></div>" : "";
 })() + UI.tabela({
@@ -12730,15 +12821,35 @@ function epiFaixaAssinatura(f) {
     try {
       if (typeof EPIASS !== "undefined" && EPIASS.porQueNaoAchou) porque = EPIASS.porQueNaoAchou();
     } catch (e) {}
+    /* [v317] SÓ AFIRMO QUE NÃO ASSINOU SE EU TERMINEI DE PROCURAR.
+       A varredura parava no 60º registro e a tela dizia "ainda não
+       tem assinatura". Com muitas assinaturas no conjunto, isso
+       virou mentira — foi o que ele viu com a assinatura dele. */
+    var incompleta = false, houveErro = false;
+    try {
+      var tr = (EPIASS.ultimaBusca && EPIASS.ultimaBusca.trilha) || [];
+      incompleta = tr.some(function (x) { return x.resultado === "incompleta"; });
+      if (f && f.__assIncompleta) incompleta = true;
+      houveErro = tr.some(function (x) { return x.resultado === "erro"; });
+    } catch (e) {}
     var pend = ambiguo
       ? "Não foi possível identificar o colaborador com segurança. Informe/confira a matrícula."
-      : "Esta pessoa ainda não tem assinatura no cadastro. Ela assina uma vez no ALMOXA CAMPO "
-        + "e a mesma assinatura vale para todas as fichas dela.";
+      : (incompleta || houveErro)
+        ? "NÃO consegui terminar a consulta — então eu não sei se esta pessoa assinou. "
+          + "Isto não é ausência de assinatura: é uma busca que não chegou ao fim."
+        : "Esta pessoa ainda não tem assinatura no cadastro. Ela assina uma vez no ALMOXA CAMPO "
+          + "e a mesma assinatura vale para todas as fichas dela.";
     return '<div class="epi-ass-faixa pend">' +
       '<div class="epi-ass-txt">' + ic("alerta") +
-        "<div><b>Assinatura pendente</b><span>" + U.esc(pend) +
+        "<div><b>" + ((incompleta || houveErro) ? "Não consegui conferir"
+                                                : "Assinatura pendente") +
+        "</b><span>" + U.esc(pend) +
         (porque ? "<br><i>" + U.esc(porque) + "</i>" : "") + "</span></div></div>" +
       '<div class="epi-ass-dir">' +
+        '<button class="btn btn-ghost btn-sm" data-reconsultar-ass="' +
+        U.esc((f && (f.matricula || f.colaborador)) || "") + '" ' +
+        'title="Pergunta de novo ao servidor, ignorando o que ficou guardado">' +
+        ic("sync") + "Procurar de novo</button>" +
         '<button class="btn btn-ghost btn-sm" data-diag-ass="' +
         U.esc((f && (f.matricula || f.colaborador)) || "") + '">' +
         ic("doutor") + "Ver onde procurei</button></div>" +
@@ -12785,6 +12896,49 @@ function epiRubricaDoItem(f, i) {
    Copia a imagem em si quando o navegador deixa; se não deixar,
    copia o endereço de dados, que cola em qualquer campo de texto. */
 function epiLigarDiagnosticoAssinatura() {
+  /* [v318] PERGUNTAR DE NOVO, DE PROPÓSITO.
+     O negativo ficava guardado na memória da página: depois de um
+     "não achei", a mesma pergunta não chegava mais ao servidor até
+     recarregar tudo. Este botão apaga o que ficou guardado daquela
+     pessoa e pergunta outra vez — é o item 6 do plano de testes
+     dele, com um lugar para ser apertado. */
+  document.querySelectorAll("[data-reconsultar-ass]").forEach(function (b) {
+    if (b.__ligado) return;
+    b.__ligado = true;
+    b.addEventListener("click", function (ev) {
+      ev.stopPropagation();
+      var alvo = b.getAttribute("data-reconsultar-ass") || "";
+      var f = null;
+      try {
+        f = (EPIASS.__fichasNaTela || []).filter(function (x) {
+          return String(x.matricula) === alvo || String(x.colaborador) === alvo;
+        })[0];
+      } catch (e) {}
+      if (!f) { toast("warn", "Não achei a ficha", "Recarregue a tela e tente de novo."); return; }
+      b.disabled = true;
+      b.innerHTML = '<span class="spinner"></span> Procurando…';
+      EPIASS.reconsultar(f).then(function (c) {
+        b.disabled = false;
+        var achou = !!(c && c.tem);
+        if (achou) {
+          toast("ok", "Assinatura encontrada", "Estava gravada em " +
+            ((c && c.chave) || "outro registro") + ".");
+        } else {
+          var porque = "";
+          try { porque = EPIASS.porQueNaoAchou(); } catch (e) {}
+          toast(c && c.ok === false ? "err" : "warn",
+            c && c.ok === false ? "A consulta falhou" : "Continua sem achar",
+            porque || "");
+        }
+        try { if (typeof ROUTER !== "undefined" && ROUTER.render) ROUTER.render(); } catch (e) {}
+      }, function (e) {
+        b.disabled = false;
+        b.innerHTML = "Procurar de novo";
+        toast("err", "A consulta falhou", String((e && e.message) || e));
+      });
+    });
+  });
+
   document.querySelectorAll("[data-diag-ass]").forEach(function (b) {
     if (b.__ligado) return;
     b.__ligado = true;
@@ -12966,6 +13120,14 @@ return '<button class="btn btn-orange btn-sm" data-entregar-epi>Substituir</butt
 mount: function() {
 document.querySelectorAll("[data-entregar-epi]").forEach(function(b) {
 b.addEventListener("click", modalEntregarEPI);
+});
+/* [v322] o "Tentar de novo" do aviso de Core fora precisa funcionar.
+   Botao que nao faz nada e pior do que botao nenhum.      [COREFORA] */
+document.querySelectorAll("[data-recarregar-epi]").forEach(function(b) {
+b.addEventListener("click", function() {
+try { if (typeof EPIASS !== "undefined" && EPIASS.carregarIndice) EPIASS.__indicePronto = false; } catch (e) {}
+try { ROUTER.render ? ROUTER.render() : location.reload(); } catch (e) { location.reload(); }
+});
 });
 var a = document.querySelector("[data-avisar]");
 if (a) a.addEventListener("click", function() {
@@ -13842,6 +14004,236 @@ var USUARIOS_TELA = [];
 function usuarioAtivo_(u) {
 return String(u && u.status || "").toUpperCase() === "ATIVO";
 }
+
+/* ############################################################
+ * DEFINIR A SENHA DE OUTRA PESSOA          busca: [SENHAUSR]
+ * ------------------------------------------------------------
+ * O PEDIDO (28/10 08:11)
+ *   "tem usuarios que a gente ja cadastrou mas nao fez a senha.
+ *    Quando eu vou digitar a senha, o sistema nao deixa: alega que
+ *    a matricula ja esta sendo usada. Preciso poder acrescentar a
+ *    senha ou mudar a senha dentro da parte de usuarios."
+ *
+ * POR QUE ELE TRAVAVA — a causa, achada no codigo
+ *   A unica forma de por senha em alguem ja cadastrado era editar o
+ *   usuario e salvar. E "salvar" passa por usuarios.salvar, que e
+ *   exatamente onde mora a checagem de duplicidade quebrada do Core:
+ *   ela compara a matricula do pedido com o banco, acha o PROPRIO
+ *   registro em edicao e recusa com USUARIO_DUPLICADO.
+ *   Resultado: a senha ficava refem de um defeito que nada tem a
+ *   ver com senha.
+ *
+ * A SAIDA, QUE JA EXISTIA E NINGUEM ALCANCAVA
+ *   O sistema ja chama usuarios.definirSenha — mas so no login, e
+ *   so para a propria pessoa ("seu cadastro esta sem senha").
+ *   Essa rota NAO passa por usuarios.salvar e portanto NAO esbarra
+ *   na checagem de duplicidade. Era so o administrador poder
+ *   alcanca-la. E isso que este bloco faz: nenhuma rota nova,
+ *   nenhuma autenticacao nova, nenhum banco novo.
+ *
+ * A ORDEM DAS TENTATIVAS
+ *   1. usuarios.definirSenha — a rota oficial.
+ *   2. se o Core nao conhecer a acao, a porta direta
+ *      AP_AC_definirSenha, do modulo de acesso, que descobre o
+ *      formato do hash olhando as OUTRAS linhas e se recusa a
+ *      escrever um palpite.
+ *   3. se nenhuma das duas existir, ele DIZ o que falta instalar.
+ *
+ * O QUE ELE NAO FAZ — e aqui nao ha excecao
+ *   NAO grava senha pela ponte da planilha. A ponte escreve texto
+ *   na celula; senha em texto numa planilha e vazamento, nao
+ *   conserto. Senha so vai para quem sabe transforma-la em hash.
+ *   NAO escreve, NAO registra e NAO imprime a senha em lugar
+ *   nenhum — nem no console, nem no diagnostico, nem na auditoria.
+ *   E NAO diz "senha alterada" sem o servidor ter confirmado.
+ * ############################################################ */
+var SENHAUSR = { ultima: null };
+
+function senhausrPortas_() { return ["AP_AC_definirSenha"]; }
+
+/* QUANDO VALE TENTAR O OUTRO CAMINHO.
+   Nao e so "o Core nao conhece a acao". Em 28/10 a tela dele devolveu
+   "Usuario nao localizado" para uma pessoa que estava na lista, com
+   matricula 408080 — o mesmo defeito ja medido em 24/10: o modulo de
+   usuarios do Core nao acha ninguem pelo id. Tratar isso como recusa
+   legitima era deixar o administrador sem saida.
+   A lista abaixo e a MESMA que a ponte da planilha ja usa
+   (PONTEPLAN.RECUSA_DO_CORE) — nao inventei criterio novo. */
+function senhausrSemAcao_(r) {
+  if (!r) return true;
+  var t = String((r.codigo || "") + " " + (r.mensagem || ""));
+  return /ACAO_DESCONHECIDA|MODULO_AUSENTE|SEM_ROTEADOR|NAO_IMPLEMENT|UNKNOWN_ACTION/i.test(t) ||
+         /NAO_ENCONTRADO|USUARIO_NAO_ENCONTRADO|NAO_ACHEI|ID_OBRIGATORIO/i.test(t) ||
+         /usu[\u00e1a]rio n[\u00e3a]o (localizado|encontrado)/i.test(t);
+}
+
+/* ------------------------------------------------------------
+   O SERVIDOR EM MODO DE SIMULACAO                  [SIMULAVISO]
+   Em 28/10 a tela dele mostrou, em vermelho:
+     "SIMULACAO: nada foi gravado. 2 campo(s) seriam alterados na
+      linha 107. Para gravar de verdade, mude AP_USR_SIMULAR para
+      false."
+   Isso NAO e defeito do sistema: e um interruptor ligado no Apps
+   Script. O modulo acha a pessoa, sabe o que mudaria e nao grava
+   de proposito. Como a mensagem sozinha nao explica isso para quem
+   nao escreveu o codigo, o sistema passa a explicar — em vez de
+   deixar a pessoa achando que perdeu dado.
+   ------------------------------------------------------------ */
+function ehSimulacaoDoServidor_(texto) {
+  var t = String(texto || "");
+  return /AP_USR_SIMULAR/i.test(t) || /SIMULA[\u00c7C][\u00c3A]O: nada foi gravado/i.test(t);
+}
+function avisoDeSimulacao_() {
+  return '<div class="alert a-yellow mt12">' + ic("info") +
+    "<div><b>O servidor est\u00e1 em modo de simula\u00e7\u00e3o \u2014 e isso n\u00e3o \u00e9 defeito.</b>" +
+    "Ele achou a pessoa e sabe exatamente o que mudaria, mas est\u00e1 configurado para " +
+    "<b>n\u00e3o gravar</b>. Nada foi perdido e nada foi corrompido." +
+    "<br><br><b>Como ligar a grava\u00e7\u00e3o:</b> no editor do Apps Script, abra o m\u00f3dulo de " +
+    "usu\u00e1rios, procure <b>AP_USR_SIMULAR</b> e troque <b>true</b> por <b>false</b>. " +
+    "Publique uma vers\u00e3o nova e tente outra vez." +
+    "<br><br>Enquanto isso estiver ligado, <b>nenhuma</b> altera\u00e7\u00e3o de usu\u00e1rio ser\u00e1 " +
+    "gravada \u2014 nem senha, nem cadastro.</div></div>";
+}
+try { window.ehSimulacaoDoServidor_ = ehSimulacaoDoServidor_; } catch (e) {}
+
+function senhausrPelaPortaDireta_(usuario, senha) {
+  return new Promise(function (resolve) {
+    var temRun = false;
+    try { temRun = !!(google && google.script && google.script.run); } catch (e) { temRun = false; }
+    if (!temRun) {
+      resolve({ ok: false, codigo: "SEM_PORTA_DIRETA",
+        mensagem: "esta pagina nao esta sendo servida pelo Apps Script, entao nao " +
+          "consigo usar a porta direta. Abra o sistema pelo endereco /exec." });
+      return;
+    }
+    var portas = senhausrPortas_();
+    function tentar(i) {
+      if (i >= portas.length) {
+        resolve({ ok: false, codigo: "SEM_MODULO_DE_ACESSO",
+          mensagem: "o Core nao conhece a acao definirSenha e o modulo de acesso " +
+            "(AP_ACESSO.gs) nao esta instalado no projeto do Apps Script. Instale-o e " +
+            "publique uma versao nova — ele e quem sabe gravar a senha em hash." });
+        return;
+      }
+      var run;
+      try { run = google.script.run; }
+      catch (e) { tentar(i + 1); return; }
+      try {
+        run.withSuccessHandler(function (r) {
+          var d = r;
+          if (typeof r === "string") { try { d = JSON.parse(r); } catch (e) { d = null; } }
+          if (d && d.ok !== undefined) { resolve(d); return; }
+          tentar(i + 1);
+        }).withFailureHandler(function () { tentar(i + 1); })
+        [portas[i]](String(usuario.matricula || ""), String(senha));
+      } catch (e) { tentar(i + 1); }
+    }
+    tentar(0);
+  });
+}
+
+/* A GRAVACAO. Nunca registra a senha — so o resultado. */
+function senhausrGravar(usuario, senha) {
+  SENHAUSR.ultima = { caminho: "", codigo: "", quando: new Date() };
+  return Promise.resolve(API.call("usuarios", "definirSenha", {
+    id: usuario.id || "",
+    matricula: usuario.matricula || "",
+    senha: senha
+  })).then(function (r) {
+    if (r && r.ok) {
+      SENHAUSR.ultima.caminho = "usuarios.definirSenha";
+      return r;
+    }
+    if (!senhausrSemAcao_(r)) {
+      SENHAUSR.ultima.caminho = "usuarios.definirSenha";
+      SENHAUSR.ultima.codigo = String((r && r.codigo) || "");
+      return r;                      /* recusa de verdade: respeito */
+    }
+    return senhausrPelaPortaDireta_(usuario, senha).then(function (d) {
+      SENHAUSR.ultima.caminho = (d && d.ok) ? "AP_AC_definirSenha" : "nenhum";
+      SENHAUSR.ultima.codigo = String((d && d.codigo) || "");
+      return d;
+    });
+  }, function (e) {
+    return senhausrPelaPortaDireta_(usuario, senha).then(function (d) {
+      SENHAUSR.ultima.caminho = (d && d.ok) ? "AP_AC_definirSenha" : "nenhum";
+      SENHAUSR.ultima.codigo = String((d && d.codigo) || "");
+      if (!d || !d.ok) {
+        d = d || {};
+        d.mensagem = (d.mensagem || "") + " (o Core tambem nao respondeu: " +
+          String((e && e.message) || e) + ")";
+      }
+      return d;
+    });
+  });
+}
+
+function modalSenhaDeOutro(usuario) {
+  var u = usuario || {};
+  var quem = String(u.nome || u.colaborador || "este usuario");
+  UI.modal({
+    titulo: "Definir senha",
+    sub: quem + (u.matricula ? " \u00b7 matr\u00edcula " + u.matricula : ""),
+    tamanho: "sm",
+    corpo:
+      '<div class="alert a-blue mb16">' + ic("info") +
+      "<div>Isto grava a senha por uma rota pr\u00f3pria, que <b>n\u00e3o passa pelo " +
+      "cadastro</b> \u2014 por isso n\u00e3o esbarra no erro de matr\u00edcula repetida. " +
+      "A senha \u00e9 gravada em hash: ningu\u00e9m consegue l\u00ea-la depois, nem voc\u00ea.</div></div>" +
+      '<div class="field"><label>Nova senha <span class="req">*</span></label>' +
+      '<input class="input" type="password" id="suSenha" placeholder="m\u00ednimo de 6 caracteres" autocomplete="new-password"></div>' +
+      '<div class="field"><label>Confirmar senha <span class="req">*</span></label>' +
+      '<input class="input" type="password" id="suSenha2" autocomplete="new-password"></div>' +
+      '<p class="small">Avise a pessoa da senha por um canal seguro. ' +
+      "Ela entra com a matr\u00edcula ou o login e esta senha.</p>" +
+      '<div id="suErro"></div>',
+    rodape: '<button class="btn btn-primary btn-block" data-ok>' + ic("cadeado") +
+            "Gravar senha</button>",
+    aoAbrir: function (w, fechar) {
+      var bt = w.querySelector("[data-ok]");
+      bt.addEventListener("click", function () {
+        var s1 = w.querySelector("#suSenha").value;
+        var s2 = w.querySelector("#suSenha2").value;
+        var erro = w.querySelector("#suErro");
+        function dizer(t) {
+          erro.innerHTML = '<div class="alert a-red mt12">' + ic("alerta") +
+            "<div>" + U.esc(t) + "</div></div>";
+        }
+        if (!s1 || s1.length < 6) { dizer("A senha precisa ter pelo menos 6 caracteres."); return; }
+        if (s1 !== s2) { dizer("As senhas n\u00e3o conferem."); return; }
+
+        bt.disabled = true;
+        var rotuloAntes = bt.innerHTML;
+        bt.textContent = "Gravando\u2026";
+        senhausrGravar(u, s1).then(function (r) {
+          bt.disabled = false; bt.innerHTML = rotuloAntes;
+          if (!r || !r.ok) {
+            /* NAO fecho e NAO digo que deu certo. O pedido dele e
+               explicito: nao considerar salvo porque a tela mostrou
+               sucesso. */
+            var motivo = (r && (r.mensagem || r.codigo)) ||
+              "o servidor n\u00e3o confirmou a grava\u00e7\u00e3o";
+            dizer(motivo);
+            if (ehSimulacaoDoServidor_(motivo)) {
+              erro.innerHTML += avisoDeSimulacao_();
+            }
+            return;
+          }
+          fechar();
+          toast("ok", "Senha gravada",
+            quem + " j\u00e1 pode entrar com a nova senha.");
+        }, function (e) {
+          bt.disabled = false; bt.innerHTML = rotuloAntes;
+          dizer(String((e && e.message) || e) ||
+            "n\u00e3o consegui falar com o servidor");
+        });
+      });
+    }
+  });
+}
+try { window.modalSenhaDeOutro = modalSenhaDeOutro; } catch (e) {}
+try { window.SENHAUSR = SENHAUSR; } catch (e) {}
+
 SCREENS["usuarios"] = {
 titulo: "Usuários e Perfis",
 modulo: "usuarios",
@@ -13973,7 +14365,7 @@ render: function(u) {
 /* [v256] os botões lado a lado. Empilhados, com três, a linha ficava
    com o triplo da altura — e a lista inteira com cara de bagunça. */
 return '<div class="flex gap4" style="justify-content:flex-end">' +
-'<button class="btn-icon" data-edit-user="' + U.esc(u.id || u.matricula || u.email) + '">' + ic("editar") + "</button>" + ' <button class="btn-icon" data-bloq-user="' + U.esc(u.id || u.matricula || u.email) + '" title="' + (usuarioAtivo_(u) ? "Bloquear" : "Desbloquear") + '">' + ic(usuarioAtivo_(u) ? "bloqueio" : "checkC") + "</button>" +
+'<button class="btn-icon" data-edit-user="' + U.esc(u.id || u.matricula || u.email) + '">' + ic("editar") + "</button>" + ' <button class="btn-icon" data-senha-user="' + U.esc(u.id || u.matricula || u.email) + '" title="Definir ou trocar a senha">' + ic("cadeado") + "</button>" + ' <button class="btn-icon" data-matant-user="' + U.esc(u.id || u.matricula || u.email) + '" title="Ligar a matr\u00edcula anterior">' + ic("vinculo") + "</button>" + ' <button class="btn-icon" data-bloq-user="' + U.esc(u.id || u.matricula || u.email) + '" title="' + (usuarioAtivo_(u) ? "Bloquear" : "Desbloquear") + '">' + ic(usuarioAtivo_(u) ? "bloqueio" : "checkC") + "</button>" +
 /* EXCLUIR.
    [v283] Antes só aparecia para quem JÁ estava bloqueado. A ideia
    era obrigar a bloquear primeiro. Na prática, com 206 pessoas
@@ -14039,6 +14431,29 @@ modalUsuario(null);
 document.querySelectorAll("[data-edit-user]").forEach(function(b) {
 b.addEventListener("click", function() {
 modalUsuario(b.getAttribute("data-edit-user"));
+});
+});
+/* [SENHAUSR] a senha vai por rota propria, nao pelo cadastro */
+/* [MATANT] ligar o numero antigo ao de hoje */
+document.querySelectorAll("[data-matant-user]").forEach(function(b) {
+b.addEventListener("click", function() {
+var alvo = _acharUsuario(b.getAttribute("data-matant-user"));
+if (!alvo) { toast("warn", "Nao achei esta pessoa", "Recarregue a lista."); return; }
+if (typeof MATANT === "undefined" || !MATANT.abrir) {
+toast("warn", "Modulo nao carregado", "O bloco [MATANT] nao esta nesta versao.");
+return;
+}
+MATANT.abrir(alvo);
+});
+});
+document.querySelectorAll("[data-senha-user]").forEach(function(b) {
+b.addEventListener("click", function() {
+var alvo = _acharUsuario(b.getAttribute("data-senha-user"));
+if (!alvo) {
+toast("warn", "Nao achei esta pessoa", "Recarregue a lista e tente de novo.");
+return;
+}
+modalSenhaDeOutro(alvo);
 });
 });
 /* acha a pessoa na lista que está NA TELA (que veio do servidor), e
@@ -14904,6 +15319,8 @@ salvarUsuarioNoCore(dados).then(function(r) {
 if (!r || !r.ok) {
   var motivo = (r && (r.mensagem || r.codigo)) || "o servidor recusou e não disse por quê";
   var ehMatricula = /matr[íi]cula/i.test(String(motivo));
+  /* [SIMULAVISO] o interruptor de simulacao tem explicacao propria */
+  var exSim = ehSimulacaoDoServidor_(motivo) ? avisoDeSimulacao_() : "";
   aviso.innerHTML = '<div class="alert a-red mt12">' + ic("alerta") +
     "<div><b>Não gravei</b>" + U.esc(motivo) +
     (ehMatricula && id
@@ -14912,7 +15329,7 @@ if (!r || !r.ok) {
         "registro repetido. Confira na lista antes de trocar o número — não mude a " +
         "matrícula de ninguém para contornar isto."
       : "") +
-    "</div></div>";
+    "</div></div>" + exSim;
   try { aviso.scrollIntoView({ block: "center" }); } catch (e) {}
   if (typeof console !== "undefined" && console.warn) {
     /* registro técnico, sem senha e sem token */
@@ -15527,13 +15944,22 @@ return UI.cabecalho({
 trilha: [ "Configurações", "Integrações" ],
 titulo: "Integrações",
 sub: "Serviços externos conectados ao Core Master.",
-acoes: '<button class="btn btn-primary" data-cn-abrir>' + ic("banco") + "Central de Dados</button>" + '<button class="btn btn-ghost" data-ir="#/doutor">' + ic("medico") + "Diagnóstico completo</button>"
+acoes: '<button class="btn btn-primary" data-cn-abrir>' + ic("banco") + "Central de Dados</button>" + '<button class="btn btn-ghost" data-ir="#/doutor">' + ic("medico") + "Diagnóstico completo</button>" + '<button class="btn btn-ghost" data-ex-abrir>' + ic("escudo") + "As fichas ainda existem?</button>"
 }) + AVISO_EXEMPLO + '<div class="grid g3">' + lista.map(function(i) {
 return '<div class="card"><div class="card-body">' + '<div class="flex between center mb12"><div class="ico ' + i.cor + '" style="width:42px;height:42px;border-radius:12px;display:grid;place-items:center">' + ic(i.icone) + "</div>" + UI.badge(i.status) + "</div>" + '<b style="font-size:14px">' + i.nome + '</b><p class="small mt8">' + i.desc + "</p>" + '<div class="alert ' + (i.status === "OK" ? "a-green" : i.status === "ERRO" ? "a-red" : "a-yellow") + ' mt12">' + ic("info") + "<div>" + i.det + "</div></div>" + '<div class="flex gap8 mt12"><button class="btn btn-ghost btn-sm grow">' + ic("engrenagem") + "Configurar</button>" + '<button class="btn btn-ghost btn-sm" data-testar="' + i.nome + '">' + ic("sync") + "Testar</button></div>" + "</div></div>";
 }).join("") + "</div>";
 },
 mount: function() {
 /* [v294] a Central de Dados */
+document.querySelectorAll("[data-ex-abrir]").forEach(function(b) {
+b.addEventListener("click", function() {
+if (typeof EXISTEM === "undefined" || !EXISTEM.abrir) {
+toast("warn", "Módulo não carregado", "O bloco [EXISTEM] não está nesta versão.");
+return;
+}
+EXISTEM.abrir();
+});
+});
 document.querySelectorAll("[data-cn-abrir]").forEach(function(b) {
 b.addEventListener("click", function() {
 if (typeof CENTRAL === "undefined" || !CENTRAL.abrir) {
@@ -16197,21 +16623,22 @@ return '<div class="switch-row"><div class="flex center gap12">' + '<div class="
 }
 },
 mount: function() {
+/* [SENHAUSR] ESTE BOTAO MENTIA.
+   Ele abria tres campos, fechava e anunciava "Senha alterada" SEM
+   chamar servidor nenhum. A pessoa saia achando que tinha trocado a
+   senha, e no acesso seguinte a senha era a antiga. Agora ele usa a
+   mesma rota de verdade (usuarios.definirSenha) e so diz que gravou
+   quando o servidor confirma. */
 var t = document.querySelector("[data-trocar-senha]");
 if (t) t.addEventListener("click", function() {
-UI.modal({
-titulo: "Alterar senha",
-tamanho: "sm",
-corpo: '<div class="field"><label>Senha atual</label><input class="input" type="password"></div>' + '<div class="field"><label>Nova senha</label><input class="input" type="password"></div>' + '<div class="field"><label>Confirmar nova senha</label><input class="input" type="password"></div>' + '<p class="small">Use pelo menos 8 caracteres, com letras e números.</p>',
-rodape: '<button class="btn btn-ghost" data-x>Cancelar</button><button class="btn btn-primary" data-ok>Salvar senha</button>',
-aoAbrir: function(w, fechar) {
-w.querySelector("[data-x]").addEventListener("click", fechar);
-w.querySelector("[data-ok]").addEventListener("click", function() {
-fechar();
-toast("ok", "Senha alterada", "Use a nova senha no próximo acesso.");
-});
+var eu = null;
+try { eu = ST.usuario || (APP.STATE && APP.STATE.usuario) || null; } catch (e) { eu = null; }
+if (!eu) {
+toast("warn", "Nao sei quem esta logado", "Entre de novo e tente outra vez.");
+return;
 }
-});
+if (typeof modalSenhaDeOutro === "function") { modalSenhaDeOutro(eu); return; }
+toast("warn", "Modulo nao carregado", "O bloco [SENHAUSR] nao esta nesta versao.");
 });
 document.querySelectorAll("[data-cadastrar-bio]").forEach(function(b) {
 b.addEventListener("click", function() {
@@ -24244,6 +24671,14 @@ var n = document.querySelector("[data-nova-ocorrencia]");
 if (n) n.addEventListener("click", modalNovaOcorrencia);
 document.querySelectorAll("[data-entregar-epi]").forEach(function(b) {
 b.addEventListener("click", modalEntregarEPI);
+});
+/* [v322] o "Tentar de novo" do aviso de Core fora precisa funcionar.
+   Botao que nao faz nada e pior do que botao nenhum.      [COREFORA] */
+document.querySelectorAll("[data-recarregar-epi]").forEach(function(b) {
+b.addEventListener("click", function() {
+try { if (typeof EPIASS !== "undefined" && EPIASS.carregarIndice) EPIASS.__indicePronto = false; } catch (e) {}
+try { ROUTER.render ? ROUTER.render() : location.reload(); } catch (e) { location.reload(); }
+});
 });
 }
 };
@@ -42805,6 +43240,9 @@ var alvo = por[chave];
 alvo.id = u.id || alvo.id || "";
 alvo.codigo = u.codigo || u.id || "";
 alvo.cpf = u.cpf || "";
+/* [v316] o crachá é identificador forte: sem ele aqui, duas fichas
+   da mesma pessoa não têm como se reconhecer na contagem */
+alvo.cracha = u.cracha || u.crachaNumero || "";
 alvo.empresa = u.empresa || "";
 alvo.obra = u.obra || "";
 alvo.admissao = u.admissao || u.dataAdmissao || "";
@@ -42853,15 +43291,43 @@ return String(a.nome).localeCompare(String(b.nome));
 });
 }
 
+/* [COREFORA] O PAINEL TEM DE DIZER QUANDO A LISTA NAO E REAL.
+   Quando o Core nao responde, MOCK.fichasEPI continua com o que
+   estava em memoria — e o painel desenhava aquilo como se fosse o
+   estoque de verdade. Numero de demonstracao apresentado como dado
+   real e pior do que tela vazia. Este aviso fica em cima da tela. */
+function epiAvisoCoreFora_() {
+var f = null;
+try { f = (typeof MOCK !== "undefined") ? MOCK.__epiFonte : null; } catch (e) { f = null; }
+if (!f) return "";
+var faltou = [];
+if (!f.fichas) faltou.push("as fichas" + (f.motivoFichas ? " (" + f.motivoFichas + ")" : ""));
+if (!f.usuarios) faltou.push("o cadastro de colaboradores" + (f.motivoUsuarios ? " (" + f.motivoUsuarios + ")" : ""));
+if (!faltou.length) return "";
+return '<div class="alert a-red mb16">' + ic("alerta") +
+"<div><b>O Core nao respondeu " + faltou.join(" nem ") + ".</b>" +
+"O que esta na tela abaixo nao veio do servidor agora — nao conte, nao " +
+"imprima e nao exclua nada com base nele. Tente de novo; se continuar, " +
+"o problema esta no servidor, nao neste computador." +
+'<button class="btn btn-ghost mt8" data-recarregar-epi>Tentar de novo</button></div></div>';
+}
+
 SCREENS["epi"] = {
 titulo: "EPI's e Uniformes",
 modulo: "epi",
 render: function() {
-return Promise.all([ API.call("epi", "fichas", {}), API.call("usuarios", "listar", {}), API.call("epigestao", "agenda", {}).catch(function() {
-return {
-ok: false
-};
-}) ]).then(function(r) {
+/* [v322] UM TEMPO ESTOURADO NAO PODE APAGAR O PAINEL INTEIRO.    [COREFORA]
+   Promise.all rejeita se QUALQUER uma das chamadas rejeitar — e so
+   a agenda tinha rede. Bastava o Core demorar nas fichas ou nos
+   usuarios para o painel nao desenhar NADA: nem cabecalho, nem
+   aviso, nem o motivo. Tela branca, e a pessoa sem saber por que.
+   Agora cada chamada cai sozinha e vira um motivo escrito. */
+function semDerrubar_(pr) {
+return pr.then(function(x) { return x; }, function(e) {
+return { ok: false, mensagem: String((e && e.message) || e || "o Core nao respondeu") };
+});
+}
+return Promise.all([ semDerrubar_(API.call("epi", "fichas", {})), semDerrubar_(API.call("usuarios", "listar", {})), semDerrubar_(API.call("epigestao", "agenda", {})) ]).then(function(r) {
 var agenda = r[2] && r[2].ok ? r[2].dados : null;
 /* [v305] De onde veio a lista deste painel. Sem isto, quando o Core
    nao responde o painel continua mostrando os dados de demonstracao
@@ -42932,7 +43398,7 @@ trilha: [ "EPI's / Uniformes", "Painel" ],
 titulo: "EPI por colaborador",
 sub: "Quem recebeu o quê, quando, e o que está vencendo.",
 acoes: '<button class="btn btn-ghost" data-ir="#/epi-catalogo">' + ic("grade") + "Catálogo de EPI</button>" + '<button class="btn btn-ghost" data-ir="#/epi-retiradas">' + ic("calendario") + "Retiradas agendadas</button>" + '<button class="btn btn-ghost" data-gerar-massa>' + ic("usuarios") + "Gerar fichas em massa</button>" + '<button class="btn btn-orange" data-entregar-epi>' + ic("mais") + "Entregar EPI</button>"
-}) + (/* A AGENDA É UM AVISO OPCIONAL — E DERRUBAVA A TELA INTEIRA.
+}) + epiAvisoCoreFora_() + (/* A AGENDA É UM AVISO OPCIONAL — E DERRUBAVA A TELA INTEIRA.
      Bastava o Core responder ok sem "totais" (módulo de EPI antigo,
      resposta vazia, meia instalação) para esta linha estourar e a
      tela de EPI não abrir. Um enfeite no topo não pode levar junto
@@ -63891,7 +64357,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 314 · 22/10";
+var ALMOXA_VERSAO = "sistema 329 · 28/10";
 var ALMOXA_NOVIDADES = [
   "276 · a tela do cracha para de culpar o modulo quando o que houve foi prazo",
   "275 · medir a abertura do lado do navegador, chamada por chamada",
@@ -64626,8 +65092,17 @@ function modalPendencias() {
     instalado: null,          /* null = ainda não perguntei */
     ultimoErro: null,
 
-    chamar: function (operacao, payload) {
-      return API.call("repo", operacao, payload || {}).then(function (r) {
+    chamar: function (operacao, payload, opcoes) {
+      /* [v320] O PRAZO DE 15 SEGUNDOS NÃO SERVE PARA ESTE MÓDULO.
+         A tela dele mostrou a frase exata: "O Core não respondeu em
+         15 segundos". E não respondeu mesmo — cada registro daqui
+         carrega uma imagem de assinatura em base64, e uma página com
+         200 deles é grande. O prazo curto transformava trabalho em
+         andamento em "não achei".
+         O Apps Script para sozinho em 6 minutos; 90 segundos é folga
+         de sobra sem deixar a tela pendurada para sempre. */
+      return API.call("repo", operacao, payload || {},
+        Object.assign({ limite: 90000 }, opcoes || {})).then(function (r) {
         if (!r) return { ok: false, codigo: "SEM_RESPOSTA", mensagem: "O servidor não respondeu." };
         if (!r.ok && /MODULO_DESCONHECIDO|SEM_ROTEADOR|ACAO_DESCONHECIDA|OPERACAO_DESCONHECIDA/.test(String(r.codigo))) {
           REPOCLI.instalado = false;
@@ -67562,8 +68037,12 @@ function modalPendencias() {
     semModulo: function (r) {
       if (!r) return true;
       var c = limpar(r.codigo).toUpperCase();
+      /* [v321] MODULO_AUSENTE faltava nesta lista, e por causa disso
+         um módulo não instalado virava "erro do módulo" — que
+         encerrava a busca em vez de deixar a reserva assumir. */
       return c === "MODULO_DESCONHECIDO" || c === "ACAO_DESCONHECIDA" ||
              c === "SEM_ROTEADOR" || c === "MODULO_NAO_INSTALADO" ||
+             c === "MODULO_AUSENTE" ||
              /não existe|nao existe|não encontrei a função/i.test(limpar(r.mensagem));
     },
 
@@ -67576,11 +68055,50 @@ function modalPendencias() {
       return EPIASS.garantirCadastroDeUsuarios(forcar).then(seguir, seguir);
 
       function seguir() {
+        EPIASS.__doModulo = null;
         return EPIASS.lerPeloModulo(f).then(function (viaModulo) {
           if (viaModulo) return viaModulo;
-          return EPIASS.lerCadastroResolvido(f, forcar);
+          return alternativo();
         }, function () {
-          return EPIASS.lerCadastroResolvido(f, forcar);
+          EPIASS.__doModulo = null;
+          return alternativo();
+        });
+      }
+
+      /* [v321] o alternativo leva junto o id que o módulo resolveu —
+         é a melhor chave que existe — e marca a divergência quando
+         acha o que o módulo disse não haver. */
+      function alternativo() {
+        var doModulo = EPIASS.__doModulo;
+        var alvo = f;
+        if (doModulo && doModulo.id && !limpar(f && (f.idColaborador || f.usuarioId))) {
+          try { alvo = Object.assign({}, f, { idColaborador: doModulo.id }); }
+          catch (e) { alvo = f; }
+        }
+        return EPIASS.lerCadastroResolvido(alvo, forcar).then(function (c) {
+          if (doModulo && c && c.tem) {
+            try {
+              c.trilha = (doModulo.trilha || []).concat(c.trilha || []);
+              c.divergencia = "o módulo de identidade respondeu que não havia assinatura, " +
+                "e havia: achei em " + (c.chave || "outro registro") + ".";
+              c.trilha.push({ chave: c.chave || "", origem: "comparação",
+                resultado: "divergência", detalhe: c.divergencia });
+              EPIASS.ultimaBusca = { achou: true, chave: c.chave, trilha: c.trilha };
+            } catch (e) {}
+          } else if (doModulo && c && !c.tem) {
+            try {
+              c.trilha = (doModulo.trilha || []).concat(c.trilha || []);
+              if (doModulo.erro) {
+                /* nem o módulo nem a reserva: isto é falha de consulta,
+                   e falha de consulta não é ausência de assinatura */
+                c.ok = false;
+                c.mensagem = "o módulo de identidade falhou (" + doModulo.erro +
+                  ") e as outras fontes não acharam — não dá para afirmar que " +
+                  "esta pessoa não assinou";
+              }
+            } catch (e) {}
+          }
+          return c;
         });
       }
     },
@@ -67620,9 +68138,57 @@ function modalPendencias() {
           var c = r.dados.colaborador;
           var trilha = [{ chave: limpar(r.dados.chave), origem: "módulo identidade no servidor",
             resultado: limpar(c.assinatura) ? "achou" : "sem assinatura" }];
+          /* ============================================================
+             [v321] "O MÓDULO ACHOU A PESSOA E NÃO TROUXE ASSINATURA"
+                    NÃO É "A PESSOA NÃO ASSINOU"
+             ------------------------------------------------------------
+             Ele apontou o lugar exato no documento de 27/10, item 4, e
+             estava certo. Este retorno encerrava a busca: quem chamou
+             recebia um objeto não-nulo, e o caminho alternativo — as
+             chaves, o índice, a varredura do conjunto — NUNCA rodava.
+
+             A prova está na tela dele: a assinatura estava gravada em
+             COLAB:USR_mtl0m5k39936608f e foi encontrada quando o
+             caminho alternativo finalmente rodou. O módulo de
+             identidade respondia "colaborador sim, assinatura não", e
+             o desktop acreditava e parava.
+
+             Agora, nesta ordem:
+               1. a assinatura pode vir em OUTRO CAMPO — "imagem",
+                  "assinaturaImagem", "rubrica". Olho todos antes de
+                  concluir qualquer coisa;
+               2. se mesmo assim não vier, isto é uma RESPOSTA PARCIAL,
+                  não uma ausência: devolvo null e deixo o caminho
+                  alternativo procurar, levando comigo o id que o
+                  módulo resolveu — que é informação boa;
+               3. se o alternativo achar, a trilha registra a
+                  DIVERGÊNCIA: o módulo disse que não havia e havia.
+
+             O que eu NÃO faço: tratar isso como ausência confirmada. A
+             ausência só pode ser declarada depois que as fontes
+             alternativas também não acharem — regra 6 do documento.
+             ============================================================ */
+          var deOutroCampo = limpar(c.imagem) || limpar(c.assinaturaImagem) ||
+                             limpar(c.rubrica) || limpar(c.assinaturaBase64);
+          if (!limpar(c.assinatura) && deOutroCampo) {
+            c = Object.assign({}, c, { assinatura: deOutroCampo });
+            trilha.push({ chave: limpar(r.dados.chave),
+              origem: "módulo identidade no servidor",
+              resultado: "achou",
+              detalhe: "a assinatura não veio no campo \"assinatura\"; veio em outro campo do mesmo registro" });
+          }
           if (!limpar(c.assinatura)) {
+            trilha.push({ chave: limpar(r.dados.chave),
+              origem: "módulo identidade no servidor",
+              resultado: "resposta parcial",
+              detalhe: "o módulo achou o colaborador" +
+                (limpar(c.id) ? " (id " + limpar(c.id) + ")" : "") +
+                " e não trouxe assinatura — vou procurar nas outras fontes antes de dizer que não há" });
             EPIASS.ultimaBusca = { achou: false, trilha: trilha };
-            return { ok: true, tem: false, chave: limpar(r.dados.chave), trilha: trilha, via: "identidade" };
+            /* devolver null é o que faz o caminho alternativo rodar */
+            EPIASS.__doModulo = { id: limpar(c.id), nome: limpar(c.nome),
+                                  matricula: limpar(c.matricula), trilha: trilha };
+            return null;
           }
           var saida = { ok: true, tem: true, via: "identidade",
             chave: limpar(r.dados.chave), versao: Number(c.assinaturaVersao) || 1, trilha: trilha,
@@ -67638,11 +68204,17 @@ function modalPendencias() {
           return EPIASS.guardar(f, saida);
         }
         if (r && limpar(r.codigo) === "SEM_ASSINATURA") {
+          /* [v321] mesma regra do caso de cima: o módulo dizer que não
+             há não encerra a procura. A tela dele provou que o módulo
+             pode dizer "não há" com a assinatura gravada ao lado. */
           EPIASS.moduloNoServidor = true;
           var t2 = [{ chave: limpar(r.chave), origem: "módulo identidade no servidor",
-            resultado: "sem assinatura", detalhe: limpar(r.mensagem) }];
+            resultado: "resposta parcial",
+            detalhe: (limpar(r.mensagem) || "o módulo respondeu SEM_ASSINATURA") +
+              " — vou procurar nas outras fontes antes de dizer que não há" }];
           EPIASS.ultimaBusca = { achou: false, trilha: t2 };
-          return { ok: true, tem: false, trilha: t2, via: "identidade" };
+          EPIASS.__doModulo = { id: "", nome: "", matricula: "", trilha: t2 };
+          return null;
         }
         if (r && limpar(r.codigo) === "AMBIGUO") {
           EPIASS.moduloNoServidor = true;
@@ -67657,18 +68229,184 @@ function modalPendencias() {
            módulo que ele não conhece. Nesse caso eu uso a reserva,
            em vez de desistir da rubrica. */
         if (r && r.ok === false && !EPIASS.semModulo(r)) {
+          /* [v321] o módulo falhou — mas o repositório pode ter a
+             assinatura. Deixo a reserva procurar e guardo o erro: se
+             ela também não achar, a resposta final é ERRO DE
+             COMUNICAÇÃO, não "não assinou". */
           EPIASS.moduloNoServidor = true;
           var t4 = [{ chave: "(módulo identidade)", origem: "módulo identidade no servidor",
             resultado: "erro", detalhe: limpar(r.mensagem) || limpar(r.codigo) }];
           EPIASS.ultimaBusca = { achou: false, trilha: t4 };
-          return { ok: false, tem: false, mensagem: limpar(r.mensagem), trilha: t4, via: "identidade" };
+          EPIASS.__doModulo = { id: "", nome: "", matricula: "", trilha: t4,
+                                erro: limpar(r.mensagem) || limpar(r.codigo) };
+          return null;
         }
         EPIASS.moduloNoServidor = false;
         return null;
       }, function () { EPIASS.moduloNoServidor = false; return null; });
     },
 
+    /* ============================================================
+       [v319] UM ÍNDICE, UMA VEZ — EM VEZ DE UMA BUSCA POR PESSOA
+       ------------------------------------------------------------
+       REGRESSÃO MINHA, E ELE VIU NA HORA: "demora para carregar e
+       não está puxando nenhuma assinatura".
+
+       Na 317 eu deixei a busca por pessoa mais completa — e mais
+       cara. A tela de fichas roda essa busca para 40 pessoas DE UMA
+       VEZ. Cada uma podia pedir duas buscas, dez listagens e até
+       quatrocentas leituras. Multiplicado por 40, a tela não
+       terminava: ficava "carregando" e nenhuma rubrica aparecia.
+       Consertei a precisão e quebrei o conjunto.
+
+       O conserto certo não é desfazer: é parar de perguntar a mesma
+       coisa quarenta vezes. Agora o conjunto é lido UMA vez, vira um
+       índice por matrícula e por nome, e cada ficha se resolve nele
+       sem tocar na rede. A busca por pessoa continua existindo —
+       para uma ficha aberta sozinha, ou quando o índice não pôde ser
+       montado.
+
+       Nome que aponta para mais de um registro entra como AMBÍGUO no
+       índice, e aí ninguém é escolhido: a regra de não carimbar a
+       rubrica do homônimo vale aqui também.
+       ============================================================ */
+    indice: null,
+    __carregandoIndice: null,
+    TETO_INDICE_PAGINAS: 40,
+    TETO_INDICE_LEITURAS: 300,
+
+    carregarIndice: function (forcar) {
+      if (EPIASS.indice && !forcar) return Promise.resolve(EPIASS.indice);
+      if (EPIASS.__carregandoIndice && !forcar) return EPIASS.__carregandoIndice;
+
+      var ix = { porMat: {}, porNome: {}, nomeAmbiguo: {}, registros: 0,
+                 completo: true, erro: "", em: new Date() };
+      var paginas = 0, lidos = 0, cursor = "";
+      /* [v320] página menor: cada registro traz uma imagem, e 200 de
+         uma vez é o que estourava o prazo. E um teto de tempo: se o
+         índice não ficar pronto em meio minuto, ele sai incompleto —
+         incompleto e honesto é melhor que a tela pendurada. */
+      var comecou = Date.now();
+      var PRAZO = 30000;
+
+      function guardarRegistro(id, d, versao) {
+        if (!d) return;
+        ix.registros++;
+        var m = EPIASS.chaveMatricula(d.matricula);
+        var n = EPIASS.chaveNome(d.nome || d.colaborador);
+        var reg = { id: id, dados: d, versao: versao || 1 };
+        if (m && !ix.porMat[m]) ix.porMat[m] = reg;
+        if (n) {
+          if (!ix.porNome[n]) ix.porNome[n] = reg;
+          else if (ix.porNome[n].id !== id) ix.nomeAmbiguo[n] = true;
+        }
+      }
+
+      function pagina() {
+        paginas++;
+        var pr = { tamanhoPagina: 50 };
+        if (cursor) pr.cursor = cursor;
+        return Promise.resolve(REPOCLI.listar(CONJUNTO_COLAB, pr)).then(function (r) {
+          if (!r || !r.ok) {
+            ix.completo = false;
+            ix.erro = limpar(r && r.mensagem) || "não consegui listar o conjunto";
+            return ix;
+          }
+          var faltaLer = [];
+          comoLista(r.dados).forEach(function (linha) {
+            var id = limpar(linha && linha.id);
+            if (!id || id.indexOf("COLAB:") !== 0) return;
+            if (id.indexOf("COLABNOME:") === 0) return;
+            var d = linha && linha.dados;
+            if (d && (d.nome || d.matricula)) guardarRegistro(id, d, linha.versao);
+            else faltaLer.push(id);
+          });
+          cursor = limpar(r.cursor || r.proximo || (r.pagina && r.pagina.cursor));
+          return lerFaltantes(faltaLer, 0).then(function () {
+            if (Date.now() - comecou > PRAZO) {
+              ix.completo = false;
+              ix.erro = "o índice não ficou pronto em " + Math.round(PRAZO / 1000) +
+                " segundos; procuro pessoa a pessoa a partir daqui";
+              return ix;
+            }
+            if (cursor && paginas < EPIASS.TETO_INDICE_PAGINAS &&
+                lidos < EPIASS.TETO_INDICE_LEITURAS) return pagina();
+            if (cursor) ix.completo = false;
+            return ix;
+          });
+        }, function (e) {
+          ix.completo = false;
+          ix.erro = String((e && e.message) || e);
+          return ix;
+        });
+      }
+
+      function lerFaltantes(ids, k) {
+        if (k >= ids.length) return Promise.resolve(null);
+        if (lidos >= EPIASS.TETO_INDICE_LEITURAS) { ix.completo = false; return Promise.resolve(null); }
+        lidos++;
+        return Promise.resolve(REPOCLI.ler(CONJUNTO_COLAB, ids[k])).then(function (reg) {
+          if (reg && reg.ok && reg.dados) {
+            guardarRegistro(ids[k], reg.dados, (reg.registro && reg.registro.versao) || 1);
+          }
+          return lerFaltantes(ids, k + 1);
+        }, function () { return lerFaltantes(ids, k + 1); });
+      }
+
+      EPIASS.__carregandoIndice = pagina().then(function () {
+        EPIASS.indice = ix;
+        EPIASS.__carregandoIndice = null;
+        return ix;
+      }, function () {
+        EPIASS.__carregandoIndice = null;
+        return null;
+      });
+      return EPIASS.__carregandoIndice;
+    },
+
+    /** A pessoa, no índice. Sem rede. null = o índice não responde. */
+    noIndice: function (f) {
+      var ix = EPIASS.indice;
+      if (!ix) return null;
+      var m = EPIASS.chaveMatricula(f && (f.matricula || f.chave));
+      var n = EPIASS.chaveNome(f && (f.nome || f.colaborador));
+      var reg = (m && ix.porMat[m]) || null;
+      var origem = "índice, pela matrícula";
+      if (!reg && n) {
+        if (ix.nomeAmbiguo[n]) {
+          return { ok: true, tem: false, ambiguo: true,
+            trilha: [{ chave: "(índice)", origem: "índice do conjunto",
+              resultado: "ambíguo",
+              detalhe: "mais de uma assinatura com este nome completo — " +
+                "não vou escolher sem a matrícula" }] };
+        }
+        reg = ix.porNome[n] || null;
+        origem = "índice, pelo nome completo";
+      }
+      if (!reg) {
+        /* só posso afirmar ausência se o índice cobriu o conjunto */
+        if (!ix.completo) return null;
+        return { ok: true, tem: false, chave: "",
+          trilha: [{ chave: "(índice)", origem: ix.registros + " assinatura(s) no conjunto",
+            resultado: "não existe", detalhe: "nenhuma com este nome nem com esta matrícula" }] };
+      }
+      return { ok: true, tem: true, via: "indice", chave: reg.id,
+        versao: reg.versao, dados: normalizarCadastro(reg.dados),
+        trilha: [{ chave: reg.id, origem: origem, resultado: "achou" }] };
+    },
+
     lerCadastroResolvido: function (f, forcar) {
+      /* o índice primeiro: é ele que faz a tela de 40 fichas caber
+         em uma leitura, em vez de quarenta buscas */
+      if (!forcar) {
+        var doIndice = EPIASS.noIndice(f);
+        if (doIndice) {
+          EPIASS.ultimaBusca = { achou: !!doIndice.tem, chave: doIndice.chave,
+                                 trilha: doIndice.trilha };
+          if (doIndice.tem) return Promise.resolve(EPIASS.guardar(f, doIndice));
+          return Promise.resolve(doIndice);
+        }
+      }
       var quem = EPIASS.quemE(f);
       if (quem.ambiguo) {
         var aviso = { ok: true, tem: false, chave: "", ambiguo: true,
@@ -67697,10 +68435,30 @@ function modalPendencias() {
 
       function desistir() {
         var erro = trilha.filter(function (x) { return x.resultado === "erro"; })[0];
+        var meio = trilha.filter(function (x) { return x.resultado === "incompleta"; })[0];
         var saida = erro
           ? { ok: false, tem: false, chave: guardarEm, mensagem: erro.detalhe, trilha: trilha }
-          : { ok: true, tem: false, chave: guardarEm, trilha: trilha };
-        EPIASS.cadastroEmMemoria[guardarEm] = saida;
+          : { ok: true, tem: false, chave: guardarEm, trilha: trilha,
+              incompleta: !!meio };
+        /* ============================================================
+           [v318] O "NÃO ACHEI" FICAVA GUARDADO — ITEM D DELE
+           ------------------------------------------------------------
+           Esta linha guardava QUALQUER resultado negativo na memória,
+           inclusive o de uma busca que falhou ou que parou no meio. A
+           partir daí, a mesma pergunta nunca mais chegava ao servidor:
+           a tela repetia "sem assinatura" até a página ser recarregada.
+
+           Era o que mantinha a rubrica escondida mesmo depois de o
+           servidor voltar — e o que faria o conserto da 317 parecer
+           que não funcionou.
+
+           Agora: só fica guardado o negativo DEFINITIVO, isto é, o de
+           uma busca que chegou ao fim sem erro. Erro e busca
+           incompleta não viram memória: na próxima vez, pergunta de
+           novo. Guardar uma dúvida como se fosse resposta é o mesmo
+           que mentir devagar.
+           ============================================================ */
+        if (!erro && !meio) EPIASS.cadastroEmMemoria[guardarEm] = saida;
         EPIASS.ultimaBusca = { achou: false, trilha: trilha };
         return saida;
       }
@@ -67765,90 +68523,225 @@ function modalPendencias() {
        aquele cujo nome completo (ou matrícula) é o da ficha.
        É mais lento, por isso só acontece quando tudo o mais falhou —
        e o resultado fica na memória. Só leitura: não grava nada. */
+    /* ============================================================
+       [v317] A VARREDURA DESISTIA NO 60º E DIZIA "NÃO EXISTE"
+       ------------------------------------------------------------
+       O relato dele (26/10 20:44): "a gente fez muita assinatura
+       digital, inclusive na minha, e quando peguei a ficha no
+       computador não apareceu".
+
+       A causa estava aqui. Quando nenhuma chave batia — e deixa de
+       bater quando o cadastro que assinou é excluído, porque a
+       assinatura mora em COLAB:<id> daquele cadastro — o último
+       recurso era varrer o conjunto. Só que a varredura:
+
+         1. listava UMA página de 200 registros;
+         2. lia no máximo 60 deles  (if (i >= 60));
+         3. e, ao desistir no 60º, escrevia na trilha
+            "não existe · nenhuma com este nome nem com esta
+            matrícula".
+
+       Essa frase é falsa. Ela não olhou o resto. Com poucas
+       assinaturas funcionava; depois de muitas, a dele passou a
+       ficar atrás da parede e o sistema afirmava que não havia
+       assinatura nenhuma. É exatamente o que o documento dele
+       proíbe: "Nunca declarar que uma pessoa não assinou apenas
+       porque uma consulta falhou."
+
+       O QUE MUDA
+         - Primeiro uma BUSCA DIRIGIDA, pelo endpoint que já existe
+           (REPOCLI.buscar → buscarDados), pela matrícula e pelo
+           nome. Dirigida não tem parede: não depende de ordem nem
+           de quantidade.
+         - A varredura continua como último recurso, agora
+           PAGINADA, e quando para por limite ela DIZ que parou —
+           "incompleta", nunca "não existe".
+         - A regra de desempate não mudou: se mais de uma assinatura
+           bate pelo nome e a matrícula não desempata, eu recuso.
+           Carimbar a rubrica do homônimo é pior que não achar.
+       ============================================================ */
+    TETO_LEITURAS: 400,
+    TETO_PAGINAS: 10,
+
+    /* o desempate, um só, usado pela busca e pela varredura */
+    decidirEntre_: function (achados, trilha, origem) {
+      if (!achados.length) return null;
+      var escolhido = null;
+      if (achados.length === 1) {
+        escolhido = achados[0];
+      } else {
+        var porMat = achados.filter(function (x) { return x.porMat; });
+        if (porMat.length === 1) escolhido = porMat[0];
+      }
+      if (!escolhido) {
+        trilha.push({ chave: "(" + origem + ")", origem: origem,
+          resultado: "ambíguo",
+          detalhe: achados.length + " assinaturas batem com este nome (" +
+            achados.map(function (x) { return x.id; }).join(", ") +
+            ") e a matrícula não desempata — não vou carimbar a rubrica de outra pessoa" });
+        return { ambiguo: true };
+      }
+      trilha.push({ chave: escolhido.id,
+        origem: escolhido.porMat ? origem + " pela matrícula" : origem + " pelo nome completo",
+        resultado: "achou" });
+      return { ok: true, tem: true, dados: normalizarCadastro(escolhido.dados),
+        versao: escolhido.versao, chave: escolhido.id, trilha: trilha };
+    },
+
+    /* um registro bate com a pessoa? Mesma conta dos dois lados. */
+    bateCom_: function (d, nome, mat) {
+      var nd = EPIASS.chaveNome(d && (d.nome || d.colaborador));
+      var md = EPIASS.chaveMatricula(d && d.matricula);
+      return { porNome: !!(nome && nd && nd === nome),
+               porMat: !!(mat && md && md === mat) };
+    },
+
+    /** BUSCA DIRIGIDA — pelo endpoint que já existe. Sem parede. */
+    buscarDirigido: function (f, trilha) {
+      var nome = EPIASS.chaveNome(f && (f.nome || f.colaborador));
+      var mat = EPIASS.chaveMatricula(f && (f.matricula || f.chave));
+      var termos = [];
+      if (limpar(f && f.matricula)) termos.push(limpar(f.matricula));
+      if (limpar(f && (f.nome || f.colaborador))) termos.push(limpar(f.nome || f.colaborador));
+      if (!termos.length || !REPOCLI || !REPOCLI.buscar) return Promise.resolve(null);
+
+      var achados = [], vistos = {}, falhou = 0, i = 0;
+      function proximo() {
+        if (i >= termos.length) {
+          if (!achados.length) {
+            trilha.push({ chave: "(busca dirigida)", origem: "buscarDados",
+              resultado: falhou ? "erro" : "não existe",
+              detalhe: falhou
+                ? "a busca não respondeu — isto NÃO quer dizer que não há assinatura"
+                : "a busca não devolveu nenhum registro com este nome nem com esta matrícula" });
+            return falhou ? { erro: true } : null;
+          }
+          return EPIASS.decidirEntre_(achados, trilha, "busca dirigida");
+        }
+        var termo = termos[i++];
+        return Promise.resolve(REPOCLI.buscar(CONJUNTO_COLAB, termo, { tamanhoPagina: 50 }))
+          .then(function (r) {
+            if (!r || !r.ok) { falhou++; return proximo(); }
+            comoLista(r.dados).forEach(function (linha) {
+              var id = limpar(linha && linha.id);
+              if (!id || id.indexOf("COLAB:") !== 0) return;
+              if (id.indexOf("COLABNOME:") === 0) return;
+              if (vistos[id]) return;
+              var d = (linha && linha.dados) || linha;
+              var b = EPIASS.bateCom_(d, nome, mat);
+              if (!b.porNome && !b.porMat) return;
+              vistos[id] = 1;
+              achados.push({ id: id, dados: d, porNome: b.porNome, porMat: b.porMat,
+                versao: (linha && linha.versao) || 1 });
+            });
+            return proximo();
+          }, function () { falhou++; return proximo(); });
+      }
+      return Promise.resolve(proximo());
+    },
+
     procurarNoConjunto: function (f, trilha) {
       var nome = EPIASS.chaveNome(f && (f.nome || f.colaborador));
       var mat = EPIASS.chaveMatricula(f && (f.matricula || f.chave));
       if (!nome && !mat) return Promise.resolve(null);
 
-      return REPOCLI.listar(CONJUNTO_COLAB, { tamanhoPagina: 200 }).then(function (r) {
-        if (!r || !r.ok) {
-          trilha.push({ chave: "(varredura)", origem: "lista do conjunto",
-            resultado: "erro", detalhe: (r && r.mensagem) || "não consegui listar" });
-          return null;
-        }
-        var ids = [];
-        (r.dados || []).forEach(function (linha) {
-          var id = limpar(linha && linha.id);
-          if (!id || id.indexOf("COLAB:") !== 0) return;
-          if (id.indexOf("COLABNOME:") === 0) return;   /* bilhete, não assinatura */
-          ids.push(id);
-        });
-        if (!ids.length) {
-          trilha.push({ chave: "(varredura)", origem: "lista do conjunto",
-            resultado: "não existe", detalhe: "nenhuma assinatura gravada no conjunto" });
-          return null;
+      /* 1) dirigida primeiro */
+      return Promise.resolve(EPIASS.buscarDirigido(f, trilha)).then(function (r) {
+        if (r && r.ok) return r;
+        if (r && r.ambiguo) return null;
+        return varrer();
+      }, function () { return varrer(); });
+
+      /* 2) varredura, paginada, e honesta quando para */
+      function varrer() {
+        var achados = [], lidos = 0, paginas = 0, cursor = null;
+        var listados = 0, incompleta = false, motivoParada = "";
+
+        function pagina() {
+          paginas++;
+          var p = { tamanhoPagina: 200 };
+          if (cursor) p.cursor = cursor;
+          return Promise.resolve(REPOCLI.listar(CONJUNTO_COLAB, p)).then(function (r) {
+            if (!r || !r.ok) {
+              trilha.push({ chave: "(varredura)", origem: "lista do conjunto",
+                resultado: "erro", detalhe: (r && r.mensagem) || "não consegui listar" });
+              return null;
+            }
+            var ids = [];
+            comoLista(r.dados).forEach(function (linha) {
+              listados++;
+              var id = limpar(linha && linha.id);
+              if (!id || id.indexOf("COLAB:") !== 0) return;
+              if (id.indexOf("COLABNOME:") === 0) return;
+              /* se a listagem já trouxe os dados, nem preciso ler */
+              var d = linha && linha.dados;
+              if (d && (d.nome || d.matricula)) {
+                var b = EPIASS.bateCom_(d, nome, mat);
+                if (b.porNome || b.porMat) {
+                  achados.push({ id: id, dados: d, porNome: b.porNome, porMat: b.porMat,
+                    versao: linha.versao || 1 });
+                }
+                return;
+              }
+              ids.push(id);
+            });
+            cursor = limpar(r.cursor || r.proximo || (r.pagina && r.pagina.cursor));
+            return lerCandidatos(ids, 0).then(function () {
+              if (cursor && paginas < EPIASS.TETO_PAGINAS && lidos < EPIASS.TETO_LEITURAS) {
+                return pagina();
+              }
+              if (cursor) { incompleta = true; motivoParada = "há mais páginas no conjunto"; }
+              return decidir();
+            });
+          }, function (e) {
+            trilha.push({ chave: "(varredura)", origem: "lista do conjunto",
+              resultado: "erro", detalhe: String((e && e.message) || e) });
+            return null;
+          });
         }
 
-        /* LER TODOS OS CANDIDATOS, NÃO PARAR NO PRIMEIRO.
-           Parar no primeiro que casa pelo nome é como carimbar a
-           rubrica do homônimo numa ficha de EPI. Então eu junto
-           todos, e só uso quando sobra UM. Empate pelo nome se
-           desfaz pela matrícula; se nem assim, eu recuso. */
-        var achados = [];
-        var i = 0;
-        function proximo() {
-          if (i >= ids.length || i >= 60) return decidir();
-          var id = ids[i++];
-          return REPOCLI.ler(CONJUNTO_COLAB, id).then(function (reg) {
+        function lerCandidatos(ids, k) {
+          if (k >= ids.length) return Promise.resolve(null);
+          if (lidos >= EPIASS.TETO_LEITURAS) {
+            incompleta = true;
+            motivoParada = "parei depois de ler " + lidos + " registros";
+            return Promise.resolve(null);
+          }
+          lidos++;
+          return Promise.resolve(REPOCLI.ler(CONJUNTO_COLAB, ids[k])).then(function (reg) {
             if (reg && reg.ok && reg.dados) {
-              var d = reg.dados;
-              var nd = EPIASS.chaveNome(d.nome || d.colaborador);
-              var md = EPIASS.chaveMatricula(d.matricula);
-              var porNome = !!(nome && nd && nd === nome);
-              var porMat = !!(mat && md && md === mat);
-              if (porNome || porMat) {
-                achados.push({ id: id, dados: d, porNome: porNome, porMat: porMat,
+              var b = EPIASS.bateCom_(reg.dados, nome, mat);
+              if (b.porNome || b.porMat) {
+                achados.push({ id: ids[k], dados: reg.dados,
+                  porNome: b.porNome, porMat: b.porMat,
                   versao: (reg.registro && reg.registro.versao) || 1 });
               }
             }
-            return proximo();
-          }, function () { return proximo(); });
+            return lerCandidatos(ids, k + 1);
+          }, function () { return lerCandidatos(ids, k + 1); });
         }
 
         function decidir() {
           if (!achados.length) {
-            trilha.push({ chave: "(varredura)", origem: ids.length + " assinatura(s) no conjunto",
-              resultado: "não existe", detalhe: "nenhuma com este nome nem com esta matrícula" });
+            /* AQUI ESTAVA A MENTIRA. Agora a trilha separa
+               "procurei tudo e não há" de "parei antes do fim". */
+            trilha.push({ chave: "(varredura)",
+              origem: listados + " registro(s) olhado(s) no conjunto",
+              resultado: incompleta ? "incompleta" : "não existe",
+              detalhe: incompleta
+                ? "NÃO varri o conjunto inteiro — " + motivoParada + ". " +
+                  "Isto não quer dizer que não há assinatura: quer dizer que eu não terminei de procurar."
+                : "nenhuma com este nome nem com esta matrícula" });
             return null;
           }
-          var escolhido = null;
-          if (achados.length === 1) {
-            escolhido = achados[0];
-          } else {
-            var porMat = achados.filter(function (x) { return x.porMat; });
-            if (porMat.length === 1) escolhido = porMat[0];
-          }
-          if (!escolhido) {
-            trilha.push({ chave: "(varredura)", origem: "varredura pelo nome completo",
-              resultado: "ambíguo",
-              detalhe: achados.length + " assinaturas batem com este nome (" +
-                achados.map(function (x) { return x.id; }).join(", ") +
-                ") e a matrícula não desempata — não vou carimbar a rubrica de outra pessoa" });
-            return null;
-          }
-          trilha.push({ chave: escolhido.id,
-            origem: escolhido.porMat ? "varredura pela matrícula" : "varredura pelo nome completo",
-            resultado: "achou" });
-          return { ok: true, tem: true, dados: normalizarCadastro(escolhido.dados),
-            versao: escolhido.versao, chave: escolhido.id, trilha: trilha };
+          var d2 = EPIASS.decidirEntre_(achados, trilha, "varredura");
+          /* ambíguo não é achado: a trilha já registrou o porquê, e
+             quem chamou espera "achei" ou "não achei" — nada no meio */
+          return (d2 && d2.ok) ? d2 : null;
         }
 
-        return proximo();
-      }, function (e) {
-        trilha.push({ chave: "(varredura)", origem: "lista do conjunto",
-          resultado: "erro", detalhe: String((e && e.message) || e) });
-        return null;
-      });
+        return pagina();
+      }
     },
 
     /* O DIAGNÓSTICO, NO FORMATO QUE ELE PEDIU.
@@ -67920,7 +68813,22 @@ function modalPendencias() {
         delete EPIASS.cadastroEmMemoria[EPIASS.chaveDaPessoa(f)];
         var id = EPIASS.idDoColaborador(f);
         delete EPIASS.cadastroEmMemoria["COLAB:" + (id || "")];
+        /* [v318] a memória é gravada sob VÁRIAS chaves (id explícito,
+           id do cadastro, nome, matrícula). Apagar só duas deixava a
+           terceira respondendo o valor velho. */
+        EPIASS.chavesPossiveis(f).forEach(function (t) {
+          delete EPIASS.cadastroEmMemoria[t.chave];
+        });
+        delete EPIASS.cadastroEmMemoria["COLAB:"];
       } catch (e) {}
+    },
+
+    /* [v318] Perguntar de novo, de propósito. O item 6 do plano de
+       testes dele: uma consulta anterior sem assinatura não pode
+       impedir a recuperação de um registro que existe no servidor. */
+    reconsultar: function (f) {
+      EPIASS.esquecer(f);
+      return EPIASS.lerCadastro(f, true);
     },
 
     /* Em uma frase: por que a rubrica não saiu. Para eu poder
@@ -67936,6 +68844,11 @@ function modalPendencias() {
       if (ambiguo) return (ambiguo.detalhe || "mais de uma pessoa com este nome completo") + ".";
       var erro = listaDeTrilha(b.trilha).filter(function (x) { return x.resultado === "erro"; })[0];
       if (erro) return "o repositório não respondeu: " + erro.detalhe;
+      /* [v317] busca que parou antes do fim não é ausência */
+      var meio = listaDeTrilha(b.trilha).filter(function (x) {
+        return x.resultado === "incompleta";
+      })[0];
+      if (meio) return (meio.detalhe || "não terminei de procurar") + ".";
       return "procurei em " + listaDeTrilha(b.trilha).map(function (x) {
         return x.chave + " (" + x.origem + ")";
       }).join(", ") + " — não existe registro em nenhuma.";
@@ -92558,12 +93471,65 @@ function modalPendencias() {
              "entregas de EPI.") +
       "</div></div>";
 
+    /* ============================================================
+       [v315] EXCLUIR NÃO DEVOLVE MATERIAL AO ESTOQUE
+       ------------------------------------------------------------
+       Ele excluiu um item esperando o saldo voltar, e o saldo não
+       subiu. O sistema fez o que a exclusão promete — ela nunca
+       tocou no estoque, e os testes provam isso. O defeito é meu:
+       eu pus a lixeira aqui sem dizer o que ela NÃO faz.
+
+       Na ficha do colaborador essa diferença já estava escrita, no
+       botão "Excluir lançamento errado". Aqui faltava. Agora está,
+       e com o caminho certo a um toque.
+       ============================================================ */
+    if (p.linhas.length) {
+      var temDevolucao = (typeof modalDevolverEPI === "function");
+      html += '<div class="alert a-yellow mt12">' + icone_("alerta") +
+        "<div><b>Excluir não devolve material ao estoque</b>" +
+        "São duas coisas diferentes:<br>" +
+        "• <b>O material voltou para a prateleira</b> → isto é " +
+        "<b>devolução</b>, e é ela que soma no saldo." +
+        (temDevolucao ? " Os botões abaixo abrem a devolução de cada linha." : "") +
+        "<br>• <b>A linha foi lançada por engano</b> (clique repetido, pessoa " +
+        "errada) → aí sim é <b>excluir</b>: o material nunca saiu de verdade, " +
+        "e o saldo não deve mudar." +
+        "<br><br>Se você já excluiu e o material tinha voltado: restaure a linha " +
+        "em <b>Integrações → Central de Dados</b>, abra a aba das fichas, e use " +
+        "<b>Devolver</b> aqui na ficha. Assim o saldo sobe com histórico, em vez " +
+        "de aparecer do nada." +
+        "</div></div>";
+      if (temDevolucao) {
+        html += '<div style="overflow-x:auto" class="mt8"><table class="tbl" style="width:100%">' +
+          "<thead><tr><th>linha</th><th>Item</th><th>Entrega</th><th></th></tr></thead><tbody>";
+        p.linhas.slice(0, 20).forEach(function (l) {
+          var idLinha = lp(l.id || (p.colunas && p.colunas.id ? l[p.colunas.id] : ""));
+          var item = p.colunas && p.colunas.item ? lp(l[p.colunas.item]) : "";
+          var dia = p.colunas && p.colunas.data ? lp(l[p.colunas.data]) : "";
+          html += "<tr><td class=\"muted small\">" + esc_(l._linha) + "</td>" +
+            "<td>" + esc_(item || "(sem descrição)") + "</td>" +
+            "<td>" + esc_(dia || "—") + "</td>" +
+            '<td style="text-align:right;white-space:nowrap">' +
+            (idLinha
+              ? '<button class="btn btn-primary btn-sm" data-ex-devolver="' +
+                esc_(idLinha) + '">' + icone_("sync") + "Devolver ao estoque</button>"
+              : '<span class="muted small">sem id: devolva pela ficha</span>') +
+            "</td></tr>";
+        });
+        html += "</tbody></table></div>";
+        if (p.linhas.length > 20) {
+          html += '<div class="muted small">mostrando 20 de ' + p.linhas.length + ".</div>";
+        }
+      }
+    }
+
     html += '<label class="flex gap8 mt12" style="align-items:flex-start">' +
       '<input type="checkbox" data-ex-ficha' + (p.tirarFicha ? " checked" : "") +
       (p.linhas.length ? "" : " disabled") + ">" +
       "<span>Excluir as <b>" + p.linhas.length + "</b> linha(s) de EPI" +
       '<div class="muted small">As linhas ficam na planilha marcadas como EXCLUIDO, ' +
-      "com o seu motivo. Dá para restaurar.</div></span></label>";
+      "com o seu motivo. Dá para restaurar. <b>O saldo do estoque não muda.</b>" +
+      "</div></span></label>";
 
     html += '<label class="flex gap8 mt8" style="align-items:flex-start">' +
       '<input type="checkbox" data-ex-cadastro' + (p.tirarCadastro ? " checked" : "") +
@@ -92628,6 +93594,23 @@ function modalPendencias() {
     }
     cada("[data-ex-fechar]", function () { return E.fechar; });
     cada("[data-ex-ok]", function () { return function () { E.executar(); }; });
+    cada("[data-ex-devolver]", function (b) {
+      return function () {
+        var id = b.getAttribute("data-ex-devolver");
+        if (typeof modalDevolverEPI !== "function") {
+          aviso_("warn", "Devolução não está nesta versão",
+            "Abra a ficha do colaborador e use o botão Devolver no item.");
+          return;
+        }
+        /* a janela de devolução é a que já existe: ela confere a
+           condição do material, devolve ao estoque quando couber e
+           escreve a linha DEVOLVIDO amarrada à entrega. */
+        E.fechar();
+        modalDevolverEPI(id, function () {
+          try { if (typeof ROUTER !== "undefined" && ROUTER.render) ROUTER.render(); } catch (e) {}
+        });
+      };
+    });
     cada("[data-ex-atualizar]", function () {
       return function () {
         E.fechar();
@@ -93689,7 +94672,1596 @@ function modalPendencias() {
 
 })();
 
+
+/* ############################################################
+ * INDICADORES DO PAINEL DE EPI            busca: [EPIIND]
+ * ------------------------------------------------------------
+ * DE ONDE VEIO (documento de 26/10, seção 6)
+ *   "Corrigir os indicadores para distinguir claramente:
+ *    colaboradores únicos, fichas oficiais ativas, fichas
+ *    históricas encerradas, entregas registradas, assinaturas
+ *    confirmadas, assinaturas pendentes e erros de consulta."
+ *   E a regra: "Se um colaborador possuir dez fichas vinculadas
+ *   com segurança à mesma identidade, ele deverá contar como UMA
+ *   pessoa."
+ *
+ * O QUE ERA
+ *   O painel mostrava "Colaboradores: 173" — e aquilo era
+ *   fichas.length, uma LINHA por chave. Ficha não é pessoa.
+ *
+ * COMO EU AGRUPO (e o que me recuso a fazer)
+ *   Duas linhas viram a MESMA pessoa quando compartilham um
+ *   identificador FORTE:
+ *     - o id do cadastro
+ *     - a matrícula normalizada (0408121 == 408121)
+ *     - o CPF, só dígitos
+ *     - o número do crachá
+ *   Nome igual NÃO junta. Duas linhas com o mesmo nome e nenhum
+ *   identificador forte em comum continuam contadas como duas, e
+ *   entram em "a confirmar" — que é a conferência que o documento
+ *   dele exige antes de consolidar.
+ *
+ * ASSINATURAS
+ *   Só são contadas depois de uma consulta que TERMINOU. Enquanto
+ *   não consultou, o número é "—", não zero. Consulta que falhou
+ *   vira "erro de consulta", nunca "não assinou" — é a regra 8 da
+ *   seção 5 dele, e é a diferença entre informar e caluniar.
+ *
+ * FICHAS ENCERRADAS
+ *   O sistema ainda NÃO tem esse estado. Em vez de mostrar zero
+ *   como se estivesse tudo em ordem, o indicador diz que o estado
+ *   não existe. Zero inventado é pior que campo vazio.
+ * ############################################################ */
+(function indicadoresDoEpi() {
+
+  var I = { aberto: false, ass: null, consultando: false, progresso: 0 };
+  try { window.EPIIND = I; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(s) { return (typeof U !== "undefined" && U.esc) ? U.esc(s) : lp(s); }
+  function icone_(n) { return (typeof ic === "function") ? ic(n) : ""; }
+  function chaveMat(v) {
+    return (typeof fichaChaveMat_ === "function") ? fichaChaveMat_(v)
+      : lp(v).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+  }
+  function chaveNome(v) {
+    var t = lp(v).toUpperCase();
+    try { t = t.normalize("NFD").replace(/[̀-ͯ]/g, ""); } catch (e) {}
+    return t.replace(/\s+/g, " ").trim();
+  }
+  function soDigitos(v) { return lp(v).replace(/\D/g, ""); }
+
+  /* ============================================================
+     1. AGRUPAR LINHAS EM PESSOAS — só por identificador forte
+     ============================================================ */
+  I.agrupar = function (linhas) {
+    var L = lista_(linhas);
+    var pai = L.map(function (_, i) { return i; });
+    function raiz(i) { while (pai[i] !== i) { pai[i] = pai[pai[i]]; i = pai[i]; } return i; }
+    function unir(a, b) { a = raiz(a); b = raiz(b); if (a !== b) pai[b] = a; }
+
+    var porChave = {};
+    L.forEach(function (f, i) {
+      var fortes = [];
+      var id = lp(f.idCadastro || f.id);
+      if (id) fortes.push("ID:" + id.toUpperCase());
+      var m = chaveMat(f.matricula);
+      if (m) fortes.push("MAT:" + m);
+      var cpf = soDigitos(f.cpf);
+      if (cpf.length >= 11) fortes.push("CPF:" + cpf);
+      var cr = lp(f.cracha).toUpperCase();
+      if (cr) fortes.push("CRA:" + cr);
+      fortes.forEach(function (k) {
+        if (porChave[k] === undefined) porChave[k] = i;
+        else unir(porChave[k], i);
+      });
+    });
+
+    var grupos = {};
+    L.forEach(function (f, i) {
+      var r = raiz(i);
+      if (!grupos[r]) grupos[r] = { linhas: [], nomes: {} };
+      grupos[r].linhas.push(f);
+      var n = chaveNome(f.nome);
+      if (n) grupos[r].nomes[n] = true;
+    });
+    var saida = [];
+    for (var k in grupos) saida.push(grupos[k]);
+
+    /* nomes que aparecem em MAIS DE UM grupo: podem ser a mesma
+       pessoa, podem ser homônimos. Não decido — marco. */
+    var gruposPorNome = {};
+    saida.forEach(function (g, ix) {
+      Object.keys(g.nomes).forEach(function (n) {
+        (gruposPorNome[n] = gruposPorNome[n] || []).push(ix);
+      });
+    });
+    var aConfirmar = [];
+    Object.keys(gruposPorNome).forEach(function (n) {
+      if (gruposPorNome[n].length < 2) return;
+      var linhas = [];
+      gruposPorNome[n].forEach(function (ix) {
+        saida[ix].linhas.forEach(function (f) { linhas.push(f); });
+      });
+      aConfirmar.push({ nome: linhas[0] ? lp(linhas[0].nome) : n,
+        grupos: gruposPorNome[n].length, linhas: linhas });
+    });
+
+    return { grupos: saida, aConfirmar: aConfirmar };
+  };
+
+  /* ============================================================
+     2. OS NÚMEROS
+     ============================================================ */
+  I.numeros = function () {
+    var linhas = [];
+    try { linhas = lista_(fichasPorColaborador()); } catch (e) {}
+    var ag = I.agrupar(linhas);
+
+    var entregas = 0, comEntrega = 0, excluidas = 0, semCadastro = 0;
+    linhas.forEach(function (f) {
+      var n = lista_(f.itens).length;
+      entregas += n;
+      if (n) comEntrega++;
+      if (f.excluido) excluidas++;
+      if (!f.cadastrado && !f.excluido) semCadastro++;
+    });
+
+    return {
+      pessoas: ag.grupos.length,
+      fichas: linhas.length,
+      aConfirmar: ag.aConfirmar,
+      entregas: entregas,
+      fichasComEntrega: comEntrega,
+      fichasExcluidas: excluidas,
+      fichasSemCadastro: semCadastro,
+      grupos: ag.grupos,
+      linhas: linhas
+    };
+  };
+
+  /* ============================================================
+     3. AS ASSINATURAS — contadas só depois de consultar
+     ============================================================ */
+  I.consultarAssinaturas = function () {
+    if (I.consultando) return Promise.resolve(null);
+    if (typeof EPIASS === "undefined" || !EPIASS.lerCadastro) {
+      I.ass = { erro: "o bloco de assinaturas não está nesta versão" };
+      desenhar();
+      return Promise.resolve(null);
+    }
+    var n = I.numeros();
+    var alvos = n.grupos.map(function (g) { return g.linhas[0]; });
+    I.consultando = true;
+    I.progresso = 0;
+    I.ass = { confirmadas: 0, pendentes: 0, erros: 0, ambiguas: 0,
+              total: alvos.length, detalheErros: [] };
+    desenhar();
+
+    function um(i) {
+      if (i >= alvos.length) {
+        I.consultando = false;
+        I.ass.terminou = true;
+        desenhar();
+        return I.ass;
+      }
+      I.progresso = i + 1;
+      if (i % 5 === 0) desenhar();
+      return Promise.resolve(EPIASS.lerCadastro(alvos[i])).then(function (c) {
+        if (!c) { I.ass.erros++; }
+        else if (c.ambiguo) { I.ass.ambiguas++; }
+        else if (c.ok === false) {
+          I.ass.erros++;
+          if (I.ass.detalheErros.length < 5) {
+            I.ass.detalheErros.push(lp(alvos[i].nome) + ": " +
+              (lp(c.mensagem) || "a consulta não respondeu"));
+          }
+        }
+        else if (c.tem) { I.ass.confirmadas++; }
+        else { I.ass.pendentes++; }
+        return um(i + 1);
+      }, function (e) {
+        I.ass.erros++;
+        if (I.ass.detalheErros.length < 5) {
+          I.ass.detalheErros.push(lp(alvos[i].nome) + ": " + lp(e && e.message));
+        }
+        return um(i + 1);
+      });
+    }
+    return um(0);
+  };
+
+  /* ============================================================
+     4. A TELA
+     ============================================================ */
+  function caixa(html) {
+    var c = document.getElementById("epiIndCaixa");
+    if (!c) {
+      c = document.createElement("div");
+      c.id = "epiIndCaixa";
+      c.style.cssText = "max-width:100%;overflow-x:hidden;padding:16px 16px 0";
+      var onde = document.querySelector("#appMain") || document.body;
+      onde.insertBefore(c, onde.firstChild);
+    }
+    c.innerHTML = html;
+    try { c.scrollIntoView({ block: "start" }); } catch (e) {}
+    ligar(c);
+    return c;
+  }
+
+  function cartao(rotulo, valor, dica, cor) {
+    return '<div class="card" style="margin:0"><div class="card-body" style="padding:12px">' +
+      '<div class="small muted" style="text-transform:uppercase;letter-spacing:.04em">' +
+      esc_(rotulo) + "</div>" +
+      '<div style="font-size:24px;font-weight:700;line-height:1.2' +
+      (cor ? ";color:" + cor : "") + '">' + esc_(valor) + "</div>" +
+      (dica ? '<div class="small muted">' + dica + "</div>" : "") + "</div></div>";
+  }
+
+  function desenhar() {
+    if (!I.aberto) {
+      var velho = document.getElementById("epiIndCaixa");
+      if (velho && velho.parentNode) velho.parentNode.removeChild(velho);
+      return;
+    }
+    var n = I.numeros();
+    var html = '<div class="card mb16"><div class="card-body">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">' +
+      "<div><b>Indicadores</b>" +
+      '<div class="muted small">Pessoas, fichas e entregas — cada número com a ' +
+      "conta que o produziu.</div></div>" +
+      '<button class="btn btn-ghost btn-sm" data-ei-fechar>Fechar</button></div>' +
+      '<div class="mt12" style="display:grid;gap:12px;' +
+      'grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">' +
+      cartao("Colaboradores únicos", n.pessoas,
+        "pessoas distintas, juntando fichas que compartilham matrícula, CPF, crachá ou cadastro") +
+      cartao("Fichas no painel", n.fichas,
+        n.fichas === n.pessoas ? "uma por pessoa"
+          : (n.fichas - n.pessoas) + " ficha(s) a mais que pessoas") +
+      cartao("Entregas registradas", n.entregas,
+        "linhas de entrega válidas em " + n.fichasComEntrega + " ficha(s)") +
+      cartao("Fichas encerradas", "—",
+        "este estado <b>não existe</b> no sistema ainda") +
+      "</div>";
+
+    html += '<div class="alert a-gray mt12">' + icone_("info") +
+      "<div><b>A conta</b>" +
+      n.fichas + " ficha(s) no painel → <b>" + n.pessoas + " pessoa(s)</b> depois de " +
+      "juntar o que tem identificador forte em comum." +
+      (n.fichasSemCadastro
+        ? "<br>" + n.fichasSemCadastro + " ficha(s) existem só por entrega de EPI, " +
+          "sem cadastro de usuário."
+        : "") +
+      (n.fichasExcluidas
+        ? "<br>" + n.fichasExcluidas + " ficha(s) de cadastro excluído que continuam " +
+          "na lista por ainda ter material em nome da pessoa."
+        : "") +
+      "<br><b>Nome igual não junta ninguém</b> — só matrícula, CPF, crachá ou o id do " +
+      "cadastro. É por isso que homônimo continua contando como duas pessoas." +
+      "</div></div>";
+
+    if (lista_(n.aConfirmar).length) {
+      html += '<div class="alert a-yellow mt12">' + icone_("alerta") +
+        "<div><b>" + n.aConfirmar.length + " nome(s) aparecem em mais de uma pessoa</b>" +
+        "Podem ser a mesma pessoa com cadastros que não se reconhecem, ou podem ser " +
+        "homônimos. <b>Não juntei.</b> Confira em “Auditoria e duplicidades”:<br>" +
+        n.aConfirmar.slice(0, 8).map(function (x) {
+          return esc_(x.nome) + " — " + x.grupos + " identidades, " +
+            x.linhas.length + " ficha(s)";
+        }).join("<br>") +
+        (n.aConfirmar.length > 8 ? "<br>… e mais " + (n.aConfirmar.length - 8) : "") +
+        "</div></div>";
+    }
+
+    /* ---- assinaturas ---- */
+    html += '<div class="card mt12"><div class="card-body">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">' +
+      "<b>Assinaturas</b>" +
+      '<button class="btn btn-' + (I.ass ? "ghost" : "primary") + ' btn-sm" data-ei-ass' +
+      (I.consultando ? " disabled" : "") + ">" +
+      icone_(I.consultando ? "sync" : "escudoOk") +
+      (I.consultando ? "Consultando " + I.progresso + " de " + (I.ass ? I.ass.total : "?")
+                     : (I.ass ? "Consultar de novo" : "Consultar agora")) +
+      "</button></div>";
+
+    if (!I.ass) {
+      html += '<div class="muted small mt8">Ainda não consultei. Enquanto não ' +
+        "consultar, <b>não mostro número</b> — zero aqui seria dizer que ninguém " +
+        "assinou, e isso eu não sei.</div>";
+    } else if (I.ass.erro) {
+      html += '<div class="alert a-red mt8" style="margin-bottom:0">' + icone_("alerta") +
+        "<div>" + esc_(I.ass.erro) + "</div></div>";
+    } else {
+      html += '<div class="mt12" style="display:grid;gap:12px;' +
+        'grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">' +
+        cartao("Confirmadas", I.ass.confirmadas, "assinatura localizada no cadastro") +
+        cartao("Pendentes", I.ass.pendentes, "consulta terminou e não achou assinatura") +
+        cartao("Erros de consulta", I.ass.erros,
+          I.ass.erros ? "<b>não é “não assinou”</b>: a consulta falhou" : "nenhuma falha") +
+        (I.ass.ambiguas
+          ? cartao("Identidade ambígua", I.ass.ambiguas, "mais de uma pessoa bate")
+          : "") +
+        "</div>";
+      if (!I.ass.terminou) {
+        html += '<div class="muted small mt8">consultando… os números abaixo ainda ' +
+          "não são o total.</div>";
+      }
+      if (lista_(I.ass.detalheErros).length) {
+        html += '<div class="alert a-yellow mt12" style="margin-bottom:0">' +
+          icone_("alerta") + "<div><b>Onde a consulta falhou</b>" +
+          I.ass.detalheErros.map(esc_).join("<br>") +
+          "<br>Estas pessoas <b>podem ter assinatura</b>. Não as conte como pendentes." +
+          "</div></div>";
+      }
+    }
+    html += "</div></div>";
+
+    html += '<div class="muted small mt12">Fichas encerradas, matrículas ' +
+      "alternativas e identidade central ainda não existem no sistema — precisam de " +
+      "coluna nova na planilha, e isso eu não crio sem a sua autorização.</div>";
+
+    return caixa(html + "</div></div>");
+  }
+
+  function ligar(c) {
+    function cada(sel, fn) {
+      c.querySelectorAll(sel).forEach(function (b) { b.addEventListener("click", fn(b)); });
+    }
+    cada("[data-ei-fechar]", function () {
+      return function () { I.aberto = false; desenhar(); };
+    });
+    cada("[data-ei-ass]", function () {
+      return function () { I.consultarAssinaturas(); };
+    });
+  }
+
+  /* ============================================================
+     5. O BOTÃO
+     ============================================================ */
+  function porBotao() {
+    try {
+      if (!/#\/epi/.test(location.hash)) return;
+      if (document.getElementById("eiBotao")) return;
+      var acoes = document.querySelector("#appMain .page-head .acoes, #appMain .page-head");
+      if (!acoes) return;
+      var b = document.createElement("button");
+      b.id = "eiBotao";
+      b.className = "btn btn-ghost";
+      b.title = "Pessoas únicas, fichas, entregas e assinaturas — cada um com a sua conta";
+      b.innerHTML = icone_("grafico") + "Indicadores";
+      b.addEventListener("click", function () { I.aberto = true; desenhar(); });
+      acoes.appendChild(b);
+    } catch (e) {}
+  }
+
+  /* o número do topo do painel: ficha não é pessoa */
+  function corrigirKpi() {
+    try {
+      if (!/#\/epi/.test(location.hash)) return;
+      var alvos = document.querySelectorAll("#appMain .kpi, #appMain [class*='kpi']");
+      for (var i = 0; i < alvos.length; i++) {
+        var el = alvos[i];
+        if (el.getAttribute("data-ei-kpi")) continue;
+        var txt = (el.innerText || "");
+        if (!/Colaboradores/i.test(txt)) continue;
+        el.setAttribute("data-ei-kpi", "1");
+        var n = I.numeros();
+        var rot = el.querySelector(".kpi-rotulo, small, .rotulo") ||
+                  el.lastElementChild;
+        var marca = document.createElement("div");
+        marca.className = "small muted";
+        marca.style.cssText = "margin-top:4px;line-height:1.3";
+        marca.innerHTML = "são <b>" + n.fichas + " ficha(s)</b> · " +
+          "<b>" + n.pessoas + " pessoa(s)</b> distinta(s)";
+        el.appendChild(marca);
+        if (rot && /Colaboradores/i.test(rot.innerText || "")) {
+          rot.innerText = "Fichas no painel";
+        }
+      }
+    } catch (e) {}
+  }
+
+  try {
+    var alvo = document.getElementById("appMain");
+    if (alvo && typeof MutationObserver === "function") {
+      var pensando = false;
+      new MutationObserver(function () {
+        if (pensando) return;
+        pensando = true;
+        setTimeout(function () { pensando = false; porBotao(); corrigirKpi(); }, 450);
+      }).observe(alvo, { childList: true, subtree: false });
+    }
+  } catch (e) {}
+
+  I.botao = porBotao;
+  I.corrigirKpi = corrigirKpi;
+  I.diagnostico = function () {
+    var n = I.numeros();
+    return { pessoas: n.pessoas, fichas: n.fichas, entregas: n.entregas,
+             aConfirmar: n.aConfirmar.length, semCadastro: n.fichasSemCadastro,
+             excluidas: n.fichasExcluidas,
+             assinaturas: I.ass ? { confirmadas: I.ass.confirmadas,
+               pendentes: I.ass.pendentes, erros: I.ass.erros,
+               ambiguas: I.ass.ambiguas, terminou: !!I.ass.terminou }
+               : "não consultadas" };
+  };
+
+})();
+
 </script>
 
+<script>
+/* ############################################################
+ * AS FICHAS AINDA EXISTEM?                 busca: [EXISTEM]
+ * ------------------------------------------------------------
+ * O PEDIDO (27/10 20:30)
+ *   "as fichas sumiram do nada... como que eu vou saber? cria um
+ *    lugar provisório que eu possa saber se realmente tem ainda,
+ *    vocês excluíram as fichas?"
+ *
+ * POR QUE ISTO EXISTE
+ *   Ele não tem como conferir a minha palavra. Quando a tela fica
+ *   vazia, "sumiu da tela" e "sumiu do banco" se parecem — e a
+ *   diferença entre as duas é a diferença entre um defeito e uma
+ *   perda de dado. Esta tela separa as duas coisas lendo a PLANILHA
+ *   direto, que é a fonte oficial, e comparando com o que o módulo
+ *   de EPI do Core devolve.
+ *
+ * O QUE ELA FAZ
+ *   1. pergunta à planilha quais abas existem e quantas linhas tem
+ *      cada uma — sem nome de aba escrito aqui dentro: descobre;
+ *   2. lê a aba escolhida inteira, por páginas;
+ *   3. conta as linhas por SITUAÇÃO (a coluna de status é achada
+ *      pelo cabeçalho, não presumida);
+ *   4. pergunta a mesma coisa ao Core, por epi.fichas;
+ *   5. mostra os dois números lado a lado e explica a diferença.
+ *
+ * O QUE ELA NÃO FAZ — e isto é o ponto
+ *   NÃO grava. NÃO apaga. NÃO corrige. NÃO migra. NÃO "limpa".
+ *   Não existe uma única chamada de escrita neste bloco inteiro.
+ *   É um vidro para olhar dentro, não uma porta para mexer.
+ *
+ *   E não decide por ele: se houver mais de uma aba candidata,
+ *   ele escolhe qual conferir. Eu não adivinho.
+ *
+ * COMO LER O RESULTADO
+ *   planilha > 0 e Core = 0   -> os dados estão lá; o defeito é de
+ *                                leitura/comunicação, não perda.
+ *   planilha = 0              -> aí sim a aba está vazia, e isso
+ *                                precisa ser investigado na origem.
+ *   planilha > Core           -> normal se a diferença for de linhas
+ *                                EXCLUIDAS: exclusão aqui é lógica,
+ *                                a linha continua, só muda a situação.
+ * ############################################################ */
+(function fichasAindaExistem() {
+
+  var E = {
+    aberto: false, passo: "inicio", erro: "", codigo: "",
+    abas: [], aba: "", contagem: null, core: null, lendo: "",
+    lidoEm: null, paginasLidas: 0
+  };
+  try { window.EXISTEM = E; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(v) { return (typeof U !== "undefined" && U.esc) ? U.esc(v) : lp(v); }
+
+  /* SÓ LEITURA. Esta é a única porta que este bloco usa. */
+  function ler_(payload) {
+    if (typeof CENTRAL !== "undefined" && CENTRAL.chamar) return CENTRAL.chamar("ler", payload);
+    if (typeof API !== "undefined" && API.call) {
+      return Promise.resolve(API.call("planilha", "ler", payload, { limite: 120000 }));
+    }
+    return Promise.resolve({ ok: false, mensagem: "não há porta de leitura nesta versão" });
+  }
+  function abas_() {
+    if (typeof CENTRAL !== "undefined" && CENTRAL.chamar) {
+      return CENTRAL.chamar("abas", { comCabecalhos: true });
+    }
+    if (typeof API !== "undefined" && API.call) {
+      return Promise.resolve(API.call("planilha", "abas", { comCabecalhos: true }, { limite: 120000 }));
+    }
+    return Promise.resolve({ ok: false, mensagem: "não há porta de leitura nesta versão" });
+  }
+
+  function nomeDaAba_(a) { return lp(a && (a.nome || a.aba || a)); }
+
+  /* qual coluna guarda a situação — descoberta pelo cabeçalho */
+  function colunaDeSituacao_(cabecalhos) {
+    var c = lista_(cabecalhos).map(lp);
+    for (var i = 0; i < c.length; i++) {
+      if (/^(status|situacao|situação)$/i.test(c[i])) return c[i];
+    }
+    for (var j = 0; j < c.length; j++) {
+      if (/status|situa/i.test(c[j])) return c[j];
+    }
+    return "";
+  }
+
+  /* ============================================================
+     1. QUE ABAS EXISTEM, E QUANTAS LINHAS CADA UMA TEM
+     ============================================================ */
+  E.carregarAbas = function () {
+    E.erro = ""; E.codigo = ""; E.passo = "lendo-abas"; E.lendo = "perguntando à planilha quais abas existem…";
+    desenhar();
+    return abas_().then(function (r) {
+      if (!r || !r.ok) {
+        E.passo = "erro";
+        E.codigo = lp(r && r.codigo);
+        E.erro = lp(r && r.mensagem) ||
+          "a planilha não respondeu. Isto é falha de comunicação — não quer dizer que as abas sumiram.";
+        desenhar();
+        return null;
+      }
+      E.abas = lista_(r.abas);
+      E.passo = "escolher";
+      E.lendo = "";
+      desenhar();
+      return E.abas;
+    })["catch"](function (e) {
+      E.passo = "erro";
+      E.erro = lp(e && e.message) || "não consegui falar com a planilha";
+      desenhar();
+      return null;
+    });
+  };
+
+  /* ============================================================
+     2. LER A ABA INTEIRA E CONTAR POR SITUAÇÃO
+     ------------------------------------------------------------
+     Por páginas, com teto, para não travar o navegador. Se o teto
+     for atingido, o resultado é marcado como PARCIAL — número
+     parcial apresentado como total é número inventado.
+     ============================================================ */
+  var POR_PAGINA = 200, TETO_PAGINAS = 60;
+
+  E.conferir = function (aba) {
+    var alvo = lp(aba);
+    if (!alvo) return Promise.resolve(null);
+    E.aba = alvo; E.erro = ""; E.codigo = ""; E.contagem = null; E.core = null;
+    E.passo = "lendo"; E.paginasLidas = 0;
+    E.lendo = "lendo a aba " + alvo + "…";
+    desenhar();
+
+    var total = 0, porSituacao = {}, cabecalhos = [], colSit = "", parcial = false;
+
+    function pagina(n) {
+      if (n > TETO_PAGINAS) { parcial = true; return Promise.resolve(); }
+      E.paginasLidas = n;
+      E.lendo = "lendo a aba " + alvo + " — página " + n + "…";
+      desenhar();
+      return ler_({ aba: alvo, pagina: n, porPagina: POR_PAGINA }).then(function (r) {
+        if (!r || !r.ok) {
+          E.codigo = lp(r && r.codigo);
+          throw new Error(lp(r && r.mensagem) || "a planilha não respondeu nesta página");
+        }
+        if (!cabecalhos.length) {
+          cabecalhos = lista_(r.cabecalhos);
+          colSit = colunaDeSituacao_(cabecalhos);
+        }
+        var linhas = lista_(r.linhas);
+        total += linhas.length;
+        linhas.forEach(function (x) {
+          var s = colSit ? lp(x[colSit]).toUpperCase() : "";
+          if (!s) s = "(sem situação escrita)";
+          porSituacao[s] = (porSituacao[s] || 0) + 1;
+        });
+        if (linhas.length < POR_PAGINA) return;
+        return pagina(n + 1);
+      });
+    }
+
+    return pagina(1).then(function () {
+      E.contagem = { total: total, porSituacao: porSituacao, cabecalhos: cabecalhos,
+                     colunaSituacao: colSit, parcial: parcial };
+      /* agora a MESMA pergunta ao Core, pela rota que a tela usa */
+      E.lendo = "perguntando a mesma coisa ao Core…";
+      desenhar();
+      return (typeof API !== "undefined" && API.call)
+        ? API.call("epi", "fichas", {})
+        : Promise.resolve({ ok: false, mensagem: "sem API nesta versão" });
+    }).then(function (r) {
+      if (!r || !r.ok) {
+        E.core = { ok: false, motivo: lp(r && (r.mensagem || r.codigo)) || "o Core não respondeu" };
+      } else {
+        var d = lista_(r.dados);
+        var itens = 0;
+        d.forEach(function (f) { itens += lista_(f && f.itens).length; });
+        E.core = { ok: true, fichas: d.length, itens: itens };
+      }
+      E.passo = "pronto"; E.lendo = ""; E.lidoEm = new Date();
+      desenhar();
+      return E.contagem;
+    })["catch"](function (e) {
+      E.passo = "erro";
+      E.erro = lp(e && e.message) || "não consegui terminar a leitura";
+      E.lendo = "";
+      desenhar();
+      return null;
+    });
+  };
+
+
+  /* ============================================================
+     2b. AS ASSINATURAS ESTAO SENDO PUXADAS?          [EXISTEMASS]
+     ------------------------------------------------------------
+     O pedido (27/10 20:45): "eu consigo ver realmente no sistema se
+     esta puxando a assinatura das pessoas?"
+
+     Pessoa por pessoa, com a MESMA funcao que a ficha usa
+     (EPIASS.lerCadastro) — nao uma copia, senao esta tela poderia
+     dizer que acha e a ficha continuar sem mostrar.
+
+     Separa QUATRO resultados, porque confundi-los e o erro que ele
+     ja apanhou: achou / nao tem rubrica / NAO CONSEGUI CONFERIR /
+     nome ambiguo. "Nao consegui conferir" nunca vira "nao assinou".
+
+     A imagem da assinatura NUNCA entra nesta tela nem em registro
+     nenhum — so o endereco onde ela mora.
+     ============================================================ */
+  var TETO_PESSOAS = 25;
+
+  E.conferirAssinaturas = function (quantas) {
+    var teto = Number(quantas) || TETO_PESSOAS;
+    E.erro = ""; E.codigo = ""; E.ass = null; E.passo = "lendo";
+    E.lendo = "pedindo as fichas ao Core…";
+    desenhar();
+
+    if (typeof EPIASS === "undefined" || !EPIASS.lerCadastro) {
+      E.passo = "erro";
+      E.erro = "o modulo de assinaturas [EPIASS] nao esta nesta versao";
+      desenhar();
+      return Promise.resolve(null);
+    }
+
+    return ((typeof API !== "undefined" && API.call)
+      ? API.call("epi", "fichas", {})
+      : Promise.resolve({ ok: false })
+    ).then(function (r) {
+      if (!r || !r.ok) {
+        throw new Error(lp(r && (r.mensagem || r.codigo)) ||
+          "o Core nao devolveu as fichas — sem elas nao ha de quem conferir a rubrica");
+      }
+      var fichas = lista_(r.dados).slice(0, teto);
+      if (!fichas.length) {
+        throw new Error("o Core respondeu, mas nao devolveu nenhuma ficha");
+      }
+
+      var saida = { linhas: [], achou: 0, semRubrica: 0, naoConferi: 0,
+                    ambiguo: 0, total: fichas.length };
+
+      /* um passo que NUNCA rejeita: uma pessoa torta nao derruba a
+         conferencia das outras. Ja me custou caro aprender isso. */
+      function pessoa(i) {
+        if (i >= fichas.length) return Promise.resolve();
+        var f = fichas[i];
+        E.lendo = "conferindo " + (i + 1) + " de " + fichas.length + "…";
+        desenhar();
+        function anotarFalha_(e) {
+          saida.naoConferi++;
+          saida.linhas.push({ nome: lp(f.colaborador || f.nome), matricula: lp(f.matricula),
+            situacao: "nao consegui conferir",
+            detalhe: lp(e && (e.message || e)) || "a consulta falhou", passos: 0 });
+        }
+        return new Promise(function (resolve) {
+          try { if (EPIASS.esquecer) EPIASS.esquecer(f); } catch (e) {}
+          /* lerCadastro pode ESTOURAR antes de devolver promessa. Ja
+             me custou a tela de sincronizar no celular: o erro escapa
+             do executor e mata a fila inteira. Aqui nao escapa. */
+          var pr_;
+          try { pr_ = EPIASS.lerCadastro(f, true); }
+          catch (e) { anotarFalha_(e); return resolve(); }
+          if (!pr_ || typeof pr_.then !== "function") {
+            anotarFalha_(new Error("lerCadastro nao devolveu uma consulta"));
+            return resolve();
+          }
+          pr_.then(function (c) {
+            var nome = lp(f.colaborador || f.nome);
+            var mat = lp(f.matricula);
+            var trilha = [];
+            try { trilha = lista_((EPIASS.ultimaBusca && EPIASS.ultimaBusca.trilha) || (c && c.trilha)); }
+            catch (e) { trilha = []; }
+            var incompleta = trilha.some(function (x) { return x && x.resultado === "incompleta"; });
+            var houveErro = trilha.some(function (x) { return x && x.resultado === "erro"; });
+            var temImagem = !!(c && c.tem && c.dados && lp(c.dados.imagem || c.dados.assinatura));
+            var situacao, detalhe;
+
+            if (c && c.ambiguo) {
+              situacao = "nome ambiguo"; saida.ambiguo++;
+              detalhe = "este nome aponta para mais de um cadastro — nao escolho por conta propria";
+            } else if (temImagem) {
+              situacao = "achou"; saida.achou++;
+              detalhe = "gravada em " + lp(c.chave) ;
+            } else if (c && c.ok === false) {
+              situacao = "nao consegui conferir"; saida.naoConferi++;
+              detalhe = lp(c.mensagem) || "a consulta falhou — isto NAO quer dizer que nao assinou";
+            } else if (incompleta || houveErro) {
+              situacao = "nao consegui conferir"; saida.naoConferi++;
+              detalhe = "a busca nao chegou ao fim — nao da para afirmar nada sobre esta pessoa";
+            } else {
+              situacao = "sem rubrica"; saida.semRubrica++;
+              detalhe = "busca terminada e nenhuma rubrica gravada para esta pessoa";
+            }
+
+            saida.linhas.push({ nome: nome, matricula: mat, situacao: situacao,
+                                detalhe: detalhe, passos: trilha.length });
+            resolve();
+          }, function (e) {
+            saida.naoConferi++;
+            saida.linhas.push({ nome: lp(f.colaborador || f.nome), matricula: lp(f.matricula),
+              situacao: "nao consegui conferir",
+              detalhe: lp(e && e.message) || "a consulta falhou", passos: 0 });
+            resolve();
+          })["catch"](function (e) {
+            saida.naoConferi++;
+            saida.linhas.push({ nome: lp(f.colaborador || f.nome), matricula: lp(f.matricula),
+              situacao: "nao consegui conferir",
+              detalhe: lp(e && e.message) || "erro inesperado", passos: 0 });
+            resolve();
+          });
+        })["catch"](function (e) { anotarFalha_(e); })
+          .then(function () { return pessoa(i + 1); });
+      }
+
+      return pessoa(0).then(function () {
+        E.ass = saida; E.passo = "ass-pronto"; E.lendo = ""; E.lidoEm = new Date();
+        desenhar();
+        return saida;
+      });
+    })["catch"](function (e) {
+      E.passo = "erro";
+      E.erro = lp(e && e.message) || "nao consegui conferir as assinaturas";
+      E.lendo = "";
+      desenhar();
+      return null;
+    });
+  };
+
+
+  /* ============================================================
+     2c. AS ASSINATURAS ORFAS                           [ASSORFA]
+     ------------------------------------------------------------
+     O pedido (28/10, itens 3, 7 e 8): descobrir o que a limpeza de
+     duplicados quebrou, e listar os registros encontrados, ausentes
+     e inconsistentes SEM expor as imagens.
+
+     O QUE EU ACHEI NO CODIGO, ANTES DE ESCREVER ISTO
+       A assinatura e guardada pela chave do ID do colaborador
+       (COLAB:<id>). A busca tenta quatro chaves, e a do id sai do
+       cadastro VIVO (EPIASS.quemE). Quando um cadastro duplicado e
+       excluido, a assinatura continua gravada em COLAB:<id antigo> —
+       e nenhuma das quatro chaves alcanca mais aquele endereco.
+       O dado nao foi apagado. O caminho ate ele e que se perdeu.
+
+     O QUE ESTA VARREDURA FAZ
+       Percorre o conjunto de registros, acha os que TEM rubrica e,
+       para cada um, pergunta: o dono deste registro ainda e um
+       cadastro vivo? Separa em:
+         vinculo bom   -> o id existe no cadastro vivo
+         orfa          -> o id NAO existe mais (a rubrica ficou sem dono)
+         religavel     -> orfa cujo nome bate com UM unico cadastro vivo
+         ambigua       -> o nome bate com mais de um cadastro vivo
+         sem identidade-> o registro nao tem nome nem matricula
+
+     O QUE ELA NAO FAZ
+       NAO religa, NAO grava, NAO apaga, NAO escolhe. Enquanto ele
+       nao autorizar, isto e so um vidro. E a imagem da rubrica nunca
+       entra na tela nem em registro nenhum — so o endereco.
+     ============================================================ */
+  var TETO_PAG_ORFA = 60, PRAZO_ORFA = 60000;
+
+  function temRubrica_(d) {
+    if (!d) return false;
+    return !!lp(d.assinatura || d.imagem || d.assinaturaImagem ||
+                d.rubrica || d.assinaturaBase64);
+  }
+
+  /* o cadastro VIVO, do jeito que o proprio EPIASS enxerga */
+  function cadastroVivo_() {
+    var fonte = [];
+    try { fonte = lista_(MOCK.usuarios); } catch (e) { fonte = []; }
+    if (!fonte.length) {
+      try { fonte = lista_(EPIASS.cadastroOficial); } catch (e) { fonte = []; }
+    }
+    var porId = {}, porNome = {}, nomeRepetido = {};
+    fonte.forEach(function (u) {
+      var id = lp(u && u.id);
+      if (id) porId[id] = u;
+      var n = "";
+      try { n = EPIASS.chaveNome(u && (u.nome || u.colaborador)); } catch (e) { n = ""; }
+      if (n) {
+        if (!porNome[n]) porNome[n] = u;
+        else if (lp(porNome[n].id) !== id) nomeRepetido[n] = true;
+      }
+    });
+    return { porId: porId, porNome: porNome, nomeRepetido: nomeRepetido,
+             quantos: fonte.length };
+  }
+
+  E.varrerOrfas = function () {
+    E.erro = ""; E.codigo = ""; E.orfas = null; E.passo = "lendo";
+    E.lendo = "varrendo o deposito de assinaturas…";
+    desenhar();
+
+    if (typeof REPOCLI === "undefined" || !REPOCLI.listar) {
+      E.passo = "erro";
+      E.erro = "o cliente do repositorio [REPOCLI] nao esta nesta versao";
+      desenhar();
+      return Promise.resolve(null);
+    }
+
+    var vivo = cadastroVivo_();
+    var saida = { registros: 0, comRubrica: 0, vinculoBom: 0, orfas: 0,
+                  religaveis: 0, ambiguas: 0, semIdentidade: 0,
+                  ponteiros: 0, linhas: [], parcial: false,
+                  cadastrosVivos: vivo.quantos, paginas: 0 };
+    var cursor = "", comecou = Date.now();
+
+    function classificar(id, d) {
+      var dono = lp(id).indexOf("COLAB:") === 0 ? lp(id).slice(6) : "";
+      var nome = "";
+      try { nome = EPIASS.chaveNome(d && (d.nome || d.colaborador)); } catch (e) { nome = ""; }
+      var mat = lp(d && d.matricula);
+      var quando = lp(d && (d.assinaturaEm || d.cadastradaEm));
+      var base = { chave: lp(id), nome: lp(d && (d.nome || d.colaborador)),
+                   matricula: mat, quando: quando };
+
+      /* A ORDEM IMPORTA: primeiro pergunto se o DONO esta vivo. Se
+         estiver, a rubrica tem caminho — mesmo que o registro nao
+         traga nome. Se nao estiver, ela e orfa, e so DEPOIS eu digo
+         por que nao da para religar. Assim as contas fecham:
+         orfas = religaveis + ambiguas + sem par + sem identidade. */
+      if (dono && vivo.porId[dono]) {
+        saida.vinculoBom++;
+        base.situacao = "vinculo bom";
+        base.detalhe = "o dono deste registro e um cadastro vivo";
+        return base;
+      }
+      saida.orfas++;
+      if (!nome && !mat) {
+        saida.semIdentidade++;
+        base.situacao = "sem identidade";
+        base.detalhe = "o cadastro dono foi excluido e o registro nao tem nome nem " +
+          "matricula — nao da para dizer de quem e, e eu nao vou adivinhar";
+        return base;
+      }
+      if (nome && vivo.nomeRepetido[nome]) {
+        saida.ambiguas++;
+        base.situacao = "orfa ambigua";
+        base.detalhe = "o cadastro dono foi excluido e este nome bate com mais de um " +
+          "cadastro vivo — religar pelo nome poderia dar a rubrica para a pessoa errada";
+        return base;
+      }
+      if (nome && vivo.porNome[nome]) {
+        saida.religaveis++;
+        base.situacao = "orfa religavel";
+        base.detalhe = "o cadastro dono foi excluido, e este nome bate com UM unico " +
+          "cadastro vivo (id " + lp(vivo.porNome[nome].id) + ") — da para religar";
+        return base;
+      }
+      base.situacao = "orfa sem par";
+      base.detalhe = "o cadastro dono foi excluido e o nome nao bate com nenhum " +
+        "cadastro vivo — a rubrica esta guardada, mas sem pessoa para religar";
+      return base;
+    }
+
+    function pagina() {
+      saida.paginas++;
+      if (saida.paginas > TETO_PAG_ORFA || Date.now() - comecou > PRAZO_ORFA) {
+        saida.parcial = true;
+        return Promise.resolve();
+      }
+      E.lendo = "varrendo o deposito — pagina " + saida.paginas + "…";
+      desenhar();
+      var pr = { tamanhoPagina: 50 };
+      if (cursor) pr.cursor = cursor;
+      return Promise.resolve(REPOCLI.listar("usuarios", pr)).then(function (r) {
+        if (!r || !r.ok) {
+          throw new Error(lp(r && (r.mensagem || r.codigo)) ||
+            "nao consegui listar o conjunto de registros");
+        }
+        lista_(r.dados).forEach(function (linha) {
+          var id = lp(linha && linha.id);
+          if (!id) return;
+          if (id.indexOf("COLABNOME:") === 0) { saida.ponteiros++; return; }
+          if (id.indexOf("COLAB:") !== 0) return;
+          saida.registros++;
+          var d = linha && linha.dados;
+          if (!temRubrica_(d)) return;
+          saida.comRubrica++;
+          if (saida.linhas.length < 300) saida.linhas.push(classificar(id, d));
+        });
+        cursor = lp(r.cursor || r.proximo || (r.pagina && r.pagina.cursor));
+        if (!cursor) return;
+        return pagina();
+      });
+    }
+
+    return pagina().then(function () {
+      E.orfas = saida; E.passo = "orfa-pronto"; E.lendo = ""; E.lidoEm = new Date();
+      desenhar();
+      return saida;
+    })["catch"](function (e) {
+      E.passo = "erro";
+      E.erro = lp(e && e.message) || "nao consegui varrer o deposito";
+      E.lendo = "";
+      desenhar();
+      return null;
+    });
+  };
+
+  /* ============================================================
+     3. A TELA
+     ============================================================ */
+  function cartao_(rotulo, valor, explica) {
+    return '<div class="card"><div class="card-body" style="padding:12px">' +
+      '<div class="muted small">' + esc_(rotulo) + "</div>" +
+      '<div style="font-size:22px;font-weight:700;margin-top:2px">' + esc_(valor) + "</div>" +
+      (explica ? '<div class="muted small mt8">' + esc_(explica) + "</div>" : "") +
+      "</div></div>";
+  }
+
+  function veredito_() {
+    var c = E.contagem, k = E.core;
+    if (!c) return "";
+    var naPlanilha = c.total;
+    if (!k || !k.ok) {
+      return '<div class="alert ' + (naPlanilha ? "a-yellow" : "a-red") + ' mt16">' + ic("info") +
+        "<div><b>" + (naPlanilha
+          ? "As linhas estão na planilha. O Core é que não respondeu."
+          : "O Core não respondeu e a aba lida está vazia.") + "</b>" +
+        (naPlanilha
+          ? "A planilha devolveu " + naPlanilha + " linha(s) nesta aba. O dado está " +
+            "guardado; o que falhou foi a consulta do sistema. Motivo do Core: " +
+            esc_(k && k.motivo) + "."
+          : "Com o Core fora, não dá para concluir nada sobre as fichas por este caminho. " +
+            "Confira se a aba escolhida é mesmo a das fichas.") +
+        "</div></div>";
+    }
+    if (naPlanilha > 0 && k.fichas === 0) {
+      return '<div class="alert a-yellow mt16">' + ic("alerta") +
+        "<div><b>Os dados existem. Quem não está enxergando é o sistema.</b>" +
+        "A planilha tem " + naPlanilha + " linha(s) nesta aba e o Core devolveu 0 ficha. " +
+        "Isto é defeito de leitura, não perda de dado. Nada foi apagado.</div></div>";
+    }
+    if (naPlanilha === 0) {
+      return '<div class="alert a-red mt16">' + ic("alerta") +
+        "<div><b>Esta aba está vazia.</b>" +
+        "Se esta é mesmo a aba das fichas, o dado não está aqui — e isso precisa ser " +
+        "investigado na origem, no histórico de versões da própria planilha " +
+        "(Arquivo › Histórico de versões, no Google Sheets). Confira antes se você " +
+        "escolheu a aba certa.</div></div>";
+    }
+    return '<div class="alert a-green mt16">' + ic("checkC") +
+      "<div><b>A planilha e o Core estão conversando.</b>" +
+      "Planilha: " + naPlanilha + " linha(s). Core: " + k.fichas + " ficha(s), " +
+      k.itens + " item(ns). Diferença entre os dois é esperada quando há linhas " +
+      "excluídas ou devolvidas — a exclusão aqui é lógica: a linha continua na " +
+      "planilha, só muda a situação.</div></div>";
+  }
+
+  function desenhar() {
+    var caixa = document.getElementById("existemCorpo");
+    if (!caixa) return;
+
+    var html = "";
+
+    if (E.passo === "inicio") {
+      html = '<p>Esta tela lê a <b>planilha direto</b> e compara com o que o sistema ' +
+        'devolve. Ela <b>não grava, não apaga e não corrige nada</b> — só mostra.</p>' +
+        '<div class="flex gap8 mt12" style="flex-wrap:wrap">' +
+        '<button class="btn btn-primary" data-ex-ass>' + ic("escudo") +
+        "As assinaturas estão sendo puxadas?</button>" +
+        '<button class="btn btn-ghost" data-ex-abas>' + ic("banco") +
+        "As fichas estão na planilha?</button>" +
+        '<button class="btn btn-ghost" data-ex-orfa>' + ic("alerta") +
+        "Tem assinatura órfã?</button></div>";
+    } else if (E.passo === "lendo-abas" || E.passo === "lendo") {
+      html = '<div class="alert a-blue">' + ic("info") + "<div>" + esc_(E.lendo) + "</div></div>";
+    } else if (E.passo === "erro") {
+      html = '<div class="alert a-red">' + ic("alerta") + "<div><b>Não consegui ler.</b>" +
+        esc_(E.erro) + (E.codigo ? " (" + esc_(E.codigo) + ")" : "") +
+        "<br><b>Isto não quer dizer que as fichas sumiram.</b> Uma falha de " +
+        "comunicação não é prova de que o dado não existe." +
+        '<button class="btn btn-ghost mt8" data-ex-abas>Tentar de novo</button></div></div>';
+    } else if (E.passo === "escolher") {
+      var linhas = E.abas.map(function (a) {
+        var nome = nomeDaAba_(a);
+        var n = (typeof a.registros === "number") ? a.registros : null;
+        var destaque = /EPI|FICHA/i.test(nome);
+        return "<tr" + (destaque ? ' style="background:rgba(27,76,138,.06)"' : "") + ">" +
+          "<td><b>" + esc_(nome) + "</b>" +
+          (destaque ? ' <span class="badge b-blue">parece ser das fichas</span>' : "") + "</td>" +
+          "<td>" + (n === null ? "—" : esc_(String(n)) + " linha(s)") + "</td>" +
+          '<td><button class="btn btn-ghost btn-sm" data-ex-conferir="' + esc_(nome) +
+          '">Conferir esta</button></td></tr>';
+      }).join("");
+      html = "<p>A planilha respondeu. Estas são as abas que ela tem <b>agora</b>, " +
+        "com o número de linhas de cada uma. Escolha a das fichas de EPI:</p>" +
+        '<div class="tabela-wrap mt12"><table class="tabela"><thead><tr>' +
+        "<th>Aba</th><th>Linhas</th><th></th></tr></thead><tbody>" +
+        (linhas || '<tr><td colspan="3">A planilha não devolveu nenhuma aba.</td></tr>') +
+        "</tbody></table></div>";
+    } else if (E.passo === "orfa-pronto") {
+      var o = E.orfas;
+      var cor_ = function (s) {
+        return s === "vinculo bom" ? "b-green"
+             : s === "orfa religavel" ? "b-yellow"
+             : s === "orfa ambigua" ? "b-red" : "b-gray";
+      };
+      var ordem_ = { "orfa religavel": 0, "orfa ambigua": 1, "orfa sem par": 2,
+                     "sem identidade": 3, "vinculo bom": 4 };
+      var lin = o.linhas.slice().sort(function (a, b) {
+        return (ordem_[a.situacao] || 9) - (ordem_[b.situacao] || 9);
+      }).map(function (x) {
+        return "<tr><td><b>" + esc_(x.nome || "(sem nome no registro)") + "</b>" +
+          (x.matricula ? '<br><span class="muted small">' + esc_(x.matricula) + "</span>" : "") +
+          '</td><td><span class="badge ' + cor_(x.situacao) + '">' + esc_(x.situacao) +
+          "</span></td><td><code class=\"small\">" + esc_(x.chave) + "</code>" +
+          (x.quando ? '<br><span class="muted small">' + esc_(x.quando) + "</span>" : "") +
+          "</td><td>" + esc_(x.detalhe) + "</td></tr>";
+      }).join("");
+      html =
+        '<div style="display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">' +
+          cartao_("Registros varridos", String(o.registros) + (o.parcial ? "+" : ""),
+            o.paginas + " pagina(s)" + (o.parcial ? " — parei no teto, resultado PARCIAL" : "")) +
+          cartao_("Com rubrica gravada", String(o.comRubrica), "estes sao os que importam") +
+          cartao_("Vinculo bom", String(o.vinculoBom), "o dono ainda e cadastro vivo") +
+          cartao_("Orfas", String(o.orfas), "o cadastro dono foi excluido") +
+          cartao_("Da para religar", String(o.religaveis), "o nome bate com UM cadastro vivo") +
+          cartao_("Ambiguas", String(o.ambiguas), "o nome bate com mais de um — nao mexo") +
+          cartao_("Sem identidade", String(o.semIdentidade),
+            "orfa sem nome e sem matricula no registro") +
+          cartao_("Bilhetes de nome", String(o.ponteiros), "atalhos COLABNOME ja gravados") +
+          cartao_("Cadastros vivos", String(o.cadastrosVivos), "lista que o sistema esta usando agora") +
+        "</div>" +
+        (o.comRubrica === 0
+          ? '<div class="alert a-yellow mt16">' + ic("alerta") +
+            "<div><b>Nenhum registro com rubrica foi encontrado nesta varredura.</b>" +
+            "Isto pode ser deposito realmente vazio OU varredura que nao alcancou os " +
+            "registros certos" + (o.parcial ? " (ela saiu PARCIAL)" : "") + ". " +
+            "Nao concluo ausencia a partir disto.</div></div>"
+          : o.orfas > 0
+            ? '<div class="alert a-yellow mt16">' + ic("alerta") +
+              "<div><b>" + o.orfas + " rubrica(s) estao gravadas e sem dono.</b>" +
+              "Elas NAO foram apagadas: o cadastro que carregava o id delas foi excluido, " +
+              "e por isso a ficha nao as alcanca mais. " +
+              (o.religaveis ? o.religaveis + " dela(s) da(o) para religar pelo nome, com " +
+                "uma correspondencia unica. " : "") +
+              (o.ambiguas ? o.ambiguas + " tem nome repetido e NAO podem ser religadas " +
+                "automaticamente — rubrica da pessoa errada e pior que ficha sem rubrica. " : "") +
+              "<b>Nada sera religado sem a sua autorizacao.</b></div></div>"
+            : '<div class="alert a-green mt16">' + ic("checkC") +
+              "<div><b>Nenhuma rubrica orfa.</b>" +
+              "Todas as " + o.comRubrica + " rubrica(s) encontradas tem dono vivo. Se alguma " +
+              "ficha ainda nao mostra assinatura, o problema esta na consulta, nao no vinculo." +
+              "</div></div>") +
+        (lin ? '<h4 class="mt16">Registro por registro</h4>' +
+          '<p class="muted small">Ordenado pelo que precisa de atencao primeiro. ' +
+          'A imagem da rubrica nao aparece — so o endereco onde ela esta.</p>' +
+          '<div class="tabela-wrap"><table class="tabela"><thead><tr>' +
+          "<th>Pessoa no registro</th><th>Situacao</th><th>Endereco</th><th>Por que</th>" +
+          "</tr></thead><tbody>" + lin + "</tbody></table></div>" +
+          (o.comRubrica > o.linhas.length
+            ? '<p class="muted small">mostrando ' + o.linhas.length + ' de ' + o.comRubrica + '.</p>'
+            : "")
+          : "") +
+        '<p class="muted small mt12">Esta varredura e SOMENTE LEITURA. Nada foi gravado, ' +
+        'religado ou apagado. Lido em ' +
+        esc_(E.lidoEm ? E.lidoEm.toLocaleString("pt-BR") : "") + '.</p>' +
+        '<button class="btn btn-ghost mt12" data-ex-orfa>Varrer de novo</button>' +
+        '<button class="btn btn-ghost mt12" data-ex-ass>Conferir pessoa por pessoa</button>';
+    } else if (E.passo === "ass-pronto") {
+      var a = E.ass;
+      var corDa_ = function (s) {
+        return s === "achou" ? "b-green"
+             : s === "sem rubrica" ? "b-gray"
+             : s === "nome ambiguo" ? "b-yellow" : "b-red";
+      };
+      var linhasAss = a.linhas.map(function (x) {
+        return "<tr><td><b>" + esc_(x.nome) + "</b>" +
+          (x.matricula ? '<br><span class="muted small">' + esc_(x.matricula) + "</span>" : "") +
+          '</td><td><span class="badge ' + corDa_(x.situacao) + '">' + esc_(x.situacao) +
+          "</span></td><td>" + esc_(x.detalhe) + "</td></tr>";
+      }).join("");
+      html =
+        '<div style="display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">' +
+          cartao_("Achou a rubrica", String(a.achou), "de " + a.total + " pessoa(s) conferida(s)") +
+          cartao_("Nao consegui conferir", String(a.naoConferi),
+            "consulta falhou ou nao terminou — NAO quer dizer que nao assinou") +
+          cartao_("Sem rubrica", String(a.semRubrica), "busca terminada, nada gravado") +
+          cartao_("Nome ambiguo", String(a.ambiguo), "mais de um cadastro com o mesmo nome") +
+        "</div>" +
+        (a.achou === 0 && a.naoConferi > 0
+          ? '<div class="alert a-red mt16">' + ic("alerta") +
+            "<div><b>Nao estou conseguindo nem consultar.</b>" +
+            "Nenhuma rubrica foi conferida porque as consultas nao terminaram. " +
+            "Isto e falha de comunicacao com o servidor — nao e prova de que as " +
+            "assinaturas nao existem.</div></div>"
+          : a.achou === 0 && a.semRubrica === a.total
+            ? '<div class="alert a-yellow mt16">' + ic("alerta") +
+              "<div><b>As consultas terminaram e nao acharam rubrica para ninguem.</b>" +
+              "Se voce sabe que estas pessoas assinaram no aplicativo de campo, entao o " +
+              "vinculo entre a assinatura e o cadastro e que se perdeu — rode a " +
+              "<b>Sincronizar assinaturas</b> no ALMOXA CAMPO e confira aqui de novo.</div></div>"
+            : a.achou > 0
+              ? '<div class="alert a-green mt16">' + ic("checkC") +
+                "<div><b>O sistema esta puxando as assinaturas.</b>" +
+                "Achou " + a.achou + " de " + a.total + " conferida(s). Onde cada uma esta " +
+                "gravada aparece na tabela abaixo.</div></div>"
+              : "") +
+        '<h4 class="mt16">Pessoa por pessoa</h4>' +
+        '<div class="tabela-wrap"><table class="tabela"><thead><tr>' +
+        "<th>Pessoa</th><th>Resultado</th><th>Onde / por que</th>" +
+        "</tr></thead><tbody>" + linhasAss + "</tbody></table></div>" +
+        '<p class="muted small mt12">A imagem da assinatura nao e mostrada nem registrada ' +
+        'aqui — so o endereco onde ela esta gravada. Lido em ' +
+        esc_(E.lidoEm ? E.lidoEm.toLocaleString("pt-BR") : "") + '. Nenhuma gravacao foi feita.</p>' +
+        '<button class="btn btn-ghost mt12" data-ex-ass>Conferir de novo</button>' +
+        '<button class="btn btn-ghost mt12" data-ex-abas>Conferir as fichas na planilha</button>';
+    } else if (E.passo === "pronto") {
+      var c = E.contagem, k = E.core;
+      var sit = Object.keys(c.porSituacao).sort(function (a, b) {
+        return c.porSituacao[b] - c.porSituacao[a];
+      }).map(function (s) {
+        return "<tr><td>" + esc_(s) + "</td><td><b>" + c.porSituacao[s] + "</b></td></tr>";
+      }).join("");
+      html =
+        '<div style="display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">' +
+          cartao_("Na planilha", c.total + (c.parcial ? "+" : ""),
+            "linhas lidas na aba " + E.aba + (c.parcial ? " (parcial: parei no teto de páginas)" : "")) +
+          cartao_("O Core devolveu", (k && k.ok) ? String(k.fichas) : "—",
+            (k && k.ok) ? "ficha(s), com " + k.itens + " item(ns)" : "o Core não respondeu") +
+          cartao_("Coluna de situação", c.colunaSituacao || "não achei",
+            c.colunaSituacao ? "achada pelo cabeçalho, não presumida"
+                             : "sem coluna de situação, não dá para separar excluídas") +
+        "</div>" +
+        veredito_() +
+        (sit ? '<h4 class="mt16">Linhas por situação</h4>' +
+          '<div class="tabela-wrap"><table class="tabela"><thead><tr>' +
+          "<th>Situação</th><th>Linhas</th></tr></thead><tbody>" + sit + "</tbody></table></div>" : "") +
+        '<p class="muted small mt12">Lido em ' +
+        esc_(E.lidoEm ? E.lidoEm.toLocaleString("pt-BR") : "") + " · " + E.paginasLidas +
+        " página(s) · aba " + esc_(E.aba) + ". Nenhuma gravação foi feita.</p>" +
+        '<button class="btn btn-ghost mt12" data-ex-abas>Conferir outra aba</button>';
+    }
+
+    caixa.innerHTML = html;
+    ligar_();
+  }
+
+  function ligar_() {
+    var b = document.querySelector("[data-ex-abas]");
+    if (b) b.addEventListener("click", function () { E.carregarAbas(); });
+    var ba = document.querySelector("[data-ex-ass]");
+    if (ba) ba.addEventListener("click", function () { E.conferirAssinaturas(); });
+    var bo = document.querySelector("[data-ex-orfa]");
+    if (bo) bo.addEventListener("click", function () { E.varrerOrfas(); });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-ex-conferir]"), function (x) {
+      x.addEventListener("click", function () {
+        E.conferir(x.getAttribute("data-ex-conferir"));
+      });
+    });
+  }
+
+  E.abrir = function () {
+    E.passo = "inicio"; E.erro = ""; E.codigo = ""; E.contagem = null;
+    E.core = null; E.aba = ""; E.abas = []; E.lendo = ""; E.ass = null; E.orfas = null;
+    /* UI.modal e o helper exportado; "modal" solto vive dentro de um
+       fechamento e nao se enxerga daqui. Descobri isso testando — nao
+       presumindo. */
+    var janela_ = (typeof UI !== "undefined" && UI.modal) ? UI.modal
+                : (typeof modal === "function" ? modal : null);
+    if (!janela_) {
+      if (typeof toast === "function") toast("warn", "Sem janela", "nao achei o helper de modal nesta versao.");
+      return null;
+    }
+    var m = janela_({
+      titulo: "As fichas de EPI ainda existem?",
+      sub: "Leitura direta da planilha. Esta tela não grava nem apaga nada.",
+      tamanho: "grande",
+      corpo: '<div id="existemCorpo"></div>'
+    });
+    desenhar();
+    return m;
+  };
+
+  E.diagnostico = function () {
+    return { passo: E.passo, aba: E.aba, erro: E.erro, codigo: E.codigo,
+             total: E.contagem && E.contagem.total, core: E.core,
+             orfas: E.orfas && { registros: E.orfas.registros, comRubrica: E.orfas.comRubrica,
+               vinculoBom: E.orfas.vinculoBom, orfas: E.orfas.orfas,
+               religaveis: E.orfas.religaveis, ambiguas: E.orfas.ambiguas },
+             paginasLidas: E.paginasLidas };
+  };
+
+})();
+</script>
+
+<script>
+/* ############################################################
+ * MATRICULA ANTERIOR — OS DOIS NUMEROS, A MESMA PESSOA
+ *                                          busca: [MATANT]
+ * ------------------------------------------------------------
+ * O PEDIDO (28/10 16:12)
+ *   "meu nome e Ismael, ele esta vinculado na matricula anterior
+ *    011 e agora a matricula no sistema e 482. Entao ele tem que
+ *    vincular os dois para os dois conversarem. E por isso que nao
+ *    esta conversando: muita gente esta cadastrada no aplicativo
+ *    com outra matricula."
+ *
+ * POR QUE ISTO FALTAVA
+ *   A troca de matricula ja existia — mas ela so mandava o numero
+ *   velho ao servidor para ele ACHAR a linha na hora de gravar.
+ *   Depois da troca, o numero velho sumia. Tudo que foi registrado
+ *   com ele (ficha de EPI, assinatura, entrega) ficava orfao, do
+ *   mesmo jeito que a rubrica fica orfa quando o id muda.
+ *
+ * COMO ISTO GUARDA — e por que NAO precisa de coluna nova
+ *   O sistema ja tem um mecanismo de bilhete: COLABNOME:<NOME>
+ *   nao guarda nada, so diz onde a pessoa mora. Faco igual para a
+ *   matricula: COLABMAT:<numero antigo> aponta para COLAB:<id>.
+ *   Mesmo conjunto, mesmo padrao, mesma leitura. Nenhuma coluna
+ *   nova na planilha, nenhum banco paralelo, nenhuma tabela nova.
+ *
+ * O QUE ELE NAO FAZ
+ *   NAO apaga a matricula atual. NAO altera a ficha de ninguem.
+ *   NAO junta duas pessoas por palpite: se o numero antigo ja
+ *   aponta para OUTRO cadastro, ele recusa e mostra os dois para
+ *   uma pessoa decidir. Numero de matricula reaproveitado entre
+ *   dois funcionarios existe, e carimbar a ficha de um no outro
+ *   seria pior do que ficha nenhuma.
+ *   E NAO escreve senha, imagem nem dado pessoal no bilhete: so o
+ *   endereco e o nome, para a tela poder mostrar de quem e.
+ * ############################################################ */
+(function matriculaAnterior() {
+
+  var M = { indice: null, carregando: null, erro: "", ultima: null };
+  try { window.MATANT = M; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(v) { return (typeof U !== "undefined" && U.esc) ? U.esc(v) : lp(v); }
+
+  /* a MESMA conta que o resto do sistema usa. Se mudar la, muda aqui. */
+  M.chave = function (v) {
+    if (typeof EPIASS !== "undefined" && EPIASS.chaveMatricula) return EPIASS.chaveMatricula(v);
+    return lp(v).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+  };
+  M.enderecoDe = function (matricula) {
+    var k = M.chave(matricula);
+    return k ? "COLABMAT:" + k : "";
+  };
+
+  /* ============================================================
+     LER OS BILHETES QUE JA EXISTEM
+     ============================================================ */
+  M.carregar = function (forcar) {
+    if (M.indice && !forcar) return Promise.resolve(M.indice);
+    if (M.carregando && !forcar) return M.carregando;
+    if (typeof REPOCLI === "undefined" || !REPOCLI.listar) {
+      M.erro = "o repositorio nao esta nesta versao";
+      return Promise.resolve(null);
+    }
+    var ix = { porMat: {}, quantos: 0, completo: true, em: new Date() };
+    var cursor = "", paginas = 0;
+    function pagina() {
+      paginas++;
+      if (paginas > 60) { ix.completo = false; return Promise.resolve(); }
+      var pr = { tamanhoPagina: 50 };
+      if (cursor) pr.cursor = cursor;
+      return Promise.resolve(REPOCLI.listar("usuarios", pr)).then(function (r) {
+        if (!r || !r.ok) {
+          ix.completo = false;
+          M.erro = lp(r && (r.mensagem || r.codigo)) || "nao consegui listar";
+          return;
+        }
+        lista_(r.dados).forEach(function (linha) {
+          var id = lp(linha && linha.id);
+          if (id.indexOf("COLABMAT:") !== 0) return;
+          var d = linha && linha.dados;
+          if (!d) return;
+          ix.porMat[id.slice(9)] = {
+            aponta: lp(d.aponta), nome: lp(d.nome), ambiguo: !!d.ambiguo,
+            conflitos: lista_(d.conflitos), criadoEm: lp(d.criadoEm)
+          };
+          ix.quantos++;
+        });
+        cursor = lp(r.cursor || r.proximo || (r.pagina && r.pagina.cursor));
+        if (!cursor) return;
+        return pagina();
+      });
+    }
+    M.carregando = pagina().then(function () {
+      M.indice = ix; M.carregando = null;
+      return ix;
+    }, function (e) {
+      M.carregando = null; M.erro = lp(e && e.message);
+      return null;
+    });
+    return M.carregando;
+  };
+
+  /* ============================================================
+     RESOLVER: este numero antigo e de quem?
+     Devolve "" quando nao sabe — e "" NUNCA e palpite.
+     ============================================================ */
+  M.resolver = function (matricula) {
+    var k = M.chave(matricula);
+    if (!k || !M.indice) return "";
+    var b = M.indice.porMat[k];
+    if (!b || b.ambiguo) return "";
+    var ap = lp(b.aponta);
+    return ap.indexOf("COLAB:") === 0 ? ap.slice(6) : ap;
+  };
+
+  /* ============================================================
+     LIGAR os dois numeros
+     ============================================================ */
+  M.ligar = function (pessoa, matriculaAntiga) {
+    var id = lp(pessoa && pessoa.id);
+    var nome = lp(pessoa && (pessoa.nome || pessoa.colaborador));
+    var k = M.chave(matriculaAntiga);
+    var atual = M.chave(pessoa && pessoa.matricula);
+    M.ultima = { de: k, para: id, quando: new Date().toISOString(), resultado: "" };
+
+    if (!id) {
+      return Promise.resolve({ ok: false, codigo: "SEM_ID",
+        mensagem: "este cadastro nao tem id — nao ha para onde apontar" });
+    }
+    if (!k) {
+      return Promise.resolve({ ok: false, codigo: "SEM_MATRICULA",
+        mensagem: "digite a matricula antiga" });
+    }
+    if (k === atual) {
+      return Promise.resolve({ ok: false, codigo: "MESMA_MATRICULA",
+        mensagem: "esse numero ja e a matricula atual desta pessoa — nao ha o que ligar" });
+    }
+    if (typeof REPOCLI === "undefined" || !REPOCLI.ler) {
+      return Promise.resolve({ ok: false, codigo: "SEM_REPOSITORIO",
+        mensagem: "o repositorio nao esta nesta versao" });
+    }
+
+    var endereco = M.enderecoDe(k);
+    return Promise.resolve(REPOCLI.ler("usuarios", endereco)).then(function (r) {
+      /* a leitura devolve o ENVELOPE: r.dados e o registro, e dentro
+         dele vem .dados (o conteudo) e .versao. Confirmei o formato
+         no proprio EPIASS, que grava assim — nao presumi. */
+      var env = (r && r.ok) ? r.dados : null;
+      var versaoLida = env && env.versao;
+      var jaTem = env ? (env.dados || env) : null;
+      if (jaTem) {
+        var apontaPara = lp(jaTem.aponta);
+        if (apontaPara === "COLAB:" + id) {
+          M.ultima.resultado = "ja estava ligado";
+          return { ok: true, jaEstava: true,
+            mensagem: "esses dois numeros ja estavam ligados — nao mudei nada" };
+        }
+        if (apontaPara && apontaPara !== "COLAB:" + id) {
+          /* NAO escolho. Matricula reaproveitada entre dois
+             funcionarios existe, e carimbar a ficha de um no outro
+             e pior do que ficha nenhuma. */
+          M.ultima.resultado = "conflito";
+          return { ok: false, codigo: "JA_E_DE_OUTRO",
+            mensagem: "a matricula " + matriculaAntiga + " ja esta ligada a outro cadastro (" +
+              (lp(jaTem.nome) || apontaPara) + "). Nao vou trocar por conta propria: " +
+              "se o numero foi reaproveitado, quem decide e uma pessoa.",
+            conflito: { aponta: apontaPara, nome: lp(jaTem.nome) } };
+        }
+      }
+      var bilhete = {
+        tipo: "PONTEIRO_DE_MATRICULA",
+        aponta: "COLAB:" + id,
+        nome: nome,
+        matriculaAtual: atual,
+        criadoEm: new Date().toISOString()
+      };
+      /* a MESMA forma que o EPIASS usa: criar leva o id nas opcoes,
+         atualizar leva a versao lida (e assim o servidor recusa se
+         alguem mexeu no meio). */
+      var gravar = versaoLida
+        ? REPOCLI.atualizar("usuarios", endereco, bilhete, versaoLida)
+        : REPOCLI.criar("usuarios", bilhete, { id: endereco, modulo: "usuarios" });
+      return Promise.resolve(gravar).then(function (g) {
+        if (!g || !g.ok) {
+          M.ultima.resultado = "nao gravou";
+          return { ok: false, codigo: lp(g && g.codigo) || "NAO_GRAVOU",
+            mensagem: lp(g && g.mensagem) || "o servidor nao confirmou a gravacao" };
+        }
+        M.ultima.resultado = "ligado";
+        if (M.indice) {
+          M.indice.porMat[k] = { aponta: "COLAB:" + id, nome: nome, ambiguo: false,
+                                 conflitos: [], criadoEm: bilhete.criadoEm };
+          M.indice.quantos++;
+        }
+        return { ok: true, mensagem: "os dois numeros agora apontam para a mesma pessoa" };
+      });
+    }, function (e) {
+      return { ok: false, codigo: "EXCECAO", mensagem: lp(e && e.message) };
+    });
+  };
+
+  M.desligar = function (matriculaAntiga) {
+    var k = M.chave(matriculaAntiga);
+    if (!k) return Promise.resolve({ ok: false, codigo: "SEM_MATRICULA" });
+    if (typeof REPOCLI === "undefined" || !REPOCLI.excluir) {
+      return Promise.resolve({ ok: false, codigo: "SEM_REPOSITORIO" });
+    }
+    return Promise.resolve(REPOCLI.excluir("usuarios", M.enderecoDe(k))).then(function (r) {
+      if (r && r.ok && M.indice) { delete M.indice.porMat[k]; M.indice.quantos--; }
+      return r || { ok: false };
+    });
+  };
+
+  /* ============================================================
+     O ENXERTO NA BUSCA DE IDENTIDADE
+     ------------------------------------------------------------
+     EPIASS.quemE procura a pessoa no cadastro vivo pela matricula.
+     Com o numero velho ele nao acha ninguem. Aqui eu acrescento UM
+     passo, depois de todos os outros falharem: se houver bilhete
+     para aquele numero, uso o id dele.
+
+     A regra de ambiguidade continua mandando: quando quemE ja
+     devolveu "ambiguo", eu NAO desempato por bilhete.
+     ============================================================ */
+  /* todos os numeros antigos ligados a esta pessoa */
+  M.anterioresDe = function (id) {
+    var alvo = lp(id);
+    if (!alvo || !M.indice) return [];
+    var fora = [];
+    Object.keys(M.indice.porMat).forEach(function (k) {
+      var b = M.indice.porMat[k];
+      if (!b || b.ambiguo) return;
+      if (lp(b.aponta) === "COLAB:" + alvo) fora.push(k);
+    });
+    return fora;
+  };
+
+  M.enxertar = function () {
+    if (typeof EPIASS === "undefined" || !EPIASS.quemE) return false;
+    if (EPIASS.__quemE_original) return true;      /* ja enxertado */
+    EPIASS.__quemE_original = EPIASS.quemE;
+    EPIASS.quemE = function (f) {
+      var r = EPIASS.__quemE_original.call(EPIASS, f);
+      if (r && r.id) return r;
+      if (r && r.ambiguo) return r;                /* ambiguo continua ambiguo */
+      var alvo = M.resolver(f && (f.matricula || f.chave));
+      if (!alvo) return r;
+      var usuario = null;
+      try {
+        usuario = lista_(MOCK.usuarios).filter(function (u) {
+          return lp(u.id) === alvo;
+        })[0] || null;
+      } catch (e) { usuario = null; }
+      return { id: alvo, usuario: usuario, por: "matricula anterior" };
+    };
+
+    /* ----------------------------------------------------------
+       O SEGUNDO ENXERTO, E ELE E O QUE FALTAVA DE VERDADE.
+
+       O aplicativo de campo, quando a pessoa NAO tem id no cadastro,
+       grava a rubrica em COLAB:MAT:<matricula> — conferi no proprio
+       arquivo do aplicativo (idDoColaborador). Entao a rubrica de
+       quem assinou com o numero velho mora em COLAB:MAT:011.
+
+       O computador monta as chaves a partir da matricula DE HOJE, e
+       procura COLAB:MAT:482. Nunca acha. Ligar os dois numeros nao
+       bastava: eu precisava tambem PROCURAR no endereco velho.
+
+       Por isso o aplicativo de campo nao precisa de versao nova: a
+       rubrica dele ja esta gravada no lugar certo. Quem nao estava
+       olhando no lugar certo era o computador.
+       ---------------------------------------------------------- */
+    if (EPIASS.chavesPossiveis && !EPIASS.__chaves_original) {
+      EPIASS.__chaves_original = EPIASS.chavesPossiveis;
+      EPIASS.chavesPossiveis = function (f) {
+        var lista = EPIASS.__chaves_original.call(EPIASS, f) || [];
+        try {
+          var visto = {};
+          lista.forEach(function (x) { visto[x.chave] = 1; });
+          /* os numeros antigos da pessoa desta ficha */
+          var id = "";
+          try { id = lp(EPIASS.__quemE_original.call(EPIASS, f).id); } catch (e) { id = ""; }
+          if (!id) id = lp(f && (f.idColaborador || f.usuarioId));
+          var velhos = M.anterioresDe(id);
+          /* e, se a propria matricula da ficha for um numero antigo,
+             o endereco dela tambem vale */
+          var k = M.chave(f && (f.matricula || f.chave));
+          if (k && M.indice && M.indice.porMat[k] && velhos.indexOf(k) === -1) velhos.push(k);
+          velhos.forEach(function (m) {
+            var c = "COLAB:MAT:" + m;
+            if (!visto[c]) { visto[c] = 1; lista.push({ chave: c, origem: "matricula anterior " + m }); }
+          });
+        } catch (e) {}
+        return lista;
+      };
+    }
+    return true;
+  };
+
+  /* ============================================================
+     A TELA
+     ============================================================ */
+  M.abrir = function (pessoa) {
+    var u = pessoa || {};
+    var janela_ = (typeof UI !== "undefined" && UI.modal) ? UI.modal : null;
+    if (!janela_) { if (typeof toast === "function") toast("warn", "Sem janela", "nao achei o modal"); return null; }
+
+    janela_({
+      titulo: "Matrícula anterior",
+      sub: lp(u.nome || u.colaborador) + (u.matricula ? " · hoje é " + u.matricula : ""),
+      tamanho: "sm",
+      corpo:
+        '<div class="alert a-blue mb16">' + ic("info") +
+        "<div>Quem trocou de matrícula fica com duas: a antiga, que está nas fichas e " +
+        "assinaturas antigas, e a de hoje. Ligando as duas, <b>os dois números passam a " +
+        "achar a mesma pessoa</b> — sem apagar nem mudar nada do que já existe.</div></div>" +
+        '<div class="field"><label>Matrícula antiga <span class="req">*</span></label>' +
+        '<input class="input" id="maNum" placeholder="o número que esta pessoa tinha antes"></div>' +
+        '<div id="maLista" class="mt12"></div>' +
+        '<div id="maErro"></div>',
+      rodape: '<button class="btn btn-primary btn-block" data-ok>' + ic("vinculo") +
+              "Ligar as duas</button>",
+      aoAbrir: function (w, fechar) {
+        var cx = w.querySelector("#maLista");
+        var erro = w.querySelector("#maErro");
+        function dizer(t, cor) {
+          erro.innerHTML = '<div class="alert ' + (cor || "a-red") + ' mt12">' +
+            ic(cor === "a-green" ? "checkC" : "alerta") + "<div>" + esc_(t) + "</div></div>";
+        }
+        function pintarLista() {
+          if (!M.indice) { cx.innerHTML = ""; return; }
+          var minhas = [];
+          Object.keys(M.indice.porMat).forEach(function (k) {
+            var b = M.indice.porMat[k];
+            if (lp(b.aponta) === "COLAB:" + lp(u.id)) minhas.push(k);
+          });
+          cx.innerHTML = minhas.length
+            ? '<div class="alert a-gray">' + ic("info") + "<div><b>Já ligadas a esta pessoa:</b> " +
+              esc_(minhas.join(", ")) + "</div></div>"
+            : "";
+        }
+        M.carregar().then(pintarLista, function () {});
+
+        w.querySelector("[data-ok]").addEventListener("click", function () {
+          var num = w.querySelector("#maNum").value;
+          if (!lp(num)) { dizer("Digite a matrícula antiga."); return; }
+          var bt = w.querySelector("[data-ok]");
+          bt.disabled = true;
+          M.ligar(u, num).then(function (r) {
+            bt.disabled = false;
+            if (!r || !r.ok) { dizer((r && r.mensagem) || "não gravei"); return; }
+            if (r.jaEstava) { dizer(r.mensagem, "a-green"); pintarLista(); return; }
+            pintarLista();
+            fechar();
+            if (typeof toast === "function") {
+              toast("ok", "Matrículas ligadas",
+                "Agora " + lp(num) + " e " + lp(u.matricula) + " acham a mesma pessoa.");
+            }
+          }, function (e) {
+            bt.disabled = false;
+            dizer(lp(e && e.message) || "não consegui falar com o servidor");
+          });
+        });
+      }
+    });
+  };
+
+  /* liga o enxerto assim que o EPIASS existir, e carrega os
+     bilhetes uma vez, sem travar nada se falhar */
+  try {
+    M.enxertar();
+    setTimeout(function () { try { M.enxertar(); M.carregar(); } catch (e) {} }, 3000);
+  } catch (e) {}
+
+})();
+</script>
 </body>
 </html>

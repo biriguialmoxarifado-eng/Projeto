@@ -1,0 +1,431 @@
+/**
+ * ============================================================================
+ * AP_USR_AUTORIZAR.gs
+ * ALMOX-PRO · A peça que falta no AP_USUARIOS_GRAVACAO.gs, e um inventário
+ *             do que existe de verdade neste projeto do Apps Script
+ * ----------------------------------------------------------------------------
+ * POR QUE ESTE ARQUIVO EXISTE
+ *
+ *   O AP_USUARIOS_GRAVACAO.gs instalado chama, antes de gravar:
+ *
+ *       if (typeof AP_USR_AUTORIZAR_ !== 'function')
+ *         return { ok:false, codigo:'AUTORIZACAO_CORE_NAO_CONECTADA', ... }
+ *
+ *   Essa função NÃO vem no arquivo. O próprio cabeçalho dele pede:
+ *   "Segurança: implemente AP_USR_AUTORIZAR_(token, permissao) usando o
+ *   Core." Enquanto ela não existir, TODA gravação pela porta direta
+ *   (AP_ADAPT_salvarUsuarioDireto) devolve AUTORIZACAO_CORE_NAO_CONECTADA
+ *   e nada é gravado. É isso que este arquivo resolve.
+ *
+ *   Ele falha FECHADO de propósito: sem uma função de sessão do Core
+ *   configurada e encontrada, devolve false. Nunca devolve true por não
+ *   ter achado nada — isso seria tirar a autenticação para "destravar".
+ *
+ * O QUE FAZER, NA ORDEM
+ *   1. Cole este arquivo no projeto.
+ *   2. Rode AP_AUT_inventario(). Ele não grava nada e diz:
+ *        · quais módulos de gravação estão instalados;
+ *        · se há nomes de função repetidos entre eles (colisão);
+ *        · quais funções deste projeto parecem validar sessão.
+ *   3. Ponha o nome da função certa em AP_AUT_FUNCAO_SESSAO, abaixo.
+ *   4. Rode AP_AUT_testar() para conferir.
+ *   5. Reimplante o Apps Script.
+ *
+ * O QUE ELE NÃO FAZ
+ *   Não grava, não lê a planilha, não cria sessão, não guarda token,
+ *   não registra token em log e não substitui a autenticação do Core.
+ * ============================================================================
+ */
+
+
+/* ============================================================================
+ * 1. CONFIGURAÇÃO
+ * ========================================================================= */
+
+/** Nome da função do SEU projeto que valida um token de sessão.
+ *  Descubra com AP_AUT_inventario(). Vazio = nega tudo. */
+var AP_AUT_FUNCAO_SESSAO = "";
+
+/** Opcional: função que confere permissão. Recebe (sessao, permissao).
+ *  Vazio = a permissão não é conferida aqui, só a sessão. */
+var AP_AUT_FUNCAO_PERMISSAO = "";
+
+/** Com true, uma sessão válida sem a permissão pedida é NEGADA.
+ *  Só vale quando AP_AUT_FUNCAO_PERMISSAO está preenchida. */
+var AP_AUT_EXIGIR_PERMISSAO = true;
+
+/** Guarda o motivo da última negativa, para o inventário mostrar.
+ *  Nunca guarda o token. */
+var AP_AUT_ULTIMO = { quando: null, resultado: null, motivo: "" };
+
+
+/* ============================================================================
+ * 2. A FUNÇÃO QUE O MÓDULO DE GRAVAÇÃO PROCURA
+ * ========================================================================= */
+
+/**
+ * @param {string} token      token de sessão vindo da interface
+ * @param {string} permissao  ex.: "USUARIOS_EDITAR"
+ * @return {boolean} true somente quando a sessão foi validada pelo Core
+ */
+function AP_USR_AUTORIZAR_(token, permissao) {
+  function nega(motivo) {
+    AP_AUT_ULTIMO = { quando: new Date(), resultado: false, motivo: motivo };
+    try { Logger.log("AP_USR_AUTORIZAR_ negou: " + motivo); } catch (e) {}
+    return false;
+  }
+  function aceita() {
+    AP_AUT_ULTIMO = { quando: new Date(), resultado: true, motivo: "" };
+    return true;
+  }
+
+  var tok = String(token == null ? "" : token).trim();
+  if (!tok) return nega("veio sem token de sessão");
+
+  if (!AP_AUT_FUNCAO_SESSAO) {
+    return nega("AP_AUT_FUNCAO_SESSAO está vazia. Rode AP_AUT_inventario() " +
+      "para descobrir o nome da função de sessão deste projeto e preencha-a.");
+  }
+
+  var validar = AP_AUT_funcaoPorNome_(AP_AUT_FUNCAO_SESSAO);
+  if (typeof validar !== "function") {
+    return nega("não existe neste projeto uma função chamada \"" +
+      AP_AUT_FUNCAO_SESSAO + "\".");
+  }
+
+  var sessao;
+  try {
+    sessao = validar(tok);
+  } catch (e) {
+    return nega("a função de sessão levantou exceção: " + String(e && e.message || e));
+  }
+
+  if (!AP_AUT_pareceValida_(sessao)) return nega("o Core não validou esta sessão");
+
+  /* permissão, quando houver função para isso */
+  if (AP_AUT_FUNCAO_PERMISSAO) {
+    var conferir = AP_AUT_funcaoPorNome_(AP_AUT_FUNCAO_PERMISSAO);
+    if (typeof conferir !== "function") {
+      return nega("AP_AUT_FUNCAO_PERMISSAO aponta para \"" + AP_AUT_FUNCAO_PERMISSAO +
+        "\", que não existe neste projeto.");
+    }
+    var podeFazer;
+    try {
+      podeFazer = conferir(sessao, String(permissao || ""));
+    } catch (e2) {
+      return nega("a função de permissão levantou exceção: " + String(e2 && e2.message || e2));
+    }
+    if (AP_AUT_EXIGIR_PERMISSAO && !AP_AUT_ehVerdade_(podeFazer)) {
+      return nega("sessão válida, mas sem a permissão " + String(permissao || "(sem nome)"));
+    }
+  }
+
+  return aceita();
+}
+
+
+/* ============================================================================
+ * 3. AUXILIARES
+ * ========================================================================= */
+
+/** Acha uma função global pelo nome, sem eval. */
+function AP_AUT_funcaoPorNome_(nome) {
+  if (!nome) return null;
+  var g = AP_AUT_global_();
+  if (g && typeof g[nome] === "function") return g[nome];
+  try {
+    var f = eval(nome);
+    if (typeof f === "function") return f;
+  } catch (e) {}
+  return null;
+}
+
+function AP_AUT_global_() {
+  var g = null;
+  try { g = (function () { return this; })(); } catch (e) {}
+  if (!g) { try { g = globalThis; } catch (e2) {} }
+  return g;
+}
+
+function AP_AUT_ehVerdade_(v) {
+  if (v === true) return true;
+  if (v && typeof v === "object") {
+    if (v.ok === true || v.valido === true || v.valida === true ||
+        v.autorizado === true || v.permitido === true) return true;
+  }
+  if (typeof v === "string") {
+    var s = v.trim().toUpperCase();
+    return s === "OK" || s === "SIM" || s === "TRUE";
+  }
+  return false;
+}
+
+/**
+ * Uma sessão "parece válida" quando o Core devolveu algo afirmativo.
+ * Objeto vazio, null, false, string vazia e {ok:false} NÃO passam.
+ */
+function AP_AUT_pareceValida_(s) {
+  if (s === true) return true;
+  if (!s) return false;
+  if (typeof s === "string") return AP_AUT_ehVerdade_(s);
+  if (typeof s === "object") {
+    if (s.ok === false || s.valido === false || s.valida === false) return false;
+    if (AP_AUT_ehVerdade_(s)) return true;
+    /* um objeto de sessão com dono identificado também vale */
+    var dono = s.usuario || s.login || s.matricula || s.id || s.email ||
+               (s.dados && (s.dados.usuario || s.dados.login || s.dados.id));
+    return !!String(dono == null ? "" : dono).trim();
+  }
+  return false;
+}
+
+
+/* ============================================================================
+ * 4. INVENTÁRIO — somente leitura, não grava nada
+ * ========================================================================= */
+
+/** Nomes de função que os dois módulos de gravação conhecidos definem. */
+var AP_AUT_MODULOS = {
+  "do ChatGPT": ["AP_USR_GRAVAR", "AP_ADAPT_salvarUsuarioDireto",
+                 "AP_USR_NORMALIZAR_", "AP_USR_CHAVE_", "AP_USR_RESULTADO_",
+                 "AP_USR_conferirLigacao"],
+  "meu (AP_USR_rota)": ["AP_USR_rota", "AP_USR_salvarDireto", "AP_USR_atualizar_",
+                 "AP_USR_excluirLogico_", "AP_USR_testar", "AP_USR_conferirLigacao"]
+};
+
+function AP_AUT_inventario() {
+  var L = [];
+  function diz(s) { L.push(s); }
+
+  diz("INVENTÁRIO DO PROJETO — " +
+      Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy HH:mm"));
+  diz("Somente leitura. Nenhuma linha é gravada.");
+  diz("");
+
+  var g = AP_AUT_global_();
+  var nomes = [];
+  try {
+    if (g) for (var k in g) { if (typeof g[k] === "function") nomes.push(k); }
+  } catch (e) {}
+  nomes.sort();
+
+  function tem(n) { return typeof AP_AUT_funcaoPorNome_(n) === "function"; }
+
+  /* ---- 1. qual módulo de gravação está instalado ---- */
+  diz("1. MÓDULOS DE GRAVAÇÃO DE USUÁRIO");
+  var instalados = [];
+  for (var mod in AP_AUT_MODULOS) {
+    if (!Object.prototype.hasOwnProperty.call(AP_AUT_MODULOS, mod)) continue;
+    var proprias = AP_AUT_MODULOS[mod].filter(function (n) {
+      return n !== "AP_USR_conferirLigacao";
+    });
+    var achadas = proprias.filter(tem);
+    var estado = achadas.length === 0 ? "não instalado"
+               : achadas.length === proprias.length ? "INSTALADO"
+               : "instalado pela metade (" + achadas.length + " de " + proprias.length + ")";
+    diz("   " + mod + ": " + estado);
+    if (achadas.length) {
+      instalados.push(mod);
+      diz("      achei: " + achadas.join(", "));
+    }
+    var faltando = proprias.filter(function (n) { return !tem(n); });
+    if (achadas.length && faltando.length) diz("      FALTA: " + faltando.join(", "));
+  }
+
+  /* ---- 2. colisão ---- */
+  diz("");
+  diz("2. NOMES REPETIDOS ENTRE OS MÓDULOS");
+  if (instalados.length > 1) {
+    diz("   ATENÇÃO: os dois módulos estão no projeto.");
+    diz("   Eles definem o MESMO nome: AP_USR_conferirLigacao.");
+    diz("   No Apps Script, duas funções de mesmo nome se sobrescrevem em");
+    diz("   silêncio, e não dá para saber qual venceu. Rodar essa função");
+    diz("   pode estar testando o módulo errado.");
+    diz("   O QUE FAZER: deixe UM só no projeto. Apague o outro arquivo,");
+    diz("   ou renomeie a função repetida dentro dele.");
+  } else if (instalados.length === 1) {
+    diz("   Só um módulo no projeto (" + instalados[0] + "). Sem colisão.");
+  } else {
+    diz("   Nenhum dos dois módulos está instalado.");
+  }
+
+  /* ---- 3. a autorização ---- */
+  diz("");
+  diz("3. AUTORIZAÇÃO (o que trava a gravação pela porta direta)");
+  diz("   AP_USR_AUTORIZAR_ existe ....... " + (tem("AP_USR_AUTORIZAR_") ? "sim" : "NÃO"));
+  diz("   AP_AUT_FUNCAO_SESSAO ........... " +
+      (AP_AUT_FUNCAO_SESSAO ? "\"" + AP_AUT_FUNCAO_SESSAO + "\"" : "VAZIA  <-- preencha"));
+  if (AP_AUT_FUNCAO_SESSAO) {
+    diz("   essa função existe? ............ " +
+        (tem(AP_AUT_FUNCAO_SESSAO) ? "sim" : "NÃO EXISTE neste projeto"));
+  }
+  diz("   AP_AUT_FUNCAO_PERMISSAO ........ " +
+      (AP_AUT_FUNCAO_PERMISSAO ? "\"" + AP_AUT_FUNCAO_PERMISSAO + "\"" : "(não usada)"));
+  if (!AP_AUT_FUNCAO_SESSAO) {
+    diz("");
+    diz("   Enquanto AP_AUT_FUNCAO_SESSAO estiver vazia, AP_USR_AUTORIZAR_");
+    diz("   nega tudo — de propósito. Preencha com o nome da função da");
+    diz("   lista do item 5 e rode AP_AUT_testar().");
+  }
+
+  /* ---- 4. o roteador ---- */
+  diz("");
+  diz("4. O ROTEADOR");
+  diz("   almoxaApi existe ............... " + (tem("almoxaApi") ? "sim" : "NÃO neste projeto"));
+  if (!tem("almoxaApi")) {
+    diz("   Se o almoxaApi está em OUTRO projeto do Apps Script, é nele que");
+    diz("   a ligação precisa ser feita, e é ele que precisa ser reimplantado.");
+  }
+  diz("   doPost existe .................. " + (tem("doPost") ? "sim" : "não"));
+  diz("   doGet existe ................... " + (tem("doGet") ? "sim" : "não"));
+
+  /* ---- 5. candidatas a função de sessão ---- */
+  diz("");
+  diz("5. FUNÇÕES DESTE PROJETO QUE PARECEM VALIDAR SESSÃO");
+  var padrao = /sess|token|autentic|autoriz|login|valida|permiss|perfil|acesso/i;
+  var candidatas = nomes.filter(function (n) {
+    if (n.indexOf("AP_AUT_") === 0 || n === "AP_USR_AUTORIZAR_") return false;
+    return padrao.test(n);
+  });
+  if (!candidatas.length) {
+    diz("   Nenhuma. Ou elas têm outro nome, ou estão em outro projeto.");
+    diz("   Procure no Apps Script quem lê o token da sessão e me diga o nome.");
+  } else {
+    candidatas.forEach(function (n) { diz("   · " + n); });
+    diz("");
+    diz("   Escolha a que recebe o TOKEN e responde se a sessão vale.");
+    diz("   Não escolho por você: chamar a função errada aqui é afrouxar");
+    diz("   a autenticação do sistema inteiro.");
+  }
+
+  /* ---- 6. a aba oficial ---- */
+  diz("");
+  diz("6. A PLANILHA");
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    diz("   projeto vinculado a uma planilha ... " + (ss ? "sim" : "NÃO"));
+    if (ss) {
+      var ab = ss.getSheetByName("USUARIOS");
+      diz("   aba USUARIOS ....................... " + (ab ? "existe" : "NÃO EXISTE"));
+      if (ab) diz("   linhas preenchidas ................. " + Math.max(0, ab.getLastRow() - 1));
+      var p13 = ss.getSheetByName("13_USUARIOS_PERMISSOES");
+      diz("   aba 13_USUARIOS_PERMISSOES ......... " + (p13 ? "existe" : "não existe (correto)"));
+    }
+  } catch (e) {
+    diz("   não consegui abrir a planilha: " + String(e && e.message || e));
+  }
+
+  /* ---- 7. última negativa ---- */
+  if (AP_AUT_ULTIMO && AP_AUT_ULTIMO.quando) {
+    diz("");
+    diz("7. ÚLTIMA DECISÃO DE AP_USR_AUTORIZAR_");
+    diz("   resultado: " + (AP_AUT_ULTIMO.resultado ? "autorizou" : "negou"));
+    if (AP_AUT_ULTIMO.motivo) diz("   motivo: " + AP_AUT_ULTIMO.motivo);
+  }
+
+  var saida = L.join("\n");
+  Logger.log(saida);
+  return saida;
+}
+
+
+/* ============================================================================
+ * 5. TESTE — não grava nada
+ * ========================================================================= */
+
+function AP_AUT_testar() {
+  var L = [], ok = 0, mal = 0;
+  function diz(s) { L.push(s); }
+  function prova(n, c, d) {
+    if (c) { ok++; diz("  ok    " + n); }
+    else { mal++; diz("  FALHA " + n + (d ? "  → " + d : "")); }
+  }
+
+  diz("AP_USR_AUTORIZAR_ — teste (não grava nada)");
+  diz("");
+
+  var guardaS = AP_AUT_FUNCAO_SESSAO, guardaP = AP_AUT_FUNCAO_PERMISSAO;
+  try {
+    diz("NEGA QUANDO DEVE NEGAR");
+    AP_AUT_FUNCAO_SESSAO = "";
+    prova("sem token: nega", AP_USR_AUTORIZAR_("", "USUARIOS_EDITAR") === false);
+    prova("sem função configurada: nega", AP_USR_AUTORIZAR_("abc", "USUARIOS_EDITAR") === false);
+    prova("e diz por quê", /AP_AUT_FUNCAO_SESSAO/.test(AP_AUT_ULTIMO.motivo), AP_AUT_ULTIMO.motivo);
+
+    AP_AUT_FUNCAO_SESSAO = "AP_AUT_naoExisteEssaFuncao";
+    prova("função inexistente: nega", AP_USR_AUTORIZAR_("abc", "X") === false);
+    prova("e diz qual não existe", /não existe/.test(AP_AUT_ULTIMO.motivo), AP_AUT_ULTIMO.motivo);
+
+    var g = AP_AUT_global_();
+    g.__apAutFalso = function (t) { return t === "BOM" ? { ok: true, usuario: "ismael" } : null; };
+    AP_AUT_FUNCAO_SESSAO = "__apAutFalso";
+    prova("token ruim: nega", AP_USR_AUTORIZAR_("RUIM", "X") === false);
+    prova("token bom: autoriza", AP_USR_AUTORIZAR_("BOM", "X") === true);
+
+    g.__apAutExplode = function () { throw new Error("Core caiu"); };
+    AP_AUT_FUNCAO_SESSAO = "__apAutExplode";
+    prova("exceção na sessão: nega, não estoura", AP_USR_AUTORIZAR_("BOM", "X") === false);
+    prova("e registra a exceção", /exceção/.test(AP_AUT_ULTIMO.motivo), AP_AUT_ULTIMO.motivo);
+
+    diz("");
+    diz("O QUE CONTA COMO SESSÃO VÁLIDA");
+    AP_AUT_FUNCAO_SESSAO = "__apAutFalso";
+    g.__apAutFalso = function () { return true; };
+    prova("true vale", AP_USR_AUTORIZAR_("t", "X") === true);
+    g.__apAutFalso = function () { return { ok: true }; };
+    prova("{ok:true} vale", AP_USR_AUTORIZAR_("t", "X") === true);
+    g.__apAutFalso = function () { return { usuario: "ismael" }; };
+    prova("objeto com dono vale", AP_USR_AUTORIZAR_("t", "X") === true);
+    g.__apAutFalso = function () { return { ok: false, usuario: "ismael" }; };
+    prova("{ok:false} NÃO vale, mesmo com dono", AP_USR_AUTORIZAR_("t", "X") === false);
+    g.__apAutFalso = function () { return {}; };
+    prova("objeto vazio NÃO vale", AP_USR_AUTORIZAR_("t", "X") === false);
+    g.__apAutFalso = function () { return null; };
+    prova("null NÃO vale", AP_USR_AUTORIZAR_("t", "X") === false);
+    g.__apAutFalso = function () { return ""; };
+    prova("string vazia NÃO vale", AP_USR_AUTORIZAR_("t", "X") === false);
+
+    diz("");
+    diz("PERMISSÃO");
+    g.__apAutFalso = function () { return { ok: true, usuario: "ismael" }; };
+    g.__apAutPerm = function (s, p) { return p === "USUARIOS_EDITAR"; };
+    AP_AUT_FUNCAO_PERMISSAO = "__apAutPerm";
+    prova("com a permissão: autoriza", AP_USR_AUTORIZAR_("t", "USUARIOS_EDITAR") === true);
+    prova("sem a permissão: nega", AP_USR_AUTORIZAR_("t", "OUTRA_COISA") === false);
+    prova("e diz que foi a permissão", /sem a permissão/.test(AP_AUT_ULTIMO.motivo),
+      AP_AUT_ULTIMO.motivo);
+    AP_AUT_FUNCAO_PERMISSAO = "__apAutNaoExiste";
+    prova("função de permissão inexistente: nega", AP_USR_AUTORIZAR_("t", "X") === false);
+
+    diz("");
+    diz("NENHUM SEGREDO VAZA");
+    AP_AUT_FUNCAO_PERMISSAO = "";
+    AP_AUT_FUNCAO_SESSAO = "";
+    AP_USR_AUTORIZAR_("TOKEN_SECRETO_123", "X");
+    prova("o token não entra no motivo",
+      AP_AUT_ULTIMO.motivo.indexOf("TOKEN_SECRETO_123") === -1, AP_AUT_ULTIMO.motivo);
+    prova("o token não entra no inventário",
+      AP_AUT_inventario().indexOf("TOKEN_SECRETO_123") === -1);
+
+  } finally {
+    AP_AUT_FUNCAO_SESSAO = guardaS;
+    AP_AUT_FUNCAO_PERMISSAO = guardaP;
+    try {
+      var gg = AP_AUT_global_();
+      delete gg.__apAutFalso; delete gg.__apAutExplode; delete gg.__apAutPerm;
+    } catch (e) {}
+  }
+
+  diz("");
+  diz("================================================");
+  diz("passaram: " + ok + "    falharam: " + mal);
+  diz("================================================");
+  if (!mal) {
+    diz("A lógica está correta e nada foi gravado.");
+    diz("Agora rode AP_AUT_inventario(), escolha a função de sessão do");
+    diz("item 5, preencha AP_AUT_FUNCAO_SESSAO e reimplante.");
+  }
+  var saida = L.join("\n");
+  Logger.log(saida);
+  return saida;
+}
