@@ -64357,7 +64357,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 336 · 29/10";
+var ALMOXA_VERSAO = "sistema 337 · 29/10";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
@@ -72533,7 +72533,9 @@ function modalPendencias() {
         nome: "Termo de Responsabilidade — TI",
         descricao: "O formulário oficial da COESA para equipamentos de " +
           "tecnologia da informação. O texto é o aprovado pela empresa.",
-        codigo: "TI",
+        /* o servidor recusa codigo repetido, e ele ja tem uma
+           "Cautela de TI" com codigo TI. Este aqui e outro documento. */
+        codigo: "TERMO-TI",
         versao: versaoDoTermo_(),
         ativo: true,
         doSistema: true,
@@ -72558,8 +72560,14 @@ function modalPendencias() {
   function faltaNoServidor_(m) {
     if (!m || !m.doSistema) return false;
     var id = lp(m.id).toUpperCase();
+    var cod = lp(m.codigo).toUpperCase();
+    var nome = lp(m.nome).toUpperCase();
     return !lista_(CFG.modelos).some(function (x) {
-      return x && !x.doSistema && lp(x.id).toUpperCase() === id;
+      if (!x || x.doSistema) return false;
+      if (lp(x.id).toUpperCase() === id) return true;
+      if (cod && lp(x.codigo).toUpperCase() === cod) return true;
+      if (nome && lp(x.nome).toUpperCase() === nome) return true;
+      return false;
     });
   }
 
@@ -72578,10 +72586,23 @@ function modalPendencias() {
   /* junta os do servidor com os do sistema; o do servidor manda */
   function juntarModelos_(doServidor) {
     var fora = lista_(doServidor).slice();
-    var vistos = {};
-    fora.forEach(function (m) { if (m && lp(m.id)) vistos[lp(m.id).toUpperCase()] = 1; });
+    /* O SERVIDOR CRIA O ID SOZINHO. Quando o modelo do sistema e
+       gravado por salvarModelo, ele volta com id MOD+tempo — nao
+       com SISTEMA-*. Entao comparar so por id faria o embutido
+       aparecer DE NOVO, duplicado na tabela. Comparo tambem por
+       codigo e por nome. */
+    var porId = {}, porCodigo = {}, porNome = {};
+    fora.forEach(function (m) {
+      if (!m) return;
+      if (lp(m.id)) porId[lp(m.id).toUpperCase()] = 1;
+      if (lp(m.codigo)) porCodigo[lp(m.codigo).toUpperCase()] = 1;
+      if (lp(m.nome)) porNome[lp(m.nome).toUpperCase()] = 1;
+    });
     modelosEmbutidos_().forEach(function (m) {
-      if (!vistos[m.id.toUpperCase()]) fora.push(m);
+      if (porId[m.id.toUpperCase()]) return;
+      if (lp(m.codigo) && porCodigo[lp(m.codigo).toUpperCase()]) return;
+      if (lp(m.nome) && porNome[lp(m.nome).toUpperCase()]) return;
+      fora.push(m);
     });
     return fora;
   }
@@ -73227,18 +73248,75 @@ function modalPendencias() {
           b.disabled = true;
           var antes = b.innerHTML;
           b.textContent = "Gravando\u2026";
-          CORE("garantirModelosDoSistema", {}).then(function (r) {
+
+          /* ------------------------------------------------------
+             GRAVAR COM O QUE O SERVIDOR JA SABE FAZER.
+             29/10: a tarja respondeu "a Central de Cautelas nao
+             conhece a acao garantirModelosDoSistema". Eu tinha
+             amarrado isto a um arquivo .gs que ele ainda nao
+             publicou — ou seja, eu criei a dependencia e depois
+             mandei ele clicar. Erro meu.
+
+             Agora: tento a acao nova; se o servidor nao a conhecer,
+             uso salvarModelo, que ele conhece desde sempre. O id
+             sai diferente (o servidor cria o dele), e tudo bem: a
+             juncao compara tambem por codigo e por nome.
+             ------------------------------------------------------ */
+          function terminar_(texto, cor) {
             b.disabled = false; b.innerHTML = antes;
-            if (!r || !r.ok) {
-              dizer((r && (r.mensagem || r.codigo)) ||
+            dizer(texto, cor);
+            carregar(true).then(function () { ROUTER.render(); });
+          }
+
+          function umPorUm_(fila, i, feitos, erros) {
+            if (i >= fila.length) {
+              if (!erros.length) {
+                terminar_(feitos.length
+                  ? feitos.length + " modelo(s) gravado(s): " + feitos.join(", ") + "."
+                  : "Os modelos do sistema j\u00e1 estavam gravados.", "a-green");
+              } else {
+                terminar_((feitos.length ? "Gravei " + feitos.join(", ") + ". " : "") +
+                  "N\u00e3o gravei " + erros.map(function (x) { return x.nome; }).join(", ") +
+                  ": " + erros[0].motivo, feitos.length ? "a-yellow" : "a-red");
+              }
+              return;
+            }
+            var m = fila[i];
+            CORE("salvarModelo", {
+              nome: m.nome, codigo: m.codigo, descricao: m.descricao,
+              ativo: true,
+              exigePatrimonio: m.exigePatrimonio, exigeCautela: m.exigeCautela,
+              exigeAssinatura: m.exigeAssinatura, exigeSerie: m.exigeSerie,
+              exigeIdentificacao: m.exigeIdentificacao, exigeDevolucao: m.exigeDevolucao,
+              permitePermanente: m.permitePermanente,
+              validaEntregaFisica: m.validaEntregaFisica
+            }).then(function (r) {
+              if (r && r.ok) feitos.push(m.nome);
+              else erros.push({ nome: m.nome,
+                motivo: lp(r && (r.mensagem || r.codigo)) || "o servidor recusou" });
+              umPorUm_(fila, i + 1, feitos, erros);
+            }, function (e) {
+              erros.push({ nome: m.nome, motivo: lp(e && e.message) || "falhou" });
+              umPorUm_(fila, i + 1, feitos, erros);
+            });
+          }
+
+          CORE("garantirModelosDoSistema", {}).then(function (r) {
+            if (r && r.ok) {
+              terminar_(lp(r.mensagem) || "gravado", "a-green");
+              return;
+            }
+            /* o servidor nao conhece a acao? entao pelo caminho antigo */
+            var naoConhece = /n[aã]o conhece a a[cç][aã]o|ACAO_DESCONHECIDA/i
+              .test(lp(r && (r.mensagem || r.codigo)));
+            if (!naoConhece) {
+              terminar_(lp(r && (r.mensagem || r.codigo)) ||
                 "o servidor n\u00e3o confirmou a grava\u00e7\u00e3o");
               return;
             }
-            dizer(lp(r.mensagem) || "gravado", "a-green");
-            carregar(true).then(function () { ROUTER.render(); });
-          }, function (e) {
-            b.disabled = false; b.innerHTML = antes;
-            dizer(lp(e && e.message) || "n\u00e3o consegui falar com o servidor");
+            umPorUm_(faltamNoServidor_(), 0, [], []);
+          }, function () {
+            umPorUm_(faltamNoServidor_(), 0, [], []);
           });
         });
       });
