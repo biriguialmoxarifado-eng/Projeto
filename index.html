@@ -9618,6 +9618,16 @@ toast("err", "Operação recusada pelo Core", r.mensagem);
 return;
 }
 toast(aprovar ? "ok" : "warn", aprovar ? "Reserva aprovada" : "Reserva recusada", protocolo + (aprovar ? " liberada para separação." : " foi recusada e o solicitante já foi avisado."));
+/* [CAUTAUTO] aprovou? entao a cautela nasce agora.
+   A aprovacao ja aconteceu no servidor — se a cautela falhar, ela
+   NAO e desfeita: o operador e avisado e gera pelo botao de sempre. */
+try {
+  if (aprovar && typeof CAUTAUTO !== "undefined" && CAUTAUTO.aoAprovar) {
+    CAUTAUTO.aoAprovar(protocolo, (typeof x !== "undefined" && x) ? x : (r && r.dados) || {})
+      .then(function (s2) { CAUTAUTO.avisar(s2); ROUTER.render(); },
+            function () {});
+  }
+} catch (e) {}
 ROUTER.render();
 });
 });
@@ -64357,7 +64367,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 338 · 29/10";
+var ALMOXA_VERSAO = "sistema 339 · 29/10";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
@@ -96667,6 +96677,285 @@ function modalPendencias() {
     M.enxertar();
     setTimeout(function () { try { M.enxertar(); M.carregar(); } catch (e) {} }, 3000);
   } catch (e) {}
+
+})();
+</script>
+<script>
+/* ############################################################
+ * A CAUTELA NASCE NA APROVACAO            busca: [CAUTAUTO]
+ * ------------------------------------------------------------
+ * O PEDIDO (29/10, palavras dele)
+ *   "a gente tem a cautela simples e a cautela do TI. Qualquer
+ *    coisa que foi aprovada ja vai gerar aqui. E nao vai precisar
+ *    pegar a assinatura dele: automaticamente ja vai ter a
+ *    assinatura dele ali."
+ *
+ * O QUE FALTAVA
+ *   A Central de Cautelas ja sabia responder qual modelo se aplica
+ *   a cada produto. O que nao existia era alguem PERGUNTAR a ela
+ *   na hora da aprovacao. Ele aprovou uma reserva e nenhuma cautela
+ *   nasceu — e estava certo: ninguem tinha sido programado para
+ *   isso.
+ *
+ * O QUE ESTE BLOCO FAZ, NA APROVACAO
+ *   1. pega os itens da reserva aprovada;
+ *   2. pergunta a Central, item por item, qual modelo se aplica
+ *      (regra do produto > regra da categoria > padrao da empresa);
+ *   3. descarta quem NAO exige cautela — material comum segue o
+ *      fluxo normal de estoque, e e assim que o padrao dele diz;
+ *   4. agrupa o que sobrou POR MODELO: mouse vai no Termo de TI,
+ *      lixadeira vai na cautela simples. Pedido misto gera DUAS
+ *      cautelas, cada uma com o seu documento;
+ *   5. grava uma cautela por grupo, com os dados do colaborador
+ *      que ja estao na reserva.
+ *
+ * A ASSINATURA
+ *   NAO e copiada para dentro da cautela, e isso e de proposito.
+ *   A rubrica continua morando no cadastro do colaborador e e
+ *   buscada na hora de imprimir, como ja acontece hoje. Assim ela
+ *   nunca e duplicada, nunca e inventada, e se a pessoa nao tiver
+ *   rubrica o documento diz isso em vez de fingir que tem.
+ *
+ * REPETIR E SEGURO
+ *   Antes de gravar, ele le as cautelas que ja existem e pula a que
+ *   ja nasceu daquele protocolo com aquele modelo. Aprovar de novo,
+ *   ou um clique duplo, nao cria cautela repetida.
+ *
+ * QUANDO ALGUMA COISA FALHA
+ *   A aprovacao NAO e desfeita. Ela ja aconteceu no servidor e nao
+ *   cabe a esta tela fingir o contrario. O que ele ve e um aviso
+ *   dizendo quais cautelas nasceram e qual nao nasceu, com o motivo
+ *   — e a de sempre, "Gerar cautela", continua ali para o caso.
+ * ############################################################ */
+(function cautelaNaAprovacao() {
+
+  var A = { ultima: null, ligado: true };
+  try { window.CAUTAUTO = A; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+
+  /* o produto, do jeito que a Central sabe perguntar */
+  function produtoDoItem_(i) {
+    return {
+      sku: lp(i && (i.sku || i.codigo || i.id)),
+      codigo: lp(i && (i.codigo || i.sku)),
+      categoria: lp(i && (i.categoria || i.familia || i.grupo))
+    };
+  }
+
+  function nomeDoItem_(i) {
+    return lp(i && (i.nome || i.descricao || i.item || i.epi)) || lp(i && (i.sku || i.codigo));
+  }
+
+  /* ============================================================
+     1. PERGUNTAR A CENTRAL, ITEM POR ITEM
+     ============================================================ */
+  A.resolverItens = function (itens) {
+    var fila = lista_(itens);
+    if (!fila.length) return Promise.resolve([]);
+    if (typeof CAUTELACFG === "undefined" || !CAUTELACFG.resolverQuandoPronto) {
+      return Promise.reject(new Error(
+        "a Central de Cautelas nao esta nesta versao, entao nao da para saber que modelo se aplica"));
+    }
+    var fora = [];
+    function um(k) {
+      if (k >= fila.length) return Promise.resolve(fora);
+      var it = fila[k];
+      return Promise.resolve(CAUTELACFG.resolverQuandoPronto(produtoDoItem_(it)))
+        .then(function (r) {
+          fora.push({ item: it, regra: r || null });
+          return um(k + 1);
+        }, function (e) {
+          fora.push({ item: it, regra: null, erro: lp(e && e.message) || "nao resolveu" });
+          return um(k + 1);
+        });
+    }
+    return um(0);
+  };
+
+  /* ============================================================
+     2. AGRUPAR POR MODELO — so quem exige cautela
+     ============================================================ */
+  A.agrupar = function (resolvidos) {
+    var grupos = {}, ordem = [], semRegra = 0, comErro = 0;
+    lista_(resolvidos).forEach(function (x) {
+      if (x.erro || !x.regra) { comErro++; return; }
+      if (x.regra.exigeCautela !== true) { semRegra++; return; }
+      var id = lp(x.regra.modeloId) || "(sem modelo)";
+      if (!grupos[id]) {
+        grupos[id] = { modeloId: id, modeloNome: lp(x.regra.modeloNome),
+                       origem: lp(x.regra.origem), itens: [] };
+        ordem.push(id);
+      }
+      grupos[id].itens.push(x.item);
+    });
+    return { grupos: ordem.map(function (k) { return grupos[k]; }),
+             semCautela: semRegra, comErro: comErro };
+  };
+
+  /* ============================================================
+     3. JA NASCEU ANTES?
+     ============================================================ */
+  function jaExiste_(protocolo, modeloId) {
+    var marca = marcaDe_(protocolo, modeloId);
+    return Promise.resolve(API.call("cautela", "listar", {})).then(function (r) {
+      if (!r || !r.ok) return false;      /* na duvida, nao bloqueio */
+      return lista_(r.dados).some(function (c) {
+        return lp(c && c.observacao).indexOf(marca) > -1;
+      });
+    }, function () { return false; });
+  }
+  function marcaDe_(protocolo, modeloId) {
+    return "[origem:" + lp(protocolo) + "|" + lp(modeloId) + "]";
+  }
+
+  /* ============================================================
+     4. GRAVAR UMA CAUTELA POR GRUPO
+     ============================================================ */
+  function montar_(reserva, grupo) {
+    var hoje = new Date().toISOString().slice(0, 10);
+    return {
+      numero: "",
+      emissao: hoje,
+      empresa: lp(reserva.empresa),
+      obra: lp(reserva.obra),
+      setor: lp(reserva.setor || reserva.setorColaborador),
+      contrato: lp(reserva.contrato),
+      notaFiscal: "",
+      colaborador: lp(reserva.colaborador || reserva.solicitante),
+      matricula: lp(reserva.matricula),
+      cpf: lp(reserva.cpf),
+      cargo: lp(reserva.cargo),
+      setorColaborador: lp(reserva.setor || reserva.setorColaborador),
+      idColaborador: lp(reserva.idColaborador || reserva.colaboradorId || reserva.usuarioId),
+      requisitante: lp(reserva.solicitante || reserva.colaborador),
+      aplicacao: "",
+      categoria: lp(grupo.modeloNome),
+      modeloId: lp(grupo.modeloId),
+      modeloNome: lp(grupo.modeloNome),
+      /* a marca de origem vive na observacao: e o que impede a
+         segunda aprovacao de criar outra cautela igual */
+      observacao: "Gerada na aprovacao de " + lp(reserva.protocolo) + ". " +
+                  marcaDe_(reserva.protocolo, grupo.modeloId),
+      itens: grupo.itens.map(function (i) {
+        return {
+          descricao: nomeDoItem_(i),
+          sku: lp(i.sku || i.codigo),
+          qtd: Number(i.qtd || i.qtdSolicitada || i.quantidade || 1) || 1,
+          patrimonio: lp(i.patrimonio),
+          serie: lp(i.serie || i.numeroSerie),
+          marca: lp(i.marca),
+          modelo: lp(i.modelo)
+        };
+      })
+    };
+  }
+
+  /* ============================================================
+     5. O FLUXO INTEIRO
+     ============================================================ */
+  A.aoAprovar = function (protocolo, reserva) {
+    var saida = { protocolo: lp(protocolo), criadas: [], puladas: [], falhas: [],
+                  semCautela: 0, comErro: 0, quando: new Date() };
+    A.ultima = saida;
+
+    if (!A.ligado) return Promise.resolve(saida);
+
+    /* QUEM CHAMA PODE NAO TER A RESERVA NA MAO.
+       O gancho vive dentro do modal de aprovacao, e de la nem sempre
+       da para enxergar o registro inteiro. Entao, se vier sem itens,
+       eu pergunto ao servidor em vez de desistir calado. */
+    return Promise.resolve(
+      (lista_(reserva && reserva.itens).length)
+        ? reserva
+        : Promise.resolve(API.call("reservas", "obter", { protocolo: lp(protocolo) }))
+            .then(function (rr) {
+              var d = (rr && rr.ok) ? (rr.dados || {}) : {};
+              if (!lista_(d.itens).length && reserva) return reserva;
+              return d;
+            }, function () { return reserva || {}; })
+    ).then(function (r) {
+      r = r || {};
+      var itens = lista_(r.itens);
+      if (!itens.length) {
+        saida.falhas.push({ modelo: "(nenhum)",
+          motivo: "nao consegui ler os itens da reserva " + lp(protocolo) +
+                  ", entao nao sei que cautela gerar" });
+        return saida;
+      }
+
+    return A.resolverItens(itens).then(function (resolvidos) {
+      var g = A.agrupar(resolvidos);
+      saida.semCautela = g.semCautela;
+      saida.comErro = g.comErro;
+      if (!g.grupos.length) return saida;
+
+      function um(k) {
+        if (k >= g.grupos.length) return saida;
+        var grupo = g.grupos[k];
+        return jaExiste_(protocolo, grupo.modeloId).then(function (tem) {
+          if (tem) {
+            saida.puladas.push(grupo.modeloNome || grupo.modeloId);
+            return um(k + 1);
+          }
+          return Promise.resolve(API.call("cautela", "salvar", montar_(r, grupo)))
+            .then(function (rs) {
+              if (rs && rs.ok) {
+                saida.criadas.push({
+                  numero: lp(rs.dados && (rs.dados.numero || rs.dados.id)),
+                  modelo: grupo.modeloNome || grupo.modeloId,
+                  itens: grupo.itens.length
+                });
+              } else {
+                saida.falhas.push({
+                  modelo: grupo.modeloNome || grupo.modeloId,
+                  motivo: lp(rs && (rs.mensagem || rs.codigo)) || "o servidor nao confirmou"
+                });
+              }
+              return um(k + 1);
+            }, function (e) {
+              saida.falhas.push({ modelo: grupo.modeloNome || grupo.modeloId,
+                                  motivo: lp(e && e.message) || "falhou" });
+              return um(k + 1);
+            });
+        });
+      }
+      return um(0);
+    }, function (e) {
+      saida.falhas.push({ modelo: "(todos)", motivo: lp(e && e.message) || "nao consultei a Central" });
+      return saida;
+    });
+    });
+  };
+
+  /* ============================================================
+     6. O QUE O OPERADOR LE DEPOIS
+     ============================================================ */
+  A.avisar = function (saida) {
+    if (!saida) return;
+    if (typeof toast !== "function") return;
+    if (saida.criadas.length) {
+      toast("ok", saida.criadas.length > 1 ? "Cautelas geradas" : "Cautela gerada",
+        saida.criadas.map(function (c) {
+          return (c.numero || "(sem numero)") + " · " + c.modelo;
+        }).join(" / "));
+    }
+    if (saida.puladas.length) {
+      toast("info", "Cautela já existia",
+        "Este protocolo já tinha cautela de " + saida.puladas.join(", ") +
+        ". Não criei outra.");
+    }
+    saida.falhas.forEach(function (f) {
+      toast("err", "Cautela NÃO gerada — " + f.modelo,
+        f.motivo + " — a aprovação valeu; gere a cautela pelo botão " +
+        "“Gerar cautela”.");
+    });
+  };
+
+  A.diagnostico = function () { return A.ultima; };
 
 })();
 </script>
