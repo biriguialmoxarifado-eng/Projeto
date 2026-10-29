@@ -64357,7 +64357,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 335 · 29/10";
+var ALMOXA_VERSAO = "sistema 336 · 29/10";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
@@ -72554,6 +72554,15 @@ function modalPendencias() {
     return fora;
   }
 
+  /* este modelo do sistema ja esta gravado no servidor? */
+  function faltaNoServidor_(m) {
+    if (!m || !m.doSistema) return false;
+    var id = lp(m.id).toUpperCase();
+    return !lista_(CFG.modelos).some(function (x) {
+      return x && !x.doSistema && lp(x.id).toUpperCase() === id;
+    });
+  }
+
   /* quais modelos do sistema o servidor AINDA nao conhece */
   function faltamNoServidor_() {
     var daCasa = {};
@@ -72669,7 +72678,12 @@ function modalPendencias() {
             (lp(m.id) === "SISTEMA-TERMO-TI"
               ? " O texto do Termo se altera na tela do <b>Termo de Responsabilidade</b>."
               : "") +
-            "<br><br>As regras por produto <b>podem</b> apontar para ele normalmente." +
+            (faltaNoServidor_(m)
+              ? "<br><br><b>E ele ainda n\u00e3o est\u00e1 gravado no servidor.</b> Enquanto " +
+                "n\u00e3o estiver, nem a regra nem a altera\u00e7\u00e3o deste modelo gravam. " +
+                "Feche esta janela e use o bot\u00e3o <b>Gravar os modelos do sistema no " +
+                "servidor</b>, na tarja amarela da Central."
+              : "<br><br>As regras por produto <b>podem</b> apontar para ele normalmente.") +
             "</div></div>"
           : "") +
         '<div class="grid g2">' +
@@ -72705,7 +72719,18 @@ function modalPendencias() {
           '<small class="hint">Fica no histórico junto com a versão anterior.</small></div>' : "") +
         '<div id="mdErro"></div>',
       rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' +
-        '<button class="btn btn-orange" data-ok>' + (edicao ? "Salvar nova versão" : "Criar modelo") + "</button>",
+        /* [CAUTSEMEAR] UM BOTAO QUE NAO PODE FUNCIONAR NAO E OFERECIDO.
+           29/10: ele abriu a Cautela de Equipamentos, mexeu nas
+           exigencias e clicou em "Salvar nova versao" — e levou
+           "Modelo SISTEMA-CAUTELA nao existe". Claro: o servidor nao
+           tem esse modelo ainda. A janela deixou ele andar ate um
+           beco. Agora, enquanto o modelo do sistema nao estiver
+           gravado no servidor, o botao diz o que falta em vez de
+           prometer uma gravacao que vai ser recusada. */
+        (m.doSistema && faltaNoServidor_(m)
+          ? '<button class="btn btn-orange" disabled title="grave os modelos do sistema no servidor primeiro">' +
+            "Grave os modelos do sistema primeiro</button>"
+          : '<button class="btn btn-orange" data-ok>' + (edicao ? "Salvar nova versão" : "Criar modelo") + "</button>"),
       aoAbrir: function (w, fechar) {
         w.querySelector("[data-x]").addEventListener("click", fechar);
         w.querySelector("[data-ok]").addEventListener("click", function () {
