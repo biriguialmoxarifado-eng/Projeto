@@ -64357,7 +64357,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 334 · 29/10";
+var ALMOXA_VERSAO = "sistema 335 · 29/10";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
@@ -72554,6 +72554,18 @@ function modalPendencias() {
     return fora;
   }
 
+  /* quais modelos do sistema o servidor AINDA nao conhece */
+  function faltamNoServidor_() {
+    var daCasa = {};
+    lista_(CFG.modelos).forEach(function (m) {
+      if (m && !m.doSistema && lp(m.id)) daCasa[lp(m.id).toUpperCase()] = 1;
+    });
+    return modelosEmbutidos_().filter(function (m) {
+      return !daCasa[m.id.toUpperCase()];
+    });
+  }
+  try { window.__cautFaltamNoServidor = function () { return faltamNoServidor_(); }; } catch (e) {}
+
   /* junta os do servidor com os do sistema; o do servidor manda */
   function juntarModelos_(doServidor) {
     var fora = lista_(doServidor).slice();
@@ -73086,6 +73098,27 @@ function modalPendencias() {
           "<div>Produto sem regra segue o <b>padrão da empresa</b>: fluxo normal de estoque, " +
           "sem patrimônio e sem cautela. Hoje são <b>" + semRegra + "</b> produtos nessa situação.</div></div>" +
 
+          /* [CAUTSEMEAR] 29/10: "A regra NAO foi gravada. O modelo
+             SISTEMA-TERMO-TI nao existe." A tela mostra os dois
+             modelos do sistema, mas o servidor valida a regra contra
+             a aba dele — e la os dois nao estavam. Enquanto nao
+             estiverem, NENHUMA regra consegue apontar para eles.
+             Este aviso diz isso e oferece gravar, com um clique dele.
+             Nada e gravado sozinho. */
+          (faltamNoServidor_().length
+            ? '<div class="alert a-yellow mb16">' + ic("alerta") +
+              "<div><b>" + faltamNoServidor_().length + " modelo(s) do sistema ainda n\u00e3o " +
+              "est\u00e3o gravados no servidor.</b>" +
+              "Eles aparecem aqui porque o sistema os possui, mas o servidor s\u00f3 aceita " +
+              "uma regra que aponte para um modelo gravado na planilha dele. Por isso " +
+              "salvar a regra responde <b>\u201cmodelo n\u00e3o existe\u201d</b>." +
+              "<br><br>Gravar \u00e9 seguro: cada um entra uma vez, com id fixo. Rodar de novo " +
+              "n\u00e3o duplica nem reescreve o que voc\u00ea j\u00e1 tiver ajustado." +
+              '<div id="ccSemearAviso"></div>' +
+              '<button class="btn btn-primary mt8" data-cc-semear>' + ic("banco") +
+              "Gravar os modelos do sistema no servidor</button></div></div>"
+            : "") +
+
           '<div class="card mb16"><div class="card-head"><div><h3>Modelos de cautela</h3>' +
           "<p>O alicerce das exigências</p></div></div>" +
           (CFG.modelos.length
@@ -73157,6 +73190,33 @@ function modalPendencias() {
       });
       categorias.sort();
 
+      /* [CAUTSEMEAR] gravar os modelos do sistema, so quando ele manda */
+      document.querySelectorAll("[data-cc-semear]").forEach(function (b) {
+        b.addEventListener("click", function () {
+          var cx = document.getElementById("ccSemearAviso");
+          function dizer(t, cor) {
+            if (cx) cx.innerHTML = '<div class="alert ' + (cor || "a-red") +
+              ' mt8">' + ic(cor === "a-green" ? "checkC" : "alerta") +
+              "<div>" + esc_(t) + "</div></div>";
+          }
+          b.disabled = true;
+          var antes = b.innerHTML;
+          b.textContent = "Gravando\u2026";
+          CORE("garantirModelosDoSistema", {}).then(function (r) {
+            b.disabled = false; b.innerHTML = antes;
+            if (!r || !r.ok) {
+              dizer((r && (r.mensagem || r.codigo)) ||
+                "o servidor n\u00e3o confirmou a grava\u00e7\u00e3o");
+              return;
+            }
+            dizer(lp(r.mensagem) || "gravado", "a-green");
+            carregar(true).then(function () { ROUTER.render(); });
+          }, function (e) {
+            b.disabled = false; b.innerHTML = antes;
+            dizer(lp(e && e.message) || "n\u00e3o consegui falar com o servidor");
+          });
+        });
+      });
       document.querySelectorAll("[data-cc-modelo]").forEach(function (b) {
         b.addEventListener("click", function () { modalModelo(null); });
       });
