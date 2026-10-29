@@ -64357,7 +64357,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 337 · 29/10";
+var ALMOXA_VERSAO = "sistema 338 · 29/10";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
@@ -72165,7 +72165,12 @@ function modalPendencias() {
                   "<td>" + esc_(c.obra) + (lp(c.setor) ? " / " + esc_(c.setor) : "") + "</td>" +
                   '<td class="num">' + lista_(c.itens).length + "</td>" +
                   "<td>" + esc_(U.data(c.emissao || c.criadoEm)) + "</td>" +
-                  "<td>" + (UI.badgeStatus ? UI.badgeStatus(c.status || "EMITIDA") : esc_(c.status)) + "</td>" +
+                  /* [CAUTSTATUS] UI.badgeStatus devolve so o NOME DA CLASSE do CSS
+   ("b-gray"), nao a etiqueta. Por isso a coluna STATUS imprimia
+   "b-gray" em vez de "emitida". Quem monta a etiqueta inteira e
+   UI.badge. Achado na foto dele de 29/10. */
+"<td>" + (UI.badge ? UI.badge(c.status || "EMITIDA")
+                   : esc_(c.status || "EMITIDA")) + "</td>" +
                   '<td><button class="btn btn-ghost btn-sm" data-ct-ver="' + k + '">' + ic("olho") + "</button>" +
                   '<button class="btn btn-ghost btn-sm" data-ct-pdf2="' + k + '" title="Cautela em PDF">' + ic("pdf") + "</button>" +
                   '<button class="btn btn-ghost btn-sm" data-ct-docs="' + k + '" title="Os dois documentos">' + ic("doc") + "</button>" +
