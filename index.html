@@ -64357,7 +64357,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 332 · 28/10";
+var ALMOXA_VERSAO = "sistema 334 · 29/10";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
@@ -72511,11 +72511,20 @@ function modalPendencias() {
         nome: "Cautela de Equipamentos",
         descricao: "O modelo COESA de cautela. Sai com os dados do colaborador, " +
           "os equipamentos e o campo de assinatura.",
-        versao: "1",
+        codigo: "CAUTELA",
+        versao: 1,
         ativo: true,
         doSistema: true,
         modulo: "cautela",
-        exige: { cautela: true, assinatura: true }
+        /* os nomes sao os de CHAVES, deste mesmo modulo. Eu tinha
+           escrito "exige:{cautela:true}" e a tela mostrou "nenhuma
+           exigencia" — nome de campo inventado nao e lido por
+           ninguem. Isto aqui sai do documento que ela imprime. */
+        exigeCautela: true,
+        exigeAssinatura: true,
+        exigePatrimonio: false, exigeSerie: false,
+        exigeIdentificacao: false, exigeDevolucao: false,
+        permitePermanente: false, validaEntregaFisica: false
       });
     }
     if (typeof TERMO !== "undefined") {
@@ -72524,11 +72533,22 @@ function modalPendencias() {
         nome: "Termo de Responsabilidade — TI",
         descricao: "O formulário oficial da COESA para equipamentos de " +
           "tecnologia da informação. O texto é o aprovado pela empresa.",
+        codigo: "TI",
         versao: versaoDoTermo_(),
         ativo: true,
         doSistema: true,
         modulo: "TERMO",
-        exige: { cautela: true, assinatura: true, patrimonio: true, serie: true, devolucao: true }
+        /* cada uma destas sai de uma linha do proprio formulario:
+           PATRIMONIO, NUMERO DE SERIE, a clausula de devolucao e o
+           campo de assinatura. Nenhuma foi suposta. */
+        exigeCautela: true,
+        exigeAssinatura: true,
+        exigePatrimonio: true,
+        exigeSerie: true,
+        exigeDevolucao: true,
+        exigeIdentificacao: false,
+        permitePermanente: false,
+        validaEntregaFisica: false
       });
     }
     return fora;
@@ -72621,6 +72641,25 @@ function modalPendencias() {
         : "O modelo define o alicerce das exigências. A regra do produto pode ajustar cada uma.",
       tamanho: "lg",
       corpo:
+        /* [CAUTEMBUTIDO] ABRIR UM MODELO DO SISTEMA NAO PODE SER
+           UMA TELA MUDA. Ele clicou para conferir e "nao apareceu
+           nada": o formulario abria vazio, porque estes dois modelos
+           nao moram no cadastro — moram no codigo que os imprime.
+           Agora a janela diz isso de cara, em vez de parecer um
+           modelo em branco. */
+        (m.doSistema
+          ? '<div class="alert a-blue mb16">' + ic("info") +
+            "<div><b>Este modelo vem do pr\u00f3prio sistema.</b>" +
+            "Ele n\u00e3o mora no cadastro da Central: mora no m\u00f3dulo <b>" +
+            esc_(m.modulo) + "</b>, que \u00e9 quem imprime o documento. " +
+            "Por isso os campos abaixo est\u00e3o aqui s\u00f3 para consulta \u2014 " +
+            "alterar aqui n\u00e3o muda o documento." +
+            (lp(m.id) === "SISTEMA-TERMO-TI"
+              ? " O texto do Termo se altera na tela do <b>Termo de Responsabilidade</b>."
+              : "") +
+            "<br><br>As regras por produto <b>podem</b> apontar para ele normalmente." +
+            "</div></div>"
+          : "") +
         '<div class="grid g2">' +
         '<div class="field"><label>Nome do modelo *</label>' +
         '<input class="input" id="mdNome" value="' + esc_(m.nome) + '" placeholder="Cautela de TI"></div>' +
@@ -72709,6 +72748,37 @@ function modalPendencias() {
     var r0 = regra || {};
     var tipoAtual = lp(r0.tipo).toUpperCase() || "SKU";
 
+    /* [CAUTPORQUE] A TELA TEM DE RESPONDER "POR QUE".
+       28/10, palavras dele: "nao esta puxando os modelos, eu quero
+       saber por que". Menu vazio sem explicacao obriga a perguntar.
+       Esta linha diz quantos modelos ha, de onde vieram, e — quando
+       nao ha nenhum — qual das causas possiveis aconteceu. */
+    function procedenciaDosModelos_() {
+      var todos = lista_(CFG.modelos).filter(function (m) {
+        return m && (lp(m.id) || lp(m.nome));
+      });
+      var doSistema = todos.filter(function (m) { return m.doSistema; }).length;
+      var doServidor = todos.length - doSistema;
+      if (todos.length) {
+        var partes = [];
+        if (doServidor) partes.push(doServidor + " do servidor");
+        if (doSistema) partes.push(doSistema + " do sistema");
+        return todos.length + " modelo(s) \u00b7 " + partes.join(" e ") +
+          (CFG.erroDoCore
+            ? " \u00b7 o servidor n\u00e3o respondeu, ent\u00e3o s\u00f3 h\u00e1 os do sistema"
+            : "");
+      }
+      if (CFG.erroDoCore) {
+        return "N\u00e3o consegui ler os modelos: " +
+          esc_(lp(CFG.erroDoCore.mensagem) || lp(CFG.erroDoCore.codigo) ||
+               "o servidor n\u00e3o respondeu") + ".";
+      }
+      return "O servidor respondeu sem erro e sem nenhum modelo, e os modelos " +
+        "do sistema tamb\u00e9m n\u00e3o carregaram. " +
+        (lp(CFG.comoVeioModelos) ? "Leitura: " + esc_(CFG.comoVeioModelos) + ". " : "") +
+        "Confira se esta p\u00e1gina \u00e9 a vers\u00e3o nova.";
+    }
+
     function opcoesModelo() {
       /* [CAUTLISTA] so entra no menu quem TEM identidade. Um registro
          sem id e sem nome nao e modelo: e resposta mal interpretada,
@@ -72754,7 +72824,8 @@ function modalPendencias() {
         "</div>" +
         '<div class="grid g2">' +
         '<div class="field"><label>Modelo de cautela</label>' +
-        '<select class="input" id="rgModelo">' + opcoesModelo() + "</select></div>" +
+        '<select class="input" id="rgModelo">' + opcoesModelo() + "</select>" +
+        '<small class="hint">' + procedenciaDosModelos_() + "</small></div>" +
         '<div class="field"><label>Situação</label><select class="input" id="rgAtivo">' +
         '<option value="sim"' + (r0.ativo !== false ? " selected" : "") + ">Ativa</option>" +
         '<option value="nao"' + (r0.ativo === false ? " selected" : "") + ">Inativa</option>" +
