@@ -64357,8 +64357,18 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 329 · 28/10";
+var ALMOXA_VERSAO = "sistema 331 · 28/10";
 var ALMOXA_NOVIDADES = [
+  "330 · procura a rubrica tambem no endereco da matricula antiga",
+  "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
+  "327 · explica o modo de simulacao do servidor, em vez de so repetir o erro",
+  "327 · usuario nao localizado deixa de ser beco sem saida",
+  "326 · definir e trocar senha pelo cadeado, sem passar pelo cadastro",
+  "325 · varredura das rubricas orfas, so leitura",
+  "324 · conferir pessoa por pessoa se a assinatura esta sendo puxada",
+  "323 · conferir na planilha se as fichas ainda existem",
+  "322 · a ficha de EPI deixa de esperar o indice de assinaturas para aparecer",
+  "322 · o painel nao some mais por causa de um tempo estourado",
   "276 · a tela do cracha para de culpar o modulo quando o que houve foi prazo",
   "275 · medir a abertura do lado do navegador, chamada por chamada",
   "274 · faixa vermelha fixa quando o sistema NAO esta gravando",
@@ -72402,18 +72412,82 @@ function modalPendencias() {
     return saida;
   }
 
-  /* carrega modelos e regras uma vez; devolve Promise */
+  /* ============================================================
+     DESEMBRULHAR A LISTA QUE O SERVIDOR MANDOU      [CAUTLISTA]
+     ------------------------------------------------------------
+     O DEFEITO (28/10): "os modelos cadastrados nao aparecem
+     corretamente na selecao da Central de Cautelas".
+
+     A causa, reproduzida aqui: a tela fazia lista_(r.dados), e
+     listaSegura, diante de um OBJETO, devolve [ aquele objeto ].
+     Entao uma resposta embrulhada — {dados:{modelos:[...]}} —
+     nao virava lista vazia: virava UMA opcao sem nome no menu.
+     Por isso "nao aparecem CORRETAMENTE", e nao "nao aparecem".
+
+     Isto aqui aceita as formas que um servidor costuma devolver,
+     sem inventar nenhuma: a lista crua, a lista dentro de dados,
+     e a lista embrulhada numa chave (modelos, itens, lista,
+     registros, linhas, resultados). Se nao houver array nenhum
+     em lugar nenhum, devolve vazio E DIZ por que — nunca um
+     registro de mentira.
+     ============================================================ */
+  var CHAVES_DE_LISTA = ["modelos", "regras", "itens", "lista", "registros",
+                         "linhas", "resultados", "dados"];
+
+  function desembrulhar_(v, profundidade) {
+    if (v === null || v === undefined) return null;
+    if (Array.isArray(v)) return v;
+    if (typeof v === "string") {
+      var t = v.trim();
+      if (!t) return null;
+      try { return desembrulhar_(JSON.parse(t), (profundidade || 0) + 1); }
+      catch (e) { return null; }
+    }
+    if (typeof v !== "object") return null;
+    if ((profundidade || 0) > 3) return null;
+    for (var i = 0; i < CHAVES_DE_LISTA.length; i++) {
+      var k = CHAVES_DE_LISTA[i];
+      if (Object.prototype.hasOwnProperty.call(v, k)) {
+        var achou = desembrulhar_(v[k], (profundidade || 0) + 1);
+        if (achou) return achou;
+      }
+    }
+    return null;
+  }
+
+  /* devolve { lista, comoVeio } — comoVeio entra no diagnostico */
+  function listaDaResposta_(r) {
+    if (!r || !r.ok) return { lista: [], comoVeio: "o servidor nao respondeu ok" };
+    if (Array.isArray(r.dados)) return { lista: r.dados, comoVeio: "lista direta em dados" };
+    var dentro = desembrulhar_(r.dados, 0);
+    if (dentro) return { lista: dentro, comoVeio: "lista embrulhada dentro de dados" };
+    var naRaiz = desembrulhar_(r, 0);
+    if (naRaiz) return { lista: naRaiz, comoVeio: "lista na raiz da resposta" };
+    return { lista: [],
+      comoVeio: "o servidor respondeu ok, mas nao achei lista nenhuma na resposta" };
+  }
+
+  /* carrega modelos e regras; devolve Promise */
   function carregar(forcar) {
     if (CFG.carregou && !forcar) return Promise.resolve(CFG);
     return Promise.all([CORE("modelos", {}), CORE("regras", {})]).then(function (res) {
       var a = res[0], b = res[1];
       CFG.erroDoCore = (a && a.ok) ? null : a;
-      CFG.modelos = lista_(a && a.dados);
-      CFG.regras = lista_(b && b.dados);
-      CFG.carregou = true;
+      var m = listaDaResposta_(a), g = listaDaResposta_(b);
+      CFG.modelos = m.lista;
+      CFG.regras = g.lista;
+      CFG.comoVeioModelos = m.comoVeio;
+      CFG.comoVeioRegras = g.comoVeio;
+      /* UMA LEITURA QUE FALHOU NAO VIRA VERDADE GUARDADA.
+         Antes, carregou=true era marcado mesmo com o Core fora: a
+         tela guardava a lista vazia e so saia disso se alguem
+         forcasse. O resolvedor usa carregar(false) — entao ele
+         ficava resolvendo em cima de nada. */
+      CFG.carregou = !!(a && a.ok);
       return CFG;
     });
   }
+  try { window.__cautListaDaResposta = listaDaResposta_; } catch (e) {}
 
   /* ============================================================
      DESENHO DOS INTERRUPTORES
@@ -72556,10 +72630,22 @@ function modalPendencias() {
     var tipoAtual = lp(r0.tipo).toUpperCase() || "SKU";
 
     function opcoesModelo() {
+      /* [CAUTLISTA] so entra no menu quem TEM identidade. Um registro
+         sem id e sem nome nao e modelo: e resposta mal interpretada,
+         e oferecer isso para escolher e pior do que menu vazio. */
+      var bons = lista_(CFG.modelos).filter(function (m) {
+        return m && (lp(m.id) || lp(m.nome));
+      });
+      if (!bons.length) {
+        return '<option value="">' +
+          (CFG.erroDoCore
+            ? "— nao consegui ler os modelos —"
+            : "— nenhum modelo cadastrado —") + "</option>";
+      }
       return '<option value="">— escolha o modelo —</option>' +
-        lista_(CFG.modelos).map(function (m) {
+        bons.map(function (m) {
           return '<option value="' + esc_(m.id) + '"' + (lp(m.id) === lp(r0.modeloId) ? " selected" : "") + ">" +
-            esc_(m.nome) + (m.ativo === false ? " (desativado)" : "") + "</option>";
+            esc_(lp(m.nome) || lp(m.id)) + (m.ativo === false ? " (desativado)" : "") + "</option>";
         }).join("");
     }
 
