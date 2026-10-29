@@ -64357,7 +64357,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 331 · 28/10";
+var ALMOXA_VERSAO = "sistema 332 · 28/10";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
@@ -72467,6 +72467,86 @@ function modalPendencias() {
       comoVeio: "o servidor respondeu ok, mas nao achei lista nenhuma na resposta" };
   }
 
+  /* ============================================================
+     OS DOIS MODELOS QUE O SISTEMA JA TEM        [CAUTEMBUTIDO]
+     ------------------------------------------------------------
+     A CAUSA RAIZ, achada em 28/10 com as fotos dele.
+
+     A Central listava cautelacfg.modelos — e esse cadastro esta
+     vazio. Mas o sistema NAO esta sem modelo: ele tem dois, que
+     funcionam e imprimem todo dia:
+
+       · Cautela de Equipamentos  — o modelo COESA, dentro do
+         modulo [cautela] (a que ele chama de "cautela simples")
+       · Termo de Responsabilidade TI — dentro do modulo [TERMO],
+         com o texto oficial da empresa
+
+     Eles nunca foram registrados na Central. Por isso o menu dizia
+     "nenhum modelo cadastrado" enquanto os dois documentos saiam
+     normalmente pela tela de Cautelas. Nao era a leitura: era que
+     nao havia o que ler.
+
+     ISTO NAO E LISTA FICTICIA. Os dois sao lidos dos modulos que
+     os possuem — versao do Termo vem de TERMO, nao de um texto
+     escrito aqui — e vem marcados como DO SISTEMA, para a tela
+     poder distinguir do que o servidor devolve. Quem vier do
+     servidor com o mesmo id MANDA: assim, no dia em que a Central
+     for instalada no Apps Script, ela assume sem conflito.
+     ============================================================ */
+  var ID_CAUTELA_SIMPLES = "SISTEMA-CAUTELA";
+  var ID_TERMO_TI = "SISTEMA-TERMO-TI";
+
+  function versaoDoTermo_() {
+    try {
+      var m = TERMO.tela.estado.modelo || TERMO.padrao;
+      return lp(m && m.versao) || "01";
+    } catch (e) { return "01"; }
+  }
+
+  function modelosEmbutidos_() {
+    var fora = [];
+    if (typeof CAUTELA !== "undefined") {
+      fora.push({
+        id: ID_CAUTELA_SIMPLES,
+        nome: "Cautela de Equipamentos",
+        descricao: "O modelo COESA de cautela. Sai com os dados do colaborador, " +
+          "os equipamentos e o campo de assinatura.",
+        versao: "1",
+        ativo: true,
+        doSistema: true,
+        modulo: "cautela",
+        exige: { cautela: true, assinatura: true }
+      });
+    }
+    if (typeof TERMO !== "undefined") {
+      fora.push({
+        id: ID_TERMO_TI,
+        nome: "Termo de Responsabilidade — TI",
+        descricao: "O formulário oficial da COESA para equipamentos de " +
+          "tecnologia da informação. O texto é o aprovado pela empresa.",
+        versao: versaoDoTermo_(),
+        ativo: true,
+        doSistema: true,
+        modulo: "TERMO",
+        exige: { cautela: true, assinatura: true, patrimonio: true, serie: true, devolucao: true }
+      });
+    }
+    return fora;
+  }
+
+  /* junta os do servidor com os do sistema; o do servidor manda */
+  function juntarModelos_(doServidor) {
+    var fora = lista_(doServidor).slice();
+    var vistos = {};
+    fora.forEach(function (m) { if (m && lp(m.id)) vistos[lp(m.id).toUpperCase()] = 1; });
+    modelosEmbutidos_().forEach(function (m) {
+      if (!vistos[m.id.toUpperCase()]) fora.push(m);
+    });
+    return fora;
+  }
+  try { window.__cautModelosDoSistema = modelosEmbutidos_; } catch (e) {}
+  try { window.__cautJuntarModelos = juntarModelos_; } catch (e) {}
+
   /* carrega modelos e regras; devolve Promise */
   function carregar(forcar) {
     if (CFG.carregou && !forcar) return Promise.resolve(CFG);
@@ -72474,7 +72554,7 @@ function modalPendencias() {
       var a = res[0], b = res[1];
       CFG.erroDoCore = (a && a.ok) ? null : a;
       var m = listaDaResposta_(a), g = listaDaResposta_(b);
-      CFG.modelos = m.lista;
+      CFG.modelos = juntarModelos_(m.lista);
       CFG.regras = g.lista;
       CFG.comoVeioModelos = m.comoVeio;
       CFG.comoVeioRegras = g.comoVeio;
@@ -72645,7 +72725,9 @@ function modalPendencias() {
       return '<option value="">— escolha o modelo —</option>' +
         bons.map(function (m) {
           return '<option value="' + esc_(m.id) + '"' + (lp(m.id) === lp(r0.modeloId) ? " selected" : "") + ">" +
-            esc_(lp(m.nome) || lp(m.id)) + (m.ativo === false ? " (desativado)" : "") + "</option>";
+            esc_(lp(m.nome) || lp(m.id)) +
+            (m.doSistema ? " (do sistema)" : "") +
+            (m.ativo === false ? " (desativado)" : "") + "</option>";
         }).join("");
     }
 
