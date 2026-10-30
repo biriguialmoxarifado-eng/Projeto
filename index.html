@@ -64362,7 +64362,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 341 · 29/10";
+var ALMOXA_VERSAO = "sistema 342 · 30/10";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
@@ -96761,6 +96761,56 @@ function modalPendencias() {
   }
 
   /* ============================================================
+     A CATEGORIA NAO VEM NA RESERVA                [CAUTAUTO_CAT]
+     ------------------------------------------------------------
+     30/10, com o diagnostico na mao: o observador VIU a aprovacao
+     (reservas.aprovar, #RES-000035, gerou: sim) e mesmo assim a
+     geracao terminou em "1 item(ns) sem exigencia de cautela".
+
+     A Central compara a CATEGORIA do produto com o alvo da regra.
+     A regra dele e por categoria (FERRAMENTAS). Mas o item que vem
+     dentro da reserva traz sku, nome e quantidade — nao traz a
+     categoria. Entao nada batia, caia no padrao da empresa, e o
+     padrao da empresa nao exige cautela. A regra dele estava certa;
+     quem chegava incompleto era o item.
+
+     Agora eu completo o item no catalogo, pelo SKU, antes de
+     perguntar. E se o catalogo nao responder, eu digo isso em vez
+     de concluir que o item nao exige cautela — concluir ausencia a
+     partir de dado faltando foi o erro que gerou este bug.
+     ============================================================ */
+  A.catalogo = null;
+
+  A.carregarCatalogo = function (forcar) {
+    if (A.catalogo && !forcar) return Promise.resolve(A.catalogo);
+    return Promise.resolve(API.call("itens", "listar", {})).then(function (r) {
+      if (!r || !r.ok) { A.catalogo = null; return null; }
+      var ix = {};
+      lista_(r.dados).forEach(function (i) {
+        var k = lp(i && (i.sku || i.codigo || i.id)).toUpperCase();
+        if (k) ix[k] = i;
+      });
+      A.catalogo = ix;
+      return ix;
+    }, function () { A.catalogo = null; return null; });
+  };
+
+  /* completa o item com o que o catalogo sabe dele */
+  A.completar = function (item) {
+    var i = item || {};
+    if (lp(i.categoria)) return i;
+    var k = lp(i.sku || i.codigo || i.id).toUpperCase();
+    if (!k || !A.catalogo || !A.catalogo[k]) return i;
+    var doCatalogo = A.catalogo[k];
+    var copia = {};
+    Object.keys(i).forEach(function (c) { copia[c] = i[c]; });
+    copia.categoria = lp(doCatalogo.categoria || doCatalogo.familia || doCatalogo.grupo);
+    if (!lp(copia.nome)) copia.nome = lp(doCatalogo.nome || doCatalogo.descricao);
+    copia.__doCatalogo = true;
+    return copia;
+  };
+
+  /* ============================================================
      1. PERGUNTAR A CENTRAL, ITEM POR ITEM
      ============================================================ */
   A.resolverItens = function (itens) {
@@ -96770,12 +96820,27 @@ function modalPendencias() {
       return Promise.reject(new Error(
         "a Central de Cautelas nao esta nesta versao, entao nao da para saber que modelo se aplica"));
     }
+    /* o catalogo primeiro: e dele que sai a categoria */
+    return A.carregarCatalogo(false).then(function () { return comCatalogo_(); });
+
+    function comCatalogo_() {
     var fora = [];
     function um(k) {
       if (k >= fila.length) return Promise.resolve(fora);
-      var it = fila[k];
+      var it = A.completar(fila[k]);
+      var semCategoria = !lp(it.categoria);
       return Promise.resolve(CAUTELACFG.resolverQuandoPronto(produtoDoItem_(it)))
         .then(function (r) {
+          /* SEM CATEGORIA EU NAO CONCLUO NADA.
+             Se o item chegou sem categoria e o catalogo tambem nao
+             soube dizer, a resposta "nao exige cautela" nao vale:
+             ela veio de dado faltando, nao de regra. */
+          if (semCategoria && r && r.exigeCautela !== true) {
+            fora.push({ item: it, regra: r || null, incerto: true,
+              erro: "nao achei a categoria deste item no catalogo, entao nao sei " +
+                    "que regra se aplica a ele" });
+            return um(k + 1);
+          }
           fora.push({ item: it, regra: r || null });
           return um(k + 1);
         }, function (e) {
@@ -96784,14 +96849,16 @@ function modalPendencias() {
         });
     }
     return um(0);
+    }
   };
 
   /* ============================================================
      2. AGRUPAR POR MODELO — so quem exige cautela
      ============================================================ */
   A.agrupar = function (resolvidos) {
-    var grupos = {}, ordem = [], semRegra = 0, comErro = 0;
+    var grupos = {}, ordem = [], semRegra = 0, comErro = 0, incertos = 0;
     lista_(resolvidos).forEach(function (x) {
+      if (x.incerto) { incertos++; return; }
       if (x.erro || !x.regra) { comErro++; return; }
       if (x.regra.exigeCautela !== true) { semRegra++; return; }
       var id = lp(x.regra.modeloId) || "(sem modelo)";
@@ -96803,7 +96870,7 @@ function modalPendencias() {
       grupos[id].itens.push(x.item);
     });
     return { grupos: ordem.map(function (k) { return grupos[k]; }),
-             semCautela: semRegra, comErro: comErro };
+             semCautela: semRegra, comErro: comErro, incertos: incertos };
   };
 
   /* ============================================================
@@ -96901,6 +96968,12 @@ function modalPendencias() {
       var g = A.agrupar(resolvidos);
       saida.semCautela = g.semCautela;
       saida.comErro = g.comErro;
+      saida.incertos = g.incertos || 0;
+      if (saida.incertos) {
+        saida.falhas.push({ modelo: "(" + saida.incertos + " item(ns))",
+          motivo: "nao achei a categoria deles no catalogo, entao nao sei que regra " +
+                  "se aplica — e nao vou concluir que nao exige cautela por falta de dado" });
+      }
       if (!g.grupos.length) return saida;
 
       function um(k) {
