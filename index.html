@@ -64362,7 +64362,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 343 · 30/10";
+var ALMOXA_VERSAO = "sistema 345 · 30/10";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
@@ -96874,6 +96874,154 @@ function modalPendencias() {
   };
 
   /* ============================================================
+     O ID UNICO DO COLABORADOR                   [CAUTAUTO_ID]
+     ------------------------------------------------------------
+     30/10: a resolucao do modelo ficou certa (TRENA -> FERRAMENTAS
+     -> Cautela de Equipamentos, gera: sim) e mesmo assim o servidor
+     recusou:
+
+       "A cautela precisa do ID unico do colaborador. Sem ele a
+        assinatura cadastrada nunca e encontrada."
+
+     E ele esta certo em recusar. A reserva traz nome, matricula,
+     cargo e setor — nao traz o id. Eu montei a cautela sem ele.
+
+     Nao invento um id nem gravo sem: pergunto a MESMA funcao que o
+     resto do sistema usa para saber quem e a pessoa, EPIASS.quemE
+     — que procura pela matricula, pelo nome, e tambem pelas
+     matriculas antigas ligadas no [MATANT]. Se ela devolver
+     "ambiguo", eu PARO: cautela carimbada na pessoa errada e pior
+     do que cautela nenhuma.
+     ============================================================ */
+  /* ------------------------------------------------------------
+     QUANDO O NOME REPETE                        [CAUTAUTO_ID2]
+     30/10, palavras dele: "nome as vezes pode ter nome duplicado
+     mas e a mesma pessoa. Entao ele pode buscar pela matricula,
+     pelo nome, ou pelo cargo."
+
+     Entao: quando o nome bate em mais de um cadastro, eu NAO
+     desisto na hora — estreito com os campos que a reserva traz
+     (matricula, cargo, setor). Se sobrar UM, e esse, e eu digo
+     quais campos decidiram. Se sobrar mais de um, ai sim eu paro
+     e MOSTRO os candidatos, para uma pessoa resolver.
+
+     O que eu nao faco e pegar o primeiro da lista. Dois cadastros
+     com o mesmo nome podem ser a mesma pessoa duplicada — ou duas
+     pessoas. Daqui nao da para saber, e chutar carimba a cautela
+     em alguem.
+     ------------------------------------------------------------ */
+  function normal_(v) {
+    return lp(v).toUpperCase().normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+  }
+  function normalMat_(v) {
+    return lp(v).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+  }
+
+  A.estreitar = function (reserva) {
+    var r = reserva || {};
+    var nome = normal_(r.colaborador || r.solicitante);
+    if (!nome) return { candidatos: [] };
+    var todos = [];
+    try { todos = lista_(MOCK.usuarios); } catch (e) { todos = []; }
+
+    var porNome = todos.filter(function (u) {
+      return normal_(u && (u.nome || u.colaborador)) === nome;
+    });
+    if (porNome.length <= 1) return { candidatos: porNome, usou: ["nome"] };
+
+    var usou = ["nome"], atual = porNome;
+
+    var mat = normalMat_(r.matricula);
+    if (mat) {
+      var m = atual.filter(function (u) { return normalMat_(u.matricula) === mat; });
+      if (m.length === 1) return { candidatos: m, usou: usou.concat("matricula") };
+      if (m.length) { atual = m; usou.push("matricula"); }
+    }
+    var cargo = normal_(r.cargo);
+    if (cargo) {
+      var c = atual.filter(function (u) { return normal_(u.cargo || u.funcao) === cargo; });
+      if (c.length === 1) return { candidatos: c, usou: usou.concat("cargo") };
+      if (c.length) { atual = c; usou.push("cargo"); }
+    }
+    var setor = normal_(r.setor || r.setorColaborador);
+    if (setor) {
+      var s2 = atual.filter(function (u) { return normal_(u.setor) === setor; });
+      if (s2.length === 1) return { candidatos: s2, usou: usou.concat("setor") };
+      if (s2.length) { atual = s2; usou.push("setor"); }
+    }
+    return { candidatos: atual, usou: usou };
+  };
+
+  /* quem esta logado, quando o colaborador e ele mesmo */
+  A.idDaSessao = function (reserva) {
+    var r = reserva || {};
+    var eu = null;
+    try { eu = ST.usuario || (APP.STATE && APP.STATE.usuario) || null; } catch (e) { eu = null; }
+    if (!eu || !lp(eu.id)) return "";
+    var nomeIgual = normal_(eu.nome) &&
+      normal_(eu.nome) === normal_(r.colaborador || r.solicitante);
+    var matIgual = normalMat_(eu.matricula) &&
+      normalMat_(eu.matricula) === normalMat_(r.matricula);
+    return (nomeIgual || matIgual) ? lp(eu.id) : "";
+  };
+
+  A.acharIdDoColaborador = function (reserva) {
+    var r = reserva || {};
+    var direto = lp(r.idColaborador || r.colaboradorId || r.usuarioId || r.idUsuario);
+    if (direto) return { id: direto, por: "veio na reserva" };
+
+    if (typeof EPIASS === "undefined" || !EPIASS.quemE) {
+      return { id: "", erro: "o modulo de identidade nao esta nesta versao" };
+    }
+    var quem;
+    try {
+      quem = EPIASS.quemE({
+        matricula: lp(r.matricula),
+        nome: lp(r.colaborador || r.solicitante),
+        colaborador: lp(r.colaborador || r.solicitante)
+      });
+    } catch (e) {
+      return { id: "", erro: lp(e && e.message) || "nao consegui identificar" };
+    }
+    if (quem && quem.ambiguo) {
+      /* [CAUTAUTO_ID2] antes de desistir, estreito pelos outros campos */
+      var e2 = A.estreitar(r);
+      if (e2.candidatos.length === 1) {
+        return { id: lp(e2.candidatos[0].id),
+                 por: e2.usou.join(" + ") };
+      }
+      /* e, se o colaborador for quem esta logado, a sessao resolve */
+      var daSessao = A.idDaSessao(r);
+      if (daSessao) return { id: daSessao, por: "e voce mesmo, pela sessao" };
+
+      return { id: "", erro: "achei " + (e2.candidatos.length || "mais de um") +
+        " cadastros com este nome e nao consegui separar nem pela matricula, " +
+        "nem pelo cargo, nem pelo setor" +
+        (e2.candidatos.length
+          ? " (" + e2.candidatos.map(function (u) {
+              return lp(u.id) + (lp(u.matricula) ? " mat " + lp(u.matricula) : "") +
+                     (lp(u.cargo) ? " \u00b7 " + lp(u.cargo) : "");
+            }).join(" | ") + ")"
+          : "") +
+        " — resolva a duplicidade no cadastro e tente de novo" };
+    }
+    if (!quem || !lp(quem.id)) {
+      var sozinho = A.estreitar(r);
+      if (sozinho.candidatos.length === 1) {
+        return { id: lp(sozinho.candidatos[0].id), por: sozinho.usou.join(" + ") };
+      }
+      var minhaSessao = A.idDaSessao(r);
+      if (minhaSessao) return { id: minhaSessao, por: "e voce mesmo, pela sessao" };
+      return { id: "", erro: "nao achei " +
+        (lp(r.colaborador) || "este colaborador") +
+        (lp(r.matricula) ? " (matricula " + lp(r.matricula) + ")" : "") +
+        " no cadastro" };
+    }
+    return { id: lp(quem.id), por: lp(quem.por) || "cadastro" };
+  };
+
+  /* ============================================================
      3. JA NASCEU ANTES?
      ============================================================ */
   function jaExiste_(protocolo, modeloId) {
@@ -96892,7 +97040,7 @@ function modalPendencias() {
   /* ============================================================
      4. GRAVAR UMA CAUTELA POR GRUPO
      ============================================================ */
-  function montar_(reserva, grupo) {
+  function montar_(reserva, grupo, idColab) {
     var hoje = new Date().toISOString().slice(0, 10);
     return {
       numero: "",
@@ -96907,7 +97055,7 @@ function modalPendencias() {
       cpf: lp(reserva.cpf),
       cargo: lp(reserva.cargo),
       setorColaborador: lp(reserva.setor || reserva.setorColaborador),
-      idColaborador: lp(reserva.idColaborador || reserva.colaboradorId || reserva.usuarioId),
+      idColaborador: lp(idColab),
       requisitante: lp(reserva.solicitante || reserva.colaborador),
       aplicacao: "",
       categoria: lp(grupo.modeloNome),
@@ -96994,6 +97142,18 @@ function modalPendencias() {
       }
       if (!g.grupos.length) return saida;
 
+      /* UMA pessoa por reserva: acho o id dela uma vez so */
+      var quemE = A.acharIdDoColaborador(r);
+      saida.colaborador = { id: quemE.id, por: lp(quemE.por), erro: lp(quemE.erro) };
+      if (!quemE.id) {
+        saida.falhas.push({
+          modelo: g.grupos.map(function (x) { return x.modeloNome || x.modeloId; }).join(", "),
+          motivo: "nao identifiquei o colaborador: " + (quemE.erro || "sem id") +
+                  ". Sem o id a assinatura cadastrada nunca e encontrada, entao nao gravo."
+        });
+        return saida;
+      }
+
       function um(k) {
         if (k >= g.grupos.length) return saida;
         var grupo = g.grupos[k];
@@ -97002,7 +97162,7 @@ function modalPendencias() {
             saida.puladas.push(grupo.modeloNome || grupo.modeloId);
             return um(k + 1);
           }
-          return Promise.resolve(API.call("cautela", "salvar", montar_(r, grupo)))
+          return Promise.resolve(API.call("cautela", "salvar", montar_(r, grupo, quemE.id)))
             .then(function (rs) {
               if (rs && rs.ok) {
                 saida.criadas.push({
@@ -97218,7 +97378,20 @@ function modalPendencias() {
     function detalhe_() {
       var u = A.ultima;
       if (!u || !lista_(u.detalhe).length) return "";
-      return '<h4 class="mt16">Item por item, da \u00faltima tentativa\u00a0' +
+      var c = u.colaborador || null;
+      var quemHTML = c
+        ? '<div class="alert ' + (c.id ? "a-green" : "a-red") + ' mt12">' +
+          ic(c.id ? "checkC" : "alerta") +
+          "<div><b>Colaborador: " + (c.id
+            ? "identificado</b> (" + esc_(c.id) + ")" +
+              (c.por ? " \u2014 achei pelo " + esc_(c.por) + "." : "")
+            : "N\u00c3O identificado.</b> " + esc_(c.erro) +
+              " Sem o id \u00fanico a assinatura cadastrada nunca \u00e9 encontrada, " +
+              "ent\u00e3o eu n\u00e3o gravo a cautela.") +
+          "</div></div>"
+        : "";
+      return quemHTML +
+        '<h4 class="mt16">Item por item, da \u00faltima tentativa\u00a0' +
         '<small class="muted">(' + esc_(u.protocolo) + ')</small></h4>' +
         '<p class="muted small">\u00c9 aqui que se v\u00ea por que um item n\u00e3o gerou: ' +
         "qual categoria o sistema enxergou nele, e o que a Central respondeu.</p>" +
