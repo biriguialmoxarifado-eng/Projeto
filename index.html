@@ -64362,7 +64362,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 342 · 30/10";
+var ALMOXA_VERSAO = "sistema 343 · 30/10";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
@@ -96966,6 +96966,24 @@ function modalPendencias() {
 
     return A.resolverItens(itens).then(function (resolvidos) {
       var g = A.agrupar(resolvidos);
+      /* [CAUTAUTO_ITEM] o detalhe de cada item, para a tela poder
+         dizer POR QUE um item nao gerou — em vez de so contar. */
+      saida.detalhe = lista_(resolvidos).map(function (x) {
+        var i = x.item || {}, r = x.regra || {};
+        return {
+          nome: nomeDoItem_(i),
+          sku: lp(i.sku || i.codigo),
+          categoria: lp(i.categoria),
+          deOndeVeioACategoria: lp(i.categoria)
+            ? (i.__doCatalogo ? "do catalogo" : "veio na reserva")
+            : "NAO ACHEI",
+          origem: lp(r.origem),
+          modelo: lp(r.modeloNome) || lp(r.modeloId),
+          exigeCautela: r.exigeCautela === true,
+          incerto: !!x.incerto,
+          erro: lp(x.erro)
+        };
+      });
       saida.semCautela = g.semCautela;
       saida.comErro = g.comErro;
       saida.incertos = g.incertos || 0;
@@ -97020,6 +97038,27 @@ function modalPendencias() {
   A.avisar = function (saida) {
     if (!saida) return;
     if (typeof toast !== "function") return;
+    /* [CAUTAUTO_AVISO] ele pediu: "na hora que eu apertar aprovar,
+       uma notificacaozinha dizendo o que aconteceu". Antes eu so
+       avisava quando dava certo — e silencio depois de aprovar e
+       exatamente o que o deixou sem saber se funcionou. */
+    if (!saida.criadas.length && !saida.puladas.length && !saida.falhas.length) {
+      var porque = "";
+      try {
+        var semRegra = lista_(saida.detalhe).filter(function (d) {
+          return !d.exigeCautela && !d.incerto;
+        });
+        if (semRegra.length) {
+          var d0 = semRegra[0];
+          porque = d0.nome + ": categoria \u201c" +
+            (d0.categoria || "n\u00e3o achei") + "\u201d \u2014 " +
+            (d0.origem || "sem regra") + ".";
+        }
+      } catch (e) {}
+      toast("info", "Nenhuma cautela para este pedido",
+        (porque || "nenhum item deste pedido exige cautela.") +
+        " Veja em \u201cPor que n\u00e3o gerou?\u201d.");
+    }
     if (saida.criadas.length) {
       toast("ok", saida.criadas.length > 1 ? "Cautelas geradas" : "Cautela gerada",
         saida.criadas.map(function (c) {
@@ -97175,6 +97214,31 @@ function modalPendencias() {
     var janela_ = (typeof UI !== "undefined" && UI.modal) ? UI.modal : null;
     if (!janela_) return null;
 
+
+    function detalhe_() {
+      var u = A.ultima;
+      if (!u || !lista_(u.detalhe).length) return "";
+      return '<h4 class="mt16">Item por item, da \u00faltima tentativa\u00a0' +
+        '<small class="muted">(' + esc_(u.protocolo) + ')</small></h4>' +
+        '<p class="muted small">\u00c9 aqui que se v\u00ea por que um item n\u00e3o gerou: ' +
+        "qual categoria o sistema enxergou nele, e o que a Central respondeu.</p>" +
+        '<div class="tbl-wrap"><table class="tbl"><thead><tr>' +
+        "<th>Item</th><th>Categoria que eu vi</th><th>A Central respondeu</th><th>Gera?</th>" +
+        "</tr></thead><tbody>" +
+        lista_(u.detalhe).map(function (d) {
+          return "<tr><td><b>" + esc_(d.nome) + "</b>" +
+            (d.sku ? "<br><small>" + esc_(d.sku) + "</small>" : "") + "</td>" +
+            "<td>" + (d.categoria
+              ? "<b>" + esc_(d.categoria) + "</b><br><small>" + esc_(d.deOndeVeioACategoria) + "</small>"
+              : '<span class="badge b-red">n\u00e3o achei</span>') + "</td>" +
+            "<td>" + esc_(d.origem || "\u2014") +
+            (d.modelo ? "<br><small>" + esc_(d.modelo) + "</small>" : "") + "</td>" +
+            "<td>" + (d.exigeCautela ? "<b>sim</b>"
+              : (d.incerto ? '<span class="badge b-yellow">incerto</span>' : "n\u00e3o")) +
+            (d.erro ? "<br><small>" + esc_(d.erro) + "</small>" : "") + "</td></tr>";
+        }).join("") + "</tbody></table></div>";
+    }
+
     function linhas_() {
       if (!A.vistas.length) {
         return '<div class="alert a-yellow">' + ic("alerta") +
@@ -97211,6 +97275,7 @@ function modalPendencias() {
         "</div></div>" +
         '<h4 class="mt16">Aprova\u00e7\u00f5es que eu vi</h4>' +
         '<div id="caDiagLista">' + linhas_() + "</div>" +
+        detalhe_() +
         '<h4 class="mt16">Gerar agora, a partir de um protocolo</h4>' +
         '<p class="muted small">Use enquanto o autom\u00e1tico n\u00e3o estiver certo. ' +
         "Vale a mesma regra: s\u00f3 gera o que a Central mandar, e n\u00e3o duplica.</p>" +
