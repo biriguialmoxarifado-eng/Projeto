@@ -64362,7 +64362,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 340 · 29/10";
+var ALMOXA_VERSAO = "sistema 341 · 29/10";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
@@ -72136,7 +72136,7 @@ function modalPendencias() {
           trilha: ["Estoque", "Cautela de equipamentos"],
           titulo: "Cautela de Equipamentos",
           sub: "Entrega de equipamentos patrimoniados sob responsabilidade do colaborador.",
-          acoes: '<button class="btn btn-orange" data-ct-nova>' + ic("mais") + "Gerar cautela</button>"
+          acoes: '<button class="btn btn-ghost" data-ct-porque>' + ic("doutor") + "Por que n\u00e3o gerou?</button>" + '<button class="btn btn-orange" data-ct-nova>' + ic("mais") + "Gerar cautela</button>"
         });
 
         if (r && !r.ok) {
@@ -72191,6 +72191,13 @@ function modalPendencias() {
     mount: function () {
       document.querySelectorAll("[data-ct-nova]").forEach(function (b) {
         b.addEventListener("click", function () { modalCautela(null); });
+      });
+      /* [CAUTAUTO_DIAG] o que o observador viu */
+      document.querySelectorAll("[data-ct-porque]").forEach(function (b) {
+        b.addEventListener("click", function () {
+          if (typeof CAUTAUTO !== "undefined" && CAUTAUTO.abrirDiagnostico) CAUTAUTO.abrirDiagnostico();
+          else toast("warn", "Modulo nao carregado", "O bloco [CAUTAUTO] nao esta nesta versao.");
+        });
       });
       document.querySelectorAll("[data-ct-ver]").forEach(function (b) {
         b.addEventListener("click", function () {
@@ -96731,6 +96738,14 @@ function modalPendencias() {
   function lista_(v) {
     return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
   }
+  /* escapar texto e meu, nao emprestado de outro bloco: contar com
+     um esc_ que vive noutro fechamento funciona ate o dia em que
+     aquele bloco muda de lugar. */
+  function esc_(v) {
+    return (typeof U !== "undefined" && U.esc) ? U.esc(lp(v))
+      : lp(v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+             .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
 
   /* o produto, do jeito que a Central sabe perguntar */
   function produtoDoItem_(i) {
@@ -97005,9 +97020,24 @@ function modalPendencias() {
         if (pr && typeof pr.then === "function") {
           pr.then(function (r) {
             try {
-              if (!foiAprovacao_(modulo, acao, payload, r)) return;
+              if (!foiAprovacao_(modulo, acao, payload, r)) {
+                /* anoto o que PARECIA aprovacao e nao foi, com o motivo:
+                   e essa lista que diz se o caminho dele passa por aqui */
+                if (pareceAprovacao_(modulo, acao)) {
+                  anotarVista_(modulo, acao, payload, r, false,
+                    (!r || !r.ok) ? "o servidor nao respondeu ok"
+                    : (lp(payload && payload.decisao) ? "a decisao nao foi de aprovacao"
+                    : "esta acao nao esta na lista de aprovacoes"));
+                }
+                return;
+              }
               var proto = protocoloDe_(payload, r);
-              if (!proto) return;
+              if (!proto) {
+                anotarVista_(modulo, acao, payload, r, false,
+                  "aprovou, mas nao achei o protocolo no pedido nem na resposta");
+                return;
+              }
+              anotarVista_(modulo, acao, payload, r, true, "");
               A.aoAprovar(proto, (r && r.dados) || null).then(function (s) {
                 A.avisar(s);
                 try { if (typeof ROUTER !== "undefined" && ROUTER.render) ROUTER.render(); }
@@ -97029,6 +97059,129 @@ function modalPendencias() {
       setTimeout(function () { try { A.observarAPI(); } catch (e) {} }, 2000);
     }
   } catch (e) {}
+
+
+  /* ============================================================
+     8. POR QUE NAO GEROU                      [CAUTAUTO_DIAG]
+     ------------------------------------------------------------
+     Ja errei duas vezes adivinhando onde a aprovacao passa. Em vez
+     de uma terceira, isto aqui ANOTA o que o observador viu e
+     mostra numa tela. Se nada aparecer na lista, a aprovacao dele
+     nao passa pela camada que eu observo — e ai eu procuro o
+     caminho certo com uma evidencia na mao, em vez de palpite.
+
+     Tem tambem o caminho de escape: gerar a cautela a partir de um
+     protocolo, a mao. Enquanto o automatico nao estiver certo, ele
+     nao fica parado.
+     ============================================================ */
+  A.vistas = [];
+
+  function anotarVista_(modulo, acao, payload, resposta, agiu, motivo) {
+    try {
+      A.vistas.unshift({
+        quando: new Date(),
+        acao: lp(modulo) + "." + lp(acao),
+        protocolo: protocoloDe_(payload, resposta),
+        decisao: lp(payload && payload.decisao),
+        respondeuOk: !!(resposta && resposta.ok),
+        agiu: !!agiu,
+        motivo: lp(motivo)
+      });
+      if (A.vistas.length > 30) A.vistas.length = 30;
+    } catch (e) {}
+  }
+
+  /* parece aprovacao, mesmo que eu nao vá agir? entao anoto */
+  function pareceAprovacao_(modulo, acao) {
+    var chave = lp(modulo) + "." + lp(acao);
+    if (ACOES_DE_APROVACAO[chave]) return true;
+    return /aprov|decid|autoriz|libera/i.test(lp(acao));
+  }
+
+  A.abrirDiagnostico = function () {
+    var janela_ = (typeof UI !== "undefined" && UI.modal) ? UI.modal : null;
+    if (!janela_) return null;
+
+    function linhas_() {
+      if (!A.vistas.length) {
+        return '<div class="alert a-yellow">' + ic("alerta") +
+          "<div><b>O observador ainda n\u00e3o viu nenhuma aprova\u00e7\u00e3o.</b>" +
+          "Se voc\u00ea j\u00e1 aprovou alguma coisa depois de abrir esta p\u00e1gina e nada " +
+          "aparece aqui, ent\u00e3o a tela que voc\u00ea usou <b>n\u00e3o passa pela camada " +
+          "que eu observo</b> \u2014 e \u00e9 isso que eu preciso saber. " +
+          "Me diga o nome da tela.</div></div>";
+      }
+      return '<div class="tbl-wrap"><table class="tbl"><thead><tr>' +
+        "<th>Quando</th><th>A\u00e7\u00e3o</th><th>Protocolo</th><th>Gerou?</th>" +
+        "</tr></thead><tbody>" +
+        A.vistas.map(function (v) {
+          return "<tr><td>" + esc_(v.quando.toLocaleTimeString("pt-BR")) + "</td>" +
+            "<td><code>" + esc_(v.acao) + "</code>" +
+            (v.decisao ? "<br><small>" + esc_(v.decisao) + "</small>" : "") + "</td>" +
+            "<td>" + esc_(v.protocolo || "\u2014") + "</td>" +
+            "<td>" + (v.agiu ? "<b>sim</b>" : "n\u00e3o" +
+              (v.motivo ? "<br><small>" + esc_(v.motivo) + "</small>" : "")) + "</td></tr>";
+        }).join("") + "</tbody></table></div>";
+    }
+
+    janela_({
+      titulo: "Por que n\u00e3o gerou a cautela?",
+      sub: "O que o sistema viu acontecer, e um caminho para gerar agora",
+      tamanho: "lg",
+      corpo:
+        '<div class="alert ' + (A.__observando ? "a-green" : "a-red") + '">' +
+        ic(A.__observando ? "checkC" : "alerta") +
+        "<div><b>Observador: " + (A.__observando ? "ligado" : "DESLIGADO") + ".</b>" +
+        (A.__observando
+          ? " Ele olha toda aprova\u00e7\u00e3o que passa pela camada de chamadas."
+          : " Sem ele, nenhuma aprova\u00e7\u00e3o gera cautela. Recarregue a p\u00e1gina.") +
+        "</div></div>" +
+        '<h4 class="mt16">Aprova\u00e7\u00f5es que eu vi</h4>' +
+        '<div id="caDiagLista">' + linhas_() + "</div>" +
+        '<h4 class="mt16">Gerar agora, a partir de um protocolo</h4>' +
+        '<p class="muted small">Use enquanto o autom\u00e1tico n\u00e3o estiver certo. ' +
+        "Vale a mesma regra: s\u00f3 gera o que a Central mandar, e n\u00e3o duplica.</p>" +
+        '<div class="flex gap8" style="align-items:center;flex-wrap:wrap">' +
+        '<input class="input" id="caDiagProto" placeholder="protocolo da solicita\u00e7\u00e3o" style="flex:1;min-width:180px">' +
+        '<button class="btn btn-primary" data-ca-gerar>Gerar cautela deste protocolo</button></div>' +
+        '<div id="caDiagSaida"></div>',
+      rodape: '<button class="btn btn-ghost" data-x>Fechar</button>',
+      aoAbrir: function (w, fechar) {
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        w.querySelector("[data-ca-gerar]").addEventListener("click", function () {
+          var proto = lp((w.querySelector("#caDiagProto") || {}).value);
+          var saida = w.querySelector("#caDiagSaida");
+          function dizer(t, cor) {
+            saida.innerHTML = '<div class="alert ' + (cor || "a-red") + ' mt12">' +
+              ic(cor === "a-green" ? "checkC" : "alerta") + "<div>" + t + "</div></div>";
+          }
+          if (!proto) { dizer("Digite o protocolo."); return; }
+          var bt = this; bt.disabled = true; bt.textContent = "Gerando\u2026";
+          A.aoAprovar(proto, null).then(function (s) {
+            bt.disabled = false; bt.textContent = "Gerar cautela deste protocolo";
+            var partes = [];
+            if (s.criadas.length) {
+              partes.push("<b>" + s.criadas.length + " cautela(s) gerada(s):</b> " +
+                esc_(s.criadas.map(function (c) { return c.numero + " (" + c.modelo + ")"; }).join(", ")));
+            }
+            if (s.puladas.length) partes.push("J\u00e1 existia: " + esc_(s.puladas.join(", ")) + ".");
+            if (s.semCautela) partes.push(s.semCautela + " item(ns) sem exig\u00eancia de cautela.");
+            s.falhas.forEach(function (f) {
+              partes.push("<b>N\u00e3o gerei " + esc_(f.modelo) + ":</b> " + esc_(f.motivo));
+            });
+            dizer(partes.join("<br>") || "Nada a gerar para este protocolo.",
+              s.criadas.length ? "a-green" : (s.falhas.length ? "a-red" : "a-yellow"));
+            if (s.criadas.length) {
+              try { if (typeof ROUTER !== "undefined" && ROUTER.render) ROUTER.render(); } catch (e) {}
+            }
+          }, function (e) {
+            bt.disabled = false; bt.textContent = "Gerar cautela deste protocolo";
+            dizer(esc_(lp(e && e.message) || "n\u00e3o consegui"));
+          });
+        });
+      }
+    });
+  };
 
   A.diagnostico = function () { return A.ultima; };
 
