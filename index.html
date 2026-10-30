@@ -9618,16 +9618,11 @@ toast("err", "Operação recusada pelo Core", r.mensagem);
 return;
 }
 toast(aprovar ? "ok" : "warn", aprovar ? "Reserva aprovada" : "Reserva recusada", protocolo + (aprovar ? " liberada para separação." : " foi recusada e o solicitante já foi avisado."));
-/* [CAUTAUTO] aprovou? entao a cautela nasce agora.
-   A aprovacao ja aconteceu no servidor — se a cautela falhar, ela
-   NAO e desfeita: o operador e avisado e gera pelo botao de sempre. */
-try {
-  if (aprovar && typeof CAUTAUTO !== "undefined" && CAUTAUTO.aoAprovar) {
-    CAUTAUTO.aoAprovar(protocolo, (typeof x !== "undefined" && x) ? x : (r && r.dados) || {})
-      .then(function (s2) { CAUTAUTO.avisar(s2); ROUTER.render(); },
-            function () {});
-  }
-} catch (e) {}
+/* [CAUTAUTO] a geracao da cautela nao mora mais aqui.
+   Ela passou para o observador da camada de chamadas, porque o
+   sistema aprova por tres caminhos e gancho tela a tela esquece um.
+   Dois ganchos tambem correriam juntos e poderiam criar a mesma
+   cautela duas vezes. Procure [CAUTAUTO_OBS]. */
 ROUTER.render();
 });
 });
@@ -64367,7 +64362,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 339 · 29/10";
+var ALMOXA_VERSAO = "sistema 340 · 29/10";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
@@ -96954,6 +96949,86 @@ function modalPendencias() {
         "“Gerar cautela”.");
     });
   };
+
+
+  /* ============================================================
+     7. ONDE EU ME LIGO — UM LUGAR SO            [CAUTAUTO_OBS]
+     ------------------------------------------------------------
+     O ERRO DE 29/10: eu liguei a geracao DENTRO do modal de aprovar
+     reserva. Mas o sistema aprova por TRES caminhos diferentes:
+       · reservas.aprovar
+       · aprovacoes.decidir
+       · aprovacoes.decidirItens
+     Ele aprovou por um que eu nao tinha ligado, e nada aconteceu.
+     E minhas provas nao pegaram isso porque testaram a FUNCAO, nao
+     a LIGACAO — eu conferi que o codigo existia, nao que ele era
+     chamado de onde ele e chamado de verdade.
+
+     A correcao nao e sair gancheando tela por tela, que e como se
+     esquece a quarta. E observar a camada por onde TODAS passam.
+
+     REGRAS DESTE OBSERVADOR
+       Nao altera a resposta de nada. Nao atrasa nada. Nao engole
+       erro. So olha o que passou e, quando foi uma aprovacao que
+       deu certo, dispara a geracao por fora — sem segurar quem
+       chamou.
+     ============================================================ */
+  var ACOES_DE_APROVACAO = {
+    "reservas.aprovar": 1,
+    "aprovacoes.decidir": 1,
+    "aprovacoes.decidirItens": 1
+  };
+
+  function foiAprovacao_(modulo, acao, payload, resposta) {
+    if (!resposta || !resposta.ok) return false;
+    var chave = lp(modulo) + "." + lp(acao);
+    if (!ACOES_DE_APROVACAO[chave]) return false;
+    /* decidir serve para aprovar E para recusar: so vale a aprovada */
+    var d = lp(payload && payload.decisao).toUpperCase();
+    if (d && d.indexOf("APROV") !== 0) return false;
+    return true;
+  }
+
+  function protocoloDe_(payload, resposta) {
+    return lp((payload && (payload.protocolo || payload.numero)) ||
+              (resposta && resposta.dados && resposta.dados.protocolo));
+  }
+
+  A.observarAPI = function () {
+    if (A.__observando) return true;
+    if (typeof API === "undefined" || typeof API.call !== "function") return false;
+    var original = API.call;
+    A.__apiOriginal = original;
+    API.call = function (modulo, acao, payload, opcoes) {
+      var pr = original.apply(API, arguments);
+      try {
+        if (pr && typeof pr.then === "function") {
+          pr.then(function (r) {
+            try {
+              if (!foiAprovacao_(modulo, acao, payload, r)) return;
+              var proto = protocoloDe_(payload, r);
+              if (!proto) return;
+              A.aoAprovar(proto, (r && r.dados) || null).then(function (s) {
+                A.avisar(s);
+                try { if (typeof ROUTER !== "undefined" && ROUTER.render) ROUTER.render(); }
+                catch (e) {}
+              }, function () {});
+            } catch (e) {}
+          }, function () {});
+        }
+      } catch (e) {}
+      return pr;      /* a resposta segue intacta, sempre */
+    };
+    A.__observando = true;
+    return true;
+  };
+
+  /* liga sozinho, assim que a API existir */
+  try {
+    if (!A.observarAPI()) {
+      setTimeout(function () { try { A.observarAPI(); } catch (e) {} }, 2000);
+    }
+  } catch (e) {}
 
   A.diagnostico = function () { return A.ultima; };
 
