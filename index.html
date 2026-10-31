@@ -64362,7 +64362,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 345 · 30/10";
+var ALMOXA_VERSAO = "sistema 346 · 31/10";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
@@ -97033,14 +97033,24 @@ function modalPendencias() {
       });
     }, function () { return false; });
   }
+  /* A MARCA TEM DE SER A MESMA DOS DOIS LADOS.
+     31/10, achado por teste: eu GRAVAVA a marca com o protocolo que
+     vinha dentro da reserva e PROCURAVA com o que vinha no pedido.
+     Quando os dois diferem — "#RES-35" contra "RES-35", ou a reserva
+     trazendo o protocolo de outro jeito — a busca nao achava e
+     nascia uma segunda cautela da mesma operacao. Agora a marca
+     normaliza: so letras e numeros, maiusculas. */
+  function soAlfaNum_(v) {
+    return lp(v).toUpperCase().replace(/[^A-Z0-9]/g, "");
+  }
   function marcaDe_(protocolo, modeloId) {
-    return "[origem:" + lp(protocolo) + "|" + lp(modeloId) + "]";
+    return "[origem:" + soAlfaNum_(protocolo) + "|" + soAlfaNum_(modeloId) + "]";
   }
 
   /* ============================================================
      4. GRAVAR UMA CAUTELA POR GRUPO
      ============================================================ */
-  function montar_(reserva, grupo, idColab) {
+  function montar_(reserva, grupo, idColab, protocolo) {
     var hoje = new Date().toISOString().slice(0, 10);
     return {
       numero: "",
@@ -97063,8 +97073,8 @@ function modalPendencias() {
       modeloNome: lp(grupo.modeloNome),
       /* a marca de origem vive na observacao: e o que impede a
          segunda aprovacao de criar outra cautela igual */
-      observacao: "Gerada na aprovacao de " + lp(reserva.protocolo) + ". " +
-                  marcaDe_(reserva.protocolo, grupo.modeloId),
+      observacao: "Gerada a partir de " + lp(protocolo || reserva.protocolo) + ". " +
+                  marcaDe_(protocolo || reserva.protocolo, grupo.modeloId),
       itens: grupo.itens.map(function (i) {
         return {
           descricao: nomeDoItem_(i),
@@ -97162,7 +97172,7 @@ function modalPendencias() {
             saida.puladas.push(grupo.modeloNome || grupo.modeloId);
             return um(k + 1);
           }
-          return Promise.resolve(API.call("cautela", "salvar", montar_(r, grupo, quemE.id)))
+          return Promise.resolve(API.call("cautela", "salvar", montar_(r, grupo, quemE.id, protocolo)))
             .then(function (rs) {
               if (rs && rs.ok) {
                 saida.criadas.push({
@@ -97260,15 +97270,48 @@ function modalPendencias() {
        deu certo, dispara a geracao por fora — sem segurar quem
        chamou.
      ============================================================ */
+  /* [CAUTAUTO_SEMAPROV] 31/10, secao 2 do documento dele:
+     "a ausencia de aprovacao nao pode impedir a geracao automatica
+      de uma cautela quando a regra da categoria determinar sua
+      emissao."
+
+     Achei a peca: quando a regra dispensa aprovacao, reservas.criar
+     ja devolve a reserva com status APROVADA (o proprio sistema faz
+     isso em "exigeAprovacao ? AGUARDANDO_APROVACAO : APROVADA").
+     Eu so olhava as acoes de aprovar — entao ferramenta, que nao
+     passa por aprovacao nenhuma, nunca gerava cautela.
+
+     Agora o criar tambem conta, MAS so quando a reserva ja nasce
+     confirmada. Reserva que ainda espera aprovacao nao gera nada
+     aqui: ela gera depois, quando for aprovada. E a idempotencia
+     garante que nunca saiam duas. */
   var ACOES_DE_APROVACAO = {
     "reservas.aprovar": 1,
     "aprovacoes.decidir": 1,
     "aprovacoes.decidirItens": 1
   };
+  /* acoes que geram SO SE a reserva ja estiver confirmada */
+  var ACOES_SE_CONFIRMADA = {
+    "reservas.criar": 1,
+    "reservas.disponibilizar": 1
+  };
+  var JA_CONFIRMADA = /^(APROVADA|CONFIRMADA|LIBERADA|DISPONIVEL|SEPARACAO|AGUARDANDO_RETIRADA)$/i;
+
+  function jaNasceuConfirmada_(resposta) {
+    var d = (resposta && resposta.dados) || {};
+    var st = lp(d.status || d.situacao).toUpperCase();
+    if (!st) return false;
+    if (/^AGUARDANDO_APROV|^PENDENTE|^EM_APROV/i.test(st)) return false;
+    return JA_CONFIRMADA.test(st);
+  }
 
   function foiAprovacao_(modulo, acao, payload, resposta) {
     if (!resposta || !resposta.ok) return false;
     var chave = lp(modulo) + "." + lp(acao);
+    if (ACOES_SE_CONFIRMADA[chave]) {
+      /* sem aprovacao gerencial: vale, desde que ja esteja confirmada */
+      return jaNasceuConfirmada_(resposta);
+    }
     if (!ACOES_DE_APROVACAO[chave]) return false;
     /* decidir serve para aprovar E para recusar: so vale a aprovada */
     var d = lp(payload && payload.decisao).toUpperCase();
@@ -97298,8 +97341,12 @@ function modalPendencias() {
                 if (pareceAprovacao_(modulo, acao)) {
                   anotarVista_(modulo, acao, payload, r, false,
                     (!r || !r.ok) ? "o servidor nao respondeu ok"
+                    : (ACOES_SE_CONFIRMADA[lp(modulo) + "." + lp(acao)]
+                        ? "a reserva ainda nao esta confirmada (" +
+                          (lp(r && r.dados && r.dados.status) || "sem status") +
+                          ") — vai gerar quando for aprovada"
                     : (lp(payload && payload.decisao) ? "a decisao nao foi de aprovacao"
-                    : "esta acao nao esta na lista de aprovacoes"));
+                    : "esta acao nao esta na lista de aprovacoes")));
                 }
                 return;
               }
@@ -97366,7 +97413,7 @@ function modalPendencias() {
   /* parece aprovacao, mesmo que eu nao vá agir? entao anoto */
   function pareceAprovacao_(modulo, acao) {
     var chave = lp(modulo) + "." + lp(acao);
-    if (ACOES_DE_APROVACAO[chave]) return true;
+    if (ACOES_DE_APROVACAO[chave] || ACOES_SE_CONFIRMADA[chave]) return true;
     return /aprov|decid|autoriz|libera/i.test(lp(acao));
   }
 
