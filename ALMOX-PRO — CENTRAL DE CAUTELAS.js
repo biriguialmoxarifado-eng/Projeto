@@ -104,6 +104,25 @@ function AP_Modulo_cautelacfg(acao, payload, sessao) {
       case 'resolver':         return AP_CCFG_resolver_(payload);
       case 'historico':        return { ok: true, dados: AP_CCFG_historico_(payload) };
       case 'diagnostico':      return { ok: true, dados: AP_CCFG_ensaio_() };
+      /* 31/10 — para ele poder ver, de dentro do sistema, se o motor
+         esta ligado. Nao duplica nada: so repassa o que o
+         AP_CAUTELA_AUTO.gs responde. Se aquele arquivo ainda nao foi
+         publicado, diz isso em vez de fingir que esta tudo bem. */
+      case 'motor': {
+        if (typeof AP_CT_estadoDoGatilho !== 'function') {
+          return { ok: false, codigo: 'MOTOR_AUSENTE',
+            mensagem: 'O arquivo AP_CAUTELA_AUTO.gs nao esta publicado neste projeto. ' +
+                      'Sem ele nenhuma cautela nasce sozinha.' };
+        }
+        return { ok: true, dados: AP_CT_estadoDoGatilho() };
+      }
+      case 'motorVarrerAgora': {
+        if (typeof AP_CT_varrerPendentes !== 'function') {
+          return { ok: false, codigo: 'MOTOR_AUSENTE',
+            mensagem: 'O arquivo AP_CAUTELA_AUTO.gs nao esta publicado neste projeto.' };
+        }
+        return { ok: true, dados: AP_CT_varrerPendentes() };
+      }
       default:
         return { ok: false, codigo: 'ACAO_DESCONHECIDA',
           mensagem: 'A Central de Cautelas não conhece a ação "' + acao + '". Conhece: ' +

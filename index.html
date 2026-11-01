@@ -64372,7 +64372,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 349 · 31/10";
+var ALMOXA_VERSAO = "sistema 355 · 01/11";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
@@ -71397,6 +71397,31 @@ function modalPendencias() {
      Reaproveita o que a ficha de EPI ja faz: fichaDadosPessoa_ devolve
      cracha, empresa, obra, foto, cargo, setor. Nao duplico essa regra.
      ============================================================ */
+  /* [ASSTRILHA] o caminho da busca da assinatura, em palavras.
+     So nomes de chave e resultado — nunca a imagem nem dado sensivel. */
+  function trilhaDaAssinatura_(cad) {
+    var linhas = lista_(cad && cad.trilha);
+    if (!linhas.length) {
+      var ult = null;
+      try { ult = EPIASS.ultimaBusca; } catch (e) {}
+      linhas = lista_(ult && ult.trilha);
+    }
+    if (!linhas.length) {
+      return '<br><small class="muted">Não tenho o caminho da busca para mostrar. ' +
+        'Se o colaborador assinou no aplicativo, me avise.</small>';
+    }
+    return '<details style="margin-top:6px"><summary style="cursor:pointer;font-size:12px">' +
+      'Onde eu procurei (' + linhas.length + ' chave(s))</summary>' +
+      '<div class="tbl-wrap" style="margin-top:6px"><table class="tbl"><thead><tr>' +
+      "<th>Chave</th><th>Resultado</th><th>Detalhe</th></tr></thead><tbody>" +
+      linhas.map(function (t) {
+        return "<tr><td class=\"mono\" style=\"font-size:11px\">" + esc_(lp(t.chave)) + "</td>" +
+          "<td>" + esc_(lp(t.resultado) || "\u2014") + "</td>" +
+          "<td style=\"font-size:11px\">" + esc_(lp(t.detalhe) || lp(t.origem) || "\u2014") +
+          "</td></tr>";
+      }).join("") + "</tbody></table></div></details>";
+  }
+
   function dadosDaPessoa(ref) {
     try {
       if (typeof fichaDadosPessoa_ === "function") return fichaDadosPessoa_(ref) || {};
@@ -71410,10 +71435,24 @@ function modalPendencias() {
     if (typeof EPIASS === "undefined" || !EPIASS || typeof EPIASS.lerCadastroResolvido !== "function") {
       return Promise.resolve({ ok: false, tem: false, mensagem: "O cadastro central de assinatura nao esta nesta versao." });
     }
+    /* [ASSINDICE] 01/11 — ESTA ERA A CAUSA DE "a assinatura nao esta
+       puxando".
+       A ficha de EPI imprime a rubrica porque a tela dela carrega ANTES
+       o indice de assinaturas (EPIASS.carregarIndice) e so depois le o
+       cadastro. A cautela pulava essa etapa e caia na busca chave por
+       chave, que erra quando o indice nao esta em memoria.
+       Nao reconstruo nada: uso o MESMO carregador que a ficha de EPI
+       ja usa. Se o indice falhar, sigo assim mesmo — a busca chave por
+       chave continua valendo como segunda tentativa. */
     var garantir = (typeof EPIASS.garantirCadastroDeUsuarios === "function")
       ? EPIASS.garantirCadastroDeUsuarios(false)
       : Promise.resolve();
-    return Promise.resolve(garantir).then(function () {
+    function comIndice_() {
+      if (typeof EPIASS.carregarIndice !== "function") return Promise.resolve();
+      return Promise.resolve(EPIASS.carregarIndice()).then(
+        function (ix) { return ix; }, function () { return null; });
+    }
+    return Promise.resolve(garantir).then(comIndice_, comIndice_).then(function () {
       return EPIASS.lerCadastroResolvido(ref, false);
     }, function () {
       return EPIASS.lerCadastroResolvido(ref, false);
@@ -71529,7 +71568,10 @@ function modalPendencias() {
     }
 
     function blocoResponsavel() {
-      var foto = lp(pessoa.foto);
+      /* 31/10 — antes so olhava pessoa.foto, que vem de fichaDadosPessoa_
+       e volta vazio quando a ficha nao foi carregada. A cautela gerada
+       ja guarda a foto do cadastro central: uso a dela quando existir. */
+    var foto = lp(pessoa.foto) || lp(c.foto);
       return '<div class="ct-bloco">' +
         '<div class="ct-bloco-tit">Responsável pelo Equipamento</div>' +
         '<div style="display:flex">' +
@@ -71563,7 +71605,8 @@ function modalPendencias() {
           '<td class="c">' + (deslocamento + k + 1) + "</td>" +
           "<td>" + (esc_(i.descricao) || "&nbsp;") + "</td>" +
           '<td class="c">' + (esc_(i.qtd) || "1") + "</td>" +
-          '<td class="mono">' + (esc_(i.patrimonio) || "&nbsp;") + "</td>" +
+          '<td class="mono">' + (lp(i.patrimonio) ? esc_(i.patrimonio)
+            : "N\u00e3o informado") + "</td>" +
           '<td class="mono">' + (esc_(i.etiquetaCoesa) || "&nbsp;") + "</td>" +
           '<td class="mono">' + (esc_(i.numeroSerie) || "&nbsp;") + "</td>" +
           "</tr>";
@@ -71678,6 +71721,23 @@ function modalPendencias() {
       idColaborador: c.idColaborador || c.colaboradorId
     };
     var pessoa = dadosDaPessoa(ref);
+    /* 31/10 — a ficha de EPI nem sempre esta carregada, e entao
+       dadosDaPessoa volta vazio: era por isso que saia SEM FOTO.
+       Completo pelo cadastro central, usando o id que a cautela guarda.
+       Nao sobrescrevo nada que ja veio preenchido. */
+    try {
+      var doCadastro = (typeof CAUTAUTO === "object" && CAUTAUTO &&
+                        CAUTAUTO.usuarioPorId)
+        ? CAUTAUTO.usuarioPorId(ref.idColaborador) : null;
+      if (doCadastro) {
+        pessoa = pessoa || {};
+        if (!lp(pessoa.foto)) pessoa.foto = lp(doCadastro.foto || doCadastro.fotoUrl);
+        if (!lp(pessoa.nome)) pessoa.nome = lp(doCadastro.nome);
+        if (!lp(pessoa.matricula)) pessoa.matricula = lp(doCadastro.matricula);
+        if (!lp(pessoa.cargo)) pessoa.cargo = lp(doCadastro.cargo || doCadastro.funcao);
+        if (!lp(pessoa.setor)) pessoa.setor = lp(doCadastro.setor);
+      }
+    } catch (e) {}
     toast("info", "Montando a cautela…", "buscando a assinatura cadastrada");
     assinaturaCentral(ref).then(function (cad) {
       var rubrica = (cad && cad.tem && lp((cad.dados || {}).imagem || (cad.dados || {}).assinatura)) || "";
@@ -71836,7 +71896,8 @@ function modalPendencias() {
               "<td>" + (k + 1) + "</td>" +
               "<td>" + esc_(i.descricao) + "</td>" +
               "<td>" + esc_(i.qtd || 1) + "</td>" +
-              '<td class="mono">' + (esc_(i.patrimonio) || "—") + "</td>" +
+              '<td class="mono">' + (lp(i.patrimonio) ? esc_(i.patrimonio)
+                : '<span class="muted">N\u00e3o informado</span>') + "</td>" +
               '<td class="mono">' + (esc_(i.etiquetaCoesa) || "—") + "</td>" +
               '<td class="mono">' + (esc_(i.numeroSerie) || "—") + "</td>" +
               '<td><input class="input input-sm" type="date" data-ct-entrega="' + k + '" value="' +
@@ -71984,10 +72045,22 @@ function modalPendencias() {
               "✓ Assinatura cadastrada</span><br>" +
               '<img src="' + esc_(img) + '" style="max-height:38px;max-width:180px;object-fit:contain;margin-top:3px">';
           } else {
-            aviso.innerHTML = '<span style="color:#B54708;font-weight:600">Assinatura digital não cadastrada.</span><br>' +
-              "O colaborador assina no aplicativo de campo (ALMOXA CAMPO) e a rubrica " +
-              "passa a valer para todas as cautelas. Sem ela, a cautela sai com a linha " +
-              "em branco para assinatura à mão.";
+            /* [ASSTRILHA] 01/11 — "nao esta puxando" nao me diz nada.
+               Mostro as chaves que foram procuradas e o que o servidor
+               respondeu em cada uma. Nunca mostro a imagem nem conteudo
+               da assinatura aqui, so o caminho da busca. */
+            aviso.innerHTML = '<span style="color:#B54708;font-weight:600">' +
+              (cad && cad.ok === false
+                ? "Não consegui consultar o cadastro de assinatura."
+                : "Assinatura digital não encontrada para este colaborador.") +
+              "</span><br>" +
+              (cad && cad.ambiguo
+                ? "O cadastro tem mais de uma pessoa com estes dados, então eu não " +
+                  "arrisco pegar a assinatura de outra. Confira a matrícula.<br>"
+                : "") +
+              "O colaborador assina no aplicativo de campo (ALMOXA CAMPO). Sem ela, " +
+              "a cautela sai com a linha em branco para assinar à mão." +
+              trilhaDaAssinatura_(cad);
           }
         });
       }
@@ -72014,11 +72087,40 @@ function modalPendencias() {
         return c;
       }
 
+      /* [PATOPC] 31/10 — o patrimonio deixou de travar a cautela.
+         Ele pediu, com estas palavras: "deixa opcional, se eu quiser eu
+         coloco, mas nao trava o processo por conta disso". O numero de
+         patrimonio passa a ser dado COMPLEMENTAR: a cautela sai, e o
+         documento mostra "Nao informado" na linha do item.
+         A exigencia so volta quando o MODELO da Central pedir — e so a
+         Central decide isso, nao uma regra fixa aqui. Nada e inventado:
+         campo vazio continua vazio. */
+      function exigePatrimonioAqui_() {
+        if (c.exigePatrimonio === true) return true;
+        if (c.exigePatrimonio === false) return false;
+        if (typeof CAUTELACFG === "object" && CAUTELACFG && CAUTELACFG.estado &&
+            CAUTELACFG.estado.carregou && lp(c.modeloId)) {
+          var achado = null;
+          lista_(CAUTELACFG.estado.modelos).forEach(function (m) {
+            if (lp(m.id) === lp(c.modeloId)) achado = m;
+          });
+          if (achado) return achado.exigePatrimonio === true;
+        }
+        return false;   /* na duvida NAO trava: o patrimonio e complementar */
+      }
+
       function criticar() {
         if (!lp(c.colaborador)) return "Escolha o colaborador responsável pelo equipamento.";
         if (!c.itens.length) return "A cautela precisa de pelo menos um equipamento.";
-        var semPat = c.itens.filter(function (i) { return !lp(i.patrimonio); }).length;
-        if (semPat) return semPat + " item(ns) sem número de patrimônio. Cada equipamento tem de ser individualizado.";
+        if (exigePatrimonioAqui_()) {
+          var semPat = c.itens.filter(function (i) { return !lp(i.patrimonio); }).length;
+          if (semPat) {
+            return semPat + " item(ns) sem número de patrimônio. Este modelo (" +
+              (lp(c.modeloNome) || lp(c.modeloId) || "o escolhido") +
+              ") exige patrimônio, conforme está configurado na Central de Cautelas. " +
+              "Para esta categoria não exigir, desligue \"Exige patrimônio\" no modelo.";
+          }
+        }
         return "";
       }
 
@@ -96808,6 +96910,84 @@ function modalPendencias() {
     }, function () { A.catalogo = null; return null; });
   };
 
+  /* [CAUTAUTO_PAT] 31/10 — o Core recusa a cautela com
+     "item sem numero de patrimonio", e a reserva da Loja nao carrega
+     plaquinha nenhuma. O cadastro central de Patrimonio e quem tem.
+     Nao crio banco novo, nao invento plaquinha: leio o que ja existe,
+     uso so unidade disponivel e nunca a mesma duas vezes. */
+  A.carregarPatrimonio = function (forcar) {
+    if (A.patrimonio !== undefined && !forcar) return Promise.resolve(A.patrimonio);
+    return Promise.resolve(API.call("patrimonio", "listar", {})).then(function (r) {
+      if (!r || !r.ok) { A.patrimonio = null; return null; }
+      var ix = {};
+      lista_(r.dados).forEach(function (u) {
+        var sit = lp(u && u.situacao).toUpperCase();
+        if (sit === "BAIXADO" || sit === "EXTRAVIADO" || sit === "EMPRESTADO") return;
+        if (!lp(u && u.patrimonio)) return;
+        var k = semAcento_(u.descricao);
+        if (!k) return;
+        if (!ix[k]) ix[k] = [];
+        ix[k].push(u);
+      });
+      A.patrimonio = ix;
+      return ix;
+    }, function () { A.patrimonio = null; return null; });
+  };
+
+  function semAcento_(v) {
+    return lp(v).toUpperCase()
+      .replace(/[\u00c1\u00c0\u00c2\u00c3\u00c4]/g, "A")
+      .replace(/[\u00c9\u00c8\u00ca\u00cb]/g, "E")
+      .replace(/[\u00cd\u00cc\u00ce\u00cf]/g, "I")
+      .replace(/[\u00d3\u00d2\u00d4\u00d5\u00d6]/g, "O")
+      .replace(/[\u00da\u00d9\u00db\u00dc]/g, "U")
+      .replace(/[\u00c7]/g, "C")
+      .replace(/\s+/g, " ").trim();
+  }
+
+  /* um item de qtd N vira N linhas, cada uma com a sua plaquinha */
+  A.individualizar = function (item, patrimonio, usadas) {
+    var i = item || {};
+    var qtd = Number(i.qtd || i.qtdSolicitada || i.quantidade || 1) || 1;
+    if (lp(i.patrimonio)) {
+      usadas[lp(i.patrimonio)] = true;
+      return { linhas: [i], achou: 1, pedidas: 1, porQue: "veio na reserva" };
+    }
+    if (patrimonio === null || patrimonio === undefined) {
+      return { linhas: [i], achou: 0, pedidas: qtd,
+               porQue: "nao consegui ler o cadastro de Patrimonio" };
+    }
+    var livres = (patrimonio[semAcento_(nomeDoItem_(i))] || []).filter(function (u) {
+      return !usadas[lp(u.patrimonio)];
+    });
+    /* individualizo SEMPRE: 30 equipamentos, 30 registros. O que tiver
+       plaquinha leva; o resto fica vazio e o documento mostra
+       "Nao informado". Falta de plaquinha nao impede emitir. */
+    var linhas = [];
+    for (var n = 0; n < qtd; n++) {
+      var copia = {};
+      Object.keys(i).forEach(function (c) { copia[c] = i[c]; });
+      copia.qtd = 1;
+      var u = livres[n];
+      if (u) {
+        usadas[lp(u.patrimonio)] = true;
+        copia.patrimonio = lp(u.patrimonio);
+        if (!lp(copia.serie)) copia.serie = lp(u.numeroSerie);
+        if (!lp(copia.marca)) copia.marca = lp(u.marca);
+        if (!lp(copia.modelo)) copia.modelo = lp(u.modelo);
+      } else {
+        copia.patrimonio = "";
+      }
+      linhas.push(copia);
+    }
+    var achou = Math.min(livres.length, qtd);
+    return { linhas: linhas, achou: achou, pedidas: qtd,
+             porQue: achou === qtd ? "do cadastro de Patrimonio"
+                   : (achou === 0 ? "nenhuma unidade disponivel com esta descricao no Patrimonio"
+                                  : "so ha " + achou + " unidade(s) disponivel(is) para " +
+                                    qtd + " pedida(s)") };
+  };
+
   /* completa o item com o que o catalogo sabe dele */
   A.completar = function (item) {
     var i = item || {};
@@ -96884,7 +97064,7 @@ function modalPendencias() {
       var id = lp(x.regra.modeloId) || "(sem modelo)";
       if (!grupos[id]) {
         grupos[id] = { modeloId: id, modeloNome: lp(x.regra.modeloNome),
-                       origem: lp(x.regra.origem), itens: [] };
+                       origem: lp(x.regra.origem), regra: x.regra, itens: [] };
         ordem.push(id);
       }
       grupos[id].itens.push(x.item);
@@ -96989,7 +97169,7 @@ function modalPendencias() {
   A.acharIdDoColaborador = function (reserva) {
     var r = reserva || {};
     var direto = lp(r.idColaborador || r.colaboradorId || r.usuarioId || r.idUsuario);
-    if (direto) return { id: direto, por: "veio na reserva" };
+    if (direto) return { id: direto, por: "veio na reserva", usuario: A.usuarioPorId(direto) };
 
     if (typeof EPIASS === "undefined" || !EPIASS.quemE) {
       return { id: "", erro: "o modulo de identidade nao esta nesta versao" };
@@ -97009,7 +97189,7 @@ function modalPendencias() {
       var e2 = A.estreitar(r);
       if (e2.candidatos.length === 1) {
         return { id: lp(e2.candidatos[0].id),
-                 por: e2.usou.join(" + ") };
+                 por: e2.usou.join(" + "), usuario: e2.candidatos[0] };
       }
       /* e, se o colaborador for quem esta logado, a sessao resolve */
       var daSessao = A.idDaSessao(r);
@@ -97029,16 +97209,35 @@ function modalPendencias() {
     if (!quem || !lp(quem.id)) {
       var sozinho = A.estreitar(r);
       if (sozinho.candidatos.length === 1) {
-        return { id: lp(sozinho.candidatos[0].id), por: sozinho.usou.join(" + ") };
+        return { id: lp(sozinho.candidatos[0].id), por: sozinho.usou.join(" + "),
+                 usuario: sozinho.candidatos[0] };
       }
       var minhaSessao = A.idDaSessao(r);
-      if (minhaSessao) return { id: minhaSessao, por: "e voce mesmo, pela sessao" };
+      if (minhaSessao) return { id: minhaSessao, por: "e voce mesmo, pela sessao",
+                                usuario: A.usuarioPorId(minhaSessao) };
       return { id: "", erro: "nao achei " +
         (lp(r.colaborador) || "este colaborador") +
         (lp(r.matricula) ? " (matricula " + lp(r.matricula) + ")" : "") +
         " no cadastro" };
     }
-    return { id: lp(quem.id), por: lp(quem.por) || "cadastro" };
+    return { id: lp(quem.id), por: lp(quem.por) || "cadastro",
+             usuario: quem.usuario || A.usuarioPorId(quem.id) };
+  };
+
+  /* [CAUTAUTO_CAD2] o cadastro central de um colaborador, pelo id unico.
+     E dele que a cautela tira matricula, cargo, setor e foto — nao da
+     reserva, que traz o que a pessoa digitou na hora de pedir. */
+  A.usuarioPorId = function (id) {
+    var alvo = lp(id);
+    if (!alvo) return null;
+    var fonte = [];
+    try { fonte = lista_(MOCK.usuarios); } catch (e) {}
+    if (!fonte.length) {
+      try { fonte = lista_(EPIASS.cadastroOficial); } catch (e) {}
+    }
+    var achado = null;
+    fonte.forEach(function (u) { if (!achado && lp(u.id) === alvo) achado = u; });
+    return achado;
   };
 
   /* ============================================================
@@ -97070,43 +97269,71 @@ function modalPendencias() {
   /* ============================================================
      4. GRAVAR UMA CAUTELA POR GRUPO
      ============================================================ */
-  function montar_(reserva, grupo, idColab, protocolo) {
+  function montar_(reserva, grupo, idColab, protocolo, patrimonio, usadas, cad) {
     var hoje = new Date().toISOString().slice(0, 10);
     return {
       numero: "",
       protocolo: lp(protocolo),
 emissao: hoje,
       empresa: lp(reserva.empresa),
-      obra: lp(reserva.obra),
-      setor: lp(reserva.setor || reserva.setorColaborador),
+      /* [CAUTAUTO_CAD2] 31/10 — antes tudo isto vinha da reserva, que
+         traz o que o solicitante digitou: foi assim que a cautela saiu
+         com "Matricula: Ismael Santos". Agora manda o CADASTRO CENTRAL,
+         achado pelo id unico; a reserva so entra no que faltar. */
+      obra: lp(reserva.obra || (cad && cad.obra)),
+      setor: lp(reserva.setor || reserva.setorColaborador || (cad && cad.setor)),
       contrato: lp(reserva.contrato),
       notaFiscal: "",
-      colaborador: lp(reserva.colaborador || reserva.solicitante),
-      matricula: lp(reserva.matricula),
-      cpf: lp(reserva.cpf),
-      cargo: lp(reserva.cargo),
-      setorColaborador: lp(reserva.setor || reserva.setorColaborador),
+      colaborador: lp((cad && (cad.nome || cad.colaborador)) ||
+                      reserva.colaborador || reserva.solicitante),
+      matricula: lp((cad && cad.matricula) || reserva.matricula),
+      cpf: lp((cad && cad.cpf) || reserva.cpf),
+      cargo: lp((cad && (cad.cargo || cad.funcao)) || reserva.cargo),
+      setorColaborador: lp((cad && cad.setor) || reserva.setor ||
+                           reserva.setorColaborador),
+      foto: lp(cad && (cad.foto || cad.fotoUrl)),
+      email: lp(cad && (cad.email || cad.emailCorporativo)),
       idColaborador: lp(idColab),
       requisitante: lp(reserva.solicitante || reserva.colaborador),
       aplicacao: "",
       categoria: lp(grupo.modeloNome),
       modeloId: lp(grupo.modeloId),
       modeloNome: lp(grupo.modeloNome),
+      /* [CAUTAUTO_EXIG] a cautela registra as exigencias que a CENTRAL
+         decidiu. Para ferramenta, exigePatrimonio vem false. */
+      exigePatrimonio: (grupo.regra || {}).exigePatrimonio === true,
+      exigeSerie: (grupo.regra || {}).exigeSerie === true,
+      exigeAssinatura: (grupo.regra || {}).exigeAssinatura === true,
+      exigeIdentificacao: (grupo.regra || {}).exigeIdentificacao === true,
+      exigeDevolucao: (grupo.regra || {}).exigeDevolucao === true,
+      permitePermanente: (grupo.regra || {}).permitePermanente === true,
+      validaEntregaFisica: (grupo.regra || {}).validaEntregaFisica === true,
+      patrimonioObrigatorio: (grupo.regra || {}).exigePatrimonio === true,
       /* a marca de origem vive na observacao: e o que impede a
          segunda aprovacao de criar outra cautela igual */
       observacao: "Gerada a partir de " + lp(protocolo || reserva.protocolo) + ". " +
                   marcaDe_(protocolo || reserva.protocolo, grupo.modeloId),
-      itens: grupo.itens.map(function (i) {
-        return {
-          descricao: nomeDoItem_(i),
-          sku: lp(i.sku || i.codigo),
-          qtd: Number(i.qtd || i.qtdSolicitada || i.quantidade || 1) || 1,
-          patrimonio: lp(i.patrimonio),
-          serie: lp(i.serie || i.numeroSerie),
-          marca: lp(i.marca),
-          modelo: lp(i.modelo)
-        };
-      })
+      itens: (function () {
+        /* cada equipamento e uma linha: 30 equipamentos, 30 registros */
+        var fora = [], linhas = [];
+        lista_(grupo.itens).forEach(function (i) {
+          var r = A.individualizar(i, patrimonio, usadas || {});
+          if (r.achou < r.pedidas) fora.push(nomeDoItem_(i) + " \u2014 " + r.porQue);
+          r.linhas.forEach(function (x) { linhas.push(x); });
+        });
+        grupo.__semPatrimonio = fora;
+        return linhas.map(function (i) {
+          return {
+            descricao: nomeDoItem_(i),
+            sku: lp(i.sku || i.codigo),
+            qtd: Number(i.qtd || i.qtdSolicitada || i.quantidade || 1) || 1,
+            patrimonio: lp(i.patrimonio),
+            serie: lp(i.serie || i.numeroSerie),
+            marca: lp(i.marca),
+            modelo: lp(i.modelo)
+          };
+        });
+      })()
     };
   }
 
@@ -97147,12 +97374,33 @@ emissao: hoje,
     }, function () { return true; });
   };
 
+  /* [CAUTETAPAS] 01/11 — ele escreveu: "nao basta mostrar que o
+     observador esta ligado ou que a acao foi detectada; e necessario
+     comprovar que a geracao foi executada e concluida".
+     Entao cada etapa do caminho registra o que aconteceu de fato. Nada
+     aqui e decorativo: o que nao for comprovado aparece como pendente
+     ou como falha, nunca como concluido. */
+  function etapa_(saida, nome, estado, detalhe) {
+    saida.etapas = saida.etapas || [];
+    saida.etapas.push({ nome: nome, estado: estado, detalhe: lp(detalhe),
+                        quando: new Date() });
+    return saida;
+  }
+
   A.aoAprovar = function (protocolo, reserva) {
     var saida = { protocolo: lp(protocolo), criadas: [], puladas: [], falhas: [],
-                  semCautela: 0, comErro: 0, quando: new Date() };
+                  semCautela: 0, comErro: 0, quando: new Date(), etapas: [] };
     A.ultima = saida;
 
-    if (!A.ligado) return Promise.resolve(saida);
+    etapa_(saida, "Aprovação recebida", "ok",
+      "o sistema viu a operação passar pela camada de chamadas");
+    etapa_(saida, "Protocolo identificado", lp(protocolo) ? "ok" : "falhou",
+      lp(protocolo) || "a operação não trouxe o protocolo da reserva");
+
+    if (!A.ligado) {
+      etapa_(saida, "Geração automática", "falhou", "o gerador está desligado");
+      return Promise.resolve(saida);
+    }
 
     /* QUEM CHAMA PODE NAO TER A RESERVA NA MAO.
        O gancho vive dentro do modal de aprovacao, e de la nem sempre
@@ -97170,6 +97418,13 @@ emissao: hoje,
     ).then(function (r) {
       r = r || {};
       var itens = lista_(r.itens);
+      etapa_(saida, "Reserva consultada", itens.length ? "ok" : "falhou",
+        itens.length ? itens.length + " item(ns) lidos da reserva"
+                     : "não consegui ler os itens da reserva");
+      var sitR = situacao_(r);
+      etapa_(saida, "Situação da reserva",
+        /^RECUSAD|^CANCELAD|^VENCID|^EXCLUID/i.test(sitR) ? "falhou" : "ok",
+        sitR || "sem status — a regra da categoria é que decide");
       if (!itens.length) {
         saida.falhas.push({ modelo: "(nenhum)",
           motivo: "nao consegui ler os itens da reserva " + lp(protocolo) +
@@ -97200,6 +97455,17 @@ emissao: hoje,
       saida.semCautela = g.semCautela;
       saida.comErro = g.comErro;
       saida.incertos = g.incertos || 0;
+
+      var comRegra = lista_(resolvidos).filter(function (x) {
+        return x.regra && lp(x.regra.origem);
+      }).length;
+      etapa_(saida, "Regra localizada", comRegra ? "ok" : "falhou",
+        comRegra ? comRegra + " item(ns) com regra vinda da Central"
+                 : "a Central n\u00e3o devolveu regra para nenhum item");
+      var modelos_ = g.grupos.map(function (x) { return lp(x.modeloNome) || lp(x.modeloId); });
+      etapa_(saida, "Modelo localizado", modelos_.length ? "ok" : "pendente",
+        modelos_.length ? modelos_.join(", ")
+                        : "nenhum item desta reserva exige cautela");
       if (saida.incertos) {
         saida.falhas.push({ modelo: "(" + saida.incertos + " item(ns))",
           motivo: "nao achei a categoria deles no catalogo, entao nao sei que regra " +
@@ -97211,6 +97477,15 @@ emissao: hoje,
          O cadastro ja foi carregado antes de chegar aqui. */
       var quemE = A.acharIdDoColaborador(r);
       saida.colaborador = { id: quemE.id, por: lp(quemE.por), erro: lp(quemE.erro) };
+      etapa_(saida, "Dados do colaborador recuperados",
+        quemE.id ? "ok" : "falhou",
+        quemE.id
+          ? (quemE.usuario
+              ? "do cadastro central: " + lp(quemE.usuario.nome) +
+                (lp(quemE.usuario.matricula) ? ", matr\u00edcula " + lp(quemE.usuario.matricula) : "") +
+                " (achei pelo " + lp(quemE.por) + ")"
+              : "id " + lp(quemE.id) + ", achei pelo " + lp(quemE.por))
+          : lp(quemE.erro));
       if (!quemE.id) {
         saida.falhas.push({
           modelo: g.grupos.map(function (x) { return x.modeloNome || x.modeloId; }).join(", "),
@@ -97220,26 +97495,62 @@ emissao: hoje,
         return saida;
       }
 
+      /* [CAUTAUTO_PAT] as plaquinhas uma vez so para a reserva inteira,
+         para a mesma unidade nao cair em duas cautelas */
+      var usadas = {};
+      return A.carregarPatrimonio().then(function (patrimonio) {
+      saida.patrimonioLido = patrimonio !== null && patrimonio !== undefined;
+
       function um(k) {
         if (k >= g.grupos.length) return saida;
         var grupo = g.grupos[k];
         return jaExiste_(protocolo, grupo.modeloId).then(function (tem) {
           if (tem) {
+            etapa_(saida, "Documento j\u00e1 existia",
+              "ok", (grupo.modeloNome || grupo.modeloId) +
+              ": esta reserva j\u00e1 tem esta cautela, n\u00e3o gero outra");
             saida.puladas.push(grupo.modeloNome || grupo.modeloId);
             return um(k + 1);
           }
-          return Promise.resolve(API.call("cautela", "salvar", montar_(r, grupo, quemE.id, protocolo)))
+          var doc = montar_(r, grupo, quemE.id, protocolo, patrimonio, usadas, quemE.usuario);
+          var semPat = lista_(grupo.__semPatrimonio);
+          var nomeM = grupo.modeloNome || grupo.modeloId;
+          etapa_(saida, "Documento montado", lista_(doc.itens).length ? "ok" : "falhou",
+            nomeM + ": " + lista_(doc.itens).length + " registro(s)" +
+            (semPat.length ? ", " + semPat.length + " sem patrim\u00f4nio (n\u00e3o impede)" : ""));
+          return Promise.resolve(API.call("cautela", "salvar", doc))
             .then(function (rs) {
               if (rs && rs.ok) {
+                var num = lp(rs.dados && (rs.dados.numero || rs.dados.id));
+                /* so digo "salvo" porque o servidor devolveu o numero */
+                etapa_(saida, "Documento salvo", num ? "ok" : "falhou",
+                  num ? nomeM + " \u2192 " + num
+                      : "o servidor respondeu ok mas n\u00e3o devolveu o n\u00famero " +
+                        "\u2014 N\u00c3O considere gravado");
+                etapa_(saida, "Documento vinculado \u00e0 reserva",
+                  num ? "ok" : "pendente",
+                  num ? "protocolo " + lp(protocolo) + " gravado na cautela e na marca de origem"
+                      : "sem n\u00famero n\u00e3o h\u00e1 o que vincular");
                 saida.criadas.push({
-                  numero: lp(rs.dados && (rs.dados.numero || rs.dados.id)),
+                  numero: num,
                   modelo: grupo.modeloNome || grupo.modeloId,
-                  itens: grupo.itens.length
+                  itens: lista_(doc.itens).length
                 });
               } else {
+                /* se recusou por plaquinha, digo QUAL item e por que o
+                   cadastro de Patrimonio nao resolveu */
+                var motivo = lp(rs && (rs.mensagem || rs.codigo)) || "o servidor nao confirmou";
+                if (semPat.length && /patrim/i.test(motivo)) {
+                  motivo += " \u2014 " + semPat.join("; ") +
+                    ". Ou cadastre a plaquinha no Patrim\u00f4nio, ou use para esta " +
+                    "categoria um modelo que n\u00e3o exija patrim\u00f4nio.";
+                } else if (!saida.patrimonioLido && /patrim/i.test(motivo)) {
+                  motivo += " \u2014 e eu n\u00e3o consegui ler o cadastro de " +
+                    "Patrim\u00f4nio para preencher.";
+                }
+                etapa_(saida, "Documento salvo", "falhou", nomeM + ": " + motivo);
                 saida.falhas.push({
-                  modelo: grupo.modeloNome || grupo.modeloId,
-                  motivo: lp(rs && (rs.mensagem || rs.codigo)) || "o servidor nao confirmou"
+                  modelo: grupo.modeloNome || grupo.modeloId, motivo: motivo
                 });
               }
               return um(k + 1);
@@ -97251,6 +97562,7 @@ emissao: hoje,
         });
       }
       return um(0);
+      });
     }, function (e) {
       saida.falhas.push({ modelo: "(todos)", motivo: lp(e && e.message) || "nao consultei a Central" });
       return saida;
@@ -97357,6 +97669,11 @@ emissao: hoje,
      igual ao motor do servidor. */
   var JA_CONFIRMADA = /^(APROVAD|CONFIRMAD|LIBERAD|DISPONIVEL|SEPARACAO|AGUARDANDO_RETIRADA|ENTREGUE|RETIRAD)/i;
 
+  /* [CAUTSEMAPROV] gerar ja na criacao da solicitacao, sem esperar
+     aprovacao gerencial. E a regra da Central que decide se nasce
+     cautela; isto so tira a exigencia do carimbo. */
+  var GERAR_AO_CRIAR = true;
+
   function situacao_(o) {
     var t = lp(o && (o.status || o.situacao));
     t = t.replace(/[\u00e1\u00e0\u00e2\u00e3]/gi, "a")
@@ -97379,7 +97696,21 @@ emissao: hoje,
     if (!resposta || !resposta.ok) return false;
     var chave = lp(modulo) + "." + lp(acao);
     if (ACOES_SE_CONFIRMADA[chave]) {
-      /* sem aprovacao gerencial: vale, desde que ja esteja confirmada */
+      /* [CAUTSEMAPROV] 01/11 — ele pediu: "quando eu finalizar a
+         solicitacao e a pessoa digitar a senha, ja gera a cautela; a
+         ferramenta ja tem a categoria configurada, nao precisa esperar
+         aprovacao". O proprio prompt dele diz: confirmacao da reserva e
+         aprovacao gerencial sao coisas diferentes.
+         Entao, ao CRIAR a reserva, eu ja pergunto a Central. Quem decide
+         se nasce cautela continua sendo a regra da categoria — eu so
+         deixei de exigir o carimbo de aprovacao. Reserva recusada ou
+         cancelada continua nao gerando, e o mesmo protocolo nao gera
+         duas vezes. */
+      if (GERAR_AO_CRIAR && chave === "reservas.criar") {
+        var st = situacao_((resposta && resposta.dados) || {});
+        if (/^RECUSAD|^CANCELAD|^VENCID|^EXCLUID/i.test(st)) return false;
+        return true;
+      }
       return jaNasceuConfirmada_(resposta);
     }
     if (!ACOES_DE_APROVACAO[chave]) return false;
@@ -97492,6 +97823,38 @@ emissao: hoje,
     if (!janela_) return null;
 
 
+    /* [CAUTETAPAS] a prova, etapa por etapa, da ultima geracao */
+    function etapas_() {
+      var u = A.ultima;
+      var e = lista_(u && u.etapas);
+      if (!e.length) {
+        return '<div class="alert a-blue mt12">' + ic("info") +
+          "<div><b>Nenhuma gera\u00e7\u00e3o aconteceu nesta p\u00e1gina ainda.</b>" +
+          "Fa\u00e7a uma solicita\u00e7\u00e3o e finalize: as etapas aparecem aqui, " +
+          "uma a uma, com o que cada uma devolveu.</div></div>";
+      }
+      var selo = { ok: "b-green", falhou: "b-red", pendente: "b-yellow" };
+      var rotulo = { ok: "concluiu", falhou: "falhou", pendente: "pendente" };
+      var falhou = e.filter(function (x) { return x.estado === "falhou"; }).length;
+      return '<h4 class="mt16">A gera\u00e7\u00e3o, etapa por etapa\u00a0' +
+        '<small class="muted">(' + esc_(lp(u.protocolo)) + ')</small></h4>' +
+        '<p class="muted small">N\u00e3o basta o observador estar ligado. ' +
+        "Aqui est\u00e1 o que cada etapa realmente devolveu.</p>" +
+        (falhou ? '<div class="alert a-red">' + ic("alerta") +
+          "<div><b>" + falhou + " etapa(s) falharam.</b>" +
+          "A gera\u00e7\u00e3o parou onde est\u00e1 marcado em vermelho.</div></div>" : "") +
+        '<div class="tbl-wrap"><table class="tbl"><thead><tr>' +
+        "<th>#</th><th>Etapa</th><th>Resultado</th><th>O que devolveu</th>" +
+        "</tr></thead><tbody>" +
+        e.map(function (x, k) {
+          return "<tr><td>" + (k + 1) + "</td>" +
+            "<td><b>" + esc_(lp(x.nome)) + "</b></td>" +
+            '<td><span class="badge ' + (selo[x.estado] || "b-gray") + '">' +
+            esc_(rotulo[x.estado] || lp(x.estado)) + "</span></td>" +
+            '<td class="small">' + esc_(lp(x.detalhe) || "\u2014") + "</td></tr>";
+        }).join("") + "</tbody></table></div>";
+    }
+
     function detalhe_() {
       var u = A.ultima;
       if (!u || !lista_(u.detalhe).length) return "";
@@ -97573,6 +97936,7 @@ emissao: hoje,
         " \u00c9 ele que gera com a aba fechada.</div></div></div>" +
         '<h4 class="mt16">Aprova\u00e7\u00f5es que eu vi</h4>' +
         '<div id="caDiagLista">' + linhas_() + "</div>" +
+        etapas_() +
         detalhe_() +
         '<h4 class="mt16">Gerar agora, a partir de um protocolo</h4>' +
         '<p class="muted small">Use enquanto o autom\u00e1tico n\u00e3o estiver certo. ' +
