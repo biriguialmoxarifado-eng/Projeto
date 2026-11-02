@@ -12332,7 +12332,8 @@ modulo: "epi",
 render: function() {
 return API.call("epi", "fichas", {}).then(function(r) {
 if (!r.ok) return UI.estado("erro", "Não foi possível carregar o painel de EPI", r.mensagem);
-var fichas = r.dados;
+/* [FICHAID] uma ficha por pessoa, mesmo quando a matricula mudou */
+var fichas = normalizarFichasEPI(r.dados);
 var vencidos = fichas.filter(function(f) {
 return f.status === "VENCIDO";
 });
@@ -13047,7 +13048,8 @@ modulo: "epi",
 render: function() {
 return API.call("epi", "fichas", {}).then(function(r) {
 var linhas = [];
-(r.dados || []).forEach(function(f) {
+/* [FICHAID] junta as fichas da mesma pessoa antes de listar */
+normalizarFichasEPI(r && r.dados).forEach(function(f) {
 listaSegura(f.itens).forEach(function(i) {
 var dias = U.diasEntre(new Date, i.validade);
 if (dias < 60) linhas.push({
@@ -24570,7 +24572,7 @@ render: function() {
 return Promise.all([ API.call("epi", "fichas", {}), API.call("ocorrencias", "listar", {}), API.call("aprovacoes", "porPerfil", {
 perfil: "seguranca"
 }) ]).then(function(res) {
-var fichas = res[0].dados || [], ocs = res[1].dados || [], aprov = res[2].dados || [];
+var fichas = normalizarFichasEPI(res[0].dados) /* [FICHAID] */, ocs = res[1].dados || [], aprov = res[2].dados || [];
 var vencidos = fichas.filter(function(f) {
 return f.status === "VENCIDO";
 });
@@ -43158,17 +43160,104 @@ function modalTrocarEPI(id, aoTerminar) {
    tem matrícula — juntar duas pessoas por coincidência de nome é
    justamente o que ele proibiu. Quando sobra um caso desses, quem
    avisa é a auditoria, não esta função. */
+/* [FICHAID] 01/11 — A CAUSA DA DUPLICACAO DE FICHAS.
+
+   Esta funcao chaveava a ficha pela MATRICULA e nunca consultava o
+   cadastro. Quando a matricula de alguem muda (a do Ismael foi de 011
+   para 482), as entregas antigas ficam em "M:11" e as novas em
+   "M:482": duas fichas, a mesma pessoa. E o item 2 do pedido dele —
+   a ficha nao pode estar presa a um dado que muda.
+
+   Agora a identidade e UMA so em todo o sistema: o id permanente do
+   colaborador, resolvido no cadastro central. A matricula continua
+   valendo como segunda chave, e o nome como terceira, para quem ainda
+   nao esta no cadastro. Nada e apagado, nenhuma matricula e alterada:
+   so deixam de existir duas respostas para a mesma pergunta.
+
+   O indice e montado uma vez por leitura do cadastro, porque esta
+   funcao e chamada uma vez por LINHA de entrega — varrer a lista
+   inteira a cada linha deixaria a tela lenta com o historico cheio. */
+var EPIFICHA_IX = { fonte: null, porMat: {}, porNome: {}, nomeRepetido: {} };
+
+function epiIndiceDoCadastro_() {
+  var fonte = null;
+  try { fonte = MOCK.usuarios; } catch (e) { fonte = null; }
+  if (EPIFICHA_IX.fonte === fonte && fonte) return EPIFICHA_IX;
+
+  var ix = { fonte: fonte, porMat: {}, porNome: {}, nomeRepetido: {} };
+  listaSegura(fonte).forEach(function (u) {
+    var id = String((u && u.id) || "").trim();
+    if (!id) return;
+    var n = (typeof fichaChaveNome_ === "function")
+      ? fichaChaveNome_(u.nome || u.colaborador) : "";
+
+    /* a matricula de hoje E as anteriores que o cadastro declara.
+       E assim que a ficha do Ismael, que era 011 e virou 482, fica
+       inteira: por VINCULO declarado, nunca por semelhanca de nome. */
+    var mats = [u.matricula, u.matriculaAnterior].concat(
+      listaSegura(u.matriculasAnteriores));
+    try {
+      if (typeof MATANT === "object" && MATANT && MATANT.anterioresDe) {
+        mats = mats.concat(listaSegura(MATANT.anterioresDe(id)));
+      }
+    } catch (e) {}
+    mats.forEach(function (v) {
+      var m = (typeof fichaChaveMat_ === "function") ? fichaChaveMat_(v) : "";
+      if (m && !ix.porMat[m]) ix.porMat[m] = u;
+    });
+
+    if (n) {
+      if (!ix.porNome[n]) ix.porNome[n] = u;
+      else if (String(ix.porNome[n].id) !== id) ix.nomeRepetido[n] = true;
+    }
+  });
+  EPIFICHA_IX = ix;
+  return ix;
+}
+
 function epiChaveDaFicha_(matricula, nome, interno) {
   var m = (typeof fichaChaveMat_ === "function")
     ? fichaChaveMat_(matricula)
     : String(matricula == null ? "" : matricula).toUpperCase()
         .replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
-  if (m) return "M:" + m;
-  var i = String(interno == null ? "" : interno).trim();
-  if (i) return "I:" + i;
   var n = (typeof fichaChaveNome_ === "function")
     ? fichaChaveNome_(nome)
     : String(nome == null ? "" : nome).toUpperCase().trim();
+
+  /* 1) o id permanente, quando o cadastro souber quem e */
+  var ix = epiIndiceDoCadastro_();
+  var u = (m && ix.porMat[m]) || null;
+
+  /* o vinculo de matricula anterior, quando existir declarado */
+  if (!u && m) {
+    try {
+      if (typeof MATANT === "object" && MATANT && MATANT.resolver) {
+        var idv = String(MATANT.resolver(matricula) || "").trim();
+        if (idv) {
+          listaSegura(ix.fonte).forEach(function (x) {
+            if (!u && String(x.id) === idv) u = x;
+          });
+        }
+      }
+    } catch (e) {}
+  }
+
+  /* [FICHAID-NOME] 01/11 — pelo nome SO quando nao ha matricula nenhuma.
+     Na primeira versao eu caia no nome tambem quando a matricula existia
+     mas nao estava no cadastro. Isso juntou, numa pessoa cadastrada, uma
+     linha de EPI de matricula desconhecida — que e exatamente o que a
+     auditoria existe para mostrar. Foi a prova da Cristiane que pegou.
+     A regra dele e clara: "nao utilizar somente o nome como chave unica"
+     e "nao declarar duplicidade apenas porque os nomes sao semelhantes".
+     Entao matricula desconhecida continua sendo ficha propria, visivel,
+     ate alguem vincular as duas de proposito. */
+  if (!u && !m && n && ix.porNome[n] && !ix.nomeRepetido[n]) u = ix.porNome[n];
+  if (u && u.id) return "U:" + String(u.id);
+
+  /* 2) a matricula, 3) o interno, 4) o nome — como era antes */
+  if (m) return "M:" + m;
+  var i = String(interno == null ? "" : interno).trim();
+  if (i) return "I:" + i;
   return n ? "N:" + n : "sem-identidade";
 }
 
@@ -64372,7 +64461,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 355 · 01/11";
+var ALMOXA_VERSAO = "sistema 357 · 01/11";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
