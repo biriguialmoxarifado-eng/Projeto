@@ -5644,6 +5644,12 @@ rota: "#/precadastros",
 icone: "usuarios",
 tag: "epi-008"
 }, {
+/* [EPICONSUMO] 01/11 — o Mapa de Consumo, item 4 do pedido dele */
+rotulo: "Mapa de Consumo",
+rota: "#/epi-consumo",
+icone: "grafico",
+tag: "epi-009"
+}, {
 rotulo: "Vencimentos",
 rota: "#/epi-vencimentos",
 icone: "relogio",
@@ -41525,10 +41531,10 @@ return m;
 var ROTAS_POR_PERFIL = {
 admin: "*",
 ti: "*",
-gestor: [ "dashboard", "mural", "painel", "indicadores", "estoque", "consulta", "estoque-critico", "movimentacoes", "reservas", "reserva", "aprovacoes", "aprovar", "historico-aprovacoes", "reservas-calendario", "solicitacoes", "compras", "precompras", "preconta", "aprovar-preconta", "orcamentos", "fornecedores", "historico-precos", "relatorios", "relatorios-gerados", "auditoria", "rastreabilidade", "obras", "projetos", "centros", "ocorrencias", "ocorrencia", "epi", "epi-vencimentos", "ferramentas", "nf", "perfil", "notificacoes" ],
-almoxarife: [ "dashboard", "mural", "painel", "estoque", "itens", "consulta", "estoque-critico", "movimentacoes", "entradas", "saidas", "inventario", "inventario-contagem", "inventario-relatorio", "inventarios-sugeridos", "localizacao", "sem-localizacao", "mapa-3d", "etiquetas", "reservas", "reserva", "reserva-nova", "retirada", "reservas-calendario", "aprovacoes", "aprovar", "nf", "nf-nova", "nf-conferencia", "nf-divergencias", "nf-importar", "loja", "carrinho", "solicitacoes", "epi", "epi-catalogo", "epi-fichas", "epi-vencimentos", "epi-solicitacoes", "kits", "kits-cadastro", "ferramentas", "ferramentas-uso", "ferramentas-devolucao", "ferramentas-retiradas", "ferramentas-manutencao", "ferramentas-historico", "compras", "precompras", "preconta", "aprovar-preconta", "fornecedores", "historico-precos", "ocorrencias", "ocorrencia", "crachas", "cracha-acessos", "relatorios", "obras", "perfil", "notificacoes", "credenciais", "armazenamento" ],
-mestre: [ "dashboard", "mural", "painel", "loja", "carrinho", "solicitacoes", "reservas", "reserva", "retirada", "aprovacoes", "aprovar", "aprovar-preconta", "consulta", "estoque", "epi", "epi-fichas", "epi-vencimentos", "ferramentas", "ferramentas-uso", "ocorrencias", "ocorrencia", "obras", "projetos", "relatorios", "perfil", "notificacoes" ],
-seguranca: [ "dashboard", "mural", "epi", "epi-catalogo", "epi-fichas", "epi-vencimentos", "epi-solicitacoes", "precadastros", "seguranca-entrada", "kits", "kits-cadastro", "painel-seguranca", "aprovacoes", "aprovar", "ocorrencias", "ocorrencia", "consulta", "ferramentas", "perfil", "notificacoes" ],
+gestor: [ "dashboard", "mural", "painel", "indicadores", "estoque", "consulta", "estoque-critico", "movimentacoes", "reservas", "reserva", "aprovacoes", "aprovar", "historico-aprovacoes", "reservas-calendario", "solicitacoes", "compras", "precompras", "preconta", "aprovar-preconta", "orcamentos", "fornecedores", "historico-precos", "relatorios", "relatorios-gerados", "auditoria", "rastreabilidade", "obras", "projetos", "centros", "ocorrencias", "ocorrencia", "epi", "epi-vencimentos", "epi-consumo", "ferramentas", "nf", "perfil", "notificacoes" ],
+almoxarife: [ "dashboard", "mural", "painel", "estoque", "itens", "consulta", "estoque-critico", "movimentacoes", "entradas", "saidas", "inventario", "inventario-contagem", "inventario-relatorio", "inventarios-sugeridos", "localizacao", "sem-localizacao", "mapa-3d", "etiquetas", "reservas", "reserva", "reserva-nova", "retirada", "reservas-calendario", "aprovacoes", "aprovar", "nf", "nf-nova", "nf-conferencia", "nf-divergencias", "nf-importar", "loja", "carrinho", "solicitacoes", "epi", "epi-catalogo", "epi-fichas", "epi-vencimentos", "epi-consumo", "epi-solicitacoes", "kits", "kits-cadastro", "ferramentas", "ferramentas-uso", "ferramentas-devolucao", "ferramentas-retiradas", "ferramentas-manutencao", "ferramentas-historico", "compras", "precompras", "preconta", "aprovar-preconta", "fornecedores", "historico-precos", "ocorrencias", "ocorrencia", "crachas", "cracha-acessos", "relatorios", "obras", "perfil", "notificacoes", "credenciais", "armazenamento" ],
+mestre: [ "dashboard", "mural", "painel", "loja", "carrinho", "solicitacoes", "reservas", "reserva", "retirada", "aprovacoes", "aprovar", "aprovar-preconta", "consulta", "estoque", "epi", "epi-fichas", "epi-vencimentos", "epi-consumo", "ferramentas", "ferramentas-uso", "ocorrencias", "ocorrencia", "obras", "projetos", "relatorios", "perfil", "notificacoes" ],
+seguranca: [ "dashboard", "mural", "epi", "epi-catalogo", "epi-fichas", "epi-vencimentos", "epi-consumo", "epi-solicitacoes", "precadastros", "seguranca-entrada", "kits", "kits-cadastro", "painel-seguranca", "aprovacoes", "aprovar", "ocorrencias", "ocorrencia", "consulta", "ferramentas", "perfil", "notificacoes" ],
 colaborador: [ "dashboard", "mural", "loja", "carrinho", "solicitacoes", "reservas", "reserva", "epi", "epi-fichas", "consulta", "ocorrencias", "perfil", "notificacoes" ],
 auditor: [ "dashboard", "auditoria", "rastreabilidade", "relatorios", "relatorios-gerados", "estoque", "movimentacoes", "consulta", "reservas", "nf", "compras", "preconta", "historico-precos", "fornecedores", "ocorrencias", "ferramentas", "inventario-relatorio", "perfil", "notificacoes" ],
 comprador: [ "dashboard", "compras", "precompras", "preconta", "aprovar-preconta", "orcamentos", "historico-precos", "fornecedores", "estoque", "estoque-critico", "consulta", "itens", "nf", "nf-nova", "relatorios", "obras", "perfil", "notificacoes" ],
@@ -64461,7 +64467,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 357 · 01/11";
+var ALMOXA_VERSAO = "sistema 358 · 01/11";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
@@ -98143,5 +98149,429 @@ emissao: hoje,
 
 })();
 </script>
+<script>
+/* ============================================================
+ * BLOCO: MAPA DE CONSUMO DE EPI   ·  codigo de busca: [EPICONSUMO]
+ * ------------------------------------------------------------
+ * Itens 4 e 10 do pedido do Ismael, 01/11: saber QUAIS EPIs saem
+ * mais, para quem, em que setor e com que frequencia.
+ *
+ * O QUE ESTE BLOCO NAO FAZ, DE PROPOSITO:
+ *  - nao cria banco proprio. Le epi.fichas, que ja existe, e o
+ *    catalogo de itens. Nenhuma fonte paralela.
+ *  - nao inventa numero. Obra, motivo da entrega e atividade NAO
+ *    sao gravados hoje na entrega de EPI — entao eles aparecem
+ *    como "ainda nao registrado", e nao como zero ou estimativa.
+ *  - nao soma linha excluida nem devolucao como consumo.
+ *  - nao mostra custo quando o item nao tem preco cadastrado:
+ *    custo parcial seria numero errado com cara de certo.
+ * ============================================================ */
+(function () {
+  "use strict";
+  function lp(v) { return v == null ? "" : String(v).trim(); }
+  function lista_(v) { return Array.isArray(v) ? v : (v && Array.isArray(v.dados) ? v.dados : []); }
+  function esc_(v) {
+    return lp(v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function num_(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+  function dia_(v) {
+    var t = lp(v);
+    if (!t) return "";
+    if (/^\d{4}-\d{2}-\d{2}/.test(t)) return t.slice(0, 10);
+    var m = t.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m) return m[3] + "-" + m[2] + "-" + m[1];
+    var d = new Date(t);
+    return isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+  }
+  function mes_(v) { var d = dia_(v); return d ? d.slice(0, 7) : ""; }
+
+  var C = {};
+  C.filtros = { de: "", ate: "", setor: "", cargo: "", colaborador: "",
+                categoria: "", produto: "" };
+  C.linhas = null;      /* null = ainda nao li */
+  C.erro = "";
+  C.lidoEm = null;
+
+  /* ---------- 1. LER: uma entrega por linha ---------- */
+  C.ler = function (forcar) {
+    if (C.linhas && !forcar) return Promise.resolve(C.linhas);
+    return Promise.resolve(API.call("epi", "fichas", {})).then(function (r) {
+      if (!r || !r.ok) {
+        C.erro = lp(r && (r.mensagem || r.codigo)) || "o Core nao respondeu";
+        C.linhas = null;
+        return null;
+      }
+      C.erro = "";
+      var fichas = (typeof normalizarFichasEPI === "function")
+        ? normalizarFichasEPI(r.dados) : lista_(r.dados);
+      var fora = 0;
+      var linhas = [];
+      fichas.forEach(function (f) {
+        lista_(f.itens).forEach(function (i) {
+          var st = lp(i.status).toUpperCase();
+          /* linha excluida ou devolvida nao e consumo */
+          if (st.indexOf("EXCLU") === 0 || st === "DEVOLVIDO" ||
+              st === "CANCELADO" || st === "CANCELADA") { fora++; return; }
+          var cat = C.doCatalogo(i.sku);
+          linhas.push({
+            sku: lp(i.sku),
+            epi: lp(i.epi) || lp(cat.descricao) || "Nao informado",
+            categoria: lp(cat.categoria),
+            preco: cat.preco === null ? null : num_(cat.preco),
+            qtd: num_(i.qtd) || 1,
+            dia: dia_(i.entrega),
+            mes: mes_(i.entrega),
+            colaborador: lp(f.colaborador),
+            matricula: lp(f.matricula),
+            cargo: lp(f.cargo),
+            setor: lp(f.setor),
+            fichaId: lp(f.id)
+          });
+        });
+      });
+      C.foraDoConsumo = fora;
+      C.linhas = linhas;
+      C.lidoEm = new Date();
+      return linhas;
+    }, function (e) {
+      C.erro = lp(e && e.message) || "nao consegui falar com o Core";
+      C.linhas = null;
+      return null;
+    });
+  };
+
+  C.doCatalogo = function (sku) {
+    var k = lp(sku).toUpperCase();
+    if (!k) return { descricao: "", categoria: "", preco: null };
+    var achado = null;
+    try {
+      (MOCK.itens || []).forEach(function (i) {
+        if (!achado && lp(i.sku).toUpperCase() === k) achado = i;
+      });
+    } catch (e) {}
+    if (!achado) return { descricao: "", categoria: "", preco: null };
+    var p = achado.preco;
+    return {
+      descricao: lp(achado.descricao || achado.nome),
+      categoria: lp(achado.categoria),
+      /* sem preco cadastrado e null, nao zero: zero mentiria no custo */
+      preco: (p === undefined || p === null || lp(p) === "") ? null : num_(p)
+    };
+  };
+
+  /* ---------- 2. FILTRAR ---------- */
+  C.filtradas = function () {
+    var f = C.filtros;
+    var de = lp(f.de), ate = lp(f.ate);
+    var setor = lp(f.setor).toUpperCase();
+    var cargo = lp(f.cargo).toUpperCase();
+    var quem = lp(f.colaborador).toUpperCase();
+    var cat = lp(f.categoria).toUpperCase();
+    var prod = lp(f.produto).toUpperCase();
+    return lista_(C.linhas).filter(function (l) {
+      if (de && (!l.dia || l.dia < de)) return false;
+      if (ate && (!l.dia || l.dia > ate)) return false;
+      if (setor && lp(l.setor).toUpperCase() !== setor) return false;
+      if (cargo && lp(l.cargo).toUpperCase() !== cargo) return false;
+      if (quem && lp(l.colaborador).toUpperCase().indexOf(quem) === -1 &&
+          lp(l.matricula).toUpperCase().indexOf(quem) === -1) return false;
+      if (cat && lp(l.categoria).toUpperCase() !== cat) return false;
+      if (prod && lp(l.epi).toUpperCase().indexOf(prod) === -1 &&
+          lp(l.sku).toUpperCase().indexOf(prod) === -1) return false;
+      return true;
+    });
+  };
+
+  /* ---------- 3. CONTAR ---------- */
+  C.resumo = function (linhas) {
+    var r = { entregas: 0, unidades: 0, pessoas: {}, fichas: {},
+              custo: 0, semPreco: 0, comPreco: 0 };
+    lista_(linhas).forEach(function (l) {
+      r.entregas++;
+      r.unidades += l.qtd;
+      if (l.fichaId) r.fichas[l.fichaId] = true;
+      if (l.colaborador) r.pessoas[l.colaborador] = true;
+      if (l.preco === null) r.semPreco++;
+      else { r.comPreco++; r.custo += l.preco * l.qtd; }
+    });
+    r.pessoas = Object.keys(r.pessoas).length;
+    r.fichas = Object.keys(r.fichas).length;
+    return r;
+  };
+
+  C.porChave = function (linhas, campo) {
+    var m = {};
+    lista_(linhas).forEach(function (l) {
+      var k = lp(l[campo]) || "(nao informado)";
+      if (!m[k]) m[k] = { chave: k, unidades: 0, entregas: 0, custo: 0, temPreco: true };
+      m[k].unidades += l.qtd;
+      m[k].entregas++;
+      if (l.preco === null) m[k].temPreco = false;
+      else m[k].custo += l.preco * l.qtd;
+    });
+    return Object.keys(m).map(function (k) { return m[k]; })
+      .sort(function (a, b) { return b.unidades - a.unidades; });
+  };
+
+  C.porMes = function (linhas) {
+    var m = {};
+    lista_(linhas).forEach(function (l) {
+      if (!l.mes) return;
+      if (!m[l.mes]) m[l.mes] = { chave: l.mes, unidades: 0, entregas: 0 };
+      m[l.mes].unidades += l.qtd;
+      m[l.mes].entregas++;
+    });
+    return Object.keys(m).sort().map(function (k) { return m[k]; });
+  };
+
+  /* frequencia de reposicao: o intervalo medio entre duas entregas
+     do MESMO produto para a MESMA pessoa. So conta quem repetiu. */
+  C.reposicao = function (linhas) {
+    var por = {};
+    lista_(linhas).forEach(function (l) {
+      if (!l.dia) return;
+      var k = (l.fichaId || l.matricula || l.colaborador) + "|" + (l.sku || l.epi);
+      if (!por[k]) por[k] = { epi: l.epi, quem: l.colaborador, dias: [] };
+      por[k].dias.push(l.dia);
+    });
+    var saida = [];
+    Object.keys(por).forEach(function (k) {
+      var p = por[k];
+      if (p.dias.length < 2) return;
+      p.dias.sort();
+      var somas = 0;
+      for (var i = 1; i < p.dias.length; i++) {
+        somas += Math.round(
+          (new Date(p.dias[i]) - new Date(p.dias[i - 1])) / 86400000);
+      }
+      saida.push({ epi: p.epi, quem: p.quem, vezes: p.dias.length,
+                   mediaDias: Math.round(somas / (p.dias.length - 1)),
+                   ultima: p.dias[p.dias.length - 1] });
+    });
+    return saida.sort(function (a, b) { return a.mediaDias - b.mediaDias; });
+  };
+
+  /* ---------- 4. DESENHAR ---------- */
+  function barras_(lista, titulo, sufixo, limite) {
+    var topo = lista.slice(0, limite || 10);
+    if (!topo.length) {
+      return '<div class="card"><div class="card-head"><h3>' + esc_(titulo) +
+        '</h3></div><div class="card-body">' +
+        '<div class="alert a-blue">' + ic("info") +
+        "<div>Nenhum registro no periodo e nos filtros escolhidos.</div></div>" +
+        "</div></div>";
+    }
+    var maior = topo[0].unidades || 1;
+    return '<div class="card"><div class="card-head"><h3>' + esc_(titulo) + "</h3></div>" +
+      '<div class="card-body">' + topo.map(function (x) {
+        var pct = Math.max(2, Math.round((x.unidades / maior) * 100));
+        return '<div style="margin-bottom:10px">' +
+          '<div class="flex between" style="font-size:12.5px;margin-bottom:3px">' +
+          "<span>" + esc_(x.chave) + "</span>" +
+          "<b>" + esc_(x.unidades) + (sufixo ? " " + esc_(sufixo) : "") + "</b></div>" +
+          '<div style="height:8px;background:var(--borda);border-radius:4px;overflow:hidden">' +
+          '<div style="height:100%;width:' + pct + '%;background:var(--azul-acao)"></div>' +
+          "</div></div>";
+      }).join("") + "</div></div>";
+  }
+
+  function opcoes_(linhas, campo, atual) {
+    var vistos = {};
+    lista_(linhas).forEach(function (l) { var v = lp(l[campo]); if (v) vistos[v] = true; });
+    return '<option value="">todos</option>' + Object.keys(vistos).sort()
+      .map(function (v) {
+        return '<option value="' + esc_(v) + '"' +
+          (lp(atual) === v ? " selected" : "") + ">" + esc_(v) + "</option>";
+      }).join("");
+  }
+
+  C.render = function () {
+    return C.ler().then(function () {
+      if (C.erro) {
+        return UI.cabecalho({
+          trilha: ["EPI", "Mapa de Consumo"], titulo: "Mapa de Consumo de EPI",
+          sub: "Quais EPIs saem mais, para quem e com que frequencia."
+        }) + '<div class="card"><div class="card-body">' +
+          '<div class="alert a-red">' + ic("alerta") +
+          "<div><b>Nao consegui ler as entregas de EPI.</b>" + esc_(C.erro) +
+          " Sem elas eu nao mostro numero nenhum, porque qualquer total " +
+          "seria inventado. <button class=\"btn btn-ghost btn-sm mt8\" " +
+          "data-ec-reler>Tentar de novo</button></div></div></div></div>";
+      }
+
+      var todas = lista_(C.linhas);
+      var f = C.filtradas();
+      var r = C.resumo(f);
+      var porEpi = C.porChave(f, "epi");
+      var porPessoa = C.porChave(f, "colaborador");
+      var porSetor = C.porChave(f, "setor");
+      var porCargo = C.porChave(f, "cargo");
+      var meses = C.porMes(f);
+      var rep = C.reposicao(f);
+
+      var custoTxt = r.comPreco
+        ? U.moeda(r.custo) + (r.semPreco
+            ? ' <small class="muted">(' + r.semPreco + " sem preco cadastrado)</small>" : "")
+        : "sem preco cadastrado";
+
+      return UI.cabecalho({
+        trilha: ["EPI", "Mapa de Consumo"],
+        titulo: "Mapa de Consumo de EPI",
+        sub: "Quais EPIs saem mais, para quem e com que frequencia.",
+        acoes: '<button class="btn btn-ghost" data-ec-csv>' + ic("download") +
+               "Exportar Excel</button>" +
+               '<button class="btn btn-ghost" data-ec-pdf>' + ic("pdf") + "Imprimir</button>" +
+               '<button class="btn btn-ghost" data-ec-reler>' + ic("sync") + "Reler</button>"
+      }) +
+
+      /* o que ainda nao e registrado — dito antes dos numeros */
+      '<div class="alert a-yellow mb16">' + ic("info") +
+      "<div><b>O que ainda nao da para cruzar.</b>" +
+      "A entrega de EPI nao grava <b>obra</b>, <b>motivo da entrega</b> nem " +
+      "<b>atividade</b> — por isso nao ha grafico deles aqui. Nao e zero: " +
+      "e dado que o sistema ainda nao pede na hora da entrega. Quando passar " +
+      "a pedir, estes cruzamentos entram.</div></div>" +
+
+      '<div class="grid g4 mb16">' +
+      UI.kpi({ icone: "doc", cor: "ico-blue", valor: r.entregas, rotulo: "Entregas no periodo" }) +
+      UI.kpi({ icone: "caixa", cor: "ico-green", valor: r.unidades, rotulo: "Unidades entregues" }) +
+      UI.kpi({ icone: "usuarios", cor: "ico-purple", valor: r.pessoas, rotulo: "Colaboradores atendidos" }) +
+      UI.kpi({ icone: "dinheiro", cor: "ico-yellow", valor: custoTxt, rotulo: "Custo estimado" }) +
+      "</div>" +
+
+      '<div class="card mb16"><div class="card-head"><h3>Filtros</h3>' +
+      "<p>Os numeros acima e os graficos abaixo seguem o que estiver aqui.</p></div>" +
+      '<div class="card-body"><div class="grid g4">' +
+      '<div class="field"><label>De</label><input type="date" class="input" id="ecDe" value="' + esc_(C.filtros.de) + '"></div>' +
+      '<div class="field"><label>Ate</label><input type="date" class="input" id="ecAte" value="' + esc_(C.filtros.ate) + '"></div>' +
+      '<div class="field"><label>Setor</label><select class="input" id="ecSetor">' + opcoes_(todas, "setor", C.filtros.setor) + "</select></div>" +
+      '<div class="field"><label>Cargo</label><select class="input" id="ecCargo">' + opcoes_(todas, "cargo", C.filtros.cargo) + "</select></div>" +
+      '<div class="field"><label>Categoria</label><select class="input" id="ecCat">' + opcoes_(todas, "categoria", C.filtros.categoria) + "</select></div>" +
+      '<div class="field"><label>Colaborador ou matricula</label><input class="input" id="ecQuem" value="' + esc_(C.filtros.colaborador) + '" placeholder="nome ou matricula"></div>' +
+      '<div class="field"><label>Produto</label><input class="input" id="ecProd" value="' + esc_(C.filtros.produto) + '" placeholder="descricao ou SKU"></div>' +
+      '<div class="field" style="align-self:end"><button class="btn btn-primary" data-ec-filtrar>Aplicar</button> ' +
+      '<button class="btn btn-ghost" data-ec-limpar>Limpar</button></div>' +
+      "</div></div></div>" +
+
+      '<div class="grid g2 mb16">' +
+      barras_(porEpi, "EPIs mais entregues", "un") +
+      barras_(porPessoa, "Colaboradores que mais receberam", "un") +
+      "</div>" +
+      '<div class="grid g2 mb16">' +
+      barras_(porSetor, "Consumo por setor", "un") +
+      barras_(porCargo, "Consumo por cargo", "un") +
+      "</div>" +
+      barras_(meses, "Consumo mes a mes", "un", 24) +
+
+      '<div class="card mt16"><div class="card-head"><h3>Frequencia de reposicao</h3>' +
+      "<p>Quem ja recebeu o mesmo EPI mais de uma vez, e de quanto em quanto tempo. " +
+      "Intervalo curto merece olhar: pode ser desgaste rapido demais para a atividade.</p></div>" +
+      '<div class="card-body">' +
+      (rep.length
+        ? '<div class="tbl-wrap"><table class="tbl"><thead><tr>' +
+          "<th>EPI</th><th>Colaborador</th><th>Vezes</th>" +
+          "<th>Intervalo medio</th><th>Ultima entrega</th></tr></thead><tbody>" +
+          rep.slice(0, 40).map(function (x) {
+            var selo = x.mediaDias <= 15 ? "b-red" : (x.mediaDias <= 45 ? "b-yellow" : "b-green");
+            return "<tr><td><b>" + esc_(x.epi) + "</b></td>" +
+              "<td>" + esc_(x.quem) + "</td>" +
+              '<td class="c">' + x.vezes + "</td>" +
+              '<td><span class="badge ' + selo + '">' + x.mediaDias + " dias</span></td>" +
+              "<td>" + esc_(x.ultima) + "</td></tr>";
+          }).join("") + "</tbody></table></div>"
+        : '<div class="alert a-blue">' + ic("info") +
+          "<div>Ninguem recebeu o mesmo EPI duas vezes no periodo filtrado. " +
+          "Sem repeticao nao ha intervalo para calcular.</div></div>") +
+      "</div></div>" +
+
+      '<p class="muted small mt16">' +
+      esc_(todas.length) + " linha(s) de entrega lidas do Core" +
+      (C.foraDoConsumo ? ", " + C.foraDoConsumo + " fora do consumo (excluidas ou devolvidas)" : "") +
+      (C.lidoEm ? " · lido em " + esc_(C.lidoEm.toLocaleString("pt-BR")) : "") + "</p>";
+    });
+  };
+
+  C.csv = function () {
+    var f = C.filtradas();
+    var cab = ["Data", "EPI", "SKU", "Categoria", "Qtd", "Colaborador",
+               "Matricula", "Cargo", "Setor", "Preco unitario"];
+    var linhas = f.map(function (l) {
+      return [l.dia, l.epi, l.sku, l.categoria, l.qtd, l.colaborador,
+              l.matricula, l.cargo, l.setor,
+              l.preco === null ? "" : String(l.preco).replace(".", ",")];
+    });
+    var txt = [cab].concat(linhas).map(function (ls) {
+      return ls.map(function (c) {
+        var v = lp(c);
+        return /[;"\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+      }).join(";");
+    }).join("\r\n");
+    /* BOM, para o Excel abrir com acento certo */
+    var blob = new Blob(["﻿" + txt], { type: "text/csv;charset=utf-8" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "consumo-epi-" + new Date().toISOString().slice(0, 10) + ".csv";
+    document.body.appendChild(a); a.click();
+    setTimeout(function () {
+      try { URL.revokeObjectURL(a.href); a.remove(); } catch (e) {}
+    }, 400);
+    return f.length;
+  };
+
+  C.mount = function () {
+    function pegar() {
+      var q = function (id) { var e = document.getElementById(id); return e ? e.value : ""; };
+      C.filtros.de = lp(q("ecDe"));
+      C.filtros.ate = lp(q("ecAte"));
+      C.filtros.setor = lp(q("ecSetor"));
+      C.filtros.cargo = lp(q("ecCargo"));
+      C.filtros.categoria = lp(q("ecCat"));
+      C.filtros.colaborador = lp(q("ecQuem"));
+      C.filtros.produto = lp(q("ecProd"));
+    }
+    function repintar() {
+      try { if (typeof ROUTER !== "undefined" && ROUTER.render) ROUTER.render(); } catch (e) {}
+    }
+    document.querySelectorAll("[data-ec-filtrar]").forEach(function (b) {
+      b.addEventListener("click", function () { pegar(); repintar(); });
+    });
+    document.querySelectorAll("[data-ec-limpar]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        C.filtros = { de: "", ate: "", setor: "", cargo: "", colaborador: "",
+                      categoria: "", produto: "" };
+        repintar();
+      });
+    });
+    document.querySelectorAll("[data-ec-reler]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        C.ler(true).then(repintar);
+      });
+    });
+    document.querySelectorAll("[data-ec-csv]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var n = C.csv();
+        if (typeof toast === "function") {
+          toast(n ? "ok" : "warn", n ? "Exportado" : "Nada para exportar",
+            n ? n + " linha(s) no arquivo." : "Os filtros nao deixaram nenhuma linha.");
+        }
+      });
+    });
+    document.querySelectorAll("[data-ec-pdf]").forEach(function (b) {
+      b.addEventListener("click", function () { window.print(); });
+    });
+  };
+
+  SCREENS["epi-consumo"] = {
+    titulo: "Mapa de Consumo de EPI",
+    modulo: "epi",
+    render: C.render,
+    mount: C.mount
+  };
+
+  try { window.EPICONSUMO = C; } catch (e) {}
+})();
+</script>
+
 </body>
 </html>
