@@ -60560,11 +60560,44 @@ setTimeout(function() {
 window.print();
 }, 250);
 }
+/* [FICHAUNICA] 01/11 — Ismael: "quando eu for selecionar o nome da
+   pessoa para imprimir a ficha, ele vai trazer todas, tres, quatro,
+   cinco fichas — eu creio que todas fossem atualizadas na mesma".
+
+   Tem razao. A tela de EPI ja junta, mas a impressao aceitava a ficha
+   que o chamador passasse — e de outras telas ela vem partida. Agora a
+   consolidacao acontece AQUI, no documento, qualquer que seja a porta
+   de entrada. Nada e apagado: as entregas continuam onde estao, e o
+   que muda e o papel sair inteiro em vez de pela metade. */
+function fichaUnicaParaImpressao_(f) {
+  if (!f) return f;
+  var completa = null;
+  try {
+    if (typeof fichasPorColaborador === "function" &&
+        typeof epiChaveDaFicha_ === "function") {
+      var alvo = epiChaveDaFicha_(f.matricula, f.nome || f.colaborador, f.chave);
+      listaSegura(fichasPorColaborador()).forEach(function (x) {
+        if (completa) return;
+        var k = x.chave || epiChaveDaFicha_(x.matricula, x.nome, "");
+        if (k === alvo) completa = x;
+      });
+    }
+  } catch (e) { completa = null; }
+  /* so troco se a consolidada tiver MAIS do que a que veio: nunca
+     devolvo uma ficha com menos itens do que o chamador ja tinha */
+  if (completa && listaSegura(completa.itens).length >= listaSegura(f.itens).length) {
+    completa.__juntouDe = listaSegura(f.itens).length;
+    return completa;
+  }
+  return f;
+}
+
 function modalImprimirFichaEPI(f) {
 if (!f || !f.itens) {
 toast("warn", "Escolha um colaborador", "Abra a ficha de alguém antes de imprimir.");
 return;
 }
+f = fichaUnicaParaImpressao_(f);
 var e = EMPRESA.ler();
 var p = typeof fichaDadosPessoa_ === "function" ? fichaDadosPessoa_(f) : {};
 UI.modal({
@@ -60599,6 +60632,9 @@ imprimir(montarFicha(f, dados));
 });
 }
 window.modalImprimirFichaEPI = modalImprimirFichaEPI;
+/* [FICHAUNICA] exposta para a prova poder conferir a consolidacao
+   sem abrir o modal inteiro */
+window.fichaUnicaParaImpressao_ = fichaUnicaParaImpressao_;
 window.modalDadosDaEmpresa = modalDadosDaEmpresa;
 /* exposta para poder ser conferida de fora: é ela que decide quantas
    folhas a ficha tem, e isso precisa ser testável sem abrir a janela
@@ -64474,7 +64510,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 359 · 01/11";
+var ALMOXA_VERSAO = "sistema 360 · 01/11";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
