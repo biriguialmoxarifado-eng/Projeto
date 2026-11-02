@@ -64819,8 +64819,11 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 362 · 02/11";
+var ALMOXA_VERSAO = "sistema 364 · 02/11";
 var ALMOXA_NOVIDADES = [
+  "364 · marcar fichas na lista e imprimir as marcadas como uma so",
+  "364 · a rubrica deixa de sumir no papel quando a pessoa tem duas matriculas",
+  "363 · imprimir junta as fichas da mesma pessoa, e liga as matriculas de vez",
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
   "327 · explica o modo de simulacao do servidor, em vez de so repetir o erro",
@@ -98922,6 +98925,902 @@ emissao: hoje,
   };
 
   try { window.EPICONSUMO = C; } catch (e) {}
+})();
+</script>
+
+
+<script>
+/* ############################################################
+ * JUNTAR AS FICHAS DA MESMA PESSOA NA IMPRESSAO
+ *                                      busca: [FICHAJUNTAR]
+ * ------------------------------------------------------------
+ * O PEDIDO (02/11)
+ *   "as vezes o usuario pode ter varias fichas de EPI. Quando eu
+ *    apertar o botao de imprimir, vai trazer todos os nomes das
+ *    pessoas — por exemplo, se tiver dois Ismael Silva dos Santos,
+ *    vai trazer tudo. Eu vou selecionar e vai aparecer na mesma
+ *    ficha de EPI. Ocultar essas duplicadas e lancar na mesma."
+ *
+ * POR QUE NASCIAM VARIAS — E NAO E ALEATORIO
+ *   A identidade da ficha e epiChaveDaFicha_(). Ela junta duas
+ *   matriculas numa unica ficha SO quando o vinculo esta declarado:
+ *   matriculaAnterior, matriculasAnteriores ou o bilhete do
+ *   [MATANT]. Pelo NOME ela junta so quando a linha nao tem
+ *   matricula nenhuma — essa e a regra [FICHAID-NOME], posta de
+ *   proposito em 01/11 depois da prova da Cristiane, porque dois
+ *   homonimos existem e carimbar a assinatura de um no outro e pior
+ *   do que ficha partida.
+ *
+ *   Ou seja: cada vez que a matricula muda e ninguem declara o
+ *   numero antigo, as linhas gravadas com o numero velho viram uma
+ *   ficha propria. A regra fez o que foi mandada fazer. O que
+ *   faltava era o passo humano — alguem dizer "estes dois sao a
+ *   mesma pessoa" — e esse passo so existia na tela de cadastro.
+ *
+ *   O [FICHAUNICA] da impressao nao resolvia: ele procura a ficha
+ *   consolidada pela MESMA chave (if (k === alvo)). Duas chaves
+ *   diferentes nunca se encontram ali.
+ *
+ * O QUE ESTE BLOCO FAZ
+ *   1. No "Imprimir ficha", antes de abrir a janela de sempre,
+ *      levanta todas as fichas que podem ser a mesma pessoa —
+ *      por cracha, por CPF ou pelo nome igual.
+ *   2. Mostra uma por uma, com matricula, funcao, quantos itens e
+ *      de quando ate quando, para ELE decidir.
+ *   3. Imprime as marcadas como UMA ficha so. O papel ja diz
+ *      "MATRICULA 482 (antes: 011)" — isso o montarFicha ja fazia.
+ *   4. Oferece ligar as matriculas de vez, pelo [MATANT]. Depois
+ *      disso as duplicadas somem de todas as telas sozinhas — e e
+ *      assim que elas ficam ocultas, sem apagar nada.
+ *
+ * O QUE ELE NAO FAZ
+ *   NAO apaga linha, NAO move linha, NAO altera matricula de
+ *   entrega nenhuma. Juntar aqui e so o papel. A planilha continua
+ *   exatamente como esta ate ele mandar ligar — e ligar tambem nao
+ *   apaga nada, so cria o ponteiro.
+ *   NAO marca sozinho quem bate apenas pelo nome: isso fica em
+ *   branco esperando a mao dele.
+ *   NAO descarta linha em silencio: se duas fichas trouxerem a
+ *   MESMA linha, ele conta quantas repetiram e escreve na tela.
+ * ############################################################ */
+(function fichaJuntarNaImpressao() {
+
+  var J = { ultima: null, ultimoErro: "" };
+  try { window.FICHAJUNTAR = J; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(v) { return (typeof U !== "undefined" && U.esc) ? U.esc(v) : lp(v); }
+  function icone_(n) { return (typeof ic === "function") ? ic(n) : ""; }
+  function matK(v) {
+    return (typeof fichaChaveMat_ === "function") ? fichaChaveMat_(v)
+      : lp(v).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+  }
+  function nomeK(v) {
+    return (typeof fichaChaveNome_ === "function") ? fichaChaveNome_(v)
+      : lp(v).toUpperCase();
+  }
+  function soDigitos(v) { return lp(v).replace(/\D/g, ""); }
+  function dataBr(v) {
+    if (!v) return "—";
+    try { if (typeof U !== "undefined" && U.data) return U.data(v); } catch (e) {}
+    return lp(v).slice(0, 10);
+  }
+  function aviso_(tipo, titulo, texto) {
+    try { if (typeof toast === "function") toast(tipo, titulo, texto); } catch (e) {}
+  }
+
+  /* ============================================================
+     DE QUANDO ATE QUANDO — para ele reconhecer a ficha no olho
+     ============================================================ */
+  function periodoDe(itens) {
+    var ds = lista_(itens).map(function (i) {
+      return lp(i.entrega || i.data);
+    }).filter(function (x) { return !!x; }).sort();
+    if (!ds.length) return "";
+    if (ds.length === 1 || ds[0] === ds[ds.length - 1]) return dataBr(ds[0]);
+    return dataBr(ds[0]) + " a " + dataBr(ds[ds.length - 1]);
+  }
+
+  /* ============================================================
+     1. QUEM PODE SER A MESMA PESSOA
+     ------------------------------------------------------------
+     Tres sinais, em ordem de forca. O cracha e o CPF identificam;
+     o nome apenas SUGERE, e por isso vem marcado como fraco e
+     chega na tela desmarcado.
+     ============================================================ */
+  function mesmaFicha_(a, b) {
+    var ca = lp(a && a.chave), cb = lp(b && b.chave);
+    if (ca && ca === cb) return true;
+    var ma = matK(a && a.matricula), mb = matK(b && b.matricula);
+    return !!(ma && mb && ma === mb);
+  }
+
+  J.candidatas = function (f) {
+    if (!f) return [];
+    var todas = [];
+    try {
+      if (typeof fichasPorColaborador === "function") todas = lista_(fichasPorColaborador());
+    } catch (e) { todas = []; J.ultimoErro = lp(e && e.message); }
+
+    var nF = nomeK(f.nome || f.colaborador);
+    var mF = matK(f.matricula);
+    var crF = lp(f.cracha || f.crachaNumero);
+    var cpF = soDigitos(f.cpf);
+
+    var achada = null, outras = [];
+    todas.forEach(function (x) {
+      if (mesmaFicha_(x, f)) { if (!achada) achada = x; return; }
+      var por = "", forte = false;
+      var crX = lp(x.cracha || x.crachaNumero);
+      var cpX = soDigitos(x.cpf);
+      if (crF && crX && crX === crF) { por = "mesmo crachá " + crF; forte = true; }
+      else if (cpF.length >= 11 && cpX === cpF) { por = "mesmo CPF"; forte = true; }
+      else if (nF && nomeK(x.nome || x.colaborador) === nF) { por = "nome igual"; forte = false; }
+      if (!por) return;
+      outras.push({ ficha: x, por: por, forte: forte });
+    });
+
+    /* a ficha que ele abriu entra sempre, e vem travada: imprimir
+       sem ela nao faz sentido nenhum */
+    var principal = achada || f;
+    if (!lp(principal.matricula) && mF) principal.matricula = f.matricula;
+
+    outras.sort(function (a, b) {
+      if (a.forte !== b.forte) return a.forte ? -1 : 1;
+      return lista_(b.ficha.itens).length - lista_(a.ficha.itens).length;
+    });
+
+    return [{ ficha: principal, por: "a ficha que você abriu", forte: true, fixo: true }]
+      .concat(outras);
+  };
+
+  /* ============================================================
+     2. JUNTAR — SO O PAPEL
+     ------------------------------------------------------------
+     Copia rasa da ficha principal, itens de todas as marcadas.
+     Linha repetida nao e descartada em silencio: ela e contada e
+     o numero aparece na tela.
+     ============================================================ */
+  J.juntar = function (escolhidas) {
+    var lista = lista_(escolhidas);
+    if (!lista.length) return null;
+    var principal = lista[0];
+    var f = {};
+    Object.keys(principal).forEach(function (k) { f[k] = principal[k]; });
+
+    var vistos = {}, itens = [], repetidas = 0, mats = [], semItens = 0;
+    lista.forEach(function (x) {
+      var m = lp(x.matricula);
+      if (m && mats.indexOf(m) === -1) mats.push(m);
+      var dela = lista_(x.itens);
+      if (!dela.length) semItens++;
+      dela.forEach(function (i) {
+        var k = lp(i.id) ||
+          ("S:" + lp(i.sku) + "|" + lp(i.entrega || i.data) + "|" + (Number(i.qtd) || 0));
+        if (vistos[k]) { repetidas++; return; }
+        vistos[k] = true;
+        itens.push(i);
+      });
+    });
+
+    itens.sort(function (a, b) {
+      return new Date(b.entrega || b.data || 0) - new Date(a.entrega || a.data || 0);
+    });
+
+    f.itens = itens;
+    var atual = matK(principal.matricula);
+    /* o montarFicha ja imprime isto como "MATRICULA 482 (antes: 011)" */
+    var antes = mats.filter(function (m) { return matK(m) !== atual; });
+    f.matriculasAnteriores = lista_(f.matriculasAnteriores).concat(antes)
+      .filter(function (m, i, a) { return a.indexOf(m) === i; });
+    f.__fichasJuntadas = lista.length;
+    f.__linhasRepetidas = repetidas;
+    f.__fichasSemItens = semItens;
+    J.ultima = { quando: new Date().toISOString(), quantas: lista.length,
+                 itens: itens.length, repetidas: repetidas, matriculas: mats };
+    /* [ASSJUNTA] todas as matriculas desta pessoa ficam anotadas na
+       ficha. E por elas que a rubrica e encontrada, e so por elas:
+       nome parecido nao abre gaveta de ninguem. */
+    f.__matriculasJuntadas = mats;
+    return f;
+  };
+
+  /* ============================================================
+     [ASSJUNTA] A RUBRICA DAS FICHAS MARCADAS
+     ------------------------------------------------------------
+     O painel mostra a assinatura porque ele PEDE ao servidor, uma
+     por ficha. A impressao nao pede: o cadastroParaImpressao so
+     olha o que ja esta na memoria, e cada ficha guarda a sua numa
+     gaveta propria — P:408220|ISMAEL e P:1|ISMAEL sao duas. Por
+     isso a rubrica aparecia no painel e sumia no papel.
+     Aqui eu abro as duas gavetas antes de montar a folha.
+     ============================================================ */
+  J.carregarAssinaturas = function (fichas, prazoMs) {
+    var alvos = lista_(fichas);
+    if (!alvos.length) return Promise.resolve([]);
+    if (typeof EPIASS === "undefined" || !EPIASS || !EPIASS.lerCadastro) {
+      return Promise.resolve([]);
+    }
+    var todas = Promise.all(alvos.map(function (x) {
+      return Promise.resolve(EPIASS.lerCadastro(x))["catch"](function () { return null; });
+    }))["catch"](function () { return []; });
+
+    /* [FICHAJA] A FICHA E O CONTEUDO; A ASSINATURA E ENFEITE.
+       Esperar o servidor para imprimir era repetir o erro da v319:
+       a tela parada por causa de um enfeite. Com prazo, o papel sai
+       de qualquer jeito — com a rubrica se ela chegou, e sem ela se
+       nao chegou, o que a tela avisa antes. */
+    var ms = Number(prazoMs) > 0 ? Number(prazoMs) : 6000;
+    return new Promise(function (resolve) {
+      var fechou = false;
+      var t = setTimeout(function () {
+        if (fechou) return;
+        fechou = true;
+        J.assinaturaNoPrazo = false;
+        resolve([]);
+      }, ms);
+      todas.then(function (v) {
+        if (fechou) return;
+        fechou = true; clearTimeout(t);
+        J.assinaturaNoPrazo = true;
+        resolve(v);
+      }, function () {
+        if (fechou) return;
+        fechou = true; clearTimeout(t);
+        J.assinaturaNoPrazo = false;
+        resolve([]);
+      });
+    });
+  };
+
+  /* Quem tem rubrica entre as marcadas — so para a tela poder dizer
+     antes de imprimir, em vez de ele descobrir no papel. */
+  J.temRubrica = function (f) {
+    try {
+      if (typeof EPIASS === "undefined" || !EPIASS || !EPIASS.cadastroParaImpressao) return null;
+      return !!EPIASS.cadastroParaImpressao(f);
+    } catch (e) { return null; }
+  };
+
+  /* ============================================================
+     3. A TELA DE ESCOLHA
+     ============================================================ */
+  function linhaDaFicha(c, i, marcada) {
+    var f = c.ficha;
+    var n = lista_(f.itens).length;
+    var per = periodoDe(f.itens);
+    return '<label class="card" data-jl="' + i + '" ' +
+      'style="display:flex;gap:12px;align-items:flex-start;padding:11px 12px;margin-bottom:8px;cursor:pointer">' +
+      '<input type="checkbox" data-jc="' + i + '"' +
+        (marcada ? " checked" : "") + (c.fixo ? " disabled" : "") +
+        ' style="margin-top:3px;flex:0 0 auto">' +
+      '<div class="grow" style="min-width:0">' +
+        '<div class="flex center gap8" style="flex-wrap:wrap">' +
+          "<b>" + esc_(f.nome || f.colaborador || "Sem nome") + "</b>" +
+          '<span class="badge ' + (c.forte ? "b-green" : "b-yellow") + '">' + esc_(c.por) + "</span>" +
+          (c.fixo ? '<span class="badge b-blue">fixa</span>' : "") +
+        "</div>" +
+        '<p class="small" style="margin:3px 0 0;color:var(--texto-2)">' +
+          "matrícula " + esc_(f.matricula || "não informada") +
+          " · " + esc_(f.cargo || "função não informada") +
+          (lp(f.setor) ? " · " + esc_(f.setor) : "") +
+          (lp(f.cracha || f.crachaNumero) ? " · crachá " + esc_(f.cracha || f.crachaNumero) : "") +
+        "</p>" +
+        '<p class="small" style="margin:2px 0 0">' +
+          "<b>" + n + "</b> " + (n === 1 ? "item entregue" : "itens entregues") +
+          (per ? " · " + esc_(per) : " · nenhuma entrega nesta ficha") +
+        "</p>" +
+      "</div></label>";
+  }
+
+  J.modal = function (f, seguir) {
+    var cands = J.candidatas(f);
+
+    /* uma so? entao nao ha nada a escolher, e eu nao ponho um
+       clique no caminho dele sem motivo */
+    if (cands.length <= 1) { seguir(f); return; }
+
+    var marcadas = {};
+    cands.forEach(function (c, i) { if (c.fixo || c.forte) marcadas[i] = true; });
+    var temFraca = cands.some(function (c, i) { return i > 0 && !c.forte; });
+
+    function corpo() {
+      return '<div class="alert a-gray mb12">' + icone_("info") +
+        "<div>Achei <b>" + cands.length + " fichas</b> que podem ser desta mesma pessoa. " +
+        "Marque as que são dela e eu imprimo <b>uma ficha só</b>, com todos os itens juntos. " +
+        "Nada é apagado nem movido: a planilha fica como está.</div></div>" +
+        (temFraca ? '<div class="alert a-yellow mb12">' + icone_("alerta") +
+          "<div>As marcadas em amarelo batem <b>só pelo nome</b>. Dois homônimos existem — " +
+          "confira a matrícula e a função antes de marcar. Essas eu não marco sozinho.</div></div>" : "") +
+        '<div id="jLista">' +
+        cands.map(function (c, i) { return linhaDaFicha(c, i, !!marcadas[i]); }).join("") +
+        "</div>" +
+        '<div class="alert a-gray" id="jResumo" style="margin:4px 0 0"></div>';
+    }
+
+    function escolhidasAgora() {
+      return cands.filter(function (c, i) { return !!marcadas[i]; })
+        .map(function (c) { return c.ficha; });
+    }
+
+    UI.modal({
+      titulo: "Imprimir ficha de EPI",
+      sub: "Quais fichas são desta pessoa",
+      tamanho: "md",
+      corpo: corpo(),
+      rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' +
+        '<button class="btn btn-ghost" data-ligar>' + icone_("usuarios") + "Ligar as matrículas de vez</button>" +
+        '<button class="btn btn-primary" data-ok>' + icone_("impressora") + "Imprimir junto</button>",
+      aoAbrir: function (w, fechar) {
+
+        function resumir() {
+          var esc = escolhidasAgora();
+          var prova = J.juntar(esc);
+          var n = prova ? lista_(prova.itens).length : 0;
+          var cx = w.querySelector("#jResumo");
+          if (!cx) return;
+          cx.innerHTML = icone_("checkC") +
+            "<div><b>" + esc.length + (esc.length === 1 ? " ficha" : " fichas") + " · " +
+            n + (n === 1 ? " item" : " itens") + " no papel</b>" +
+            (prova && prova.__linhasRepetidas
+              ? "<br>" + prova.__linhasRepetidas + " linha(s) apareciam nas duas fichas e entram " +
+                "uma vez só — não desapareceram da planilha."
+              : "") +
+            (prova && lista_(prova.matriculasAnteriores).length
+              ? "<br>A ficha vai sair como matrícula " + esc_(prova.matricula) +
+                " (antes: " + esc_(lista_(prova.matriculasAnteriores).join(", ")) + ")."
+              : "") +
+            "</div>";
+        }
+
+        w.addEventListener("change", function (ev) {
+          var cb = ev.target.closest("[data-jc]");
+          if (!cb) return;
+          var i = Number(cb.getAttribute("data-jc"));
+          if (cands[i] && cands[i].fixo) { cb.checked = true; return; }
+          marcadas[i] = !!cb.checked;
+          resumir();
+        });
+
+        resumir();
+
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+
+        w.querySelector("[data-ok]").addEventListener("click", function () {
+          var esc = escolhidasAgora();
+          if (!esc.length) {
+            aviso_("warn", "Nenhuma ficha marcada", "Marque pelo menos a ficha que você abriu.");
+            return;
+          }
+          var juntada = J.juntar(esc);
+          if (!juntada || !lista_(juntada.itens).length) {
+            aviso_("warn", "Nada para imprimir",
+              "As fichas marcadas não têm nenhum item entregue.");
+            return;
+          }
+          /* [ASSJUNTA] a assinatura de cada ficha marcada tem de estar
+             na memoria ANTES de montar o papel: o cadastroParaImpressao
+             nao vai ao servidor, so olha o que ja foi lido. Sem isto a
+             ficha junta sai sem rubrica — foi o que ele viu. */
+          var bt = w.querySelector("[data-ok]");
+          if (bt) { bt.disabled = true; bt.innerHTML = "Buscando as assinaturas…"; }
+          J.carregarAssinaturas(esc).then(function () {
+            fechar();
+            seguir(juntada);
+          });
+        });
+
+        w.querySelector("[data-ligar]").addEventListener("click", function () {
+          var esc = escolhidasAgora();
+          if (esc.length < 2) {
+            aviso_("warn", "Marque as duas",
+              "Para ligar, marque a ficha certa e pelo menos uma das outras.");
+            return;
+          }
+          fechar();
+          confirmarLigacao(esc);
+        });
+      }
+    });
+  };
+
+  /* ============================================================
+     4. LIGAR DE VEZ — e e assim que as duplicadas somem
+     ------------------------------------------------------------
+     Nao apago ficha nenhuma. O [MATANT] grava um ponteiro
+     COLABMAT:<numero antigo> -> COLAB:<id>. A partir dai o
+     epiChaveDaFicha_ junta as duas sozinho, em TODAS as telas,
+     e a duplicada deixa de aparecer. Se o numero antigo ja
+     aponta para outro cadastro, o [MATANT] recusa e mostra os
+     dois — e isso continua valendo aqui.
+     ============================================================ */
+  function confirmarLigacao(escolhidas) {
+    var principal = escolhidas[0];
+    var outras = escolhidas.slice(1).filter(function (x) {
+      return matK(x.matricula) && matK(x.matricula) !== matK(principal.matricula);
+    });
+    if (!outras.length) {
+      aviso_("warn", "Não há número antigo para ligar",
+        "As fichas marcadas têm a mesma matrícula ou nenhuma matrícula.");
+      return;
+    }
+    if (typeof MATANT === "undefined" || !MATANT || !MATANT.ligar) {
+      aviso_("warn", "Bloco não carregado", "O [MATANT] não está nesta versão.");
+      return;
+    }
+
+    var pessoa = null;
+    try {
+      pessoa = lista_(MOCK.usuarios).filter(function (u) {
+        return matK(u.matricula) === matK(principal.matricula);
+      })[0] || null;
+    } catch (e) { pessoa = null; }
+
+    if (!pessoa || !lp(pessoa.id)) {
+      aviso_("warn", "Esta matrícula não está no cadastro",
+        "Para ligar, a matrícula " + lp(principal.matricula) + " precisa ter cadastro com id. " +
+        "Imprimir junto funciona mesmo assim.");
+      return;
+    }
+
+    UI.modal({
+      titulo: "Ligar as matrículas",
+      sub: lp(pessoa.nome || principal.nome),
+      tamanho: "sm",
+      corpo: '<div class="alert a-yellow mb12">' + icone_("alerta") +
+        "<div>Isto grava que <b>" +
+        esc_(outras.map(function (x) { return lp(x.matricula); }).join(", ")) +
+        "</b> é número antigo de <b>" + esc_(lp(principal.matricula)) + "</b>." +
+        "<br>Depois disso as fichas se juntam sozinhas em todas as telas e a duplicada " +
+        "para de aparecer.</div></div>" +
+        '<p class="small">Nenhuma linha é apagada, nenhuma entrega é movida e nenhuma ' +
+        "matrícula de entrega é alterada. Só é criado o ponteiro. Se um desses números " +
+        "já pertencer a outro cadastro, o sistema recusa e mostra os dois.</p>" +
+        '<div id="jlResultado" class="mt8"></div>',
+      rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' +
+        '<button class="btn btn-primary" data-ok>Ligar</button>',
+      aoAbrir: function (w, fechar) {
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        w.querySelector("[data-ok]").addEventListener("click", function () {
+          var bt = w.querySelector("[data-ok]");
+          bt.disabled = true;
+          var cx = w.querySelector("#jlResultado");
+          var feitos = [], falhou = [];
+          function passo(i) {
+            if (i >= outras.length) {
+              cx.innerHTML = (feitos.length ? '<div class="alert a-green">' + icone_("checkC") +
+                  "<div><b>" + feitos.length + " ligada(s)</b>" + esc_(feitos.join(", ")) +
+                  "<br>Recarregue a tela de EPI para ver a ficha única.</div></div>" : "") +
+                (falhou.length ? '<div class="alert a-red mt8">' + icone_("alerta") +
+                  "<div><b>" + falhou.length + " não ligou</b>" +
+                  falhou.map(function (x) { return "<br>" + esc_(x); }).join("") + "</div></div>" : "");
+              bt.disabled = false;
+              if (feitos.length) {
+                try { if (typeof CACHE !== "undefined" && CACHE.invalidar) CACHE.invalidar(); } catch (e) {}
+                aviso_("ok", "Matrícula ligada",
+                  feitos.length + " número(s) antigo(s) apontando para " + lp(pessoa.matricula) + ".");
+              }
+              return;
+            }
+            var antiga = lp(outras[i].matricula);
+            cx.innerHTML = '<div class="alert a-gray">' + icone_("sync") +
+              "<div>Ligando " + esc_(antiga) + "…</div></div>";
+            Promise.resolve(MATANT.ligar(pessoa, antiga)).then(function (r) {
+              if (r && r.ok) feitos.push(antiga + (r.jaEstava ? " (já estava)" : ""));
+              else falhou.push(antiga + " — " +
+                (lp(r && r.mensagem) || "o servidor não explicou"));
+            })["catch"](function (err) {
+              falhou.push(antiga + " — " + (lp(err && err.message) || String(err)));
+            }).then(function () { passo(i + 1); });
+          }
+          passo(0);
+        });
+      }
+    });
+  }
+
+  /* ============================================================
+     5. ENTRAR NA FRENTE DO "IMPRIMIR FICHA"
+     ------------------------------------------------------------
+     Embrulho o modalImprimirFichaEPI que ja existe — nao troco
+     nenhuma linha dele. A escolha acontece antes; o que segue
+     para a cadeia de sempre (inclusive o passo da assinatura do
+     [EPIASS]) e a ficha ja junta.
+     ============================================================ */
+  function enxertar() {
+    if (typeof window.modalImprimirFichaEPI !== "function") return false;
+    if (window.__fichaJuntarEnxertado) return true;
+    window.__fichaJuntarEnxertado = true;
+    var antes = window.modalImprimirFichaEPI;
+    window.modalImprimirFichaEPI = function (f) {
+      var eu = this;
+      try {
+        if (!f || !f.itens) return antes.call(eu, f);
+        if (f.__fichasJuntadas) return antes.call(eu, f);   /* ja passou por aqui */
+        J.modal(f, function (pronta) { antes.call(eu, pronta); });
+        return;
+      } catch (e) {
+        J.ultimoErro = lp(e && e.message);
+      }
+      return antes.call(eu, f);
+    };
+    return true;
+  }
+
+  if (!enxertar()) {
+    /* a tela de EPI pode ser desenhada antes deste bloco em alguma
+       ordem de carregamento; tento de novo quando o DOM fechar */
+    try {
+      document.addEventListener("DOMContentLoaded", enxertar);
+      setTimeout(enxertar, 1200);
+    } catch (e) {}
+  }
+
+  J.__enxertar = enxertar;
+})();
+</script>
+
+
+<script>
+/* ############################################################
+ * MARCAR NA LISTA E IMPRIMIR JUNTO  ·  busca: [FICHALISTA]
+ * ------------------------------------------------------------
+ * O PEDIDO (02/11 19:16)
+ *   "deveria ter um botao aqui dentro do painel de colaboradores
+ *    que, mesmo se tivesse duas fichas de EPI separadas, a gente
+ *    pudesse imprimir as duas juntas. Selecionar o nome da pessoa,
+ *    selecionar uma ou duas que tiver o nome da pessoa, apertar
+ *    imprimir, e ele junta tudo e vira uma ficha so."
+ *   "que ele tambem preenchesse as assinaturas digitais, porque
+ *    quando aperta no painel e seleciona a pessoa aparece a
+ *    assinatura nos quadrinhos, mas la nao esta aparecendo nada."
+ *
+ * ------------------------------------------------------------
+ * 1. A SELECAO NA PROPRIA LISTA
+ *   Ate agora so dava para juntar entrando na ficha de alguem. Na
+ *   lista nao havia como. Agora cada cartao tem uma caixa, e
+ *   quando duas ou mais estao marcadas aparece a barra embaixo
+ *   com "Imprimir juntas". Quem tem homonimo ganha tambem o atalho
+ *   "marcar os N com este nome".
+ *
+ * 2. POR QUE A RUBRICA SUMIA NO PAPEL              [ASSJUNTA]
+ *   Medido, nao suposto: EPIASS.chaveDaPessoa() e
+ *   "P:" + matricula + "|" + nome. As duas fichas do Ismael dao
+ *   P:408220|ISMAEL... e P:1|ISMAEL... — DUAS gavetas.
+ *   O painel mostra a assinatura porque ele PEDE ao servidor, ficha
+ *   por ficha, e guarda cada uma na gaveta dela. A impressao nao
+ *   pede nada: cadastroParaImpressao() so olha a memoria, e so na
+ *   gaveta da matricula daquela ficha. Se a rubrica foi gravada sob
+ *   a outra matricula, o papel sai em branco — com a assinatura
+ *   bem ali, na gaveta do lado.
+ *
+ *   O conserto: quando a ficha DECLARA que outras matriculas sao
+ *   dela (matriculasAnteriores, ou as que ele marcou na juncao), a
+ *   impressao passa a olhar tambem nessas gavetas.
+ *
+ * O QUE ELE NAO FAZ
+ *   NAO procura rubrica por nome parecido. So por matricula que
+ *   ESTA ficha declara como dela, e so com o mesmo nome completo.
+ *   Assinatura de outra pessoa numa ficha e a coisa que ele mandou
+ *   nunca acontecer, e continua nao acontecendo.
+ *   NAO apaga, NAO move e NAO altera linha nenhuma. Marcar e
+ *   imprimir sao leitura.
+ * ############################################################ */
+(function fichaListaMarcar() {
+
+  var L = { fichas: [], marcadas: {}, ultimoErro: "" };
+  try { window.FICHALISTA = L; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(v) { return (typeof U !== "undefined" && U.esc) ? U.esc(v) : lp(v); }
+  function icone_(n) { return (typeof ic === "function") ? ic(n) : ""; }
+  function nomeK(v) {
+    return (typeof fichaChaveNome_ === "function") ? fichaChaveNome_(v) : lp(v).toUpperCase();
+  }
+  function aviso_(t, a, b) {
+    try { if (typeof toast === "function") toast(t, a, b); } catch (e) {}
+  }
+
+  /* ============================================================
+     PARTE 1 — A RUBRICA ATRAVES DAS MATRICULAS DECLARADAS
+     ============================================================ */
+  function enxertarAssinatura() {
+    if (typeof EPIASS === "undefined" || !EPIASS || !EPIASS.cadastroParaImpressao) return false;
+    if (EPIASS.__assJuntaEnxertado) return true;
+    EPIASS.__assJuntaEnxertado = true;
+    var antes = EPIASS.cadastroParaImpressao;
+
+    EPIASS.cadastroParaImpressao = function (f) {
+      var r = null;
+      try { r = antes.call(EPIASS, f); } catch (e) { r = null; }
+      if (r) return r;
+      try {
+        /* SO as matriculas que esta ficha declara como dela:
+           as anteriores do cadastro e as que ele marcou na juncao */
+        var outras = lista_(f && f.matriculasAnteriores)
+          .concat(lista_(f && f.__matriculasJuntadas));
+        if (!outras.length) return null;
+        var nome = EPIASS.chaveNome(f && (f.nome || f.colaborador));
+        if (!nome) return null;          /* sem nome eu nao abro gaveta nenhuma */
+        var achado = null;
+        outras.forEach(function (m) {
+          if (achado) return;
+          var mk = EPIASS.chaveMatricula(m);
+          if (!mk) return;
+          var g = EPIASS.cadastroEmMemoria["P:" + mk + "|" + nome];
+          if (!g || !g.tem) return;
+          var d = g.dados || {};
+          /* o cadastro pode ter sido escrito pelo campo ("imagem")
+             ou pelo resto do sistema ("assinatura") */
+          if (lp(d.imagem) || lp(d.assinatura)) {
+            if (!lp(d.imagem)) d.imagem = d.assinatura;
+            achado = d;
+          }
+        });
+        if (achado) {
+          L.ultimaRubricaPor = "matrícula declarada da mesma pessoa";
+          return achado;
+        }
+      } catch (e) { L.ultimoErro = lp(e && e.message); }
+      return null;
+    };
+    return true;
+  }
+
+  /* ============================================================
+     PARTE 2 — AS CAIXAS NOS CARTOES DA LISTA
+     ============================================================ */
+  var MARCA = '<div class="card mb12"><div class="card-body">';
+
+  function caixaDoCartao(f, i, iguais) {
+    return '<label class="fl-pick" style="display:flex;gap:8px;align-items:center;' +
+      'margin:-2px 0 10px;cursor:pointer;font-size:12px;color:var(--texto-2)">' +
+      '<input type="checkbox" data-fl-ix="' + i + '" style="flex:0 0 auto">' +
+      "<span>Marcar esta ficha para imprimir junto</span>" +
+      (iguais > 1
+        ? '<button type="button" class="btn btn-ghost btn-sm" data-fl-nome="' + i + '" ' +
+          'style="margin-left:4px">marcar as ' + iguais + " com este nome</button>"
+        : "") +
+      "</label>";
+  }
+
+  function injetar(html, fichas) {
+    var partes = String(html).split(MARCA);
+    if (partes.length - 1 !== lista_(fichas).length) {
+      /* a lista e os cartoes nao bateram: nao arrisco pregar caixa
+         no cartao errado. Deixo a tela exatamente como estava. */
+      L.ultimoErro = "cartões (" + (partes.length - 1) + ") não batem com fichas (" +
+        lista_(fichas).length + ") — caixas não foram postas";
+      return html;
+    }
+    var porNome = {};
+    lista_(fichas).forEach(function (f) {
+      var k = nomeK(f.colaborador || f.nome);
+      if (k) porNome[k] = (porNome[k] || 0) + 1;
+    });
+    var saida = partes[0];
+    for (var i = 1; i < partes.length; i++) {
+      var f = fichas[i - 1];
+      var iguais = porNome[nomeK(f.colaborador || f.nome)] || 1;
+      saida += MARCA + caixaDoCartao(f, i - 1, iguais) + partes[i];
+    }
+    return saida;
+  }
+
+  /* ---------- a barra que aparece quando ha marcadas ---------- */
+  function barra() {
+    var b = document.getElementById("flBarra");
+    var quantas = Object.keys(L.marcadas).filter(function (k) { return L.marcadas[k]; });
+    if (!quantas.length) { if (b) b.remove(); return; }
+
+    var esc = quantas.map(function (k) { return L.fichas[Number(k)]; })
+      .filter(function (x) { return !!x; });
+    var itens = 0;
+    esc.forEach(function (x) { itens += lista_(x.itens).length; });
+
+    if (!b) {
+      b = document.createElement("div");
+      b.id = "flBarra";
+      b.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:4000;" +
+        "background:var(--azul-acao,#0B2A55);color:#fff;padding:10px 16px;" +
+        "display:flex;gap:12px;align-items:center;flex-wrap:wrap;" +
+        "box-shadow:0 -2px 12px rgba(0,0,0,.25)";
+      document.body.appendChild(b);
+      b.addEventListener("click", function (ev) {
+        if (ev.target.closest("[data-fl-limpar]")) { limparTudo(); return; }
+        if (ev.target.closest("[data-fl-imprimir]")) { imprimirMarcadas(); return; }
+      });
+    }
+    var nomes = {};
+    esc.forEach(function (x) { nomes[nomeK(x.colaborador || x.nome)] = 1; });
+    var variosNomes = Object.keys(nomes).length > 1;
+
+    b.innerHTML = '<div style="flex:1;min-width:200px;font-size:13px">' +
+      "<b>" + esc.length + (esc.length === 1 ? " ficha marcada" : " fichas marcadas") + "</b>" +
+      " · " + itens + (itens === 1 ? " item" : " itens") + " no papel" +
+      (variosNomes
+        ? '<br><span style="font-size:11.5px;opacity:.9">⚠ há mais de um nome entre as marcadas — ' +
+          "confira antes de imprimir como uma pessoa só</span>"
+        : "") +
+      "</div>" +
+      '<button class="btn btn-ghost btn-sm" data-fl-limpar ' +
+      'style="background:transparent;color:#fff;border-color:rgba(255,255,255,.4)">Limpar</button>' +
+      '<button class="btn btn-orange btn-sm" data-fl-imprimir>' + icone_("impressora") +
+      (esc.length > 1 ? "Imprimir juntas" : "Imprimir") + "</button>";
+  }
+
+  function limparTudo() {
+    L.marcadas = {};
+    document.querySelectorAll("[data-fl-ix]").forEach(function (c) { c.checked = false; });
+    barra();
+  }
+
+  function imprimirMarcadas() {
+    var chaves = Object.keys(L.marcadas).filter(function (k) { return L.marcadas[k]; });
+    var esc = chaves.map(function (k) { return L.fichas[Number(k)]; })
+      .filter(function (x) { return !!x; });
+    if (!esc.length) { aviso_("warn", "Nenhuma ficha marcada", "Marque pelo menos uma."); return; }
+
+    var comItens = esc.filter(function (x) { return lista_(x.itens).length; });
+    if (!comItens.length) {
+      aviso_("warn", "Nada para imprimir", "As fichas marcadas não têm nenhum item entregue.");
+      return;
+    }
+
+    if (typeof window.modalImprimirFichaEPI !== "function") {
+      aviso_("warn", "Impressão não disponível", "A tela de impressão não está nesta versão.");
+      return;
+    }
+
+    /* uma so: segue o caminho normal, com a janela de escolha de sempre */
+    if (esc.length === 1) {
+      var bt0 = document.querySelector("[data-fl-imprimir]");
+      if (bt0) bt0.disabled = true;
+      carregarAss(esc).then(function () {
+        if (bt0) bt0.disabled = false;
+        window.modalImprimirFichaEPI(esc[0]);
+      });
+      return;
+    }
+
+    if (typeof FICHAJUNTAR === "undefined" || !FICHAJUNTAR || !FICHAJUNTAR.juntar) {
+      aviso_("warn", "Bloco não carregado", "O [FICHAJUNTAR] não está nesta versão.");
+      return;
+    }
+
+    var bt = document.querySelector("[data-fl-imprimir]");
+    if (bt) { bt.disabled = true; bt.innerHTML = "Buscando as assinaturas…"; }
+
+    carregarAss(esc).then(function () {
+      var juntada = FICHAJUNTAR.juntar(esc);
+      if (bt) { bt.disabled = false; barra(); }
+      if (!juntada || !lista_(juntada.itens).length) {
+        aviso_("warn", "Nada para imprimir", "As fichas marcadas não têm nenhum item entregue.");
+        return;
+      }
+      var temAss = null;
+      try { temAss = FICHAJUNTAR.temRubrica(juntada); } catch (e) {}
+      if (temAss === false) {
+        /* [NAOMINTA] duas razoes diferentes, duas frases diferentes.
+           Dizer "nao assinou" quando a consulta nem terminou foi o
+           erro que a 276 corrigiu na tela do cracha. Nao repito. */
+        var noPrazo = true;
+        try { noPrazo = FICHAJUNTAR.assinaturaNoPrazo !== false; } catch (e2) {}
+        if (noPrazo) {
+          aviso_("warn", "Sem assinatura no cadastro",
+            "A ficha vai sair sem a rubrica: nenhuma das matrículas marcadas tem assinatura " +
+            "cadastrada. Ela é colhida uma vez no ALMOXA CAMPO.");
+        } else {
+          aviso_("warn", "Não consegui conferir a assinatura",
+            "O servidor não respondeu a tempo, então eu NÃO sei se esta pessoa assinou. " +
+            "A ficha sai do mesmo jeito, mas pode sair sem a rubrica.");
+        }
+      }
+      window.modalImprimirFichaEPI(juntada);
+    });
+  }
+
+  function carregarAss(fichas) {
+    try {
+      if (typeof FICHAJUNTAR !== "undefined" && FICHAJUNTAR && FICHAJUNTAR.carregarAssinaturas) {
+        return FICHAJUNTAR.carregarAssinaturas(fichas);
+      }
+    } catch (e) {}
+    return Promise.resolve([]);
+  }
+
+  /* ---------- ligar as caixas depois que a tela desenha ---------- */
+  function ligar() {
+    var caixas = [].slice.call(document.querySelectorAll("[data-fl-ix]"));
+    if (!caixas.length) return;
+    caixas.forEach(function (c) {
+      var i = c.getAttribute("data-fl-ix");
+      c.checked = !!L.marcadas[i];
+      c.addEventListener("change", function () {
+        L.marcadas[i] = !!c.checked;
+        barra();
+      });
+    });
+    document.querySelectorAll("[data-fl-nome]").forEach(function (b) {
+      b.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        var f = L.fichas[Number(b.getAttribute("data-fl-nome"))];
+        if (!f) return;
+        var alvo = nomeK(f.colaborador || f.nome);
+        L.fichas.forEach(function (x, j) {
+          if (nomeK(x.colaborador || x.nome) === alvo) L.marcadas[j] = true;
+        });
+        document.querySelectorAll("[data-fl-ix]").forEach(function (c) {
+          c.checked = !!L.marcadas[c.getAttribute("data-fl-ix")];
+        });
+        barra();
+      });
+    });
+    barra();
+  }
+
+  /* ============================================================
+     PARTE 3 — ENTRAR NA TELA SEM TROCAR UMA LINHA DELA
+     ============================================================ */
+  function enxertarTela() {
+    if (window.__fichaListaEnxertado) return true;
+    if (typeof window.epiFichasTela !== "function") return false;
+    window.__fichaListaEnxertado = true;
+
+    var desenhaAntes = window.epiFichasTela;
+    window.epiFichasTela = function (fichas) {
+      var html = desenhaAntes.apply(this, arguments);
+      try {
+        L.fichas = lista_(fichas);
+        L.marcadas = {};            /* lista nova, selecao zerada */
+        var b = document.getElementById("flBarra");
+        if (b) b.remove();
+        return injetar(html, L.fichas);
+      } catch (e) {
+        L.ultimoErro = lp(e && e.message);
+        return html;
+      }
+    };
+
+    try {
+      var tela = SCREENS["epi-fichas"];
+      if (tela && typeof tela.mount === "function" && !tela.__flMount) {
+        var montaAntes = tela.mount;
+        tela.__flMount = true;
+        tela.mount = function () {
+          var r;
+          try { r = montaAntes.apply(this, arguments); } catch (e) { L.ultimoErro = lp(e && e.message); }
+          try { ligar(); } catch (e2) { L.ultimoErro = lp(e2 && e2.message); }
+          return r;
+        };
+      }
+    } catch (e) { L.ultimoErro = lp(e && e.message); }
+    return true;
+  }
+
+  enxertarAssinatura();
+  if (!enxertarTela()) {
+    try {
+      document.addEventListener("DOMContentLoaded", function () {
+        enxertarAssinatura(); enxertarTela();
+      });
+      setTimeout(function () { enxertarAssinatura(); enxertarTela(); }, 1200);
+    } catch (e) {}
+  }
+
+  L.__injetar = injetar;
+  L.__ligar = ligar;
+  L.__barra = barra;
+  L.__imprimir = imprimirMarcadas;
+  L.__enxertarTela = enxertarTela;
+  L.__enxertarAssinatura = enxertarAssinatura;
 })();
 </script>
 
