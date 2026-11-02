@@ -28836,7 +28836,17 @@ function blocoFoto() {
 return (foto ? '<img id="itFoto" src="' + foto + '" style="width:100%;height:150px;object-fit:cover;border-radius:var(--r-sm);border:1px solid var(--borda)">' : '<div class="prod-img" style="height:150px;font-size:38px">📷</div>') + '<button class="btn btn-ghost btn-sm btn-block mt8" data-item-foto>' + ic("imagem") + (foto ? "Trocar foto" : "Selecionar foto") + "</button>" + (foto ? '<button class="btn btn-ghost btn-sm btn-block mt8" data-item-foto-rm style="color:var(--vermelho)">Excluir foto</button>' : "");
 }
 function corpo() {
-return '<div class="grid" style="grid-template-columns:200px 1fr;gap:16px">' + "<div>" + '<div class="field"><label>Foto do item</label><div id="itFotoBox">' + blocoFoto() + "</div></div>" + '<div class="field"><label>SKU</label>' + '<div class="flex gap8"><input class="input mono" id="itSku" value="' + U.esc(skuAtual || "") + '" ' + (skuManual ? "" : "readonly") + ">" + '<button class="btn btn-ghost btn-sm" data-item-sku>' + (skuManual ? "Automático" : "Editar") + "</button></div>" + '<div class="help">' + (skuManual ? "SKU manual: será verificada a duplicidade ao salvar." : "Gerado automaticamente pelo padrão configurado.") + "</div></div>" + '<div class="field"><label>Código de barras</label>' + '<input class="input mono" id="itBarras" value="' + U.esc(v("codigoBarras", "")) + '" placeholder="gerado ao salvar"></div>' + "</div>" + "<div>" + '<div class="field"><label>Descrição <span class="req">*</span></label>' + '<input class="input" id="itDesc" value="' + U.esc(v("descricao", "")) + '" placeholder="Ex.: Furadeira de impacto 850W"></div>' + '<div class="field"><label>Descrição complementar</label>' + '<input class="input" id="itDesc2" value="' + U.esc(v("descricaoComplementar", "")) + '"></div>' + '<div class="grid g3">' + campoSel("Categoria", "itCategoria", MOCK.categorias.length ? MOCK.categorias.map(function(c) {
+return '<div class="grid" style="grid-template-columns:200px 1fr;gap:16px">' + "<div>" + '<div class="field"><label>Foto do item</label><div id="itFotoBox">' + blocoFoto() + "</div></div>" + '<div class="field"><label>SKU</label>' + '<div class="flex gap8"><input class="input mono" id="itSku" value="' + U.esc(skuAtual || "") + '" ' + (skuManual ? "" : "readonly") + ">" + '<button class="btn btn-ghost btn-sm" data-item-sku>' + (skuManual ? "Automático" : "Editar") + "</button></div>" + '<div class="help">' + (skuManual ? "SKU manual: será verificada a duplicidade ao salvar." : "Gerado automaticamente pelo padrão configurado.") + "</div></div>" + '<div class="field"><label>Código de barras</label>' + '<input class="input mono" id="itBarras" value="' + U.esc(v("codigoBarras", "")) + '" placeholder="gerado ao salvar"></div>' +
+/* [ITEMCA] 02/11 — o CA do EPI. Ele pediu varias vezes: "preciso de um
+   campo para adicionar o numero do CA do material e gravar, para
+   trazer dentro da ficha de EPI". A ficha ja sabia mostrar (ela le
+   item.ca); o que faltava era onde digitar. */
+'<div class="field"><label>CA <small class="muted">(Certificado de Aprova\u00e7\u00e3o)</small></label>' +
+'<input class="input mono" id="itCa" value="' + U.esc(v("ca", "")) + '" placeholder="Ex.: 41234" inputmode="numeric">' +
+'<div class="help">Vale para EPI. Sai impresso na ficha de entrega.</div></div>' +
+'<div class="field"><label>Validade do CA</label>' +
+'<input type="date" class="input" id="itCaValidade" value="' + U.esc(v("caValidade", "")) + '">' +
+'<div class="help">Opcional. Avisa quando o CA estiver vencendo.</div></div>' + "</div>" + "<div>" + '<div class="field"><label>Descrição <span class="req">*</span></label>' + '<input class="input" id="itDesc" value="' + U.esc(v("descricao", "")) + '" placeholder="Ex.: Furadeira de impacto 850W"></div>' + '<div class="field"><label>Descrição complementar</label>' + '<input class="input" id="itDesc2" value="' + U.esc(v("descricaoComplementar", "")) + '"></div>' + '<div class="grid g3">' + campoSel("Categoria", "itCategoria", MOCK.categorias.length ? MOCK.categorias.map(function(c) {
 return c.nome;
 }) : [ "Sem categoria" ], v("categoria", "")) + campo("Subcategoria", "itSub", v("subcategoria", "")) + campoSel("Unidade", "itUnidade", [ "un", "pç", "cx", "m", "m²", "m³", "kg", "L", "par", "rolo" ], v("unidade", "un")) + campo("Marca", "itMarca", v("marca", "")) + campo("Modelo", "itModelo", v("modelo", "")) + campo("NCM", "itNcm", v("ncm", "")) + campoSel("Fornecedor", "itFornecedor", [ "—" ].concat(MOCK.fornecedores.map(function(f) {
 return f.nome || f.razaoSocial;
@@ -28975,6 +28985,9 @@ estoqueMaximo: Number(w.querySelector("#itMax").value) || 0,
 status: w.querySelector("#itStatus").value,
 observacoes: w.querySelector("#itObs").value,
 foto: foto,
+/* [ITEMCA] 02/11 — gravados junto do item, para a ficha de EPI imprimir */
+ca: (w.querySelector("#itCa") ? w.querySelector("#itCa").value : "").trim(),
+caValidade: (w.querySelector("#itCaValidade") ? w.querySelector("#itCaValidade").value : "").trim(),
 editando: !!item
 };
 if (!dados.descricao) {
@@ -32967,7 +32980,41 @@ epiBusca = "";
    sistema dizia "Nenhum usuário cadastrado" com a obra inteira
    cadastrada. O aviso era verdadeiro sobre a variável e mentiroso
    sobre a realidade. */
-var usuarios = listaSegura(MOCK.usuarios);
+/* [ENTREGABUSCA] 02/11 — duas coisas que ele pediu:
+
+   1) "na lista aquele nome de pessoas tava puxando os nomes das
+      matriculas anteriores" — e era isso mesmo. A lista mostrava UMA
+      LINHA POR CADASTRO. Quem tem matricula antiga e nova aparecia
+      duas vezes, e escolher a linha errada gravava a entrega com a
+      matricula velha: ficha nova, duplicada.
+      Agora e uma linha por PESSOA, pela mesma identidade que a ficha
+      usa. Nada e apagado no cadastro: so deixa de aparecer repetido
+      na hora de escolher.
+
+   2) "deveria ter uma opcao para eu digitar ali o nome da pessoa".
+      Tem, logo acima do campo.                                      */
+function pessoasSemRepetir_(brutos) {
+  brutos = listaSegura(brutos);
+  if (typeof epiChaveDaFicha_ !== "function") return brutos;
+  var por = {}, ordem = [];
+  brutos.forEach(function (u) {
+    var k;
+    try { k = epiChaveDaFicha_(u.matricula, u.nome || u.colaborador, u.id); }
+    catch (e) { k = "ID:" + String(u.id || u.matricula || u.nome); }
+    if (!por[k]) { por[k] = u; ordem.push(k); return; }
+    /* fica a linha do cadastro ATUAL: a que o indice reconhece pela
+       matricula de hoje. As outras viram "matricula anterior". */
+    var atual = por[k];
+    var antes = [];
+    if (atual.matricula && String(atual.matricula) !== String(u.matricula)) {
+      antes = listaSegura(atual.__outrasMatriculas).concat([u.matricula]);
+    }
+    if (String(u.id || "") && !String(atual.id || "")) por[k] = u;
+    por[k].__outrasMatriculas = antes;
+  });
+  return ordem.map(function (k) { return por[k]; });
+}
+var usuarios = pessoasSemRepetir_(MOCK.usuarios);
 var listaCarregando = true;
 /* [ACHAEPI] por padrao, so o que e EPI. Com "Escolher do catalogo
    inteiro", todos os ativos — e a tela diz que esta assim. */
@@ -33036,7 +33083,14 @@ return i.sku === sku;
 })[0] || {};
 return s + epiSelecao[sku] * (Number(it.valorUnitario) || 0);
 }, 0);
-return '<div class="grid g2 mb16">' + '<div class="field"><label>Colaborador <span class="req">*</span>' + '<button class="btn-link" data-ep-novo style="float:right;font-weight:600">+ Cadastrar rápido</button></label>' + '<select class="select" id="epColab">' + (usuarios.length ? usuarios.map(function(u) {
+return '<div class="grid g2 mb16">' + '<div class="field"><label>Colaborador <span class="req">*</span>' + '<button class="btn-link" data-ep-novo style="float:right;font-weight:600">+ Cadastrar rápido</button></label>' +
+/* [ENTREGABUSCA] digitar o nome em vez de rolar a lista inteira.
+   Filtra as opcoes por JavaScript, SEM redesenhar o corpo da janela:
+   redesenhar e o que fazia a escolha voltar sozinha (ver QUEMRECEBE). */
+'<div class="search-wrap mb8">' + ic("busca") +
+'<input class="input" id="epColabBusca" placeholder="Digite o nome ou a matr\u00edcula\u2026" autocomplete="off"></div>' +
+'<div class="help" id="epColabConta" style="margin:-4px 0 6px"></div>' +
+'<select class="select" id="epColab">' + (usuarios.length ? usuarios.map(function(u) {
 /* [QUEMRECEBE] marca quem VOCE escolheu; so cai no preset
    enquanto voce ainda nao escolheu ninguem */
 return '<option value="' + U.esc(u.matricula) + '" ' + (String(u.matricula) === String(quemRecebe || matriculaPreset || "") ? "selected" : "") + ">" + U.esc(u.nome) + " — " + U.esc(u.matricula) + "</option>";
@@ -33096,8 +33150,11 @@ return API.call("usuarios", "listar", {}).then(function(r) {
 listaCarregando = false;
 var vindos = (r && r.ok) ? listaSegura(r.dados) : [];
 if (vindos.length) {
-usuarios = vindos;
 MOCK.usuarios = vindos;
+/* [ENTREGABUSCA] a recarga tambem sem repetir a mesma pessoa.
+   Sem esta linha, a lista voltava duplicada assim que o Core
+   respondia, e a correcao durava menos de um segundo. */
+usuarios = pessoasSemRepetir_(vindos);
 }
 if (selecionar) matriculaPreset = selecionar;
 repintar();
@@ -33249,6 +33306,44 @@ var selColab = w.querySelector("#epColab");
 if (selColab) selColab.addEventListener("change", function () {
   quemRecebe = selColab.value;
 });
+
+/* [ENTREGABUSCA] 02/11 — digitar o nome em vez de rolar a lista.
+   Esconde as opcoes que nao batem, SEM redesenhar o corpo: redesenhar
+   e o que fazia a pessoa escolhida voltar sozinha. */
+var buscaColab = w.querySelector("#epColabBusca");
+var contaColab = w.querySelector("#epColabConta");
+function filtrarColab_() {
+  if (!selColab) return;
+  var t = (buscaColab ? buscaColab.value : "").trim().toLowerCase();
+  var visiveis = 0, primeira = null;
+  Array.prototype.forEach.call(selColab.options, function (o) {
+    var bate = !t || o.text.toLowerCase().indexOf(t) > -1;
+    o.hidden = !bate;
+    o.disabled = !bate;
+    if (bate) { visiveis++; if (!primeira) primeira = o; }
+  });
+  if (contaColab) {
+    contaColab.textContent = !t
+      ? selColab.options.length + " pessoa(s) na lista"
+      : (visiveis
+          ? visiveis + " de " + selColab.options.length + " conferem com \"" + t + "\""
+          : "ningu\u00e9m com \"" + t + "\" \u2014 confira a grafia ou use o Cadastrar r\u00e1pido");
+  }
+  /* se o que estava escolhido sumiu do filtro, passo para o primeiro
+     que sobrou — e registro, para a entrega nao sair para outra pessoa */
+  if (t && visiveis && selColab.selectedOptions && selColab.selectedOptions[0] &&
+      selColab.selectedOptions[0].hidden && primeira) {
+    selColab.value = primeira.value;
+    quemRecebe = selColab.value;
+  }
+}
+if (buscaColab) {
+  buscaColab.addEventListener("input", filtrarColab_);
+  buscaColab.addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") { ev.preventDefault(); filtrarColab_(); }
+  });
+}
+filtrarColab_();
 var selMotivo = w.querySelector("#epMotivo");
 if (selMotivo) selMotivo.addEventListener("change", function () {
   motivoEscolhido = selMotivo.value;
@@ -64510,7 +64605,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 360 · 01/11";
+var ALMOXA_VERSAO = "sistema 361 · 02/11";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
