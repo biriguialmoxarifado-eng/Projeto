@@ -12492,6 +12492,167 @@ if (tabela[i][0].test(t)) return '<span class="epi-simbolo">' + tabela[i][1] + "
 return '<span class="epi-simbolo">🦺</span>';
 }
 
+/* ============================================================
+   [EPICA] O CA DO EPI  ·  02/11
+   ------------------------------------------------------------
+   Ismael: "tem itens que vai ser o mesmo CA, tipo bota, entao a
+   gente tem que vincular o CA no mesmo item tambem".
+
+   Grava o CA no proprio item do catalogo, pela porta que ja existe
+   (itens.salvar). Nao cria tabela de CA, nao inventa numero, e nao
+   mexe em nenhum outro campo do item alem do CA e da validade.
+   ============================================================ */
+function epiSalvarCA_(skus, dados) {
+  var ca = String((dados && dados.ca) || "").trim();
+  var val = String((dados && dados.caValidade) || "").trim();
+  var alvos = listaSegura(skus).filter(function (x) { return String(x || "").trim(); });
+  if (!alvos.length) {
+    return Promise.resolve({ ok: false, motivo: "nenhum item escolhido", feitos: [], falhas: [] });
+  }
+  var feitos = [], falhas = [];
+
+  function um(k) {
+    if (k >= alvos.length) {
+      /* so digo que gravou o que o servidor confirmou */
+      return { ok: feitos.length > 0 && !falhas.length, feitos: feitos, falhas: falhas,
+               motivo: falhas.length
+                 ? falhas.length + " item(ns) o servidor recusou: " +
+                   falhas.map(function (f) { return f.sku + " (" + f.motivo + ")"; }).join("; ")
+                 : (feitos.length ? "" : "o servidor nao confirmou nenhum") };
+    }
+    var sku = alvos[k];
+    var atual = listaSegura(MOCK.itens).filter(function (i) {
+      return String(i.sku) === String(sku);
+    })[0] || {};
+    /* mando o item inteiro de volta com o CA trocado: assim o Core nao
+       perde descricao, categoria nem preco por eu ter mandado so o CA */
+    var carga = {};
+    Object.keys(atual).forEach(function (c) { carga[c] = atual[c]; });
+    carga.sku = sku;
+    carga.ca = ca;
+    carga.caValidade = val;
+    carga.editando = true;
+    return Promise.resolve(API.call("itens", "salvar", carga)).then(function (r) {
+      if (r && r.ok) {
+        feitos.push(sku);
+        /* a copia da tela acompanha, para a ficha ja mostrar o CA */
+        listaSegura(MOCK.itens).forEach(function (i) {
+          if (String(i.sku) === String(sku)) { i.ca = ca; i.caValidade = val; }
+        });
+      } else {
+        falhas.push({ sku: sku,
+          motivo: String((r && (r.mensagem || r.codigo)) || "sem resposta") });
+      }
+      return um(k + 1);
+    }, function (e) {
+      falhas.push({ sku: sku, motivo: String((e && e.message) || e) });
+      return um(k + 1);
+    });
+  }
+  return Promise.resolve(um(0));
+}
+
+/* [EPICA] escolher em quais outros itens o mesmo CA vale */
+function modalCAemVarios(skuOrigem, itemOrigem, dados) {
+  var todos = listaSegura(MOCK.itens).filter(function (i) {
+    return String(i.sku) !== String(skuOrigem);
+  });
+  /* sugestao: itens com a MESMA primeira palavra da descricao — e so
+     sugestao, marcada para conferir; quem decide e ele */
+  var primeira = String((itemOrigem && (itemOrigem.descricao || itemOrigem.nome)) || "")
+    .trim().split(/\s+/)[0].toUpperCase();
+  var marcados = {};
+
+  function linhas(filtro) {
+    var t = String(filtro || "").trim().toLowerCase();
+    var vis = todos.filter(function (i) {
+      if (!t) return true;
+      return String(i.descricao || i.nome || "").toLowerCase().indexOf(t) > -1 ||
+             String(i.sku || "").toLowerCase().indexOf(t) > -1;
+    });
+    if (!vis.length) {
+      return '<div class="alert a-blue">' + ic("info") +
+        "<div>Nenhum item com esse texto.</div></div>";
+    }
+    return '<div class="tbl-wrap" style="max-height:320px;overflow:auto">' +
+      '<table class="tbl"><thead><tr><th style="width:36px"></th><th>Item</th>' +
+      "<th>SKU</th><th>CA de hoje</th></tr></thead><tbody>" +
+      vis.map(function (i) {
+        var sugerido = primeira && String(i.descricao || i.nome || "")
+          .toUpperCase().indexOf(primeira) === 0;
+        var jaTem = String(i.ca || "").trim();
+        return "<tr><td><input type=\"checkbox\" data-ca-item=\"" + U.esc(i.sku) + "\"" +
+          ((marcados[i.sku] === undefined ? sugerido : marcados[i.sku]) ? " checked" : "") +
+          "></td>" +
+          "<td>" + U.esc(i.descricao || i.nome || i.sku) + "</td>" +
+          '<td class="mono small">' + U.esc(i.sku) + "</td>" +
+          "<td>" + (jaTem
+            ? '<span class="badge b-yellow" title="este CA sera substituido">CA ' +
+              U.esc(jaTem) + "</span>"
+            : '<span class="muted">sem CA</span>') + "</td></tr>";
+      }).join("") + "</tbody></table></div>";
+  }
+
+  UI.modal({
+    titulo: "Aplicar o CA " + dados.ca + " a outros itens",
+    sub: "Marque os itens que usam o mesmo Certificado de Aprovação",
+    tamanho: "lg",
+    corpo: '<div class="alert a-yellow mb12">' + ic("alerta") +
+      "<div>Os itens que já têm CA aparecem marcados em amarelo: o CA deles " +
+      "<b>será substituído</b>. Confira antes de aplicar.</div></div>" +
+      '<div class="search-wrap mb12">' + ic("busca") +
+      '<input class="input" id="caBusca" placeholder="Filtrar por descrição ou SKU…"></div>' +
+      '<div id="caLista">' + linhas("") + "</div>" +
+      '<div id="caSaida"></div>',
+    rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' +
+      '<button class="btn btn-primary" data-ca-aplicar>Aplicar nos marcados</button>',
+    aoAbrir: function (w, fechar) {
+      w.querySelector("[data-x]").addEventListener("click", fechar);
+
+      function guardarMarcas() {
+        w.querySelectorAll("[data-ca-item]").forEach(function (c) {
+          marcados[c.getAttribute("data-ca-item")] = c.checked;
+        });
+      }
+      w.addEventListener("change", function (e) {
+        if (e.target && e.target.hasAttribute && e.target.hasAttribute("data-ca-item")) {
+          marcados[e.target.getAttribute("data-ca-item")] = e.target.checked;
+        }
+      });
+      var busca = w.querySelector("#caBusca");
+      if (busca) busca.addEventListener("input", function () {
+        guardarMarcas();
+        w.querySelector("#caLista").innerHTML = linhas(busca.value);
+      });
+
+      w.querySelector("[data-ca-aplicar]").addEventListener("click", function () {
+        guardarMarcas();
+        var escolhidos = Object.keys(marcados).filter(function (k) { return marcados[k]; });
+        var saida = w.querySelector("#caSaida");
+        if (!escolhidos.length) {
+          saida.innerHTML = '<div class="alert a-yellow mt12">' + ic("alerta") +
+            "<div>Marque pelo menos um item.</div></div>";
+          return;
+        }
+        var bt = this;
+        bt.disabled = true;
+        bt.innerHTML = '<span class="spinner"></span> Aplicando em ' + escolhidos.length + "…";
+        epiSalvarCA_(escolhidos, dados).then(function (r) {
+          bt.disabled = false;
+          bt.textContent = "Aplicar nos marcados";
+          saida.innerHTML = '<div class="alert ' + (r.ok ? "a-green" : "a-red") + ' mt12">' +
+            ic(r.ok ? "checkC" : "alerta") + "<div>" +
+            (r.feitos.length
+              ? "<b>CA " + U.esc(dados.ca) + " gravado em " + r.feitos.length + " item(ns).</b>"
+              : "<b>Nada foi gravado.</b>") +
+            (r.falhas.length ? " " + U.esc(r.motivo) : "") + "</div></div>";
+          if (r.feitos.length && typeof CACHE !== "undefined" && CACHE.invalidar) CACHE.invalidar();
+        });
+      });
+    }
+  });
+}
+
 function modalFichaDoEPI(sku) {
 Promise.all([ API.call("estoque", "listar", {}), API.call("epigestao", "listarReservas", {}).catch(function() {
 return {
@@ -12540,7 +12701,28 @@ tamanho: "lg",
 corpo: '<div class="prod-img' + (item.foto ? " com-foto" : "") + ' mb16" style="height:150px">' + (item.foto ? '<img src="' + U.esc(item.foto) + '" alt="">' : simboloDoEPI({
 nome: item.descricao || item.nome,
 categoria: item.categoria
-})) + "</div>" + (item.foto ? "" : '<div class="muted small mb16">Este item ainda não tem foto cadastrada. ' + "A foto entra na ficha do produto, no Estoque, e passa a aparecer aqui e no catálogo.</div>") + '<div class="grid g3 mb16">' + '<div class="mini-kpi"><b>' + U.num(saldo) + "</b><span>Em estoque</span></div>" + '<div class="mini-kpi"><b class="' + (reservado ? "stock-warn" : "") + '">' + U.num(reservado) + "</b>" + "<span>Reservado em fichas</span></div>" + '<div class="mini-kpi"><b>' + U.num(Math.max(0, saldo - reservado)) + "</b><span>Disponível</span></div>" + "</div>" + '<div class="section-title">Baixas deste EPI' + (totalBaixado ? " · " + U.num(totalBaixado) + " " + U.esc(item.unidade || "un") + " entregues" : "") + "</div>" + UI.tabela({
+})) + "</div>" + (item.foto ? "" : '<div class="muted small mb16">Este item ainda não tem foto cadastrada. ' + "A foto entra na ficha do produto, no Estoque, e passa a aparecer aqui e no catálogo.</div>") + /* [EPICA] 02/11 — o CA MORA AQUI, que e onde ele vai.
+   Eu tinha posto o campo so no formulario de item do Estoque e
+   mandei ele procurar no catalogo de EPI: clicando no card abre
+   ESTA janela, e o campo nao estava nela. Ele viu, e tinha razao.
+   Agora o CA se cadastra na propria ficha do EPI, e da para aplicar
+   o mesmo CA a varios itens de uma vez — "tem itens que vai ser o
+   mesmo CA, tipo bota". */
+'<div class="card mb16" style="background:var(--fundo-suave,#F7F8FA)"><div class="card-body">' +
+'<div class="grid g3" style="align-items:end">' +
+'<div class="field" style="margin:0"><label>CA <small class="muted">(Certificado de Aprova\u00e7\u00e3o)</small></label>' +
+'<input class="input mono" id="epiCaNum" value="' + U.esc(item.ca || "") + '" placeholder="Ex.: 41234" inputmode="numeric"></div>' +
+'<div class="field" style="margin:0"><label>Validade do CA</label>' +
+'<input type="date" class="input" id="epiCaVal" value="' + U.esc(item.caValidade || "") + '"></div>' +
+'<div><button class="btn btn-primary btn-block" data-epi-ca-salvar>Salvar CA</button></div>' +
+"</div>" +
+'<div class="flex between center mt8 wrap gap8">' +
+'<small class="muted">Sai impresso na ficha de entrega de EPI.</small>' +
+'<button class="btn btn-ghost btn-sm" data-epi-ca-varios>' + ic("copiar") +
+"Aplicar este CA a outros itens</button></div>" +
+'<div id="epiCaAviso"></div>' +
+"</div></div>" +
+'<div class="grid g3 mb16">' + '<div class="mini-kpi"><b>' + U.num(saldo) + "</b><span>Em estoque</span></div>" + '<div class="mini-kpi"><b class="' + (reservado ? "stock-warn" : "") + '">' + U.num(reservado) + "</b>" + "<span>Reservado em fichas</span></div>" + '<div class="mini-kpi"><b>' + U.num(Math.max(0, saldo - reservado)) + "</b><span>Disponível</span></div>" + "</div>" + '<div class="section-title">Baixas deste EPI' + (totalBaixado ? " · " + U.num(totalBaixado) + " " + U.esc(item.unidade || "un") + " entregues" : "") + "</div>" + UI.tabela({
 linhas: baixas,
 vazioTitulo: "Nenhuma baixa ainda",
 vazioTexto: "Quando este EPI for entregue a alguém, a baixa aparece aqui com o nome do colaborador.",
@@ -12588,6 +12770,38 @@ w.querySelector("[data-x]").addEventListener("click", fechar);
 w.querySelector("[data-nova]").addEventListener("click", function() {
 fechar();
 modalFichaAgendada();
+});
+
+/* [EPICA] gravar o CA deste item */
+function caDigitado_() {
+  var n = w.querySelector("#epiCaNum"), v = w.querySelector("#epiCaVal");
+  return { ca: n ? String(n.value).trim() : "", caValidade: v ? String(v.value).trim() : "" };
+}
+function dizer_(classe, texto) {
+  var alvo = w.querySelector("#epiCaAviso");
+  if (alvo) alvo.innerHTML = '<div class="alert ' + classe + ' mt8">' + U.esc(texto) + "</div>";
+}
+var btCa = w.querySelector("[data-epi-ca-salvar]");
+if (btCa) btCa.addEventListener("click", function () {
+  var d = caDigitado_();
+  btCa.disabled = true;
+  btCa.innerHTML = '<span class="spinner"></span> Salvando…';
+  epiSalvarCA_([sku], d).then(function (res) {
+    btCa.disabled = false; btCa.textContent = "Salvar CA";
+    if (res.ok) {
+      dizer_("a-green", d.ca ? "CA " + d.ca + " gravado neste item." : "CA removido deste item.");
+    } else {
+      dizer_("a-red", "N\u00e3o gravei: " + res.motivo);
+    }
+  });
+});
+
+/* [EPICA] o mesmo CA em varios itens */
+var btVarios = w.querySelector("[data-epi-ca-varios]");
+if (btVarios) btVarios.addEventListener("click", function () {
+  var d = caDigitado_();
+  if (!d.ca) { dizer_("a-yellow", "Digite o CA primeiro para poder aplicar nos outros."); return; }
+  modalCAemVarios(sku, item, d);
 });
 }
 });
@@ -64605,7 +64819,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 361 · 02/11";
+var ALMOXA_VERSAO = "sistema 362 · 02/11";
 var ALMOXA_NOVIDADES = [
   "330 · procura a rubrica tambem no endereco da matricula antiga",
   "328 · ligar a matricula antiga a de hoje, pelo elo na linha do usuario",
