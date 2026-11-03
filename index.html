@@ -64819,8 +64819,9 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 370 · 02/11";
+var ALMOXA_VERSAO = "sistema 371 · 02/11";
 var ALMOXA_NOVIDADES = [
+  "371 · comparar a planilha passa a ser so olhar: nenhum botao que cria cadastro",
   "370 · preencher cargo passa pela porta direta, nao pelo roteador que nao atualiza",
   "369 · le a planilha na codificacao certa: acento quebrado nao casa com o cadastro",
   "369 · quando nao ha nada a preencher, a tela diz para onde foi cada linha",
@@ -100353,8 +100354,8 @@ emissao: hoje,
       sub: r.total + " cadastros ativos · " + r.crachasLidos + " crachás lidos. " +
            "Só leitura: nada é gravado nesta tela sem você mandar.",
       acoes: '<button class="btn btn-ghost" data-cc-recarregar>' + icone_("sync") + "Reler</button>" +
-             '<button class="btn btn-ghost" data-cc-planilha>' + icone_("upload") +
-             "Comparar com a minha planilha</button>"
+             '<button class="btn btn-ghost" data-cc-planilha title="Só compara. Não cria, não grava, não altera nada.">' +
+             icone_("busca") + "Comparar com a minha planilha (só olhar)</button>"
     }) +
     (erroCracha
       ? '<div class="alert a-yellow mb16">' + icone_("alerta") +
@@ -100544,6 +100545,188 @@ emissao: hoje,
   }
 
   /* ============================================================
+     COMPARAR — SÓ OLHAR  ·  busca: [SOOLHAR]
+     ------------------------------------------------------------
+     O QUE ACONTECEU (02/11 23:28)
+     O botão "Comparar com a minha planilha" abria o
+     modalImportarColaboradores — a importação COMPLETA, que CRIA
+     gente. Ele chegou nela com a planilha de 118 e viu o sistema
+     oferecer "Importar 110 pessoa(s)", com 31 matrículas geradas
+     e avisos de "vai entrar como pessoa nova — confira se não é a
+     mesma". Ele parou e perguntou, com razão.
+     Pôr uma porta que CRIA cadastro numa tela que existe para
+     PREENCHER CAMPO VAZIO foi erro meu. Comparar é olhar.
+     Esta janela não tem botão de gravar — nenhum. Para criar
+     gente continua existindo a importação do RH, em Usuários,
+     onde ela sempre esteve e onde ninguém chega sem querer.
+     ============================================================ */
+  /* a tabelinha desta janela: as linhas aqui são {p: <planilha>} */
+  function blocoCC(titulo, linhas, colExtra) {
+    if (!lista_(linhas).length) {
+      return '<div class="card mb12"><div class="card-body">' +
+        '<b style="font-size:13px">' + esc_(titulo) + " (0)</b>" +
+        '<p class="small muted" style="margin:6px 0 0">Nenhum.</p></div></div>';
+    }
+    return '<div class="card mb12"><div class="card-body">' +
+      '<b style="font-size:13px">' + esc_(titulo) + " (" + linhas.length + ")</b>" +
+      '<div class="mt8" style="max-height:260px;overflow:auto">' +
+      UI.tabela({
+        linhas: linhas,
+        colunas: [
+          { rotulo: "Linha", num: true, render: function (x) { return x.p.linha; } },
+          { rotulo: "Nome", render: function (x) { return "<b>" + esc_(x.p.nome) + "</b>"; } },
+          { rotulo: "Matrícula", render: function (x) {
+              return '<span class="mono">' + esc_(lp(x.p.matricula) || "—") + "</span>"; } },
+          colExtra
+        ]
+      }) + "</div></div></div>";
+  }
+
+  function modalComparar() {
+    UI.modal({
+      titulo: "Comparar a planilha com o cadastro",
+      sub: "só olhar — nada é criado, gravado nem alterado",
+      tamanho: "lg",
+      corpo: '<div class="alert a-green mb12">' + icone_("cadeado") +
+        "<div><b>Esta janela não grava nada.</b> Ela só mostra o que bate e o que não bate. " +
+        "Não existe botão de importar aqui.</div></div>" +
+        '<div id="cpPasso1">' +
+        '<div class="field"><label>Cole a planilha aqui (ou escolha o arquivo)</label>' +
+        '<textarea class="textarea mono" id="cpTexto" rows="7" ' +
+        'placeholder="Cabeçalho com NOME e mais dois campos — por exemplo MATRÍCULA e FUNÇÃO."></textarea></div>' +
+        '<div class="flex gap8" style="flex-wrap:wrap">' +
+        '<input type="file" id="cpArquivo" accept=".csv,.txt,.tsv" style="display:none">' +
+        '<button class="btn btn-ghost btn-sm" id="cpEscolher">' + icone_("upload") + "Escolher arquivo</button>" +
+        '<button class="btn btn-primary btn-sm" id="cpLer">' + icone_("busca") + "Comparar</button>" +
+        "</div><div id='cpErro' class='mt8'></div></div>" +
+        '<div id="cpPasso2"></div>',
+      rodape: '<button class="btn btn-ghost" data-x>Fechar</button>',
+      aoAbrir: function (w, fechar) {
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        var arq = w.querySelector("#cpArquivo");
+        w.querySelector("#cpEscolher").addEventListener("click", function () { arq.click(); });
+        arq.addEventListener("change", function () {
+          var f = arq.files && arq.files[0];
+          if (!f) return;
+          if (typeof SOCARGO !== "undefined" && SOCARGO.lerArquivo) {
+            SOCARGO.lerArquivo(f).then(function (r) {
+              w.querySelector("#cpTexto").value = r.texto;
+              w.querySelector("#cpErro").innerHTML = '<div class="alert a-gray">' + icone_("info") +
+                "<div>Li como <b>" + esc_(r.codificacao) + "</b>" +
+                (r.trocou ? " (o arquivo não estava em UTF-8)" : "") + ".</div></div>";
+            });
+          }
+        });
+        w.querySelector("#cpLer").addEventListener("click", function () { comparar(w); });
+      }
+    });
+  }
+
+  function comparar(w) {
+    var cx = w.querySelector("#cpErro");
+    cx.innerHTML = "";
+    var texto = lp(w.querySelector("#cpTexto").value);
+    if (!texto) {
+      cx.innerHTML = '<div class="alert a-yellow">' + icone_("alerta") +
+        "<div>Cole a planilha ou escolha o arquivo.</div></div>";
+      return;
+    }
+    if (typeof BASEMESTRE === "undefined" || !BASEMESTRE || !BASEMESTRE.ler) {
+      cx.innerHTML = '<div class="alert a-red">' + icone_("alerta") +
+        "<div>O leitor de planilha não está nesta versão.</div></div>";
+      return;
+    }
+    var lido = BASEMESTRE.ler(texto);
+    if (!lido || !lido.ok) {
+      cx.innerHTML = '<div class="alert a-red">' + icone_("alerta") +
+        "<div><b>" + esc_(lp(lido && lido.codigo)) + "</b>" +
+        esc_(lp(lido && lido.mensagem)) + "</div></div>";
+      return;
+    }
+    var bt = w.querySelector("#cpLer");
+    bt.disabled = true; bt.innerHTML = "Lendo o cadastro…";
+    Promise.resolve(API.call("usuarios", "listar", {})).then(function (r) {
+      bt.disabled = false; bt.innerHTML = icone_("busca") + "Comparar";
+      if (!r || !r.ok) {
+        cx.innerHTML = '<div class="alert a-red">' + icone_("alerta") +
+          "<div>Não li os usuários: " + esc_(lp(r && r.mensagem)) + "</div></div>";
+        return;
+      }
+      pintarComparacao(w, lido, cruzarListas(lido.pessoas, lista_(r.dados)));
+    });
+  }
+
+  function cruzarListas(pessoas, usuarios) {
+    var us = lista_(usuarios).filter(function (u) { return u && !excluido_(u); });
+    var porMat = {}, porNome = {}, nomeRep = {};
+    us.forEach(function (u) {
+      var m = matK(u.matricula); if (m) (porMat[m] = porMat[m] || []).push(u);
+      var n = nomeK(u.nome); if (!n) return;
+      if (!porNome[n]) porNome[n] = u;
+      else if (lp(porNome[n].id) !== lp(u.id)) nomeRep[n] = true;
+    });
+    var vistos = {};
+    var r = { batem: [], soNaPlanilha: [], soNoSistema: [], repetidos: [],
+              totalPlanilha: lista_(pessoas).length, totalSistema: us.length };
+    lista_(pessoas).forEach(function (p) {
+      var m = matK(p.matricula), n = nomeK(p.nome), u = null, via = "";
+      if (m && porMat[m] && porMat[m].length === 1) { u = porMat[m][0]; via = "matrícula"; }
+      else if (m && porMat[m]) { r.repetidos.push({ p: p, motivo: porMat[m].length +
+        " cadastros com a matrícula " + lp(p.matricula) }); return; }
+      else if (n && porNome[n] && !nomeRep[n]) { u = porNome[n]; via = "nome"; }
+      else if (n && nomeRep[n]) { r.repetidos.push({ p: p,
+        motivo: "nome repetido no cadastro" }); return; }
+      if (u) { vistos[lp(u.id)] = 1; r.batem.push({ p: p, u: u, via: via }); }
+      else r.soNaPlanilha.push({ p: p });
+    });
+    us.forEach(function (u) { if (!vistos[lp(u.id)]) r.soNoSistema.push({ u: u }); });
+    return r;
+  }
+
+  function pintarComparacao(w, lido, c) {
+    w.querySelector("#cpPasso1").style.display = "none";
+    var semCargo = c.batem.filter(function (x) {
+      return !cargoDe(x.u) && lp(x.p.funcao);
+    });
+    w.querySelector("#cpPasso2").innerHTML =
+      '<div class="grid g3 mb12">' +
+      kpi("usuarios", "ico-blue", c.totalPlanilha, "Na sua planilha", "") +
+      kpi("usuarios", "ico-navy", c.totalSistema, "No sistema", "cadastros ativos") +
+      kpi("checkC", "ico-green", c.batem.length, "Batem nas duas", "") +
+      "</div>" +
+      (semCargo.length
+        ? '<div class="alert a-blue mb12">' + icone_("info") +
+          "<div><b>" + semCargo.length + " pessoa(s) batem e estão sem cargo no sistema</b>, " +
+          "e a sua planilha tem a função delas. Para preencher, use o botão " +
+          "<b>“Trazer os cargos de uma planilha”</b> — ele só mexe no cargo e não cria ninguém." +
+          "</div></div>"
+        : "") +
+      blocoCC("Só na sua planilha — não estão no cadastro", c.soNaPlanilha,
+        { rotulo: "Função na planilha", render: function (x) {
+            return esc_(lp(x.p.funcao) || "—"); } }) +
+      '<div class="card mb12"><div class="card-body">' +
+      '<b style="font-size:13px">Só no sistema — não estão na sua planilha (' +
+      c.soNoSistema.length + ")</b>" +
+      '<div class="mt8" style="max-height:260px;overflow:auto">' +
+      UI.tabela({
+        linhas: c.soNoSistema,
+        colunas: [
+          { rotulo: "Nome", render: function (x) { return "<b>" + esc_(x.u.nome) + "</b>"; } },
+          { rotulo: "Matrícula", render: function (x) {
+              return '<span class="mono">' + esc_(lp(x.u.matricula) || "—") + "</span>"; } },
+          { rotulo: "Cargo", render: function (x) { return esc_(cargoDe(x.u) || "—"); } }
+        ]
+      }) + "</div></div></div>" +
+      blocoCC("Nome ou matrícula repetidos — conferir à mão", c.repetidos,
+        { rotulo: "Por quê", render: function (x) {
+            return '<span class="small">' + esc_(x.motivo) + "</span>"; } }) +
+      '<div class="alert a-gray mt8">' + icone_("cadeado") +
+      "<div>Nada do que está aqui foi gravado. Para <b>preencher cargo</b>, use o botão da " +
+      "tela anterior. Para <b>cadastrar gente nova</b>, a importação do RH fica em " +
+      "<b>Usuários</b> — de propósito, longe daqui.</div></div>";
+  }
+
+  /* ============================================================
      A TELA, REGISTRADA
      ============================================================ */
   function montarTela() {
@@ -100595,11 +100778,7 @@ emissao: hoje,
           ROUTER.render();
         });
         var pl = document.querySelector("[data-cc-planilha]");
-        if (pl) pl.addEventListener("click", function () {
-          if (typeof modalImportarColaboradores === "function") modalImportarColaboradores();
-          else aviso_("warn", "Importação não disponível",
-            "A janela de importar lista não está nesta versão.");
-        });
+        if (pl) pl.addEventListener("click", function () { modalComparar(); });
         document.querySelectorAll("[data-cc-preencher]").forEach(function (b) {
           b.addEventListener("click", function () {
             modalPreencher(b.getAttribute("data-cc-preencher"));
@@ -100651,6 +100830,8 @@ emissao: hoje,
     } catch (e) {}
   }
 
+  C.__modalComparar = modalComparar;
+  C.__cruzarListas = cruzarListas;
   C.__desenhar = desenhar;
   C.__montarTela = montarTela;
   C.__noMenu = noMenu;
