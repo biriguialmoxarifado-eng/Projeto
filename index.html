@@ -64819,8 +64819,9 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 375 · 03/11";
+var ALMOXA_VERSAO = "sistema 376 · 03/11";
 var ALMOXA_NOVIDADES = [
+  "376 · le planilha do Active Directory, e pergunta qual coluna e qual quando nao reconhece",
   "375 · ficha Identificacao/Cracha: foto do perfil e do cracha separadas, com a origem",
   "375 · crachas sem dono, pessoas com mais de um, e a sonda da imagem que nao aparece",
   "374 · trazer e-mails da planilha: so quem esta sem, e divergencia nao e sobrescrita",
@@ -102254,10 +102255,23 @@ emissao: hoje,
   }
   function chaveCol(t) { return semAcento(t).toLowerCase().replace(/[^a-z0-9]/g, ""); }
 
+  /* [ADCOLUNA] 03/11 11:17 — a planilha dele não é do RH: é uma
+     exportação do Active Directory / Microsoft 365. O cabeçalho
+     veio displayName, userPrincipalName, firstName, lastName,
+     whenCreated, departamento — e eu não conhecia nenhum desses.
+     Acrescento os nomes do AD aqui. Mas acrescentar nome por nome
+     é correr atrás: a próxima exportação virá com outros. Por isso
+     existe também o seletor de colunas lá embaixo, que resolve
+     qualquer cabeçalho sem eu precisar adivinhar de novo. */
   var APELIDO = {
-    nome: ["nome", "nomecompleto", "colaborador", "funcionario", "empregado"],
-    email: ["email", "emails", "correio", "correioeletronico", "mail", "enderecoeletronico"],
-    matricula: ["matricula", "matricul", "mat", "chapa", "registro"]
+    nome: ["nome", "nomecompleto", "colaborador", "funcionario", "empregado",
+           "displayname", "nomeexibicao", "nomedeexibicao", "cn", "fullname",
+           "nomecompletoad", "usuario"],
+    email: ["email", "emails", "correio", "correioeletronico", "mail", "enderecoeletronico",
+            "userprincipalname", "upn", "emailaddress", "primarysmtpaddress",
+            "enderecodeemail", "enderecodee-mail", "smtp"],
+    matricula: ["matricula", "matricul", "mat", "chapa", "registro", "employeeid",
+                "employeenumber"]
   };
 
   function separadorDe(linha) {
@@ -102270,7 +102284,7 @@ emissao: hoje,
     return quantos > 0 ? melhor : null;
   }
 
-  E.ler = function (texto) {
+  E.ler = function (texto, escolha) {
     var linhas = String(texto || "").split(/\r\n|\r|\n/).filter(function (l) {
       return lp(l) !== "";
     });
@@ -102283,18 +102297,52 @@ emissao: hoje,
       return { ok: false, codigo: "SEM_SEPARADOR",
         mensagem: "Não achei separador na primeira linha. Cole direto do Excel, ou salve como CSV." };
     }
-    var cab = linhas[0].split(sep).map(function (c) { return chaveCol(c); });
+    var cru = linhas[0].split(sep).map(function (c) { return lp(c); });
+    var cab = cru.map(function (c) { return chaveCol(c); });
     var ix = { nome: -1, email: -1, matricula: -1 };
     Object.keys(APELIDO).forEach(function (campo) {
       cab.forEach(function (c, i) {
         if (ix[campo] === -1 && APELIDO[campo].indexOf(c) >= 0) ix[campo] = i;
       });
     });
+    /* [ADCOLUNA] a escolha manual manda, quando ele fizer uma */
+    if (escolha) {
+      if (escolha.nome >= 0) ix.nome = Number(escolha.nome);
+      if (escolha.email >= 0) ix.email = Number(escolha.email);
+      ix.matricula = (escolha.matricula >= 0) ? Number(escolha.matricula) : -1;
+    }
+    /* último recurso automático: uma coluna cujos valores PARECEM e-mail.
+       Olho os dados, não o rótulo — é o que sobra quando o cabeçalho é
+       de um sistema que eu não conheço. */
+    if (ix.email === -1) {
+      var amostra = linhas.slice(1, 6).map(function (l) { return l.split(sep); });
+      for (var c = 0; c < cru.length; c++) {
+        var acertos = 0, olhados = 0;
+        amostra.forEach(function (col) {
+          var v = lp(col[c]); if (!v) return;
+          olhados++; if (E.emailValido(v)) acertos++;
+        });
+        if (olhados && acertos === olhados) { ix.email = c; break; }
+      }
+    }
     if (ix.nome === -1 || ix.email === -1) {
       return { ok: false, codigo: "FALTA_COLUNA",
         mensagem: "O cabeçalho precisa ter uma coluna de NOME e uma de E-MAIL. " +
-          "Achei: " + (cab.filter(Boolean).join(", ") || "nada reconhecível") + "." };
+          "Achei: " + (cru.filter(Boolean).join(", ") || "nada reconhecível") + ".",
+        /* [ADCOLUNA] devolvo as colunas para a tela poder perguntar */
+        colunas: cru.map(function (rot, i) {
+          var ex = "";
+          for (var k = 1; k < linhas.length && k < 6 && !ex; k++) {
+            ex = lp((linhas[k].split(sep))[i]);
+          }
+          return { i: i, rotulo: rot || "(sem título)", exemplo: ex };
+        }),
+        achou: { nome: ix.nome, email: ix.email, matricula: ix.matricula },
+        texto: texto };
     }
+    var usou = { nome: cru[ix.nome] || ("coluna " + (ix.nome + 1)),
+                 email: cru[ix.email] || ("coluna " + (ix.email + 1)),
+                 matricula: ix.matricula >= 0 ? (cru[ix.matricula] || "") : "" };
     var pessoas = [];
     for (var i = 1; i < linhas.length; i++) {
       var col = linhas[i].split(sep);
@@ -102307,7 +102355,8 @@ emissao: hoje,
     if (!pessoas.length) {
       return { ok: false, codigo: "SEM_PESSOAS", mensagem: "Achei o cabeçalho, mas nenhuma linha." };
     }
-    return { ok: true, separador: sep === "\t" ? "tabulação" : sep, pessoas: pessoas };
+    return { ok: true, separador: sep === "\t" ? "tabulação" : sep,
+             pessoas: pessoas, usou: usou };
   };
 
   /* ============================================================
@@ -102491,6 +102540,61 @@ emissao: hoje,
     });
   };
 
+  /* ============================================================
+     [ADCOLUNA] QUAL COLUNA É QUAL — perguntado, não adivinhado
+     ------------------------------------------------------------
+     A planilha dele veio do Active Directory: displayName,
+     userPrincipalName, firstName, lastName, whenCreated,
+     departamento. Eu acrescentei esses nomes à lista, mas sair
+     acrescentando nome por nome é correr atrás do prejuízo: a
+     próxima exportação vem com outros. Então, quando eu não
+     reconhecer, eu mostro as colunas COM UM EXEMPLO de cada e
+     deixo ele apontar. Uma vez apontado, funciona para qualquer
+     cabeçalho, de qualquer sistema.
+     ============================================================ */
+  function pedirColunas(w, lido) {
+    var cols = lista_(lido.colunas);
+    function opcoes(sel) {
+      return '<option value="-1">— escolher —</option>' +
+        cols.map(function (c) {
+          return '<option value="' + c.i + '"' + (sel === c.i ? " selected" : "") + ">" +
+            esc_(c.rotulo) + (c.exemplo ? "  ·  ex.: " + esc_(c.exemplo.slice(0, 32)) : "") +
+            "</option>";
+        }).join("");
+    }
+    var cx = w.querySelector("#emErro");
+    cx.innerHTML = '<div class="alert a-yellow mb12">' + icone_("alerta") +
+      "<div><b>Não reconheci o cabeçalho desta planilha.</b>" +
+      "<br>Ela parece vir de outro sistema (Active Directory, Microsoft 365, folha…). " +
+      "Sem problema: me diga qual coluna é qual e eu sigo.</div></div>" +
+      '<div class="grid g2" style="gap:12px">' +
+      '<div class="field"><label>Qual coluna é o NOME</label>' +
+      '<select class="select" id="emColNome">' + opcoes(lido.achou.nome) + "</select></div>" +
+      '<div class="field"><label>Qual coluna é o E-MAIL</label>' +
+      '<select class="select" id="emColEmail">' + opcoes(lido.achou.email) + "</select></div>" +
+      "</div>" +
+      '<div class="field"><label>Matrícula (opcional — melhora o casamento)</label>' +
+      '<select class="select" id="emColMat">' + opcoes(lido.achou.matricula) + "</select></div>" +
+      '<button class="btn btn-primary btn-sm" id="emUsarCols">' + icone_("checkC") +
+      "Usar estas colunas</button>";
+
+    w.querySelector("#emUsarCols").addEventListener("click", function () {
+      var n = Number(w.querySelector("#emColNome").value);
+      var e2 = Number(w.querySelector("#emColEmail").value);
+      if (n < 0 || e2 < 0) {
+        aviso_("warn", "Faltou escolher", "Preciso saber qual é o nome e qual é o e-mail.");
+        return;
+      }
+      if (n === e2) {
+        aviso_("warn", "São a mesma coluna", "Nome e e-mail não podem ser a mesma.");
+        return;
+      }
+      E.__escolha = { nome: n, email: e2,
+                      matricula: Number(w.querySelector("#emColMat").value) };
+      conferir(w);
+    });
+  }
+
   function conferir(w) {
     var cx = w.querySelector("#emErro");
     cx.innerHTML = "";
@@ -102500,12 +102604,17 @@ emissao: hoje,
         "<div>Cole a planilha ou escolha o arquivo.</div></div>";
       return;
     }
-    var lido = E.ler(texto);
+    var lido = E.ler(texto, E.__escolha || null);
     if (!lido.ok) {
+      /* [ADCOLUNA] em vez de só reclamar, eu PERGUNTO qual é qual.
+         Assim nenhuma exportação futura trava: ele aponta as duas
+         colunas e segue. */
+      if (lista_(lido.colunas).length) { pedirColunas(w, lido); return; }
       cx.innerHTML = '<div class="alert a-red">' + icone_("alerta") +
         "<div><b>" + esc_(lido.codigo) + "</b>" + esc_(lido.mensagem) + "</div></div>";
       return;
     }
+    E.__escolha = null;
     var bt = w.querySelector("#emLer");
     bt.disabled = true; bt.innerHTML = "Lendo o cadastro…";
     Promise.resolve(API.call("usuarios", "listar", {})).then(function (r) {
@@ -102547,7 +102656,14 @@ emissao: hoje,
 
     alvo.innerHTML =
       '<div class="alert a-gray mb12">' + icone_("info") +
-      "<div><b>" + total + " linha(s)</b> · separador " + esc_(lido.separador) + "</div></div>" +
+      "<div><b>" + total + " linha(s)</b> · separador " + esc_(lido.separador) +
+      (lido.usou ? "<br>Peguei o <b>nome</b> da coluna <span class='mono'>" +
+        esc_(lido.usou.nome) + "</span> e o <b>e-mail</b> da coluna <span class='mono'>" +
+        esc_(lido.usou.email) + "</span>" +
+        (lido.usou.matricula ? ", e a <b>matrícula</b> de <span class='mono'>" +
+          esc_(lido.usou.matricula) + "</span>" : "") +
+        ". Se estiver errado, feche e comece de novo." : "") +
+      "</div></div>" +
 
       (r.preencher.length
         ? '<div class="alert a-green mb12">' + icone_("checkC") +
