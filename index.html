@@ -64819,8 +64819,9 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 364 · 02/11";
+var ALMOXA_VERSAO = "sistema 365 · 02/11";
 var ALMOXA_NOVIDADES = [
+  "365 · a assinatura termina de ser procurada depois que a ficha ja esta na tela",
   "364 · marcar fichas na lista e imprimir as marcadas como uma so",
   "364 · a rubrica deixa de sumir no papel quando a pessoa tem duas matriculas",
   "363 · imprimir junta as fichas da mesma pessoa, e liga as matriculas de vez",
@@ -99821,6 +99822,290 @@ emissao: hoje,
   L.__imprimir = imprimirMarcadas;
   L.__enxertarTela = enxertarTela;
   L.__enxertarAssinatura = enxertarAssinatura;
+})();
+</script>
+
+
+<script>
+/* ############################################################
+ * A ASSINATURA QUE O ÍNDICE ACHA E A TELA NÃO ESPERAVA
+ *                                       busca: [ASSFUNDO]
+ * ------------------------------------------------------------
+ * O QUE ELE RELATOU (02/11 19:42, com o diagnóstico na mão)
+ *   "ASSINATURA: ENCONTRADA · FOTO: ENCONTRADA · ORIGEM:
+ *    ALMOXA_CAMPO · CONJUNTO: usuarios · LOCALIZAÇÃO: COLAB ·
+ *    IDENTIFICAÇÃO: matrícula do colaborador."
+ *   E, na mesma tela, a faixa amarela dizendo
+ *   "não consegui terminar a consulta — então eu não sei se esta
+ *    pessoa assinou".
+ *   As duas frases são verdadeiras ao mesmo tempo. Eis o porquê.
+ *
+ * ------------------------------------------------------------
+ * A CAUSA RAIZ, MEDIDA NO PRÓPRIO ARQUIVO
+ *
+ *   Existem DOIS caminhos para achar a rubrica, e eles não são
+ *   equivalentes:
+ *
+ *   1) POR ENDEREÇO — EPIASS.chavesPossiveis() ADIVINHA onde o
+ *      registro mora: "COLAB:<id>", "COLABNOME:<nome>" e
+ *      "COLAB:MAT:<matrícula>". Se o registro estiver em outro
+ *      endereço, nenhuma tentativa acerta.
+ *
+ *   2) POR ÍNDICE — EPIASS.carregarIndice() LISTA o conjunto
+ *      inteiro e indexa pelo campo matricula de dentro de cada
+ *      registro. Este não adivinha endereço nenhum: acha onde
+ *      quer que esteja. É ele que o diagnóstico usa, e é por isso
+ *      que o diagnóstico diz ENCONTRADA.
+ *
+ *   O índice tem prazo próprio de 30 segundos (linha 68763) e lê
+ *   o conjunto de 50 em 50.
+ *   A tela de fichas dá ao trabalho TODO de assinatura um
+ *   orçamento de 12 segundos (linha 12845: FIM_ASS_).
+ *
+ *   Doze segundos para um trabalho cujo próprio prazo é trinta.
+ *   O índice é abortado no meio, volta com completo=false, o
+ *   noIndice() devolve null, e tudo cai no caminho 1 — que erra o
+ *   endereço. A trilha fica marcada "incompleta", e a faixa diz,
+ *   com toda a razão, que não terminou de procurar.
+ *
+ *   Não é o servidor que não tem a assinatura. É a tela que
+ *   desiste antes de a busca acabar.
+ *
+ * ------------------------------------------------------------
+ * O CONSERTO — e por que não é "aumentar o prazo às cegas"
+ *   O documento dele proíbe aumentar o tempo limite para mascarar
+ *   a falha, e permite expressamente "um mecanismo seguro de
+ *   carregamento assíncrono". É o que este bloco faz:
+ *
+ *   · O orçamento de 12s da tela CONTINUA COMO ESTÁ. A ficha
+ *     aparece rápido, como na v322 — isso não se toca.
+ *   · Depois que a tela já está desenhada, o índice termina de ser
+ *     montado EM SEGUNDO PLANO, sem prazo da tela por cima.
+ *   · Quando ele fica pronto, cada faixa de assinatura é refeita
+ *     no lugar, sem redesenhar a tela e sem perder a seleção.
+ *   · UM índice serve as 40 fichas. Não são 40 buscas.
+ *
+ * O QUE ELE NÃO FAZ
+ *   NÃO grava nada: carregarIndice e lerCadastro são leitura.
+ *   NÃO cria rota, conjunto, coluna nem cadastro.
+ *   NÃO inventa endereço: usa o índice que já existe.
+ *   NÃO escolhe rubrica por semelhança de nome — nome repetido
+ *   continua voltando como ambíguo, sem assinatura nenhuma.
+ *   NÃO diz "não assinou" quando o índice voltou incompleto: aí
+ *   ele diz que não terminou, que é outra coisa.
+ * ############################################################ */
+(function assinaturaEmSegundoPlano() {
+
+  var A = { rodando: false, ultimo: null, ultimoErro: "", jaRodouNaTela: false };
+  try { window.ASSFUNDO = A; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(v) { return (typeof U !== "undefined" && U.esc) ? U.esc(v) : lp(v); }
+  function aviso_(t, a, b) {
+    try { if (typeof toast === "function") toast(t, a, b); } catch (e) {}
+  }
+
+  /* ============================================================
+     O AVISO — honesto em cada um dos estados
+     ============================================================ */
+  function pilula(texto, tom) {
+    var p = document.getElementById("assFundoPilula");
+    if (!texto) { if (p) p.remove(); return; }
+    if (!p) {
+      p = document.createElement("div");
+      p.id = "assFundoPilula";
+      document.body.appendChild(p);
+    }
+    var temBarra = !!document.getElementById("flBarra");
+    p.style.cssText = "position:fixed;left:12px;bottom:" + (temBarra ? "70px" : "12px") +
+      ";z-index:3900;max-width:min(460px,92vw);padding:9px 13px;border-radius:8px;" +
+      "font-size:12px;line-height:1.35;box-shadow:0 2px 10px rgba(0,0,0,.18);" +
+      (tom === "ok" ? "background:#E7F6EC;color:#10402A;border:1px solid #9BD4B0"
+       : tom === "meio" ? "background:#FFF7E0;color:#5A4300;border:1px solid #E8C86A"
+       : "background:#EDF1F7;color:#10213B;border:1px solid #C9D3E0");
+    p.innerHTML = texto;
+  }
+
+  /* ============================================================
+     REFAZER A FAIXA DE UMA FICHA, NO LUGAR
+     ------------------------------------------------------------
+     Os cartões saem na ordem da lista — isso foi conferido: um
+     marcador de cartão por ficha. Se por qualquer motivo as duas
+     contagens não baterem, eu não mexo em faixa nenhuma: pôr a
+     rubrica de alguém no cartão errado é o que ele mandou nunca
+     acontecer.
+     ============================================================ */
+  function faixas() {
+    return [].slice.call(document.querySelectorAll(".epi-ass-faixa"));
+  }
+
+  function repintarFaixa(i, f) {
+    var fs = faixas();
+    if (!fs[i]) return false;
+    if (typeof epiFaixaAssinatura !== "function") return false;
+    var novo = document.createElement("div");
+    novo.innerHTML = epiFaixaAssinatura(f);
+    var el = novo.firstElementChild;
+    if (!el) return false;
+    fs[i].replaceWith(el);
+    return true;
+  }
+
+  function religar() {
+    try { if (typeof epiLigarDiagnosticoAssinatura === "function") epiLigarDiagnosticoAssinatura(); } catch (e) {}
+    try { if (typeof epiLigarCopiarAssinatura === "function") epiLigarCopiarAssinatura(); } catch (e) {}
+  }
+
+  /* ============================================================
+     O TRABALHO
+     ============================================================ */
+  A.rodar = function (forcar) {
+    if (A.rodando) return A.rodando;
+    if (typeof EPIASS === "undefined" || !EPIASS || !EPIASS.carregarIndice) {
+      A.ultimoErro = "o [EPIASS] não está nesta versão";
+      return Promise.resolve(null);
+    }
+    var fichas = [];
+    try { fichas = lista_(EPIASS.__fichasNaTela); } catch (e) { fichas = []; }
+    if (!fichas.length) return Promise.resolve(null);
+
+    /* as faixas desenhadas têm de bater com as fichas; senão, saio */
+    if (faixas().length !== fichas.length) {
+      A.ultimoErro = "faixas (" + faixas().length + ") não batem com fichas (" +
+        fichas.length + ") — não mexi em nenhuma";
+      return Promise.resolve(null);
+    }
+
+    var jaCompleto = !!(EPIASS.indice && EPIASS.indice.completo);
+    if (jaCompleto && !forcar) {
+      /* o índice já está inteiro: só falta aplicar nas faixas */
+      return (A.rodando = aplicar(fichas, EPIASS.indice));
+    }
+
+    pilula("Procurando as assinaturas no servidor… " +
+      "<span style='opacity:.75'>a ficha já está na tela; a rubrica entra quando chegar.</span>");
+
+    A.rodando = Promise.resolve(EPIASS.carregarIndice(true)).then(function (ix) {
+      return aplicar(fichas, ix || EPIASS.indice);
+    }, function (e) {
+      A.ultimoErro = lp(e && e.message) || "o servidor não respondeu";
+      pilula("Não consegui procurar as assinaturas: " + esc_(A.ultimoErro) +
+        ". <b>Isto não quer dizer que ninguém assinou</b> — quer dizer que a busca não aconteceu.",
+        "meio");
+      A.rodando = false;
+      return null;
+    });
+    return A.rodando;
+  };
+
+  function aplicar(fichas, ix) {
+    var completo = !!(ix && ix.completo);
+    var conta = { comRubrica: 0, semRubrica: 0, semImagem: 0, ambiguo: 0, naoSei: 0 };
+
+    function uma(i) {
+      if (i >= fichas.length) return Promise.resolve();
+      var f = fichas[i];
+      return Promise.resolve(EPIASS.lerCadastro(f))["catch"](function () { return null; })
+        .then(function (c) {
+          f.__ass = c || null;
+          f.__assIncompleta = !completo && !(c && c.tem);
+          /* [DIAG] os estados do item 7 do documento dele, separados */
+          if (c && c.tem) {
+            var d = c.dados || {};
+            if (lp(d.imagem) || lp(d.assinatura)) conta.comRubrica++;
+            else conta.semImagem++;
+          } else if (c && c.ambiguo) conta.ambiguo++;
+          else if (completo) conta.semRubrica++;
+          else conta.naoSei++;
+          try { repintarFaixa(i, f); } catch (e) { A.ultimoErro = lp(e && e.message); }
+          return uma(i + 1);
+        });
+    }
+
+    return uma(0).then(function () {
+      religar();
+      A.rodando = false;
+      A.ultimo = { quando: new Date().toISOString(), completo: completo,
+                   registros: (ix && ix.registros) || 0, conta: conta,
+                   erroDoIndice: lp(ix && ix.erro) };
+      relatar(conta, completo, ix);
+      return A.ultimo;
+    });
+  }
+
+  /* ============================================================
+     O RELATÓRIO — cada estado com o nome dele
+     ============================================================ */
+  function relatar(c, completo, ix) {
+    var partes = [];
+    if (c.comRubrica) partes.push("<b>" + c.comRubrica + "</b> com rubrica");
+    if (c.semImagem) partes.push("<b>" + c.semImagem + "</b> com registro mas <b>sem imagem</b>");
+    if (c.ambiguo) partes.push("<b>" + c.ambiguo + "</b> com nome repetido (não escolho sozinho)");
+    if (completo && c.semRubrica) partes.push("<b>" + c.semRubrica + "</b> ainda sem assinatura");
+    if (!completo && c.naoSei) partes.push("<b>" + c.naoSei + "</b> que eu <b>não sei</b>");
+
+    var cab = completo
+      ? "Assinaturas conferidas no servidor"
+      : "Conferência incompleta — não afirmo ausência";
+    var rodape = completo
+      ? (ix && ix.registros ? " · " + ix.registros + " assinatura(s) no conjunto" : "")
+      : "<br><span style='opacity:.8'>" +
+        esc_(lp(ix && ix.erro) || "a leitura do conjunto não chegou ao fim") +
+        ". Quem ficou em \"não sei\" pode ter assinatura — aperte " +
+        "<i>Procurar de novo</i> na pessoa.</span>";
+
+    pilula("<b>" + cab + "</b><br>" + (partes.join(" · ") || "nada para conferir") + rodape,
+           completo ? "ok" : "meio");
+
+    if (c.comRubrica) {
+      aviso_("ok", "Assinaturas carregadas",
+        c.comRubrica + " rubrica(s) apareceram nas fichas. Agora a impressão também as encontra.");
+    }
+    try {
+      var p = document.getElementById("assFundoPilula");
+      if (p && completo) setTimeout(function () {
+        var q = document.getElementById("assFundoPilula");
+        if (q === p) q.remove();
+      }, 9000);
+    } catch (e) {}
+  }
+
+  /* ============================================================
+     ENTRAR NA TELA — sem trocar uma linha dela
+     ============================================================ */
+  function enxertar() {
+    if (window.__assFundoEnxertado) return true;
+    try {
+      var tela = SCREENS && SCREENS["epi-fichas"];
+      if (!tela || typeof tela.mount !== "function") return false;
+      window.__assFundoEnxertado = true;
+      var montaAntes = tela.mount;
+      tela.mount = function () {
+        var r;
+        try { r = montaAntes.apply(this, arguments); } catch (e) { A.ultimoErro = lp(e && e.message); }
+        /* um respiro para a tela terminar de pintar antes de eu
+           começar a ler — a ficha primeiro, a rubrica depois */
+        try { setTimeout(function () { A.rodar(false); }, 400); } catch (e2) {}
+        return r;
+      };
+      return true;
+    } catch (e) { A.ultimoErro = lp(e && e.message); return false; }
+  }
+
+  if (!enxertar()) {
+    try {
+      document.addEventListener("DOMContentLoaded", enxertar);
+      setTimeout(enxertar, 1200);
+    } catch (e) {}
+  }
+
+  A.__enxertar = enxertar;
+  A.__repintarFaixa = repintarFaixa;
+  A.__faixas = faixas;
+  A.__pilula = pilula;
 })();
 </script>
 
