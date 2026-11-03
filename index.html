@@ -64819,8 +64819,10 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 380 · 03/11";
+var ALMOXA_VERSAO = "sistema 381 · 03/11";
 var ALMOXA_NOVIDADES = [
+  "381 · a trava sabe de qual fila veio: o botao do tapa-buraco deixou de barrar a si mesmo",
+  "381 · espaco duplo no nome nao e mais confundido com alteracao",
   "380 · separa e-mail de tapa-buraco (@almoxa.local) de divergencia de verdade",
   "378 · o e-mail com os icones da arte, a regua ligada e as datas de cada etapa",
   "377 · modelo COESA do e-mail de pedido, montado com os dados reais e com previa",
@@ -101716,9 +101718,14 @@ emissao: hoje,
         status: [atual && atual.status, "Ativo"]
       };
       var aceitos = sinonimos[k] || [velho];
+      /* [ESPACODUPLO] o BASEMESTRE normaliza com limpa(), que
+         colapsa espaços. Comparar o normalizado contra o cru fazia
+         "Tadeu  Gonzaga" parecer alteração. Aperto os dois lados do
+         mesmo jeito — alteração de verdade continua sendo pega. */
+      function apertado_(v) { return lp(v).replace(/\s+/g, " "); }
       var bate = aceitos.some(function (v) {
         if (typeof novo === "boolean") return !!v === novo || (v === undefined && novo === false);
-        return lp(v) === lp(novo);
+        return apertado_(v) === apertado_(novo);
       });
       if (!bate) {
         ruins.push(k + ': "' + lp(velho) + '" viraria "' + lp(novo) + '"');
@@ -102491,6 +102498,20 @@ emissao: hoje,
 
   /* TRAVA 4 — só email pode ter mudado */
   var PODE_MUDAR = { email: 1, id: 1, editando: 1 };
+  /* [ESPACODUPLO] 03/11 13:42 — "Recusadas pela conferência (1):
+     nome 'Tadeu Gonzaga Ribeiro' viraria 'Tadeu Gonzaga Ribeiro'".
+     Dois textos idênticos na tela, recusados por diferença. A
+     diferença era invisível: espaço duplo. O BASEMESTRE normaliza
+     com limpa() — que faz replace(/\s+/g,' ') — e eu comparava o
+     valor normalizado contra o valor cru do cadastro. Qualquer nome
+     com dois espaços caía como se fosse alteração.
+     Comparar depois do MESMO aperto não afrouxa nada: alteração de
+     verdade continua sendo pega. O que eu estava pegando era a
+     minha própria normalização. */
+  function mesmoTexto_(a, b) {
+    function ap(v) { return lp(v).replace(/\s+/g, " "); }
+    return ap(a) === ap(b);
+  }
   E.conferirCarga = function (carga, atual) {
     var ruins = [];
     Object.keys(carga || {}).forEach(function (k) {
@@ -102507,12 +102528,13 @@ emissao: hoje,
       var aceitos = sinonimos[k] || [velho];
       var bate = aceitos.some(function (v) {
         if (typeof novo === "boolean") return !!v === novo || (v === undefined && novo === false);
-        return lp(v) === lp(novo);
+        return mesmoTexto_(v, novo);
       });
       if (!bate) ruins.push(k + ': "' + lp(velho) + '" viraria "' + lp(novo) + '"');
     });
     return ruins;
   };
+  E.__mesmoTexto = mesmoTexto_;
 
   E.salvar = function (dados) {
     try {
@@ -102871,7 +102893,30 @@ emissao: hoje,
 
       var ruins = E.conferirCarga(x.pedido, x.u);
       if (ruins.length) { barrados.push(x.p.nome + " — " + ruins.join("; ")); return passo(i + 1); }
-      if (emailDe(x.u)) {
+      /* ============================================================
+         [QUALFILA] 03/11 13:42 — ele apertou o botão laranja e
+         voltaram "33 barradas: passou a ter e-mail no meio do
+         caminho". Era esta trava, e ela estava errada: eu a escrevi
+         supondo que a fila só tem gente com o campo VAZIO. A fila
+         do tapa-buraco é o contrário — é gente que TEM e-mail, só
+         que um que não entrega. Então a trava barrava justamente o
+         que o botão existe para fazer.
+         Agora ela sabe de qual fila veio: na fila normal, qualquer
+         e-mail que tenha aparecido no meio do caminho bloqueia; na
+         fila do tapa-buraco, só bloqueia se o que está lá deixou de
+         ser tapa-buraco — isto é, se alguém pôs um e-mail de
+         verdade enquanto a janela estava aberta. A proteção
+         continua inteira; o que mudou foi ela saber o que proteger.
+         ============================================================ */
+      var agora = emailDe(x.u);
+      if (x.noCadastro !== undefined) {
+        /* fila do tapa-buraco */
+        if (agora && !E.ehTapaBuraco(agora)) {
+          barrados.push(x.p.nome + " — passou a ter um e-mail de verdade (" + agora +
+            ") no meio do caminho; não sobrescrevi");
+          return passo(i + 1);
+        }
+      } else if (agora) {
         barrados.push(x.p.nome + " — passou a ter e-mail no meio do caminho; não sobrescrevi");
         return passo(i + 1);
       }
