@@ -64819,8 +64819,10 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 368 · 02/11";
+var ALMOXA_VERSAO = "sistema 369 · 02/11";
 var ALMOXA_NOVIDADES = [
+  "369 · le a planilha na codificacao certa: acento quebrado nao casa com o cadastro",
+  "369 · quando nao ha nada a preencher, a tela diz para onde foi cada linha",
   "368 · trazer da planilha SO o cargo, e so de quem esta sem cargo; nao cria ninguem",
   "367 · a ficha pergunta a assinatura pela mesma rota do painel, quando o resto falha",
   "367 · a frase \"procurei em...\" passa a ser da pessoa, nao da ultima busca",
@@ -101221,13 +101223,27 @@ emissao: hoje,
     });
 
     var r = { preencher: [], jaTemCargo: [], semFuncaoNaPlanilha: [],
-              naoExiste: [], ambiguo: [], recusado: [] };
+              naoExiste: [], ambiguo: [], recusado: [], acentoQuebrado: [] };
 
     lista_(pessoas).forEach(function (p) {
       var nome = lp(p.nome);
       var func = lp(p.funcao);
       var m = matK(p.matricula);
       var n = nomeK(nome);
+
+      /* [ACENTO] nome quebrado não casa com ninguém — e dizer
+         "não existe no cadastro" seria mentira: ele existe, o que
+         chegou aqui é que está estragado. */
+      if (nome.indexOf(" ") >= 0) {
+        if (!m) {
+          r.acentoQuebrado.push({ p: p, motivo:
+            "o nome chegou com os acentos estragados e esta linha não tem matrícula — " +
+            "sem um dos dois eu não acho a pessoa. Salve a planilha como CSV UTF-8." });
+          return;
+        }
+        /* com matrícula eu ainda acho: sigo, mas sem usar o nome */
+        n = "";
+      }
 
       var u = null, via = "";
       if (m && porMat[m]) {
@@ -101293,6 +101309,56 @@ emissao: hoje,
       "</div></div>";
   }
 
+  /* ============================================================
+     [ACENTO] O ARQUIVO NEM SEMPRE ESTÁ EM UTF-8
+     ------------------------------------------------------------
+     Na foto de 02/11 21:51 os nomes vieram assim:
+       "Jackson Lima da Concei<?><?>o"
+       "Matheus Marroco Gon<?>alves de Oliveira"
+       "Edicarlos Morais de S<?>"
+     Eu lia todo arquivo como UTF-8. O Excel, no Brasil, salva CSV
+     em Windows-1252 por padrão. Lido como UTF-8, cada acento vira
+     caractere inválido — e NOME QUEBRADO NÃO CASA COM O CADASTRO.
+     Era eu transformando "Conceição" em alguém que não existe.
+     Agora: tento UTF-8 em modo estrito; se o arquivo não for
+     UTF-8, a decodificação falha e eu releio como Windows-1252,
+     e digo na tela qual das duas usei.
+     ============================================================ */
+  S.lerArquivo = function (f) {
+    return new Promise(function (resolve) {
+      var fr = new FileReader();
+      fr.onerror = function () {
+        resolve({ texto: "", codificacao: "não consegui ler", trocou: false, suspeito: true });
+      };
+      fr.onload = function () {
+        var buf = fr.result;
+        var texto = "", cod = "UTF-8", trocou = false;
+        try {
+          texto = new TextDecoder("utf-8", { fatal: true }).decode(buf);
+        } catch (e) {
+          trocou = true;
+          cod = "Windows-1252";
+          try { texto = new TextDecoder("windows-1252").decode(buf); }
+          catch (e2) {
+            cod = "ISO-8859-1";
+            try { texto = new TextDecoder("iso-8859-1").decode(buf); }
+            catch (e3) { texto = String(buf); cod = "bruto"; }
+          }
+        }
+        /* o caractere de substituição é o sinal de que algo se
+           perdeu no caminho — digo, em vez de deixar passar */
+        var suspeito = texto.indexOf(" ") >= 0;
+        resolve({ texto: texto, codificacao: cod, trocou: trocou, suspeito: suspeito });
+      };
+      fr.readAsArrayBuffer(f);
+    });
+  };
+
+  /* avisa quando o texto COLADO também veio com acento quebrado */
+  S.acentoQuebrado = function (texto) {
+    return String(texto || "").indexOf(" ") >= 0;
+  };
+
   S.modal = function () {
     UI.modal({
       titulo: "Trazer os cargos da planilha",
@@ -101323,9 +101389,21 @@ emissao: hoje,
         arq.addEventListener("change", function () {
           var f = arq.files && arq.files[0];
           if (!f) return;
-          var fr = new FileReader();
-          fr.onload = function () { w.querySelector("#scTexto").value = String(fr.result || ""); };
-          fr.readAsText(f, "utf-8");
+          S.lerArquivo(f).then(function (r) {
+            w.querySelector("#scTexto").value = r.texto;
+            var cx = w.querySelector("#scErro");
+            if (cx) {
+              cx.innerHTML = '<div class="alert a-gray">' + icone_("info") +
+                "<div>Li o arquivo como <b>" + esc_(r.codificacao) + "</b>" +
+                (r.trocou ? " — o arquivo não estava em UTF-8, então troquei para não " +
+                  "estragar os acentos." : ".") +
+                (r.suspeito ? "<br><b>Atenção:</b> ainda há caracteres estranhos no texto. " +
+                  "Se os nomes aparecerem com <span class='mono'>?</span> no lugar dos acentos, " +
+                  "salve a planilha como <b>CSV UTF-8</b> no Excel e tente de novo — nome " +
+                  "com acento quebrado não casa com o cadastro." : "") +
+                "</div></div>";
+            }
+          });
         });
         w.querySelector("#scLer").addEventListener("click", function () {
           conferir(w, fechar);
@@ -101406,9 +101484,30 @@ emissao: hoje,
       (res.preencher.length
         ? '<div class="alert a-green mb12">' + icone_("checkC") +
           "<div><b>" + res.preencher.length + " cargo(s) vão entrar.</b> " +
-          "Nenhum outro campo muda. Confira a lista abaixo antes.</div></div>"
+          "Nenhum outro campo muda." +
+          '<br><button class="btn btn-orange mt8" data-sc-gravar>' + icone_("checkC") +
+          "Preencher os " + res.preencher.length + " cargos</button>" +
+          "</div></div>"
+        /* [CADEOBOTAO] 21:51 — ele procurou o botão laranja e não
+           achou, com razão: quando não há ninguém a preencher ele
+           não existe. Dizer "nenhum" sem dizer PARA ONDE foram as
+           118 linhas é deixar ele procurando. Agora a conta fecha
+           na tela, linha por linha. */
         : '<div class="alert a-yellow mb12">' + icone_("alerta") +
-          "<div><b>Nenhum cargo a preencher.</b> Veja abaixo o porquê de cada linha.</div></div>") +
+          "<div><b>Nenhum cargo a preencher — por isso não há botão laranja.</b>" +
+          "<br>Das " + total + " linhas da sua planilha:" +
+          "<br>· <b>" + res.jaTemCargo.length + "</b> já tinham cargo no sistema" +
+          "<br>· <b>" + res.semFuncaoNaPlanilha.length + "</b> estão <b>sem função na própria planilha</b>" +
+          "<br>· <b>" + res.naoExiste.length + "</b> não existem no cadastro" +
+          "<br>· <b>" + res.ambiguo.length + "</b> com nome repetido" +
+          (res.acentoQuebrado.length ? "<br>· <b>" + res.acentoQuebrado.length +
+            "</b> com o <b>acento estragado</b> no nome — salve a planilha como CSV UTF-8" : "") +
+          (res.recusado.length ? "<br>· <b>" + res.recusado.length + "</b> recusadas pela conferência" : "") +
+          "<br><br>Some: " + (res.jaTemCargo.length + res.semFuncaoNaPlanilha.length +
+            res.naoExiste.length + res.ambiguo.length + res.recusado.length +
+            res.acentoQuebrado.length) +
+          " de " + total + ". As listas abaixo têm os nomes." +
+          "</div></div>") +
 
       bloco("Vão receber o cargo", "green", res.preencher,
         { rotulo: "Cargo que entra", render: function (x) {
@@ -101435,26 +101534,34 @@ emissao: hoje,
         { rotulo: "O que faço", render: function () {
             return '<span class="small">nada — não há cargo para copiar.</span>'; } }) +
 
+      bloco("Nome com acento estragado — salve como CSV UTF-8", "red", res.acentoQuebrado,
+        { rotulo: "Por quê", render: function (x) {
+            return '<span class="small">' + esc_(x.motivo) + "</span>"; } }) +
+
       bloco("Recusadas pela conferência", "red", res.recusado,
         { rotulo: "O que mudaria além do cargo", render: function (x) {
             return '<span class="small">' + esc_(lista_(x.motivos).join("; ")) + "</span>"; } }) +
 
       '<div id="scAndamento" class="mt8"></div>' +
       (res.preencher.length
-        ? '<button class="btn btn-orange btn-block mt8" id="scGravar">' + icone_("checkC") +
+        ? '<button class="btn btn-orange btn-block mt8" data-sc-gravar>' + icone_("checkC") +
           "Preencher os " + res.preencher.length + " cargos</button>"
         : "");
 
-    var g = w.querySelector("#scGravar");
-    if (g) g.addEventListener("click", function () { gravar(w, res); });
+    /* o mesmo botão em cima e embaixo: a lista é longa, e procurar
+       botão não é trabalho dele */
+    w.querySelectorAll("[data-sc-gravar]").forEach(function (g) {
+      g.addEventListener("click", function () { gravar(w, res); });
+    });
   }
 
   /* ============================================================
      A GRAVAÇÃO — uma por vez, e cada uma conferida de novo
      ============================================================ */
   function gravar(w, res) {
-    var g = w.querySelector("#scGravar");
-    g.disabled = true;
+    var botoes = [].slice.call(w.querySelectorAll("[data-sc-gravar]"));
+    botoes.forEach(function (b) { b.disabled = true; });
+    var g = { set disabled(v) { botoes.forEach(function (b) { b.disabled = v; }); } };
     var cx = w.querySelector("#scAndamento");
     var fila = res.preencher.slice();
     var feitos = [], falhou = [], barrados = [];
