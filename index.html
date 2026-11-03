@@ -64819,8 +64819,9 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 379 · 03/11";
+var ALMOXA_VERSAO = "sistema 380 · 03/11";
 var ALMOXA_NOVIDADES = [
+  "380 · separa e-mail de tapa-buraco (@almoxa.local) de divergencia de verdade",
   "378 · o e-mail com os icones da arte, a regua ligada e as datas de cada etapa",
   "377 · modelo COESA do e-mail de pedido, montado com os dados reais e com previa",
   "376 · le planilha do Active Directory, e pergunta qual coluna e qual quando nao reconhece",
@@ -102236,6 +102237,38 @@ emissao: hoje,
   function excluido_(u) { return /^EXCLU/.test(lp(u && u.status).toUpperCase()); }
   function emailDe(u) { return lp(u && (u.email || u.eMail || u.mail)); }
 
+  /* ============================================================
+     [TAPABURACO] 03/11 13:24 — O QUE NÃO É E-MAIL DE NINGUÉM
+     ------------------------------------------------------------
+     A tela dele voltou "37 divergentes" e nenhum a preencher. Fui
+     ver o que estava "no cadastro":
+         8600593701@almoxa.local
+         407936@almoxa.local
+         6@almoxa.local
+     Isso é a matrícula com um domínio inventado. ".local" é
+     reservado e NÃO existe na internet: mandar para lá volta.
+     Alguém (ou alguma importação) encheu a coluna de e-mail com
+     tapa-buraco para o campo não ficar vazio.
+     A regra dele é "não substituir e-mails existentes
+     silenciosamente". Ela continua valendo — mas um endereço que
+     não entrega não é um e-mail existente, é um campo preenchido
+     com nada. Então eu separo os dois casos: conflito de verdade
+     (real contra real) continua em Divergências, sem gravar; e
+     tapa-buraco vai para uma lista própria, com nome e explicação,
+     e um botão SÓ dele. Não é silencioso: está escrito na tela.
+     ============================================================ */
+  var DOMINIO_FALSO = /@(.*\.)?(local|localhost|invalid|test|example|lan|internal)$/i;
+  E.ehTapaBuraco = function (v) {
+    var t = emailK(v);
+    if (!t || t.indexOf("@") < 1) return false;
+    if (DOMINIO_FALSO.test(t)) return true;
+    if (/@almoxa(\.|$)/i.test(t)) return true;
+    /* a parte antes do @ é só o número da matrícula */
+    var antes = t.split("@")[0];
+    if (/^\d{1,12}$/.test(antes)) return true;
+    return false;
+  };
+
   /* TRAVA 5 — o que é e o que não é e-mail */
   E.emailValido = function (v) {
     var t = lp(v);
@@ -102380,7 +102413,8 @@ emissao: hoje,
     });
 
     var r = { preencher: [], jaIgual: [], divergentes: [], naoExiste: [],
-              ambiguo: [], emailTorto: [], semEmail: [], recusado: [] };
+              ambiguo: [], emailTorto: [], semEmail: [], recusado: [],
+              tapaBuraco: [] };
 
     lista_(pessoas).forEach(function (p) {
       var nome = lp(p.nome), email = lp(p.email);
@@ -102414,7 +102448,24 @@ emissao: hoje,
       var atual = emailDe(u);
       if (atual) {
         if (emailK(atual) === emailK(email)) { r.jaIgual.push({ p: p, u: u }); return; }
-        /* TRAVA 2 — divergência vai para conferência, não para a gravação */
+        /* [TAPABURACO] o que está lá não entrega: não é conflito,
+           é campo preenchido com nada. Vai para lista própria. */
+        if (E.ehTapaBuraco(atual)) {
+          var ped0 = null, ruins0 = ["o BASEMESTRE não está nesta versão"];
+          try {
+            if (typeof BASEMESTRE !== "undefined" && BASEMESTRE && BASEMESTRE.paraCadastro) {
+              ped0 = BASEMESTRE.paraCadastro(
+                { idExistente: u.id, nome: lp(u.nome), matricula: lp(u.matricula) }, u);
+              ped0.email = email;
+              ruins0 = E.conferirCarga(ped0, u);
+            }
+          } catch (e0) { ruins0 = [lp(e0 && e0.message) || String(e0)]; }
+          if (ruins0.length) { r.recusado.push({ p: p, u: u, motivos: ruins0 }); return; }
+          r.tapaBuraco.push({ p: p, u: u, via: via, valor: email,
+                              noCadastro: atual, pedido: ped0 });
+          return;
+        }
+        /* TRAVA 2 — divergência DE VERDADE vai para conferência */
         r.divergentes.push({ p: p, u: u, noCadastro: atual, naPlanilha: email, via: via });
         return;
       }
@@ -102675,6 +102726,7 @@ emissao: hoje,
         : '<div class="alert a-yellow mb12">' + icone_("alerta") +
           "<div><b>Nenhum e-mail a preencher.</b> Das " + total + " linhas: " +
           "<b>" + r.jaIgual.length + "</b> já tinham o mesmo · " +
+          "<b>" + r.tapaBuraco.length + "</b> com endereço de tapa-buraco · " +
           "<b>" + r.divergentes.length + "</b> divergentes · " +
           "<b>" + r.naoExiste.length + "</b> fora do cadastro · " +
           "<b>" + r.ambiguo.length + "</b> ambíguos · " +
@@ -102684,6 +102736,40 @@ emissao: hoje,
       caixa("Vão receber o e-mail", r.preencher,
         { rotulo: "Casou por", render: function (x) {
             return '<span class="small muted">' + esc_(x.via) + "</span>"; } }) +
+
+      /* [TAPABURACO] a lista que destrava o caso dele, e por que
+         ela não fere a regra de "não sobrescrever em silêncio" */
+      (r.tapaBuraco.length
+        ? '<div class="card mb12" style="border-left:4px solid var(--laranja,#F08A1C)">' +
+          '<div class="card-body">' +
+          '<b style="font-size:13px">Endereço de tapa-buraco no cadastro (' +
+          r.tapaBuraco.length + ")</b>" +
+          '<p class="small" style="margin:6px 0 10px">O que está no cadastro destas pessoas ' +
+          "<b>não entrega e-mail nenhum</b>: é a matrícula com um domínio inventado " +
+          "(<span class='mono'>@almoxa.local</span> e parecidos). " +
+          "<span class='mono'>.local</span> é reservado e não existe na internet — " +
+          "mandar para lá volta.<br>Isso não é conflito de e-mail, é campo preenchido com " +
+          "nada. <b>Não estou sobrescrevendo em silêncio:</b> está tudo escrito aqui, com " +
+          "nome e endereço dos dois lados, e o botão é só destes.</p>" +
+          '<div style="max-height:260px;overflow:auto">' +
+          UI.tabela({
+            linhas: r.tapaBuraco,
+            colunas: [
+              { rotulo: "Nome", render: function (x) {
+                  return "<b>" + esc_(x.p.nome) + "</b>"; } },
+              { rotulo: "Está no cadastro (não entrega)", render: function (x) {
+                  return '<span class="mono small" style="color:var(--texto-3,#9AA4B2);' +
+                    'text-decoration:line-through">' + esc_(x.noCadastro) + "</span>"; } },
+              { rotulo: "Vai entrar", render: function (x) {
+                  return '<b class="mono" style="font-size:12px">' + esc_(x.valor) + "</b>"; } },
+              { rotulo: "Casou por", render: function (x) {
+                  return '<span class="small muted">' + esc_(x.via) + "</span>"; } }
+            ]
+          }) + "</div>" +
+          '<button class="btn btn-orange btn-block mt12" data-em-tapa>' + icone_("checkC") +
+          "Substituir os " + r.tapaBuraco.length + " endereços de tapa-buraco</button>" +
+          "</div></div>"
+        : "") +
 
       /* a lista que o documento dele pede em letras maiúsculas */
       '<div class="card mb12" style="border-left:4px solid var(--vermelho,#D4380D)"><div class="card-body">' +
@@ -102736,6 +102822,12 @@ emissao: hoje,
 
     w.querySelectorAll("[data-em-gravar]").forEach(function (b) {
       b.addEventListener("click", function () { gravar(w, r); });
+    });
+    w.querySelectorAll("[data-em-tapa]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        /* a mesma gravação, com a fila dos tapa-buraco */
+        gravar(w, { preencher: r.tapaBuraco });
+      });
     });
   }
 
