@@ -64819,8 +64819,11 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 371 · 02/11";
+var ALMOXA_VERSAO = "sistema 373 · 03/11";
 var ALMOXA_NOVIDADES = [
+  "373 · aponta quando cadastro e cracha discordam (matricula, cargo, setor)",
+  "373 · mostra quais campos o Core devolve em cada cracha — e se ha foto entre eles",
+  "372 · diz por que a gravacao e recusada: deste endereco nao existe porta direta",
   "371 · comparar a planilha passa a ser so olhar: nenhum botao que cria cadastro",
   "370 · preencher cargo passa pela porta direta, nao pelo roteador que nao atualiza",
   "369 · le a planilha na codificacao certa: acento quebrado nao casa com o cadastro",
@@ -100202,7 +100205,67 @@ emissao: hoje,
   function portaUsada_() {
     try { return lp(SALVARUSR_ULTIMA && SALVARUSR_ULTIMA.porta); } catch (e) { return ""; }
   }
-  try { window.__salvarPeloCaminhoCerto = salvarPeloCaminhoCerto_; } catch (e) {}
+
+  /* ============================================================
+     [ONDEMORA] POR QUE A GRAVAÇÃO FOI RECUSADA — A CAUSA CERTA
+     ------------------------------------------------------------
+     02/11 23:47. Ele instalou a 371, apertou, e voltaram as mesmas
+     onze recusas — e o meu aviso sobre o roteador NÃO apareceu.
+     Fui ver por quê, e a resposta estava na primeira linha do
+     salvarUsuarioNoCore do próprio sistema dele:
+
+       var direto = dados.editando && typeof google !== "undefined"
+                    && google.script && google.script.run;
+       if (!direto) return API.call("usuarios", "salvar", dados);
+
+     google.script.run SÓ EXISTE quando a página é servida pelo
+     PRÓPRIO Apps Script (o endereço /exec). Esta página está
+     aberta pelo GitHub Pages. Logo, não há porta direta aqui —
+     nenhuma. A gravação cai no roteador HTTP, que está medido
+     desde 24/10 como incapaz de ATUALIZAR cadastro que já existe.
+
+     Não é o servidor dele estar quebrado. É que, deste endereço,
+     a única porta disponível é justamente a que não atualiza.
+     ============================================================ */
+  function portaDeGravacao_() {
+    var temRun = false;
+    try {
+      temRun = !!(typeof google !== "undefined" && google.script && google.script.run);
+    } catch (e) { temRun = false; }
+    var porta = portaUsada_();
+    if (porta && porta !== "roteador") {
+      return { direta: true, porta: porta, texto: "porta direta " + porta };
+    }
+    if (!temRun) {
+      return { direta: false, motivo: "SEM_PORTA_NESTE_ENDERECO",
+        texto: "Esta página está aberta por um endereço que <b>não é o do Apps Script</b> " +
+          "(GitHub Pages, arquivo local, etc.). A porta direta de gravação " +
+          "(<span class='mono'>AP_USR_salvarDireto</span>) é uma chamada " +
+          "<span class='mono'>google.script.run</span>, e ela <b>só existe quando a página " +
+          "é servida pelo próprio Apps Script</b>. Daqui ela não existe, então a gravação " +
+          "foi pelo roteador HTTP — que está medido desde 24/10 como <b>incapaz de " +
+          "atualizar</b> cadastro que já existe: com matrícula ele responde " +
+          "<span class='mono'>USUARIO_DUPLICADO</span>." };
+    }
+    return { direta: false, motivo: "ROTEADOR",
+      texto: "A porta direta existe neste endereço, mas <b>não respondeu</b>, e a gravação " +
+        "caiu no roteador — que não atualiza cadastro existente." };
+  }
+  function saidasDeGravacao_() {
+    return "<br><br><b>Duas saídas, nesta ordem:</b>" +
+      "<br>1. Abra o sistema pela <b>URL /exec do Apps Script</b> (a mesma implantação) e " +
+      "repita este botão. Lá a porta direta existe e a gravação passa. <b>Teste rápido, " +
+      "não muda nada no servidor.</b>" +
+      "<br>2. Se precisar funcionar também por este endereço, o conserto é no Core: o " +
+      "<span class='mono'>usuarios.salvar</span> precisa <b>atualizar</b> quando o pedido " +
+      "traz <span class='mono'>editando: true</span> e um id, em vez de barrar por " +
+      "duplicidade. Isso é no Apps Script, não aqui.";
+  }
+  try {
+    window.__salvarPeloCaminhoCerto = salvarPeloCaminhoCerto_;
+    window.__portaDeGravacao = portaDeGravacao_;
+    window.__saidasDeGravacao = saidasDeGravacao_;
+  } catch (e) {}
   function fotoDe(u) { return lp(u && (u.foto || u.imagem || u.fotoUrl)); }
   function excluido_(u) {
     return /^EXCLU/.test(lp(u && u.status).toUpperCase());
@@ -100241,6 +100304,26 @@ emissao: hoje,
       semCargo: [], semSetor: [], semMatricula: [], semCracha: [], semFoto: [],
       cargoNoCracha: [], setorNoCracha: [], fotoNoCracha: [],
       fotoPorqueNao: [], conferirAMao: [],
+      divergencias: [], fotoSoNoCadastro: [],
+      camposDoCracha: (function () {
+        /* [QUECAMPOS] 03/11 — "eu salvo a foto no crachá, é o único
+           lugar que tem para pôr foto". E a tela diz 0 de 97 com
+           foto. Uma das duas afirmações está errada, e eu não vou
+           adivinhar qual: mostro os NOMES DOS CAMPOS que vieram em
+           cada registro de crachá. Se houver um campo de foto com
+           outro nome, ele aparece aqui. Se não houver campo nenhum,
+           é a listagem que não devolve a imagem — e aí o conserto é
+           no Core, não na tela. */
+        var conta = {}, comFoto = 0;
+        cr.forEach(function (x) {
+          if (x && x.temFoto) comFoto++;
+          lista_(x && x.campos).forEach(function (k) {
+            var n = lp(k); if (!n) return;
+            conta[n] = (conta[n] || 0) + 1;
+          });
+        });
+        return { conta: conta, total: cr.length, comFoto: comFoto };
+      })(),
       crachasLidos: cr.length
     };
 
@@ -100288,6 +100371,36 @@ emissao: hoje,
       }
 
       if (ambiguo) r.conferirAMao.push(reg);
+
+      /* ============================================================
+         [DIVERGE] 03/11 — "o Gabriel consta com a matrícula, mas no
+         crachá ainda mostra o número provisório".
+         Ele está certo, e isto nunca foi mostrado em lugar nenhum:
+         a mesma pessoa pode ter um valor no cadastro e OUTRO no
+         crachá, e as duas telas mostram cada uma o seu, sem nunca
+         dizer que discordam. Aqui eu só APONTO a diferença — não
+         escolho qual está certa, porque isso quem sabe é ele.
+         ============================================================ */
+      if (c) {
+        [["matrícula", lp(u.matricula), lp(c.matricula)],
+         ["cargo", cargoDe(u), lp(c.funcao)],
+         ["setor", setorDe(u), lp(c.setor)]].forEach(function (par) {
+          var campo = par[0], noCad = par[1], noCra = par[2];
+          if (!noCad || !noCra) return;         /* vazio é falta, não divergência */
+          var igual = campo === "matrícula"
+            ? matK(noCad) === matK(noCra)
+            : nomeK(noCad) === nomeK(noCra);
+          if (igual) return;
+          r.divergencias.push({ reg: reg, campo: campo,
+            noCadastro: noCad, noCracha: noCra, via: via });
+        });
+        /* foto: existe de um lado e não do outro */
+        if (!fotoDe(u) && c.temFoto) {
+          /* já contado em fotoNoCracha; aqui não repito */
+        } else if (fotoDe(u) && !c.temFoto) {
+          r.fotoSoNoCadastro.push(reg);
+        }
+      }
     });
 
     C.ultimo = r;
@@ -100357,6 +100470,15 @@ emissao: hoje,
              '<button class="btn btn-ghost" data-cc-planilha title="Só compara. Não cria, não grava, não altera nada.">' +
              icone_("busca") + "Comparar com a minha planilha (só olhar)</button>"
     }) +
+    /* [ONDEMORA] dito ANTES de ele apertar, não depois de falhar */
+    (function () {
+      var d = portaDeGravacao_();
+      if (d.direta || d.motivo !== "SEM_PORTA_NESTE_ENDERECO") return "";
+      return '<div class="alert a-yellow mb16">' + icone_("alerta") +
+        "<div><b>Atenção antes de preencher: deste endereço a gravação pode ser recusada.</b>" +
+        "<br>" + d.texto + saidasDeGravacao_() + "</div></div>";
+    })() +
+
     (erroCracha
       ? '<div class="alert a-yellow mb16">' + icone_("alerta") +
         "<div><b>Os crachás não foram lidos por inteiro</b>" + esc_(erroCracha) +
@@ -100378,8 +100500,8 @@ emissao: hoje,
           "nem no cadastro nem na lista de crachás", "semCracha") +
       kpi("tag", "ico-red", r.semMatricula.length, "Sem matrícula",
           "matrícula é o que liga ficha, crachá e assinatura", "semMatricula") +
-      kpi("busca", "ico-gray", r.conferirAMao.length, "Conferir à mão",
-          "nome repetido — não caso por palpite", "conferirAMao") +
+      kpi("alerta", "ico-red", r.divergencias.length, "Cadastro ≠ crachá",
+          "mesma pessoa, dois valores", "divergencias") +
       kpi("checkC", "ico-green",
           r.total - r.semCargo.length, "Com cargo",
           Math.round(((r.total - r.semCargo.length) / Math.max(1, r.total)) * 100) + "% do cadastro") +
@@ -100434,6 +100556,60 @@ emissao: hoje,
 
     painel("semCracha", "Sem crachá (" + r.semCracha.length + ")", listaDeNomes(r.semCracha)) +
     painel("semMatricula", "Sem matrícula (" + r.semMatricula.length + ")", listaDeNomes(r.semMatricula)) +
+    /* [DIVERGE] o caso do Gabriel, com nome */
+    painel("divergencias",
+      "Cadastro e crachá discordam (" + r.divergencias.length + ")",
+      '<div class="alert a-gray mb12">' + icone_("info") +
+      "<div>A mesma pessoa, dois valores diferentes. Eu <b>não escolho</b> qual está certo — " +
+      "só mostro. Exemplo típico: a matrícula definitiva já entrou no cadastro e o crachá " +
+      "ficou com o número provisório.</div></div>" +
+      (r.divergencias.length
+        ? '<div style="max-height:340px;overflow:auto">' +
+          UI.tabela({
+            linhas: r.divergencias,
+            colunas: [
+              { rotulo: "Nome", render: function (x) {
+                  return "<b>" + esc_(x.reg.nome) + "</b>"; } },
+              { rotulo: "Campo", render: function (x) { return esc_(x.campo); } },
+              { rotulo: "No cadastro", render: function (x) {
+                  return '<span class="mono">' + esc_(x.noCadastro) + "</span>"; } },
+              { rotulo: "No crachá", render: function (x) {
+                  return '<span class="mono">' + esc_(x.noCracha) + "</span>"; } }
+            ]
+          }) + "</div>"
+        : '<p class="small muted">Nenhuma divergência entre os dois.</p>')) +
+
+    /* [QUECAMPOS] o que o Core devolve em cada crachá */
+    painel("camposCracha",
+      "O que vem em cada crachá (" + Object.keys(r.camposDoCracha.conta).length + " campos)",
+      '<div class="alert ' + (r.camposDoCracha.comFoto ? "a-gray" : "a-yellow") + ' mb12">' +
+      icone_(r.camposDoCracha.comFoto ? "info" : "alerta") +
+      "<div><b>" + r.camposDoCracha.comFoto + " de " + r.camposDoCracha.total +
+      " crachás trouxeram imagem.</b>" +
+      (r.camposDoCracha.comFoto
+        ? " Os nomes de campo abaixo são os que o Core devolveu."
+        : "<br>Zero. Se você <b>salva a foto no crachá</b>, então ou a imagem está num campo " +
+          "com outro nome, ou a listagem <span class='mono'>cracha.listar</span> não devolve " +
+          "a imagem (ela é pesada, e isso é comum de propósito). A lista abaixo é a prova: " +
+          "se não houver nenhum campo de foto aí, o conserto é no Core — a tela não tem o que " +
+          "procurar. Os campos que eu reconheço como foto são: foto, imagem, fotoUrl, urlFoto, " +
+          "fotoURL, imagemUrl, avatar, fotoBase64, foto64, retrato.") +
+      "</div></div>" +
+      '<div style="max-height:300px;overflow:auto">' +
+      UI.tabela({
+        linhas: Object.keys(r.camposDoCracha.conta).sort().map(function (k) {
+          return { campo: k, n: r.camposDoCracha.conta[k] };
+        }),
+        colunas: [
+          { rotulo: "Campo no registro de crachá", render: function (x) {
+              var ehFoto = /^(foto|imagem|fotourl|urlfoto|fotoURL|imagemurl|avatar|fotobase64|foto64|retrato)$/i
+                .test(x.campo);
+              return '<span class="mono">' + esc_(x.campo) + "</span>" +
+                (ehFoto ? ' <span class="badge b-green">eu procuro aqui</span>' : ""); } },
+          { rotulo: "Em quantos crachás", num: true, render: function (x) { return x.n; } }
+        ]
+      }) + "</div>") +
+
     painel("conferirAMao", "Conferir à mão (" + r.conferirAMao.length + ")",
       '<div class="alert a-gray mb12">' + icone_("info") +
       "<div>Estes nomes aparecem mais de uma vez. Casar por nome aqui poria o crachá " +
@@ -100493,17 +100669,15 @@ emissao: hoje,
                 (feitos.length ? '<div class="alert a-green">' + icone_("checkC") +
                   "<div><b>" + feitos.length + " preenchido(s)</b>" +
                   "Abra Usuários para conferir.</div></div>" : "") +
-                (falhou.length ? '<div class="alert a-red mt8">' + icone_("alerta") +
-                  "<div><b>" + falhou.length + " não entrou</b>" +
-                  (portaUsada_() === "roteador"
-                    ? "<br><b>Atenção:</b> foi pelo <b>roteador</b>, não pela porta direta. " +
-                      "O roteador de usuários do Core não atualiza cadastro que já existe — " +
-                      "daí o \"já existe usuário com esta matrícula\". A porta " +
-                      "<span class='mono'>AP_USR_salvarDireto</span> não respondeu aqui. " +
-                      "Isso se conserta no Apps Script."
-                    : "") +
-                  falhou.slice(0, 12).map(function (x) { return "<br>" + esc_(x); }).join("") +
-                  (falhou.length > 12 ? "<br>…" : "") + "</div></div>" : "");
+                (falhou.length ? (function () {
+                  var d = portaDeGravacao_();
+                  return '<div class="alert a-red mt8">' + icone_("alerta") +
+                    "<div><b>" + falhou.length + " não entrou</b>" +
+                    (d.direta ? "" : "<br><br><b>Por que:</b> " + d.texto + saidasDeGravacao_() +
+                      "<br><br><b>O que o servidor respondeu:</b>") +
+                    falhou.slice(0, 12).map(function (x) { return "<br>" + esc_(x); }).join("") +
+                    (falhou.length > 12 ? "<br>…" : "") + "</div></div>";
+                })() : "");
               bt.disabled = false;
               try { if (typeof CACHE !== "undefined" && CACHE.invalidar) CACHE.invalidar(); } catch (e) {}
               if (feitos.length) aviso_("ok", "Cadastro atualizado",
@@ -101809,18 +101983,18 @@ emissao: hoje,
             "<div><b>" + barrados.length + " barrada(s) na conferência</b>" +
             barrados.slice(0, 10).map(function (x) { return "<br>" + esc_(x); }).join("") +
             "</div></div>" : "") +
-          (falhou.length ? '<div class="alert a-red mt8">' + icone_("alerta") +
-            "<div><b>" + falhou.length + " não entrou</b>" +
-            (S.portaUsada() === "roteador"
-              ? "<br><b>Atenção:</b> a gravação foi pelo <b>roteador</b>, não pela porta " +
-                "direta. O roteador de usuários do Core está medido como incapaz de " +
-                "atualizar cadastro que já existe — é por isso que ele responde " +
-                "\"já existe usuário com esta matrícula\". A porta direta " +
-                "<span class='mono'>AP_USR_salvarDireto</span> não respondeu neste navegador. " +
-                "Isso se conserta no Apps Script, não aqui."
-              : "") +
-            falhou.slice(0, 10).map(function (x) { return "<br>" + esc_(x); }).join("") +
-            (falhou.length > 10 ? "<br>…" : "") + "</div></div>" : "");
+          (falhou.length ? (function () {
+            var d = (typeof window.__portaDeGravacao === "function")
+              ? window.__portaDeGravacao() : { direta: false, texto: "" };
+            var saidas = (typeof window.__saidasDeGravacao === "function")
+              ? window.__saidasDeGravacao() : "";
+            return '<div class="alert a-red mt8">' + icone_("alerta") +
+              "<div><b>" + falhou.length + " não entrou</b>" +
+              (d.direta ? "" : "<br><br><b>Por que:</b> " + d.texto + saidas +
+                "<br><br><b>O que o servidor respondeu:</b>") +
+              falhou.slice(0, 10).map(function (x) { return "<br>" + esc_(x); }).join("") +
+              (falhou.length > 10 ? "<br>…" : "") + "</div></div>";
+          })() : "");
         g.disabled = false;
         try { if (typeof CACHE !== "undefined" && CACHE.invalidar) CACHE.invalidar(); } catch (e) {}
         if (feitos.length) aviso_("ok", "Cargos preenchidos",
