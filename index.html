@@ -64819,8 +64819,9 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 369 · 02/11";
+var ALMOXA_VERSAO = "sistema 370 · 02/11";
 var ALMOXA_NOVIDADES = [
+  "370 · preencher cargo passa pela porta direta, nao pelo roteador que nao atualiza",
   "369 · le a planilha na codificacao certa: acento quebrado nao casa com o cadastro",
   "369 · quando nao ha nada a preencher, a tela diz para onde foi cada linha",
   "368 · trazer da planilha SO o cargo, e so de quem esta sem cargo; nao cria ninguem",
@@ -100187,6 +100188,20 @@ emissao: hoje,
   function cargoDe(u) { return lp(u && (u.cargo || u.funcao)); }
   function setorDe(u) { return lp(u && (u.setor || u.lotacao)); }
   function crachaDe(u) { return lp(u && (u.cracha || u.crachaNumero || u.numeroCracha)); }
+
+  /* [PORTACERTA] a porta direta quando ela existe; o roteador só
+     como último recurso, e dizendo qual das duas respondeu */
+  function salvarPeloCaminhoCerto_(dados) {
+    try {
+      if (typeof salvarUsuarioNoCore === "function") return salvarUsuarioNoCore(dados);
+      if (typeof window.salvarUsuarioNoCore === "function") return window.salvarUsuarioNoCore(dados);
+    } catch (e) {}
+    return API.call("usuarios", "salvar", dados);
+  }
+  function portaUsada_() {
+    try { return lp(SALVARUSR_ULTIMA && SALVARUSR_ULTIMA.porta); } catch (e) { return ""; }
+  }
+  try { window.__salvarPeloCaminhoCerto = salvarPeloCaminhoCerto_; } catch (e) {}
   function fotoDe(u) { return lp(u && (u.foto || u.imagem || u.fotoUrl)); }
   function excluido_(u) {
     return /^EXCLU/.test(lp(u && u.status).toUpperCase());
@@ -100479,6 +100494,13 @@ emissao: hoje,
                   "Abra Usuários para conferir.</div></div>" : "") +
                 (falhou.length ? '<div class="alert a-red mt8">' + icone_("alerta") +
                   "<div><b>" + falhou.length + " não entrou</b>" +
+                  (portaUsada_() === "roteador"
+                    ? "<br><b>Atenção:</b> foi pelo <b>roteador</b>, não pela porta direta. " +
+                      "O roteador de usuários do Core não atualiza cadastro que já existe — " +
+                      "daí o \"já existe usuário com esta matrícula\". A porta " +
+                      "<span class='mono'>AP_USR_salvarDireto</span> não respondeu aqui. " +
+                      "Isso se conserta no Apps Script."
+                    : "") +
                   falhou.slice(0, 12).map(function (x) { return "<br>" + esc_(x); }).join("") +
                   (falhou.length > 12 ? "<br>…" : "") + "</div></div>" : "");
               bt.disabled = false;
@@ -100495,7 +100517,16 @@ emissao: hoje,
                       matricula: lp(x.reg.u.matricula) };
             if (campo === "cargo") p.funcao = x.valor; else p.lotacao = x.valor;
 
-            Promise.resolve(API.call("usuarios", "salvar",
+            /* [PORTACERTA] 02/11 23:08 — ele apertou e voltaram 11
+               "Já existe usuário com esta matrícula ou e-mail".
+               A causa está medida no próprio arquivo dele, em 24/10:
+                 usuarios.salvar COM matricula  -> USUARIO_DUPLICADO
+                 usuarios.salvar SEM matricula  -> CAMPOS_OBRIGATORIOS
+               O módulo de usuários do Core não atualiza pelo roteador.
+               Por isso existe salvarUsuarioNoCore(), que, quando o
+               pedido é edição, vai pela porta direta AP_USR_salvarDireto.
+               Eu estava chamando o roteador. Era o meu erro. */
+            Promise.resolve(salvarPeloCaminhoCerto_(
                 BASEMESTRE.paraCadastro(p, x.reg.u)))
               .then(function (res) {
                 if (res && res.ok) feitos.push(x.reg.nome);
@@ -101163,6 +101194,25 @@ emissao: hoje,
   function cargoDe(u) { return lp(u && (u.cargo || u.funcao)); }
   function excluido_(u) { return /^EXCLU/.test(lp(u && u.status).toUpperCase()); }
 
+  /* [PORTACERTA] 02/11 23:08 — "11 não entrou · Já existe usuário
+     com esta matrícula ou e-mail", onze vezes. Não era duplicidade:
+     era eu chamando o roteador de usuários do Core, que está medido
+     como incapaz de ATUALIZAR desde 24/10 (usuarios.salvar com
+     matrícula devolve USUARIO_DUPLICADO; sem matrícula devolve
+     CAMPOS_OBRIGATORIOS). O sistema já tinha a volta por cima:
+     salvarUsuarioNoCore() usa a porta direta AP_USR_salvarDireto
+     quando o pedido é edição. Agora eu uso ela também. */
+  S.salvar = function (dados) {
+    try {
+      if (typeof salvarUsuarioNoCore === "function") return salvarUsuarioNoCore(dados);
+      if (typeof window.salvarUsuarioNoCore === "function") return window.salvarUsuarioNoCore(dados);
+    } catch (e) {}
+    return API.call("usuarios", "salvar", dados);
+  };
+  S.portaUsada = function () {
+    try { return lp(SALVARUSR_ULTIMA && SALVARUSR_ULTIMA.porta); } catch (e) { return ""; }
+  };
+
   /* ============================================================
      TRAVA 1 — A CONFERÊNCIA DO PEDIDO
      ------------------------------------------------------------
@@ -101571,13 +101621,23 @@ emissao: hoje,
         cx.innerHTML =
           (feitos.length ? '<div class="alert a-green">' + icone_("checkC") +
             "<div><b>" + feitos.length + " cargo(s) preenchido(s)</b>" +
-            "Abra Usuários para conferir. Nenhum outro campo foi alterado.</div></div>" : "") +
+            "Abra Usuários para conferir. Nenhum outro campo foi alterado." +
+            (S.portaUsada() ? "<br><span class='small'>gravado pela porta <b>" +
+              esc_(S.portaUsada()) + "</b></span>" : "") + "</div></div>" : "") +
           (barrados.length ? '<div class="alert a-red mt8">' + icone_("cadeado") +
             "<div><b>" + barrados.length + " barrada(s) na conferência</b>" +
             barrados.slice(0, 10).map(function (x) { return "<br>" + esc_(x); }).join("") +
             "</div></div>" : "") +
           (falhou.length ? '<div class="alert a-red mt8">' + icone_("alerta") +
             "<div><b>" + falhou.length + " não entrou</b>" +
+            (S.portaUsada() === "roteador"
+              ? "<br><b>Atenção:</b> a gravação foi pelo <b>roteador</b>, não pela porta " +
+                "direta. O roteador de usuários do Core está medido como incapaz de " +
+                "atualizar cadastro que já existe — é por isso que ele responde " +
+                "\"já existe usuário com esta matrícula\". A porta direta " +
+                "<span class='mono'>AP_USR_salvarDireto</span> não respondeu neste navegador. " +
+                "Isso se conserta no Apps Script, não aqui."
+              : "") +
             falhou.slice(0, 10).map(function (x) { return "<br>" + esc_(x); }).join("") +
             (falhou.length > 10 ? "<br>…" : "") + "</div></div>" : "");
         g.disabled = false;
@@ -101603,7 +101663,9 @@ emissao: hoje,
         return passo(i + 1);
       }
 
-      Promise.resolve(API.call("usuarios", "salvar", x.pedido)).then(function (r) {
+      /* [PORTACERTA] mesma correção do [CONFCAD]: o roteador de
+         usuários do Core não atualiza, e era nele que eu batia */
+      Promise.resolve(S.salvar(x.pedido)).then(function (r) {
         if (r && r.ok) feitos.push(x.p.nome);
         else falhou.push(x.p.nome + " — " + (lp(r && r.mensagem) || "o servidor não explicou"));
       }, function (e) {
