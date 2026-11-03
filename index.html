@@ -64819,8 +64819,10 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 365 · 02/11";
+var ALMOXA_VERSAO = "sistema 366 · 02/11";
 var ALMOXA_NOVIDADES = [
+  "366 · conferencia do cadastro: quem esta sem cargo, setor, foto, cracha ou matricula",
+  "366 · preencher cargo e setor a partir do cracha, so onde esta em branco",
   "365 · a assinatura termina de ser procurada depois que a ficha ja esta na tela",
   "364 · marcar fichas na lista e imprimir as marcadas como uma so",
   "364 · a rubrica deixa de sumir no papel quando a pessoa tem duas matriculas",
@@ -100106,6 +100108,498 @@ emissao: hoje,
   A.__repintarFaixa = repintarFaixa;
   A.__faixas = faixas;
   A.__pilula = pilula;
+})();
+</script>
+
+
+<script>
+/* ############################################################
+ * CONFERÊNCIA DO CADASTRO  ·  busca: [CONFCAD]
+ * ------------------------------------------------------------
+ * O PEDIDO (02/11 19:56)
+ *   "No sistema tem 139, na tabela que eu tenho aqui tem 118.
+ *    Tem muita gente que não está na tabela principal. Eu
+ *    precisava ver a tabela que eu tenho aqui contra o sistema,
+ *    para fazer o crachá dessas pessoas. E tem muita pessoa que
+ *    tem crachá e na parte de usuário não está atualizando as
+ *    fotos. E muitos usuários não puxaram os cargos — ficou sem
+ *    cargo. Precisava ver como a gente ia fazer isso."
+ *
+ * ------------------------------------------------------------
+ * O QUE JÁ ESTAVA MEDIDO NO PRÓPRIO SISTEMA
+ *   O fichário do [FOTOCRACHA] traz este registro, de 23/10:
+ *   "ALMOXA_CRACHAS.funcao está 100% preenchida (85 de 85),
+ *    enquanto USUARIOS.cargo só tem 62% (108 de 175)."
+ *   Ou seja: boa parte do cargo que falta em Usuários JÁ EXISTE
+ *   no crachá da mesma pessoa. Não precisa de planilha para
+ *   aquela parte — precisa de alguém cruzar as duas listas.
+ *   É isso que esta tela faz.
+ *
+ * ------------------------------------------------------------
+ * O QUE ELA MOSTRA
+ *   1. O cadastro de hoje: quantos sem cargo, sem setor, sem
+ *      matrícula, sem crachá, sem foto — com os nomes.
+ *   2. O cruzamento com os crachás: de quem está sem cargo,
+ *      quantos têm o cargo no crachá. Idem setor e foto.
+ *   3. Quando a foto existe no crachá e não aparece em Usuários,
+ *      ela diz POR QUE não casou: matrícula diferente, nome
+ *      repetido, ou crachá sem foto. Nunca "sem foto" seco.
+ *
+ * O QUE ELA FAZ (e só com o dedo dele)
+ *   Preencher APENAS o que está em branco, usando o
+ *   BASEMESTRE.paraCadastro que já existe — o mesmo que a
+ *   importação usa, com o manterOuPreencher: o que o sistema já
+ *   tem volta igual, e a origem só entra onde está vazio.
+ *   Antes de gravar, mostra linha por linha o que vai entrar.
+ *
+ * O QUE ELA NÃO FAZ
+ *   NÃO apaga nem sobrescreve nada. NÃO cria cadastro novo.
+ *   NÃO inventa cargo, setor nem matrícula. NÃO casa pessoa por
+ *   nome repetido — nome que aparece duas vezes fica de fora e é
+ *   mostrado como "conferir à mão". NÃO cria rota nem coluna.
+ * ############################################################ */
+(function conferenciaDoCadastro() {
+
+  var C = { ultimo: null, ultimoErro: "", aberto: {} };
+  try { window.CONFCAD = C; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(v) { return (typeof U !== "undefined" && U.esc) ? U.esc(v) : lp(v); }
+  function icone_(n) { return (typeof ic === "function") ? ic(n) : ""; }
+  function matK(v) {
+    return lp(v).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+  }
+  function nomeK(v) {
+    return lp(v).toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/\s+/g, " ").trim();
+  }
+  function aviso_(t, a, b) {
+    try { if (typeof toast === "function") toast(t, a, b); } catch (e) {}
+  }
+  function cargoDe(u) { return lp(u && (u.cargo || u.funcao)); }
+  function setorDe(u) { return lp(u && (u.setor || u.lotacao)); }
+  function crachaDe(u) { return lp(u && (u.cracha || u.crachaNumero || u.numeroCracha)); }
+  function fotoDe(u) { return lp(u && (u.foto || u.imagem || u.fotoUrl)); }
+  function excluido_(u) {
+    return /^EXCLU/.test(lp(u && u.status).toUpperCase());
+  }
+
+  /* ============================================================
+     O CRUZAMENTO
+     ------------------------------------------------------------
+     Pela matrícula limpa primeiro. Pelo nome SÓ quando aquele
+     nome aparece uma vez de cada lado — dois homônimos ficam de
+     fora e aparecem na lista de "conferir à mão". Esta é a mesma
+     regra do [FOTOCRACHA] e da ficha de EPI; não invento outra.
+     ============================================================ */
+  C.cruzar = function (usuarios, fichario) {
+    var us = lista_(usuarios).filter(function (u) { return u && !excluido_(u); });
+    var cr = lista_(fichario);
+
+    var crPorMat = {}, crPorNome = {}, nomeRepetidoCr = {};
+    cr.forEach(function (c) {
+      var m = matK(c.matricula || c.codigo);
+      if (m && !crPorMat[m]) crPorMat[m] = c;
+      var n = nomeK(c.nome);
+      if (!n) return;
+      if (!crPorNome[n]) crPorNome[n] = c;
+      else if (nomeK(crPorNome[n].matricula) !== nomeK(c.matricula)) nomeRepetidoCr[n] = true;
+    });
+
+    var vezesNomeUs = {};
+    us.forEach(function (u) {
+      var n = nomeK(u.nome);
+      if (n) vezesNomeUs[n] = (vezesNomeUs[n] || 0) + 1;
+    });
+
+    var r = {
+      total: us.length,
+      semCargo: [], semSetor: [], semMatricula: [], semCracha: [], semFoto: [],
+      cargoNoCracha: [], setorNoCracha: [], fotoNoCracha: [],
+      fotoPorqueNao: [], conferirAMao: [],
+      crachasLidos: cr.length
+    };
+
+    us.forEach(function (u) {
+      var m = matK(u.matricula);
+      var n = nomeK(u.nome);
+      var c = (m && crPorMat[m]) || null;
+      var via = c ? "matrícula" : "";
+      if (!c && n && crPorNome[n] && !nomeRepetidoCr[n] && vezesNomeUs[n] === 1) {
+        c = crPorNome[n]; via = "nome completo";
+      }
+      var ambiguo = !c && n && (nomeRepetidoCr[n] || vezesNomeUs[n] > 1);
+
+      var reg = { u: u, nome: lp(u.nome) || "(sem nome)", matricula: lp(u.matricula),
+                  cracha: c, via: via };
+
+      if (!cargoDe(u)) {
+        r.semCargo.push(reg);
+        if (c && lp(c.funcao)) r.cargoNoCracha.push({ reg: reg, valor: lp(c.funcao) });
+      }
+      if (!setorDe(u)) {
+        r.semSetor.push(reg);
+        if (c && lp(c.setor)) r.setorNoCracha.push({ reg: reg, valor: lp(c.setor) });
+      }
+      if (!m) r.semMatricula.push(reg);
+      if (!crachaDe(u) && !c) r.semCracha.push(reg);
+
+      if (!fotoDe(u)) {
+        r.semFoto.push(reg);
+        if (c && c.temFoto) {
+          r.fotoNoCracha.push(reg);
+          r.fotoPorqueNao.push({ reg: reg,
+            porque: via === "matrícula"
+              ? "o crachá tem foto e casou pela matrícula — a foto não chegou até a tela"
+              : "casou pelo nome completo; a matrícula do crachá (" +
+                lp(c.matricula) + ") é diferente da do cadastro (" + (lp(u.matricula) || "vazia") + ")" });
+        } else if (ambiguo) {
+          r.fotoPorqueNao.push({ reg: reg,
+            porque: "nome repetido nos dois lados — não escolho crachá por palpite" });
+        } else if (c && !c.temFoto) {
+          r.fotoPorqueNao.push({ reg: reg, porque: "o crachá desta pessoa não tem foto" });
+        } else {
+          r.fotoPorqueNao.push({ reg: reg, porque: "não achei crachá para esta pessoa" });
+        }
+      }
+
+      if (ambiguo) r.conferirAMao.push(reg);
+    });
+
+    C.ultimo = r;
+    return r;
+  };
+
+  /* ============================================================
+     A TELA
+     ============================================================ */
+  function kpi(icone, cor, valor, rotulo, hint, alvo) {
+    var k = (typeof UI !== "undefined" && UI.kpi)
+      ? UI.kpi({ icone: icone, cor: cor, valor: valor, rotulo: rotulo, hint: hint })
+      : "<div class='card'><b>" + valor + "</b> " + esc_(rotulo) + "</div>";
+    if (!alvo) return k;
+    return '<div data-cc-ver="' + alvo + '" style="cursor:pointer" ' +
+      'title="clique para ver os nomes">' + k + "</div>";
+  }
+
+  function listaDeNomes(regs, extra) {
+    if (!regs.length) return '<p class="small muted">Nenhum.</p>';
+    return '<div style="max-height:340px;overflow:auto">' +
+      (typeof UI !== "undefined" && UI.tabela
+        ? UI.tabela({
+            linhas: regs,
+            colunas: [
+              { rotulo: "Nome", render: function (x) {
+                  var r = x.reg || x;
+                  return "<b>" + esc_(r.nome) + "</b>"; } },
+              { rotulo: "Matrícula", render: function (x) {
+                  var r = x.reg || x;
+                  return '<span class="mono">' + esc_(r.matricula || "—") + "</span>"; } },
+              { rotulo: extra ? extra.rotulo : "Crachá", render: function (x) {
+                  var r = x.reg || x;
+                  if (extra) return extra.render(x);
+                  return r.cracha
+                    ? esc_(lp(r.cracha.codigo) || "sim") +
+                      '<br><span class="small muted">casou por ' + esc_(r.via) + "</span>"
+                    : '<span class="small muted">sem crachá</span>'; } }
+            ]
+          })
+        : regs.map(function (x) {
+            var r = x.reg || x;
+            return "<div>" + esc_(r.nome) + " · " + esc_(r.matricula) + "</div>";
+          }).join("")) + "</div>";
+  }
+
+  function painel(id, titulo, conteudo) {
+    var aberto = !!C.aberto[id];
+    return '<div class="card mb12"><div class="card-body">' +
+      '<div class="flex between center" style="cursor:pointer" data-cc-painel="' + id + '">' +
+      '<b style="font-size:14px">' + esc_(titulo) + "</b>" +
+      '<span class="btn btn-ghost btn-sm">' + (aberto ? "ocultar" : "ver") + "</span></div>" +
+      (aberto ? '<div class="mt12">' + conteudo + "</div>" : "") +
+      "</div></div>";
+  }
+
+  function desenhar(r, erroCracha) {
+    var podeCargo = r.cargoNoCracha.length;
+    var podeSetor = r.setorNoCracha.length;
+
+    return UI.cabecalho({
+      trilha: ["Configurações", "Conferência do cadastro"],
+      titulo: "Conferência do cadastro",
+      sub: r.total + " cadastros ativos · " + r.crachasLidos + " crachás lidos. " +
+           "Só leitura: nada é gravado nesta tela sem você mandar.",
+      acoes: '<button class="btn btn-ghost" data-cc-recarregar>' + icone_("sync") + "Reler</button>" +
+             '<button class="btn btn-ghost" data-cc-planilha>' + icone_("upload") +
+             "Comparar com a minha planilha</button>"
+    }) +
+    (erroCracha
+      ? '<div class="alert a-yellow mb16">' + icone_("alerta") +
+        "<div><b>Os crachás não foram lidos por inteiro</b>" + esc_(erroCracha) +
+        ". Os números abaixo valem para o que chegou — não afirmo que o resto não tem." +
+        "</div></div>"
+      : "") +
+
+    '<div class="grid g4 mb16">' +
+      kpi("usuarios", "ico-blue", r.total, "Cadastros ativos", r.crachasLidos + " crachás") +
+      kpi("alerta", "ico-orange", r.semCargo.length, "Sem cargo",
+          podeCargo ? podeCargo + " têm o cargo no crachá" : "nenhum recuperável do crachá", "semCargo") +
+      kpi("obra", "ico-yellow", r.semSetor.length, "Sem setor",
+          podeSetor ? podeSetor + " têm o setor no crachá" : "nenhum recuperável do crachá", "semSetor") +
+      kpi("foto", "ico-purple", r.semFoto.length, "Sem foto",
+          r.fotoNoCracha.length + " têm foto no crachá", "semFoto") +
+    "</div>" +
+    '<div class="grid g4 mb16">' +
+      kpi("cracha", "ico-navy", r.semCracha.length, "Sem crachá",
+          "nem no cadastro nem na lista de crachás", "semCracha") +
+      kpi("tag", "ico-red", r.semMatricula.length, "Sem matrícula",
+          "matrícula é o que liga ficha, crachá e assinatura", "semMatricula") +
+      kpi("busca", "ico-gray", r.conferirAMao.length, "Conferir à mão",
+          "nome repetido — não caso por palpite", "conferirAMao") +
+      kpi("checkC", "ico-green",
+          r.total - r.semCargo.length, "Com cargo",
+          Math.round(((r.total - r.semCargo.length) / Math.max(1, r.total)) * 100) + "% do cadastro") +
+    "</div>" +
+
+    (podeCargo || podeSetor
+      ? '<div class="card mb16" style="border-left:4px solid var(--verde,#2E9E5B)"><div class="card-body">' +
+        '<b style="font-size:14px">Dá para preencher agora, sem planilha nenhuma</b>' +
+        '<p class="small" style="margin:6px 0 12px">' +
+        (podeCargo ? "<b>" + podeCargo + "</b> cargo(s) " : "") +
+        (podeCargo && podeSetor ? "e " : "") +
+        (podeSetor ? "<b>" + podeSetor + "</b> setor(es) " : "") +
+        "estão em branco em Usuários e já existem no crachá da mesma pessoa. " +
+        "Só entra onde está vazio — nada é sobrescrito.</p>" +
+        (podeCargo ? '<button class="btn btn-orange" data-cc-preencher="cargo">' +
+          icone_("checkC") + "Ver e preencher os " + podeCargo + " cargos</button> " : "") +
+        (podeSetor ? '<button class="btn btn-ghost" data-cc-preencher="setor">' +
+          icone_("checkC") + "Ver e preencher os " + podeSetor + " setores</button>" : "") +
+        "</div></div>"
+      : "") +
+
+    painel("semCargo", "Sem cargo (" + r.semCargo.length + ")",
+      listaDeNomes(r.semCargo, { rotulo: "Cargo no crachá", render: function (x) {
+        var r2 = x.reg || x;
+        var v = r2.cracha ? lp(r2.cracha.funcao) : "";
+        return v ? "<b>" + esc_(v) + "</b>" + '<span class="small muted"> · do crachá</span>'
+                 : '<span class="small muted">não está no crachá também</span>'; } })) +
+
+    painel("semSetor", "Sem setor (" + r.semSetor.length + ")",
+      listaDeNomes(r.semSetor, { rotulo: "Setor no crachá", render: function (x) {
+        var r2 = x.reg || x;
+        var v = r2.cracha ? lp(r2.cracha.setor) : "";
+        return v ? "<b>" + esc_(v) + "</b>" : '<span class="small muted">não está no crachá</span>'; } })) +
+
+    painel("semFoto", "Sem foto (" + r.semFoto.length + ") — e por quê",
+      listaDeNomes(r.fotoPorqueNao, { rotulo: "Por que não apareceu", render: function (x) {
+        return '<span class="small">' + esc_(x.porque) + "</span>"; } })) +
+
+    painel("semCracha", "Sem crachá (" + r.semCracha.length + ")", listaDeNomes(r.semCracha)) +
+    painel("semMatricula", "Sem matrícula (" + r.semMatricula.length + ")", listaDeNomes(r.semMatricula)) +
+    painel("conferirAMao", "Conferir à mão (" + r.conferirAMao.length + ")",
+      '<div class="alert a-gray mb12">' + icone_("info") +
+      "<div>Estes nomes aparecem mais de uma vez. Casar por nome aqui poria o crachá " +
+      "— e a assinatura — de uma pessoa na ficha de outra. Prefiro deixar para você.</div></div>" +
+      listaDeNomes(r.conferirAMao));
+  }
+
+  /* ============================================================
+     PREENCHER — com o dedo dele, linha por linha à vista
+     ============================================================ */
+  function modalPreencher(campo) {
+    var r = C.ultimo;
+    if (!r) { aviso_("warn", "Releia a tela", "Os números ainda não foram levantados."); return; }
+    var fila = campo === "cargo" ? r.cargoNoCracha : r.setorNoCracha;
+    if (!fila.length) { aviso_("warn", "Nada a preencher", "Nenhum valor veio do crachá."); return; }
+    if (typeof BASEMESTRE === "undefined" || !BASEMESTRE || !BASEMESTRE.paraCadastro) {
+      aviso_("warn", "Bloco não carregado", "O [BASEMESTRE] não está nesta versão."); return;
+    }
+
+    var rotulo = campo === "cargo" ? "cargo" : "setor";
+    UI.modal({
+      titulo: "Preencher " + rotulo + " a partir do crachá",
+      sub: fila.length + " pessoa(s)",
+      tamanho: "lg",
+      corpo: '<div class="alert a-blue mb12">' + icone_("info") +
+        "<div>Só entra onde o campo está <b>vazio</b> em Usuários. " +
+        "Uso o mesmo caminho da importação (<span class='mono'>BASEMESTRE.paraCadastro</span>), " +
+        "que devolve ao Core o valor que já existe em todos os outros campos — " +
+        "então nada mais muda.</div></div>" +
+        '<div style="max-height:380px;overflow:auto">' +
+        UI.tabela({
+          linhas: fila,
+          colunas: [
+            { rotulo: "Nome", render: function (x) { return "<b>" + esc_(x.reg.nome) + "</b>"; } },
+            { rotulo: "Matrícula", render: function (x) {
+                return '<span class="mono">' + esc_(x.reg.matricula || "—") + "</span>"; } },
+            { rotulo: "Vai entrar", render: function (x) {
+                return "<b>" + esc_(x.valor) + "</b>"; } },
+            { rotulo: "Casou por", render: function (x) {
+                return '<span class="small muted">' + esc_(x.reg.via) + "</span>"; } }
+          ]
+        }) + "</div>" +
+        '<div id="ccAndamento" class="mt12"></div>',
+      rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' +
+              '<button class="btn btn-primary" data-ok>Preencher os ' + fila.length + "</button>",
+      aoAbrir: function (w, fechar) {
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        w.querySelector("[data-ok]").addEventListener("click", function () {
+          var bt = w.querySelector("[data-ok]");
+          bt.disabled = true;
+          var cx = w.querySelector("#ccAndamento");
+          var feitos = [], falhou = [];
+
+          function passo(i) {
+            if (i >= fila.length) {
+              cx.innerHTML =
+                (feitos.length ? '<div class="alert a-green">' + icone_("checkC") +
+                  "<div><b>" + feitos.length + " preenchido(s)</b>" +
+                  "Abra Usuários para conferir.</div></div>" : "") +
+                (falhou.length ? '<div class="alert a-red mt8">' + icone_("alerta") +
+                  "<div><b>" + falhou.length + " não entrou</b>" +
+                  falhou.slice(0, 12).map(function (x) { return "<br>" + esc_(x); }).join("") +
+                  (falhou.length > 12 ? "<br>…" : "") + "</div></div>" : "");
+              bt.disabled = false;
+              try { if (typeof CACHE !== "undefined" && CACHE.invalidar) CACHE.invalidar(); } catch (e) {}
+              if (feitos.length) aviso_("ok", "Cadastro atualizado",
+                feitos.length + " " + rotulo + "(s) preenchido(s) a partir do crachá.");
+              return;
+            }
+            var x = fila[i];
+            cx.innerHTML = '<div class="alert a-gray">' + icone_("sync") +
+              "<div><b>" + (i + 1) + " de " + fila.length + "</b>" + esc_(x.reg.nome) + "</div></div>";
+
+            var p = { idExistente: x.reg.u.id, nome: lp(x.reg.u.nome),
+                      matricula: lp(x.reg.u.matricula) };
+            if (campo === "cargo") p.funcao = x.valor; else p.lotacao = x.valor;
+
+            Promise.resolve(API.call("usuarios", "salvar",
+                BASEMESTRE.paraCadastro(p, x.reg.u)))
+              .then(function (res) {
+                if (res && res.ok) feitos.push(x.reg.nome);
+                else falhou.push(x.reg.nome + " — " +
+                  (lp(res && res.mensagem) || "o servidor não explicou"));
+              }, function (e) {
+                falhou.push(x.reg.nome + " — " + (lp(e && e.message) || String(e)));
+              })
+              .then(function () { passo(i + 1); });
+          }
+          passo(0);
+        });
+      }
+    });
+  }
+
+  /* ============================================================
+     A TELA, REGISTRADA
+     ============================================================ */
+  function montarTela() {
+    if (typeof SCREENS === "undefined" || SCREENS["conferencia-cadastro"]) return false;
+    SCREENS["conferencia-cadastro"] = {
+      titulo: "Conferência do cadastro",
+      modulo: "usuarios",
+      render: function () {
+        var pedido = API.call("usuarios", "listar", {});
+        var crachas = (typeof FOTOCRACHA !== "undefined" && FOTOCRACHA.carregar)
+          ? Promise.resolve(FOTOCRACHA.carregar())["catch"](function () { return null; })
+          : Promise.resolve(null);
+        return Promise.resolve(pedido).then(function (res) {
+          if (!res || !res.ok) {
+            return UI.estado("erro", "Não deu para ler os usuários",
+              lp(res && res.mensagem) || "o Core não respondeu");
+          }
+          return crachas.then(function () {
+            var fich = [];
+            var erro = "";
+            try { fich = lista_(FOTOCRACHA.fichario); erro = lp(FOTOCRACHA.erro); } catch (e) {}
+            var r = C.cruzar(lista_(res.dados), fich);
+            return desenhar(r, erro);
+          });
+        }, function (e) {
+          return UI.estado("erro", "Não deu para ler os usuários",
+            lp(e && e.message) || String(e));
+        });
+      },
+      mount: function () {
+        document.querySelectorAll("[data-cc-painel]").forEach(function (b) {
+          b.addEventListener("click", function () {
+            var id = b.getAttribute("data-cc-painel");
+            C.aberto[id] = !C.aberto[id];
+            ROUTER.render();
+          });
+        });
+        document.querySelectorAll("[data-cc-ver]").forEach(function (b) {
+          b.addEventListener("click", function () {
+            var id = b.getAttribute("data-cc-ver");
+            C.aberto[id] = true;
+            ROUTER.render();
+          });
+        });
+        var rec = document.querySelector("[data-cc-recarregar]");
+        if (rec) rec.addEventListener("click", function () {
+          try { if (typeof CACHE !== "undefined" && CACHE.invalidar) CACHE.invalidar(); } catch (e) {}
+          try { if (typeof FOTOCRACHA !== "undefined") FOTOCRACHA.__pessoas = null; } catch (e) {}
+          ROUTER.render();
+        });
+        var pl = document.querySelector("[data-cc-planilha]");
+        if (pl) pl.addEventListener("click", function () {
+          if (typeof modalImportarColaboradores === "function") modalImportarColaboradores();
+          else aviso_("warn", "Importação não disponível",
+            "A janela de importar lista não está nesta versão.");
+        });
+        document.querySelectorAll("[data-cc-preencher]").forEach(function (b) {
+          b.addEventListener("click", function () {
+            modalPreencher(b.getAttribute("data-cc-preencher"));
+          });
+        });
+      }
+    };
+    return true;
+  }
+
+  /* entra no menu, ao lado de Usuários e Perfis */
+  function noMenu() {
+    try {
+      if (typeof NAV === "undefined" || !NAV || window.__ccNoMenu) return false;
+      for (var i = 0; i < NAV.length; i++) {
+        var g = NAV[i];
+        if (!g || !lista_(g.itens).length) continue;
+        for (var j = 0; j < g.itens.length; j++) {
+          if (lp(g.itens[j].rota) === "#/usuarios") {
+            if (g.itens.some(function (x) { return lp(x.rota) === "#/conferencia-cadastro"; })) {
+              window.__ccNoMenu = true; return true;
+            }
+            g.itens.splice(j + 1, 0, {
+              rotulo: "Conferência do cadastro",
+              rota: "#/conferencia-cadastro",
+              icone: "busca",
+              tag: "admin-002",
+              modulo: "usuarios"
+            });
+            window.__ccNoMenu = true;
+            return true;
+          }
+        }
+      }
+    } catch (e) { C.ultimoErro = lp(e && e.message); }
+    return false;
+  }
+
+  montarTela();
+  if (!noMenu()) {
+    try {
+      document.addEventListener("DOMContentLoaded", function () { montarTela(); noMenu(); });
+      setTimeout(function () { montarTela(); noMenu(); }, 1200);
+    } catch (e) {}
+  }
+
+  C.__desenhar = desenhar;
+  C.__montarTela = montarTela;
+  C.__noMenu = noMenu;
+  C.__modalPreencher = modalPreencher;
 })();
 </script>
 
