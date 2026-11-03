@@ -64819,8 +64819,11 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 373 · 03/11";
+var ALMOXA_VERSAO = "sistema 375 · 03/11";
 var ALMOXA_NOVIDADES = [
+  "375 · ficha Identificacao/Cracha: foto do perfil e do cracha separadas, com a origem",
+  "375 · crachas sem dono, pessoas com mais de um, e a sonda da imagem que nao aparece",
+  "374 · trazer e-mails da planilha: so quem esta sem, e divergencia nao e sobrescrita",
   "373 · aponta quando cadastro e cracha discordam (matricula, cargo, setor)",
   "373 · mostra quais campos o Core devolve em cada cracha — e se ha foto entre eles",
   "372 · diz por que a gravacao e recusada: deste endereco nao existe porta direta",
@@ -100305,6 +100308,7 @@ emissao: hoje,
       cargoNoCracha: [], setorNoCracha: [], fotoNoCracha: [],
       fotoPorqueNao: [], conferirAMao: [],
       divergencias: [], fotoSoNoCadastro: [],
+      crachaSemUsuario: [], maisDeUmCracha: [],
       camposDoCracha: (function () {
         /* [QUECAMPOS] 03/11 — "eu salvo a foto no crachá, é o único
            lugar que tem para pôr foto". E a tela diz 0 de 97 com
@@ -100403,6 +100407,48 @@ emissao: hoje,
       }
     });
 
+    /* ============================================================
+       [IDCRACHA] §6 do documento de 03/11 10:04
+         "Crachás sem usuário vinculado" e
+         "Usuários com mais de um crachá".
+       Os dois saem do mesmo passeio: para cada crachá, de quem ele
+       é. Quem não achou dono entra na primeira lista; quem tem dois
+       donos iguais entra na segunda. O nome só vincula quando é
+       único dos dois lados — a regra que o documento repete.
+       ============================================================ */
+    (function () {
+      var usPorMat = {}, usPorNome = {}, nomeRepUs = {};
+      us.forEach(function (u) {
+        var m = matK(u.matricula); if (m) (usPorMat[m] = usPorMat[m] || []).push(u);
+        var n = nomeK(u.nome); if (!n) return;
+        if (!usPorNome[n]) usPorNome[n] = u;
+        else if (lp(usPorNome[n].id) !== lp(u.id)) nomeRepUs[n] = true;
+      });
+      var porDono = {};
+      cr.forEach(function (c) {
+        var m = matK(c.matricula || c.codigo);
+        var n = nomeK(c.nome);
+        var u = null, via = "";
+        if (m && usPorMat[m] && usPorMat[m].length === 1) { u = usPorMat[m][0]; via = "matrícula"; }
+        else if (n && usPorNome[n] && !nomeRepUs[n]) { u = usPorNome[n]; via = "nome completo"; }
+        if (!u) {
+          r.crachaSemUsuario.push({ c: c, motivo: (m || n)
+            ? "nenhum cadastro com esta matrícula nem com este nome único"
+            : "o crachá não tem matrícula nem nome" });
+          return;
+        }
+        var k = lp(u.id) || ("M:" + m);
+        (porDono[k] = porDono[k] || { u: u, via: via, crachas: [] }).crachas.push(c);
+      });
+      Object.keys(porDono).forEach(function (k) {
+        var g = porDono[k];
+        if (g.crachas.length > 1) {
+          r.maisDeUmCracha.push({ u: g.u, via: g.via, crachas: g.crachas,
+            codigos: g.crachas.map(function (x) { return lp(x.codigo) || lp(x.matricula); }) });
+        }
+      });
+    })();
+
     C.ultimo = r;
     return r;
   };
@@ -100467,6 +100513,8 @@ emissao: hoje,
       sub: r.total + " cadastros ativos · " + r.crachasLidos + " crachás lidos. " +
            "Só leitura: nada é gravado nesta tela sem você mandar.",
       acoes: '<button class="btn btn-ghost" data-cc-recarregar>' + icone_("sync") + "Reler</button>" +
+             '<button class="btn btn-ghost" data-cc-identificacao title="Foto do perfil, foto do crachá, número, status — separados e com a origem">' +
+             icone_("cracha") + "Identificação / Crachá</button>" +
              '<button class="btn btn-ghost" data-cc-planilha title="Só compara. Não cria, não grava, não altera nada.">' +
              icone_("busca") + "Comparar com a minha planilha (só olhar)</button>"
     }) +
@@ -100502,9 +100550,8 @@ emissao: hoje,
           "matrícula é o que liga ficha, crachá e assinatura", "semMatricula") +
       kpi("alerta", "ico-red", r.divergencias.length, "Cadastro ≠ crachá",
           "mesma pessoa, dois valores", "divergencias") +
-      kpi("checkC", "ico-green",
-          r.total - r.semCargo.length, "Com cargo",
-          Math.round(((r.total - r.semCargo.length) / Math.max(1, r.total)) * 100) + "% do cadastro") +
+      kpi("cracha", "ico-purple", r.crachaSemUsuario.length, "Crachás sem dono",
+          r.maisDeUmCracha.length + " pessoa(s) com mais de um", "crachaSemUsuario") +
     "</div>" +
 
     (podeCargo || podeSetor
@@ -100535,6 +100582,19 @@ emissao: hoje,
     "não traz setor, não traz matrícula, não traz mais nada.</p>" +
     '<button class="btn btn-primary" data-cc-socargo>' + icone_("upload") +
     "Trazer os cargos de uma planilha</button>" +
+    "</div></div>" +
+
+    /* [EMAILCOLAB] Modulo A do documento de 03/11 */
+    '<div class="card mb16" style="border-left:4px solid var(--roxo,#722ED1)"><div class="card-body">' +
+    '<b style="font-size:14px">Trazer os e-mails da sua planilha</b>' +
+    '<p class="small" style="margin:6px 0 10px">' +
+    "Planilha simples com <b>NOME</b> e <b>E-MAIL</b>. Preencho só o e-mail, e só de quem " +
+    "está sem. <b>E-mail diferente do que já existe não é sobrescrito</b> — vai para " +
+    "conferência.</p>" +
+    '<p class="small muted" style="margin:0 0 12px">Não cria ninguém, não duplica, ' +
+    "não traz mais nenhum campo.</p>" +
+    '<button class="btn btn-primary" data-cc-email>' + icone_("upload") +
+    "Trazer os e-mails de uma planilha</button>" +
     "</div></div>" +
 
     painel("semCargo", "Sem cargo (" + r.semCargo.length + ")",
@@ -100579,6 +100639,48 @@ emissao: hoje,
           }) + "</div>"
         : '<p class="small muted">Nenhuma divergência entre os dois.</p>')) +
 
+    /* [IDCRACHA] §6 — crachás órfãos e pessoas com mais de um */
+    painel("crachaSemUsuario",
+      "Crachás sem usuário vinculado (" + r.crachaSemUsuario.length + ")",
+      (r.crachaSemUsuario.length
+        ? '<div style="max-height:300px;overflow:auto">' +
+          UI.tabela({
+            linhas: r.crachaSemUsuario,
+            colunas: [
+              { rotulo: "Nome no crachá", render: function (x) {
+                  return "<b>" + esc_(lp(x.c.nome) || "—") + "</b>"; } },
+              { rotulo: "Matrícula", render: function (x) {
+                  return '<span class="mono">' + esc_(lp(x.c.matricula) || "—") + "</span>"; } },
+              { rotulo: "Código", render: function (x) {
+                  return '<span class="mono">' + esc_(lp(x.c.codigo) || "—") + "</span>"; } },
+              { rotulo: "Por quê", render: function (x) {
+                  return '<span class="small">' + esc_(x.motivo) + "</span>"; } }
+            ]
+          }) + "</div>"
+        : '<p class="small muted">Todos os crachás lidos acharam dono.</p>')) +
+
+    painel("maisDeUmCracha",
+      "Pessoas com mais de um crachá (" + r.maisDeUmCracha.length + ")",
+      '<div class="alert a-gray mb12">' + icone_("info") +
+      "<div>Pode ser via nova (2ª via) — que é normal — ou dois registros que deveriam ser um. " +
+      "Eu <b>não apago crachá nenhum</b>: só mostro.</div></div>" +
+      (r.maisDeUmCracha.length
+        ? '<div style="max-height:300px;overflow:auto">' +
+          UI.tabela({
+            linhas: r.maisDeUmCracha,
+            colunas: [
+              { rotulo: "Nome", render: function (x) {
+                  return "<b>" + esc_(lp(x.u.nome)) + "</b>"; } },
+              { rotulo: "Matrícula", render: function (x) {
+                  return '<span class="mono">' + esc_(lp(x.u.matricula) || "—") + "</span>"; } },
+              { rotulo: "Quantos", num: true, render: function (x) {
+                  return x.crachas.length; } },
+              { rotulo: "Códigos", render: function (x) {
+                  return '<span class="mono small">' + esc_(x.codigos.join(", ")) + "</span>"; } }
+            ]
+          }) + "</div>"
+        : '<p class="small muted">Ninguém com mais de um.</p>')) +
+
     /* [QUECAMPOS] o que o Core devolve em cada crachá */
     painel("camposCracha",
       "O que vem em cada crachá (" + Object.keys(r.camposDoCracha.conta).length + " campos)",
@@ -100595,6 +100697,8 @@ emissao: hoje,
           "procurar. Os campos que eu reconheço como foto são: foto, imagem, fotoUrl, urlFoto, " +
           "fotoURL, imagemUrl, avatar, fotoBase64, foto64, retrato.") +
       "</div></div>" +
+      '<button class="btn btn-primary btn-sm mb12" data-cc-sonda>' + icone_("doutor") +
+      "Perguntar ao Core se a imagem existe (até 5 crachás)</button>" +
       '<div style="max-height:300px;overflow:auto">' +
       UI.tabela({
         linhas: Object.keys(r.camposDoCracha.conta).sort().map(function (k) {
@@ -100957,6 +101061,21 @@ emissao: hoje,
           b.addEventListener("click", function () {
             modalPreencher(b.getAttribute("data-cc-preencher"));
           });
+        });
+        var idb = document.querySelector("[data-cc-identificacao]");
+        if (idb) idb.addEventListener("click", function () {
+          if (typeof IDCRACHA !== "undefined" && IDCRACHA && IDCRACHA.procurar) IDCRACHA.procurar();
+          else aviso_("warn", "Bloco não carregado", "O [IDCRACHA] não está nesta versão.");
+        });
+        var em = document.querySelector("[data-cc-email]");
+        if (em) em.addEventListener("click", function () {
+          if (typeof EMAILCOLAB !== "undefined" && EMAILCOLAB && EMAILCOLAB.modal) EMAILCOLAB.modal();
+          else aviso_("warn", "Bloco não carregado", "O [EMAILCOLAB] não está nesta versão.");
+        });
+        var sd = document.querySelector("[data-cc-sonda]");
+        if (sd) sd.addEventListener("click", function () {
+          if (typeof IDCRACHA !== "undefined" && IDCRACHA && IDCRACHA.modalSonda) IDCRACHA.modalSonda();
+          else aviso_("warn", "Bloco não carregado", "O [IDCRACHA] não está nesta versão.");
         });
         var sc = document.querySelector("[data-cc-socargo]");
         if (sc) sc.addEventListener("click", function () {
@@ -102032,6 +102151,948 @@ emissao: hoje,
 
   S.__travas = travas;
   S.__gravar = gravar;
+})();
+</script>
+
+
+<script>
+/* ############################################################
+ * MÓDULO A — E-MAIL DO COLABORADOR  ·  busca: [EMAILCOLAB]
+ * ------------------------------------------------------------
+ * DO DOCUMENTO DELE (03/11), ITEM POR ITEM
+ *   "Criar função de importação de planilha simplificada contendo
+ *    NOME e E-MAIL. O sistema deverá: ler a planilha; normalizar
+ *    espaços e diferenças de formatação dos nomes; comparar com os
+ *    usuários existentes; identificar correspondências; identificar
+ *    nomes duplicados ou ambíguos; apresentar prévia da atualização;
+ *    completar o e-mail do cadastro correspondente; preservar todos
+ *    os outros dados existentes.
+ *    Não criar novos usuários quando já existir um cadastro
+ *    correspondente.
+ *    Não substituir e-mails existentes silenciosamente. Mostrar
+ *    divergências para conferência.
+ *    Usar matrícula e ID interno como identificadores principais
+ *    depois da vinculação inicial."
+ *
+ * ------------------------------------------------------------
+ * POR QUE ESTE BLOCO TEM LEITOR PRÓPRIO
+ *   O BASEMESTRE já lê planilha, e eu quis usá-lo. Mas o conjunto
+ *   de colunas dele é fixo e NÃO tem e-mail:
+ *     COLUNAS = ['item','matricula','nome','funcao','tipoMO',
+ *                'cracha','admissao','lotacao','origem','uniforme',
+ *                'botina','capacete']
+ *   Passar a planilha por ele descartaria justamente a coluna que
+ *   interessa. Então aqui vai um leitor pequeno, só para NOME e
+ *   E-MAIL, usando a MESMA detecção de codificação do [SOCARGO] —
+ *   que é onde o acento quebrado já tinha estragado o casamento.
+ *   Não mexi no BASEMESTRE: ele continua servindo quem já usa.
+ *
+ * ------------------------------------------------------------
+ * AS TRAVAS
+ *   1. NUNCA CRIA. Só entra linha que casou com cadastro existente.
+ *   2. NUNCA SOBRESCREVE EM SILÊNCIO. E-mail já preenchido e
+ *      diferente vai para "divergências", não para a gravação.
+ *   3. NUNCA ESCOLHE ENTRE DOIS. Nome repetido de qualquer lado
+ *      é recusado e mostrado.
+ *   4. SÓ O E-MAIL MUDA. O pedido é montado pelo
+ *      BASEMESTRE.paraCadastro (que devolve ao Core o valor que já
+ *      existe em todos os outros campos), recebe só o campo email,
+ *      e é CONFERIDO campo a campo antes de sair.
+ *   5. E-MAIL TORTO NÃO ENTRA. Sem @, sem ponto no domínio, com
+ *      espaço — fica de fora, com o motivo escrito.
+ *
+ * ------------------------------------------------------------
+ * O QUE ESTE BLOCO NÃO RESOLVE, E EU DIGO ANTES
+ *   A gravação depende do usuarios.salvar do Core, que está
+ *   medido como incapaz de ATUALIZAR a partir deste endereço (ver
+ *   [ONDEMORA]). A leitura, o casamento e a prévia funcionam de
+ *   qualquer lugar; a gravação só pela URL /exec, ou depois do
+ *   conserto no Apps Script. A tela avisa isso antes de ele
+ *   apertar, em vez de deixá-lo descobrir no erro.
+ * ############################################################ */
+(function emailDoColaborador() {
+
+  var E = { ultimo: null, ultimoErro: "" };
+  try { window.EMAILCOLAB = E; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(v) { return (typeof U !== "undefined" && U.esc) ? U.esc(v) : lp(v); }
+  function icone_(n) { return (typeof ic === "function") ? ic(n) : ""; }
+  function matK(v) { return lp(v).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, ""); }
+  function nomeK(v) {
+    return lp(v).toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/\s+/g, " ").trim();
+  }
+  function emailK(v) { return lp(v).toLowerCase(); }
+  function aviso_(t, a, b) {
+    try { if (typeof toast === "function") toast(t, a, b); } catch (e) {}
+  }
+  function excluido_(u) { return /^EXCLU/.test(lp(u && u.status).toUpperCase()); }
+  function emailDe(u) { return lp(u && (u.email || u.eMail || u.mail)); }
+
+  /* TRAVA 5 — o que é e o que não é e-mail */
+  E.emailValido = function (v) {
+    var t = lp(v);
+    if (!t) return false;
+    if (/\s/.test(t)) return false;
+    if (t.indexOf("@") < 1) return false;
+    var dom = t.split("@")[1] || "";
+    if (t.split("@").length !== 2) return false;
+    if (dom.indexOf(".") < 1) return false;
+    if (/\.$/.test(dom)) return false;
+    return /^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/.test(t);
+  };
+
+  /* ============================================================
+     O LEITOR — só NOME e E-MAIL (e matrícula, se vier)
+     ============================================================ */
+  function semAcento(t) {
+    return String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "");
+  }
+  function chaveCol(t) { return semAcento(t).toLowerCase().replace(/[^a-z0-9]/g, ""); }
+
+  var APELIDO = {
+    nome: ["nome", "nomecompleto", "colaborador", "funcionario", "empregado"],
+    email: ["email", "emails", "correio", "correioeletronico", "mail", "enderecoeletronico"],
+    matricula: ["matricula", "matricul", "mat", "chapa", "registro"]
+  };
+
+  function separadorDe(linha) {
+    var cands = [";", "\t", ",", "|"];
+    var melhor = ";", quantos = -1;
+    cands.forEach(function (s) {
+      var n = linha.split(s).length - 1;
+      if (n > quantos) { quantos = n; melhor = s; }
+    });
+    return quantos > 0 ? melhor : null;
+  }
+
+  E.ler = function (texto) {
+    var linhas = String(texto || "").split(/\r\n|\r|\n/).filter(function (l) {
+      return lp(l) !== "";
+    });
+    if (linhas.length < 2) {
+      return { ok: false, codigo: "SEM_LINHAS",
+        mensagem: "Preciso de uma linha de cabeçalho e pelo menos uma pessoa embaixo." };
+    }
+    var sep = separadorDe(linhas[0]);
+    if (!sep) {
+      return { ok: false, codigo: "SEM_SEPARADOR",
+        mensagem: "Não achei separador na primeira linha. Cole direto do Excel, ou salve como CSV." };
+    }
+    var cab = linhas[0].split(sep).map(function (c) { return chaveCol(c); });
+    var ix = { nome: -1, email: -1, matricula: -1 };
+    Object.keys(APELIDO).forEach(function (campo) {
+      cab.forEach(function (c, i) {
+        if (ix[campo] === -1 && APELIDO[campo].indexOf(c) >= 0) ix[campo] = i;
+      });
+    });
+    if (ix.nome === -1 || ix.email === -1) {
+      return { ok: false, codigo: "FALTA_COLUNA",
+        mensagem: "O cabeçalho precisa ter uma coluna de NOME e uma de E-MAIL. " +
+          "Achei: " + (cab.filter(Boolean).join(", ") || "nada reconhecível") + "." };
+    }
+    var pessoas = [];
+    for (var i = 1; i < linhas.length; i++) {
+      var col = linhas[i].split(sep);
+      var nome = lp(col[ix.nome]);
+      var email = lp(col[ix.email]);
+      if (!nome && !email) continue;
+      pessoas.push({ linha: i + 1, nome: nome, email: email,
+        matricula: ix.matricula >= 0 ? lp(col[ix.matricula]) : "" });
+    }
+    if (!pessoas.length) {
+      return { ok: false, codigo: "SEM_PESSOAS", mensagem: "Achei o cabeçalho, mas nenhuma linha." };
+    }
+    return { ok: true, separador: sep === "\t" ? "tabulação" : sep, pessoas: pessoas };
+  };
+
+  /* ============================================================
+     O CASAMENTO — travas 1, 2, 3 e 5
+     ============================================================ */
+  E.casar = function (pessoas, usuarios) {
+    var us = lista_(usuarios).filter(function (u) { return u && !excluido_(u); });
+
+    var porMat = {}, porNome = {}, nomeRepSis = {};
+    us.forEach(function (u) {
+      var m = matK(u.matricula); if (m) (porMat[m] = porMat[m] || []).push(u);
+      var n = nomeK(u.nome); if (!n) return;
+      if (!porNome[n]) porNome[n] = u;
+      else if (lp(porNome[n].id) !== lp(u.id)) nomeRepSis[n] = true;
+    });
+    var vezesPl = {};
+    lista_(pessoas).forEach(function (p) {
+      var n = nomeK(p.nome); if (n) vezesPl[n] = (vezesPl[n] || 0) + 1;
+    });
+
+    var r = { preencher: [], jaIgual: [], divergentes: [], naoExiste: [],
+              ambiguo: [], emailTorto: [], semEmail: [], recusado: [] };
+
+    lista_(pessoas).forEach(function (p) {
+      var nome = lp(p.nome), email = lp(p.email);
+      var m = matK(p.matricula), n = nomeK(nome);
+
+      if (!email) { r.semEmail.push({ p: p }); return; }
+      if (!E.emailValido(email)) {
+        r.emailTorto.push({ p: p, motivo: "não parece um e-mail — não gravo o que não entendo" });
+        return;
+      }
+
+      var u = null, via = "";
+      /* "usar matrícula e ID interno como identificadores principais" */
+      if (m && porMat[m]) {
+        if (porMat[m].length === 1) { u = porMat[m][0]; via = "matrícula"; }
+        else { r.ambiguo.push({ p: p, motivo: porMat[m].length +
+          " cadastros com a matrícula " + lp(p.matricula) + " — não escolho" }); return; }
+      }
+      if (!u && n) {
+        if (nomeRepSis[n] || vezesPl[n] > 1) {
+          r.ambiguo.push({ p: p, motivo: nomeRepSis[n]
+            ? "este nome aparece mais de uma vez no cadastro — não escolho"
+            : "este nome aparece mais de uma vez na sua planilha — não escolho" });
+          return;
+        }
+        if (porNome[n]) { u = porNome[n]; via = "nome completo"; }
+      }
+
+      if (!u) { r.naoExiste.push({ p: p }); return; }          /* TRAVA 1 */
+
+      var atual = emailDe(u);
+      if (atual) {
+        if (emailK(atual) === emailK(email)) { r.jaIgual.push({ p: p, u: u }); return; }
+        /* TRAVA 2 — divergência vai para conferência, não para a gravação */
+        r.divergentes.push({ p: p, u: u, noCadastro: atual, naPlanilha: email, via: via });
+        return;
+      }
+
+      var pedido = null, ruins = ["o BASEMESTRE não está nesta versão"];
+      try {
+        if (typeof BASEMESTRE !== "undefined" && BASEMESTRE && BASEMESTRE.paraCadastro) {
+          pedido = BASEMESTRE.paraCadastro(
+            { idExistente: u.id, nome: lp(u.nome), matricula: lp(u.matricula) }, u);
+          /* o paraCadastro não carrega e-mail; eu acrescento SÓ ele */
+          pedido.email = email;
+          ruins = E.conferirCarga(pedido, u);
+        }
+      } catch (e) { ruins = [lp(e && e.message) || String(e)]; }
+
+      if (ruins.length) { r.recusado.push({ p: p, u: u, motivos: ruins }); return; }
+      r.preencher.push({ p: p, u: u, via: via, valor: email, pedido: pedido });
+    });
+
+    E.ultimo = r;
+    return r;
+  };
+
+  /* TRAVA 4 — só email pode ter mudado */
+  var PODE_MUDAR = { email: 1, id: 1, editando: 1 };
+  E.conferirCarga = function (carga, atual) {
+    var ruins = [];
+    Object.keys(carga || {}).forEach(function (k) {
+      if (PODE_MUDAR[k]) return;
+      var novo = carga[k], velho = atual ? atual[k] : undefined;
+      var sinonimos = {
+        lotacao: [atual && atual.lotacao, atual && atual.setor],
+        crachaNumero: [atual && atual.crachaNumero, atual && atual.numeroCracha],
+        cargo: [atual && atual.cargo, atual && atual.funcao],
+        funcao: [atual && atual.funcao, atual && atual.cargo],
+        perfil: [atual && atual.perfil, "colaborador"],
+        status: [atual && atual.status, "Ativo"]
+      };
+      var aceitos = sinonimos[k] || [velho];
+      var bate = aceitos.some(function (v) {
+        if (typeof novo === "boolean") return !!v === novo || (v === undefined && novo === false);
+        return lp(v) === lp(novo);
+      });
+      if (!bate) ruins.push(k + ': "' + lp(velho) + '" viraria "' + lp(novo) + '"');
+    });
+    return ruins;
+  };
+
+  E.salvar = function (dados) {
+    try {
+      if (typeof salvarUsuarioNoCore === "function") return salvarUsuarioNoCore(dados);
+      if (typeof window.salvarUsuarioNoCore === "function") return window.salvarUsuarioNoCore(dados);
+    } catch (e) {}
+    return API.call("usuarios", "salvar", dados);
+  };
+
+  /* ============================================================
+     A JANELA
+     ============================================================ */
+  function travas() {
+    return '<div class="alert a-blue mb12">' + icone_("cadeado") +
+      "<div><b>O que está travado</b>" +
+      "<br>· Preencho <b>só o e-mail</b>. Nenhum outro campo sai daqui." +
+      "<br>· Só de quem está <b>sem e-mail</b> no sistema." +
+      "<br>· <b>E-mail diferente não é sobrescrito</b> — vai para a lista de divergências, " +
+      "para você conferir." +
+      "<br>· <b>Não crio ninguém.</b>" +
+      "<br>· Nome repetido eu <b>não escolho</b>." +
+      "<br>· Casa pela <b>matrícula</b> primeiro; pelo nome só quando ele é único dos dois lados." +
+      "</div></div>";
+  }
+
+  function avisoDeGravacao() {
+    try {
+      if (typeof window.__portaDeGravacao !== "function") return "";
+      var d = window.__portaDeGravacao();
+      if (d.direta || d.motivo !== "SEM_PORTA_NESTE_ENDERECO") return "";
+      return '<div class="alert a-yellow mb12">' + icone_("alerta") +
+        "<div><b>Antes de começar: deste endereço a gravação pode ser recusada.</b><br>" +
+        d.texto + (typeof window.__saidasDeGravacao === "function"
+          ? window.__saidasDeGravacao() : "") + "</div></div>";
+    } catch (e) { return ""; }
+  }
+
+  E.modal = function () {
+    UI.modal({
+      titulo: "Trazer os e-mails da planilha",
+      sub: "só o e-mail, só de quem está sem",
+      tamanho: "lg",
+      corpo: avisoDeGravacao() + travas() +
+        '<div id="emPasso1">' +
+        '<div class="field"><label>Cole a planilha aqui (ou escolha o arquivo)</label>' +
+        '<textarea class="textarea mono" id="emTexto" rows="7" ' +
+        'placeholder="Cabeçalho com NOME e E-MAIL. Matrícula, se tiver, melhora o casamento."' +
+        "></textarea></div>" +
+        '<div class="flex gap8" style="flex-wrap:wrap">' +
+        '<input type="file" id="emArquivo" accept=".csv,.txt,.tsv" style="display:none">' +
+        '<button class="btn btn-ghost btn-sm" id="emEscolher">' + icone_("upload") +
+        "Escolher arquivo</button>" +
+        '<button class="btn btn-primary btn-sm" id="emLer">' + icone_("busca") +
+        "Conferir a planilha</button></div>" +
+        '<div id="emErro" class="mt8"></div></div>' +
+        '<div id="emPasso2"></div>',
+      rodape: '<button class="btn btn-ghost" data-x>Fechar</button>',
+      aoAbrir: function (w, fechar) {
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        var arq = w.querySelector("#emArquivo");
+        w.querySelector("#emEscolher").addEventListener("click", function () { arq.click(); });
+        arq.addEventListener("change", function () {
+          var f = arq.files && arq.files[0];
+          if (!f) return;
+          if (typeof SOCARGO !== "undefined" && SOCARGO.lerArquivo) {
+            SOCARGO.lerArquivo(f).then(function (res) {
+              w.querySelector("#emTexto").value = res.texto;
+              w.querySelector("#emErro").innerHTML = '<div class="alert a-gray">' + icone_("info") +
+                "<div>Li como <b>" + esc_(res.codificacao) + "</b>" +
+                (res.trocou ? " (o arquivo não estava em UTF-8)" : "") + "." +
+                (res.suspeito ? " <b>Ainda há caracteres estranhos</b> — salve como CSV UTF-8." : "") +
+                "</div></div>";
+            });
+          }
+        });
+        w.querySelector("#emLer").addEventListener("click", function () { conferir(w); });
+      }
+    });
+  };
+
+  function conferir(w) {
+    var cx = w.querySelector("#emErro");
+    cx.innerHTML = "";
+    var texto = lp(w.querySelector("#emTexto").value);
+    if (!texto) {
+      cx.innerHTML = '<div class="alert a-yellow">' + icone_("alerta") +
+        "<div>Cole a planilha ou escolha o arquivo.</div></div>";
+      return;
+    }
+    var lido = E.ler(texto);
+    if (!lido.ok) {
+      cx.innerHTML = '<div class="alert a-red">' + icone_("alerta") +
+        "<div><b>" + esc_(lido.codigo) + "</b>" + esc_(lido.mensagem) + "</div></div>";
+      return;
+    }
+    var bt = w.querySelector("#emLer");
+    bt.disabled = true; bt.innerHTML = "Lendo o cadastro…";
+    Promise.resolve(API.call("usuarios", "listar", {})).then(function (r) {
+      bt.disabled = false; bt.innerHTML = icone_("busca") + "Conferir a planilha";
+      if (!r || !r.ok) {
+        cx.innerHTML = '<div class="alert a-red">' + icone_("alerta") +
+          "<div>Não li os usuários: " + esc_(lp(r && r.mensagem)) + "</div></div>";
+        return;
+      }
+      pintar(w, lido, E.casar(lido.pessoas, lista_(r.dados)));
+    });
+  }
+
+  function tabela(linhas, extra) {
+    return '<div style="max-height:260px;overflow:auto">' +
+      UI.tabela({
+        linhas: linhas,
+        colunas: [
+          { rotulo: "Linha", num: true, render: function (x) { return x.p.linha; } },
+          { rotulo: "Nome", render: function (x) { return "<b>" + esc_(x.p.nome) + "</b>"; } },
+          { rotulo: "E-mail na planilha", render: function (x) {
+              return '<span class="mono small">' + esc_(x.p.email || "—") + "</span>"; } },
+          extra
+        ]
+      }) + "</div>";
+  }
+  function caixa(titulo, linhas, extra) {
+    return '<div class="card mb12"><div class="card-body">' +
+      '<b style="font-size:13px">' + esc_(titulo) + " (" + linhas.length + ")</b>" +
+      (linhas.length ? '<div class="mt8">' + tabela(linhas, extra) + "</div>"
+                     : '<p class="small muted" style="margin:6px 0 0">Nenhum.</p>') +
+      "</div></div>";
+  }
+
+  function pintar(w, lido, r) {
+    w.querySelector("#emPasso1").style.display = "none";
+    var total = lista_(lido.pessoas).length;
+    var alvo = w.querySelector("#emPasso2");
+
+    alvo.innerHTML =
+      '<div class="alert a-gray mb12">' + icone_("info") +
+      "<div><b>" + total + " linha(s)</b> · separador " + esc_(lido.separador) + "</div></div>" +
+
+      (r.preencher.length
+        ? '<div class="alert a-green mb12">' + icone_("checkC") +
+          "<div><b>" + r.preencher.length + " e-mail(s) vão entrar.</b> Nenhum outro campo muda." +
+          '<br><button class="btn btn-orange mt8" data-em-gravar>' + icone_("checkC") +
+          "Preencher os " + r.preencher.length + " e-mails</button></div></div>"
+        : '<div class="alert a-yellow mb12">' + icone_("alerta") +
+          "<div><b>Nenhum e-mail a preencher.</b> Das " + total + " linhas: " +
+          "<b>" + r.jaIgual.length + "</b> já tinham o mesmo · " +
+          "<b>" + r.divergentes.length + "</b> divergentes · " +
+          "<b>" + r.naoExiste.length + "</b> fora do cadastro · " +
+          "<b>" + r.ambiguo.length + "</b> ambíguos · " +
+          "<b>" + r.emailTorto.length + "</b> com e-mail inválido · " +
+          "<b>" + r.semEmail.length + "</b> sem e-mail na planilha.</div></div>") +
+
+      caixa("Vão receber o e-mail", r.preencher,
+        { rotulo: "Casou por", render: function (x) {
+            return '<span class="small muted">' + esc_(x.via) + "</span>"; } }) +
+
+      /* a lista que o documento dele pede em letras maiúsculas */
+      '<div class="card mb12" style="border-left:4px solid var(--vermelho,#D4380D)"><div class="card-body">' +
+      '<b style="font-size:13px">Divergências — e-mail diferente do que já existe (' +
+      r.divergentes.length + ")</b>" +
+      '<p class="small" style="margin:6px 0 0">Estes <b>não vou gravar</b>. ' +
+      "Trocar e-mail de cadastro sem alguém olhar é o tipo de coisa que só se descobre " +
+      "quando a notificação vai para a pessoa errada.</p>" +
+      (r.divergentes.length
+        ? '<div class="mt8" style="max-height:260px;overflow:auto">' +
+          UI.tabela({
+            linhas: r.divergentes,
+            colunas: [
+              { rotulo: "Nome", render: function (x) { return "<b>" + esc_(x.p.nome) + "</b>"; } },
+              { rotulo: "No cadastro", render: function (x) {
+                  return '<span class="mono small">' + esc_(x.noCadastro) + "</span>"; } },
+              { rotulo: "Na planilha", render: function (x) {
+                  return '<span class="mono small">' + esc_(x.naPlanilha) + "</span>"; } },
+              { rotulo: "Casou por", render: function (x) {
+                  return '<span class="small muted">' + esc_(x.via) + "</span>"; } }
+            ]
+          }) + "</div>"
+        : '<p class="small muted" style="margin:6px 0 0">Nenhuma.</p>') +
+      "</div></div>" +
+
+      caixa("Já tinham o mesmo e-mail", r.jaIgual,
+        { rotulo: "O que faço", render: function () {
+            return '<span class="small">nada — já está igual.</span>'; } }) +
+      caixa("Não existem no cadastro — NÃO criei", r.naoExiste,
+        { rotulo: "O que faço", render: function () {
+            return '<span class="small">nada. Cadastrar gente é em Usuários, de propósito.</span>'; } }) +
+      caixa("Nome repetido — deixei para você", r.ambiguo,
+        { rotulo: "Por quê", render: function (x) {
+            return '<span class="small">' + esc_(x.motivo) + "</span>"; } }) +
+      caixa("E-mail inválido", r.emailTorto,
+        { rotulo: "Por quê", render: function (x) {
+            return '<span class="small">' + esc_(x.motivo) + "</span>"; } }) +
+      caixa("Sem e-mail na planilha", r.semEmail,
+        { rotulo: "O que faço", render: function () {
+            return '<span class="small">nada — não há o que copiar.</span>'; } }) +
+      caixa("Recusadas pela conferência", r.recusado,
+        { rotulo: "O que mudaria além do e-mail", render: function (x) {
+            return '<span class="small">' + esc_(lista_(x.motivos).join("; ")) + "</span>"; } }) +
+
+      '<div id="emAndamento" class="mt8"></div>' +
+      (r.preencher.length
+        ? '<button class="btn btn-orange btn-block mt8" data-em-gravar>' + icone_("checkC") +
+          "Preencher os " + r.preencher.length + " e-mails</button>"
+        : "");
+
+    w.querySelectorAll("[data-em-gravar]").forEach(function (b) {
+      b.addEventListener("click", function () { gravar(w, r); });
+    });
+  }
+
+  function gravar(w, r) {
+    var botoes = [].slice.call(w.querySelectorAll("[data-em-gravar]"));
+    botoes.forEach(function (b) { b.disabled = true; });
+    var cx = w.querySelector("#emAndamento");
+    var fila = r.preencher.slice();
+    var feitos = [], falhou = [], barrados = [];
+
+    function passo(i) {
+      if (i >= fila.length) {
+        var d = (typeof window.__portaDeGravacao === "function")
+          ? window.__portaDeGravacao() : { direta: false, texto: "" };
+        var saidas = (typeof window.__saidasDeGravacao === "function")
+          ? window.__saidasDeGravacao() : "";
+        cx.innerHTML =
+          (feitos.length ? '<div class="alert a-green">' + icone_("checkC") +
+            "<div><b>" + feitos.length + " e-mail(s) preenchido(s)</b>" +
+            (d.direta ? "<br><span class='small'>gravado pela " + esc_(d.texto) + "</span>" : "") +
+            "</div></div>" : "") +
+          (barrados.length ? '<div class="alert a-red mt8">' + icone_("cadeado") +
+            "<div><b>" + barrados.length + " barrada(s) na conferência</b>" +
+            barrados.slice(0, 10).map(function (x) { return "<br>" + esc_(x); }).join("") +
+            "</div></div>" : "") +
+          (falhou.length ? '<div class="alert a-red mt8">' + icone_("alerta") +
+            "<div><b>" + falhou.length + " não entrou</b>" +
+            (d.direta ? "" : "<br><br><b>Por que:</b> " + d.texto + saidas +
+              "<br><br><b>O que o servidor respondeu:</b>") +
+            falhou.slice(0, 10).map(function (x) { return "<br>" + esc_(x); }).join("") +
+            (falhou.length > 10 ? "<br>…" : "") + "</div></div>" : "");
+        botoes.forEach(function (b) { b.disabled = false; });
+        try { if (typeof CACHE !== "undefined" && CACHE.invalidar) CACHE.invalidar(); } catch (e) {}
+        if (feitos.length) aviso_("ok", "E-mails preenchidos",
+          feitos.length + " de " + fila.length + " · nenhum outro campo mudou.");
+        return;
+      }
+      var x = fila[i];
+      cx.innerHTML = '<div class="alert a-gray">' + icone_("sync") +
+        "<div><b>" + (i + 1) + " de " + fila.length + "</b>" + esc_(x.p.nome) + "</div></div>";
+
+      var ruins = E.conferirCarga(x.pedido, x.u);
+      if (ruins.length) { barrados.push(x.p.nome + " — " + ruins.join("; ")); return passo(i + 1); }
+      if (emailDe(x.u)) {
+        barrados.push(x.p.nome + " — passou a ter e-mail no meio do caminho; não sobrescrevi");
+        return passo(i + 1);
+      }
+
+      Promise.resolve(E.salvar(x.pedido)).then(function (res) {
+        if (res && res.ok) feitos.push(x.p.nome);
+        else falhou.push(x.p.nome + " — " + (lp(res && res.mensagem) || "o servidor não explicou"));
+      }, function (e) {
+        falhou.push(x.p.nome + " — " + (lp(e && e.message) || String(e)));
+      }).then(function () { passo(i + 1); });
+    }
+    passo(0);
+  }
+
+  E.__travas = travas;
+  E.__pintar = pintar;
+})();
+</script>
+
+
+<script>
+/* ############################################################
+ * IDENTIFICAÇÃO / CRACHÁ  ·  busca: [IDCRACHA]
+ * ------------------------------------------------------------
+ * DO DOCUMENTO DELE (03/11 10:04)
+ *   §3 "Na tela de detalhes do usuário, criar uma seção chamada
+ *       IDENTIFICAÇÃO / CRACHÁ. Exibir: foto do perfil, foto da
+ *       frente do crachá, foto do verso, número, status, data de
+ *       emissão, validade. Exibir claramente: COM CRACHÁ, SEM
+ *       CRACHÁ, CRACHÁ INATIVO, VÍNCULO PENDENTE."
+ *   §4 "Não misturar foto do perfil com foto do crachá. Se a foto
+ *       existir em um módulo e não no outro, apresentar a imagem
+ *       disponível e indicar sua origem."
+ *   §6 "...imagens existentes que não estão sendo exibidas."
+ *
+ * ------------------------------------------------------------
+ * O QUE EU DESCOBRI LENDO O ARQUIVO DELE, ANTES DE ESCREVER
+ *
+ *   1. A "frente" e o "verso" do crachá NÃO são imagens guardadas.
+ *      São desenhados pelo próprio sistema (.cr-cracha.cr-frente e
+ *      .cr-cracha.cr-tras). O que existe gravado é UMA foto: a do
+ *      rosto, dentro do registro do crachá (d.foto). Então exibir
+ *      "a foto da frente" é exibir o cartão montado — e é isso que
+ *      esta janela faz, usando o desenhador que já existe.
+ *
+ *   2. Existem DUAS rotas de crachá, e elas não devolvem a mesma
+ *      coisa:
+ *        cracha.listar  -> a lista (97 registros, sem imagem)
+ *        cracha.obter   -> UM registro, completo
+ *      A tela de Conferência diz "0 de 97 com foto" porque ela
+ *      olha a LISTA. Se a imagem estiver só no obter, então as
+ *      fotos existem e não estão sendo exibidas — que é exatamente
+ *      o item 6 do documento dele. Eu não vou afirmar isso: a
+ *      sonda abaixo pergunta ao Core e mostra a resposta.
+ *
+ * O QUE ESTE BLOCO NÃO FAZ
+ *   NÃO grava, NÃO vincula nada automaticamente, NÃO apaga crachá,
+ *   NÃO altera matrícula, NÃO sobrescreve foto. Tudo aqui é
+ *   leitura. A foto do perfil e a do crachá aparecem SEPARADAS,
+ *   cada uma com a origem escrita embaixo — nunca uma no lugar da
+ *   outra.
+ * ############################################################ */
+(function identificacaoCracha() {
+
+  var I = { ultimo: null, ultimoErro: "", sonda: null };
+  try { window.IDCRACHA = I; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(v) { return (typeof U !== "undefined" && U.esc) ? U.esc(v) : lp(v); }
+  function icone_(n) { return (typeof ic === "function") ? ic(n) : ""; }
+  function matK(v) { return lp(v).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, ""); }
+  function nomeK(v) {
+    return lp(v).toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/\s+/g, " ").trim();
+  }
+  function aviso_(t, a, b) {
+    try { if (typeof toast === "function") toast(t, a, b); } catch (e) {}
+  }
+  var CAMPOS_FOTO = ["foto", "imagem", "fotoUrl", "urlFoto", "fotoURL",
+                     "imagemUrl", "avatar", "fotoBase64", "foto64", "retrato"];
+  function fotoDe(o) {
+    if (!o) return { url: "", campo: "" };
+    for (var i = 0; i < CAMPOS_FOTO.length; i++) {
+      var v = lp(o[CAMPOS_FOTO[i]]);
+      if (v && v.length > 12) return { url: v, campo: CAMPOS_FOTO[i] };
+    }
+    return { url: "", campo: "" };
+  }
+
+  /* ============================================================
+     §6 — A SONDA: a imagem existe no obter e não no listar?
+     ============================================================ */
+  I.sondarImagens = function (codigos) {
+    var alvos = lista_(codigos).slice(0, 5);
+    if (!alvos.length) return Promise.resolve([]);
+    var saida = [];
+    function um(i) {
+      if (i >= alvos.length) { I.sonda = saida; return saida; }
+      var cod = lp(alvos[i]);
+      var t0 = Date.now();
+      return Promise.resolve(API.call("cracha", "obter", { codigo: cod, comQR: false }))
+        .then(function (r) {
+          var d = (r && r.ok) ? (r.dados || {}) : null;
+          var f = fotoDe(d);
+          saida.push({ codigo: cod, ms: Date.now() - t0, ok: !!(r && r.ok),
+            mensagem: lp(r && r.mensagem), campos: d ? Object.keys(d) : [],
+            temImagem: !!f.url, campoDaImagem: f.campo,
+            tamanho: f.url ? f.url.length : 0 });
+          return um(i + 1);
+        }, function (e) {
+          saida.push({ codigo: cod, ms: Date.now() - t0, ok: false,
+            mensagem: lp(e && e.message) || String(e), campos: [], temImagem: false });
+          return um(i + 1);
+        });
+    }
+    return Promise.resolve(um(0)).then(function () { return saida; });
+  };
+
+  I.modalSonda = function () {
+    var codigos = [];
+    try {
+      codigos = lista_(FOTOCRACHA.fichario).filter(function (c) { return !c.temFoto; })
+        .map(function (c) { return lp(c.codigo); }).filter(Boolean);
+      if (!codigos.length) {
+        codigos = lista_(FOTOCRACHA.fichario).map(function (c) { return lp(c.codigo); })
+          .filter(Boolean);
+      }
+    } catch (e) { codigos = []; }
+
+    if (!codigos.length) {
+      aviso_("warn", "Sem crachás para sondar", "A lista de crachás não foi carregada.");
+      return;
+    }
+
+    UI.modal({
+      titulo: "A imagem existe e não está sendo exibida?",
+      sub: "pergunto ao Core, crachá por crachá",
+      tamanho: "md",
+      corpo: '<div class="alert a-gray mb12">' + icone_("info") +
+        "<div>A tela de Conferência olha o <span class='mono'>cracha.listar</span>, que " +
+        "pode não trazer a imagem (ela é pesada, e muitas listagens omitem de propósito). " +
+        "Aqui eu chamo o <span class='mono'>cracha.obter</span> em até 5 crachás e mostro " +
+        "o que vem. <b>Só leitura.</b></div></div>" +
+        '<div id="idsResultado"><div class="alert a-gray">' + icone_("sync") +
+        "<div>Perguntando…</div></div></div>",
+      rodape: '<button class="btn btn-ghost" data-x>Fechar</button>',
+      aoAbrir: function (w, fechar) {
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        I.sondarImagens(codigos).then(function (res) {
+          var comImagem = res.filter(function (x) { return x.temImagem; });
+          var cx = w.querySelector("#idsResultado");
+          cx.innerHTML =
+            (comImagem.length
+              ? '<div class="alert a-green mb12">' + icone_("checkC") +
+                "<div><b>Achei imagem em " + comImagem.length + " de " + res.length + ".</b>" +
+                "<br>Ou seja: <b>as fotos existem</b> e não aparecem porque a listagem não " +
+                "as traz. O campo é <span class='mono'>" +
+                esc_(comImagem[0].campoDaImagem) + "</span>. " +
+                "Agora dá para exibi-las: eu busco pelo <span class='mono'>cracha.obter</span> " +
+                "quando a pessoa for aberta — sem pedir as 97 de uma vez.</div></div>"
+              : '<div class="alert a-yellow mb12">' + icone_("alerta") +
+                "<div><b>Nenhuma imagem em " + res.length + " crachás, nem pelo obter.</b>" +
+                "<br>Então as fotos não estão no registro do crachá. Se você salva a foto " +
+                "em algum lugar, ela está em outro conjunto — e a lista de campos abaixo " +
+                "mostra tudo o que o Core devolveu, para a gente achar onde.</div></div>") +
+            UI.tabela({
+              linhas: res,
+              colunas: [
+                { rotulo: "Crachá", render: function (x) {
+                    return '<span class="mono small">' + esc_(x.codigo) + "</span>"; } },
+                { rotulo: "Resposta", render: function (x) {
+                    return x.ok ? '<span class="badge b-green">ok</span>'
+                                : '<span class="badge b-red">falhou</span>'; } },
+                { rotulo: "ms", num: true, render: function (x) { return x.ms; } },
+                { rotulo: "Imagem", render: function (x) {
+                    return x.temImagem
+                      ? "<b>" + esc_(x.campoDaImagem) + "</b> · " +
+                        Math.round(x.tamanho / 1024) + " KB"
+                      : '<span class="small muted">não veio</span>'; } }
+              ]
+            }) +
+            '<div class="section-title mt12">Campos que vieram no primeiro crachá</div>' +
+            '<p class="mono small" style="word-break:break-all">' +
+            esc_((res[0] && res[0].campos.join(", ")) || "—") + "</p>" +
+            '<p class="small muted">' + esc_(lp(res[0] && res[0].mensagem)) + "</p>";
+        });
+      }
+    });
+  };
+
+  /* ============================================================
+     §3 — A FICHA DE IDENTIFICAÇÃO
+     ============================================================ */
+  I.situacao = function (u, crachas, ambiguo) {
+    if (ambiguo) return { rotulo: "VÍNCULO PENDENTE", cor: "b-yellow",
+      texto: "Há crachá com este nome, mas a matrícula não confere ou o nome se repete. " +
+             "Não vinculo por palpite." };
+    if (!crachas.length) return { rotulo: "SEM CRACHÁ", cor: "b-red",
+      texto: "Nenhum crachá encontrado para esta pessoa." };
+    var ativo = crachas.filter(function (c) { return /ATIV/i.test(lp(c.status)); });
+    if (!ativo.length) return { rotulo: "CRACHÁ INATIVO", cor: "b-yellow",
+      texto: crachas.length + " crachá(s), nenhum ativo." };
+    return { rotulo: "COM CRACHÁ", cor: "b-green",
+      texto: ativo.length + " ativo(s)" +
+        (crachas.length > ativo.length
+          ? " · " + (crachas.length - ativo.length) + " inativo(s)" : "") };
+  };
+
+  I.crachasDe = function (u) {
+    var fich = [];
+    try { fich = lista_(FOTOCRACHA.fichario); } catch (e) { fich = []; }
+    var m = matK(u && u.matricula), n = nomeK(u && u.nome);
+    var porMat = fich.filter(function (c) {
+      return m && matK(c.matricula || c.codigo) === m;
+    });
+    if (porMat.length) return { crachas: porMat, via: "matrícula", ambiguo: false };
+    var porNome = fich.filter(function (c) { return n && nomeK(c.nome) === n; });
+    if (!porNome.length) return { crachas: [], via: "", ambiguo: false };
+    /* nome bate mas a matrícula não — é exatamente o VÍNCULO PENDENTE */
+    return { crachas: [], via: "nome", ambiguo: true, candidatos: porNome };
+  };
+
+  function quadroFoto(titulo, url, origem, vazio) {
+    return '<div style="text-align:center">' +
+      '<div style="width:120px;height:146px;border:1px solid var(--linha,#E3E8EF);' +
+      'border-radius:10px;overflow:hidden;background:var(--fundo-2,#F7F9FC);' +
+      'display:grid;place-items:center;margin:0 auto">' +
+      (url ? '<img src="' + esc_(url) + '" style="width:100%;height:100%;object-fit:cover">'
+           : '<span class="small muted" style="padding:8px">' + esc_(vazio) + "</span>") +
+      "</div>" +
+      '<div class="small" style="margin-top:6px"><b>' + esc_(titulo) + "</b></div>" +
+      '<div class="small muted">' + esc_(origem) + "</div></div>";
+  }
+
+  I.ficha = function (u) {
+    if (!u) return;
+    var v = I.crachasDe(u);
+    var sit = I.situacao(u, v.crachas, v.ambiguo);
+    var fotoPerfil = fotoDe(u);
+    var c0 = v.crachas[0] || null;
+
+    UI.modal({
+      titulo: "Identificação / Crachá",
+      sub: lp(u.nome) + " · matrícula " + (lp(u.matricula) || "não informada"),
+      tamanho: "md",
+      corpo:
+        '<div class="flex center gap8 mb12" style="flex-wrap:wrap">' +
+        '<span class="badge ' + sit.cor + '" style="font-size:12px">' + esc_(sit.rotulo) + "</span>" +
+        '<span class="small muted">' + esc_(sit.texto) + "</span></div>" +
+
+        /* §4 — as duas fotos, separadas, cada uma com a origem */
+        '<div class="flex gap16 mb16" style="flex-wrap:wrap;justify-content:center">' +
+        quadroFoto("Foto do perfil", fotoPerfil.url,
+          fotoPerfil.url ? "cadastro de Usuários · campo " + fotoPerfil.campo
+                         : "cadastro de Usuários",
+          "sem foto no cadastro") +
+        quadroFoto("Foto do crachá", "",
+          "módulo Crachás",
+          c0 ? (c0.temFoto ? "a lista não traz a imagem — use a sonda"
+                           : "este crachá não tem foto")
+             : "sem crachá vinculado") +
+        "</div>" +
+        '<div class="alert a-gray mb12">' + icone_("info") +
+        "<div>As duas fotos são <b>independentes</b>. Eu não ponho uma no lugar da outra, " +
+        "e não copio nenhuma para o outro módulo.</div></div>" +
+
+        '<div class="section-title">Crachá vinculado</div>' +
+        (v.crachas.length
+          ? UI.tabela({
+              linhas: v.crachas,
+              colunas: [
+                { rotulo: "Código", render: function (c) {
+                    return '<span class="mono">' + esc_(lp(c.codigo) || "—") + "</span>"; } },
+                { rotulo: "Matrícula", render: function (c) {
+                    return '<span class="mono">' + esc_(lp(c.matricula) || "—") + "</span>"; } },
+                { rotulo: "Função", render: function (c) { return esc_(lp(c.funcao) || "—"); } },
+                { rotulo: "Status", render: function (c) {
+                    return '<span class="badge ' +
+                      (/ATIV/i.test(lp(c.status)) ? "b-green" : "b-gray") + '">' +
+                      esc_(lp(c.status) || "—") + "</span>"; } }
+              ]
+            })
+          : v.ambiguo
+            ? '<div class="alert a-yellow">' + icone_("alerta") +
+              "<div><b>Vínculo pendente.</b> Achei " + lista_(v.candidatos).length +
+              " crachá(s) com este nome, mas a matrícula não confere: " +
+              esc_(lista_(v.candidatos).map(function (c) {
+                return lp(c.codigo) + " (mat. " + (lp(c.matricula) || "vazia") + ")";
+              }).join(", ")) +
+              ".<br>Vincular por nome aqui poria o crachá de um no outro. Quem decide é você." +
+              "</div></div>"
+            : '<p class="small muted">Nenhum crachá para esta pessoa.</p>') +
+
+        '<div class="section-title mt16">Dados do cadastro</div>' +
+        '<div class="grid g2" style="gap:8px 16px">' +
+        [["ID interno", lp(u.id)], ["Matrícula", lp(u.matricula)],
+         ["Cargo", lp(u.cargo || u.funcao)], ["Setor", lp(u.setor || u.lotacao)],
+         ["Obra", lp(u.obra)], ["E-mail", lp(u.email)],
+         ["Situação", lp(u.status)], ["Admissão", lp(u.admissao || u.dataAdmissao)]]
+          .map(function (par) {
+            return '<div><div class="small muted">' + esc_(par[0]) + "</div>" +
+              "<div><b>" + esc_(par[1] || "—") + "</b></div></div>";
+          }).join("") +
+        "</div>",
+      rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' +
+        (c0 ? '<button class="btn btn-primary" data-id-obter>' + icone_("busca") +
+          "Buscar a foto deste crachá</button>" : ""),
+      aoAbrir: function (w, fechar) {
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        var bt = w.querySelector("[data-id-obter]");
+        if (bt) bt.addEventListener("click", function () {
+          bt.disabled = true; bt.innerHTML = "Buscando…";
+          I.sondarImagens([lp(c0.codigo)]).then(function (res) {
+            bt.disabled = false; bt.innerHTML = icone_("busca") + "Buscar a foto deste crachá";
+            var r0 = res[0];
+            if (r0 && r0.temImagem) {
+              aviso_("ok", "A foto existe no crachá",
+                "campo " + r0.campoDaImagem + " · " + Math.round(r0.tamanho / 1024) + " KB. " +
+                "Ela não aparecia porque a listagem não a traz.");
+              I.ultimo = r0;
+              fechar();
+              I.fichaComFoto(u, r0);
+            } else {
+              aviso_("warn", "Sem foto neste crachá",
+                lp(r0 && r0.mensagem) || "o Core respondeu sem imagem.");
+            }
+          });
+        });
+      }
+    });
+  };
+
+  /* reabre a ficha já com a imagem que o obter trouxe */
+  I.fichaComFoto = function (u, r0) {
+    var v = I.crachasDe(u);
+    var sit = I.situacao(u, v.crachas, v.ambiguo);
+    var fotoPerfil = fotoDe(u);
+    UI.modal({
+      titulo: "Identificação / Crachá",
+      sub: lp(u.nome),
+      tamanho: "md",
+      corpo: '<div class="flex center gap8 mb12"><span class="badge ' + sit.cor + '">' +
+        esc_(sit.rotulo) + "</span></div>" +
+        '<div class="flex gap16 mb16" style="flex-wrap:wrap;justify-content:center">' +
+        quadroFoto("Foto do perfil", fotoPerfil.url,
+          fotoPerfil.url ? "cadastro de Usuários" : "cadastro de Usuários", "sem foto") +
+        quadroFoto("Foto do crachá", I.__ultimaUrl || "",
+          "módulo Crachás · campo " + lp(r0 && r0.campoDaImagem), "sem foto") +
+        "</div>" +
+        '<div class="alert a-green">' + icone_("checkC") +
+        "<div>Esta imagem veio do <span class='mono'>cracha.obter</span>, não da listagem. " +
+        "É por isso que a Conferência contava zero: ela olha a lista.</div></div>",
+      rodape: '<button class="btn btn-ghost" data-x>Fechar</button>',
+      aoAbrir: function (w, fechar) {
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+      }
+    });
+  };
+
+  /* ============================================================
+     ACHAR A PESSOA
+     ============================================================ */
+  I.procurar = function () {
+    UI.modal({
+      titulo: "Identificação / Crachá",
+      sub: "procure a pessoa pelo nome ou pela matrícula",
+      tamanho: "md",
+      corpo: '<div class="field"><label>Nome ou matrícula</label>' +
+        '<input class="input" id="idBusca" autocomplete="off" placeholder="digite ao menos 3 letras"></div>' +
+        '<div id="idLista"></div>',
+      rodape: '<button class="btn btn-ghost" data-x>Fechar</button>',
+      aoAbrir: function (w, fechar) {
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        var cx = w.querySelector("#idLista");
+        var todos = [];
+        cx.innerHTML = '<div class="alert a-gray">' + icone_("sync") + "<div>Lendo…</div></div>";
+        Promise.resolve(API.call("usuarios", "listar", {})).then(function (r) {
+          if (!r || !r.ok) {
+            cx.innerHTML = '<div class="alert a-red">' + icone_("alerta") +
+              "<div>" + esc_(lp(r && r.mensagem)) + "</div></div>";
+            return;
+          }
+          todos = lista_(r.dados).filter(function (u) {
+            return !/^EXCLU/.test(lp(u.status).toUpperCase());
+          });
+          cx.innerHTML = '<p class="small muted">' + todos.length + " pessoas. Digite para achar.</p>";
+          var inp = w.querySelector("#idBusca");
+          inp.addEventListener("input", function () {
+            var t = nomeK(inp.value);
+            if (t.length < 3) {
+              cx.innerHTML = '<p class="small muted">' + todos.length +
+                " pessoas. Digite ao menos 3 letras.</p>";
+              return;
+            }
+            var achados = todos.filter(function (u) {
+              return nomeK(u.nome).indexOf(t) >= 0 ||
+                     matK(u.matricula).indexOf(matK(inp.value)) === 0 && matK(inp.value);
+            }).slice(0, 20);
+            cx.innerHTML = achados.length
+              ? achados.map(function (u, i) {
+                  var vv = I.crachasDe(u);
+                  var s = I.situacao(u, vv.crachas, vv.ambiguo);
+                  return '<div class="card mb8" data-id-abrir="' + i + '" style="cursor:pointer">' +
+                    '<div class="card-body" style="padding:9px 12px">' +
+                    '<div class="flex between center gap8">' +
+                    "<div><b>" + esc_(u.nome) + "</b>" +
+                    '<div class="small muted">matrícula ' + esc_(lp(u.matricula) || "—") +
+                    " · " + esc_(lp(u.cargo || u.funcao) || "sem cargo") + "</div></div>" +
+                    '<span class="badge ' + s.cor + '">' + esc_(s.rotulo) + "</span>" +
+                    "</div></div></div>";
+                }).join("")
+              : '<p class="small muted">Ninguém com isso.</p>';
+            cx.querySelectorAll("[data-id-abrir]").forEach(function (b) {
+              b.addEventListener("click", function () {
+                var u = achados[Number(b.getAttribute("data-id-abrir"))];
+                if (!u) return;
+                fechar();
+                I.ficha(u);
+              });
+            });
+          });
+        });
+      }
+    });
+  };
+
+  I.__fotoDe = fotoDe;
+  I.__quadroFoto = quadroFoto;
 })();
 </script>
 
