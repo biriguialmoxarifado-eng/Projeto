@@ -64819,8 +64819,11 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 366 · 02/11";
+var ALMOXA_VERSAO = "sistema 368 · 02/11";
 var ALMOXA_NOVIDADES = [
+  "368 · trazer da planilha SO o cargo, e so de quem esta sem cargo; nao cria ninguem",
+  "367 · a ficha pergunta a assinatura pela mesma rota do painel, quando o resto falha",
+  "367 · a frase \"procurei em...\" passa a ser da pessoa, nao da ultima busca",
   "366 · conferencia do cadastro: quem esta sem cargo, setor, foto, cracha ou matricula",
   "366 · preencher cargo e setor a partir do cracha, so onde esta em branco",
   "365 · a assinatura termina de ser procurada depois que a ficha ja esta na tela",
@@ -100380,6 +100383,20 @@ emissao: hoje,
         "</div></div>"
       : "") +
 
+    /* [SOCARGO] a planilha dele entra AQUI, na mesma tela onde ele
+       está vendo quem está sem cargo — foi o que ele pediu */
+    '<div class="card mb16" style="border-left:4px solid var(--azul-acao,#0B2A55)"><div class="card-body">' +
+    '<b style="font-size:14px">Trazer os cargos da sua planilha</b>' +
+    '<p class="small" style="margin:6px 0 10px">' +
+    "Cole a planilha das suas pessoas. Eu copio <b>só o cargo</b>, e <b>só de quem está " +
+    "sem cargo</b> no sistema. Na sua planilha a coluna é <b>FUNÇÃO</b>; aqui é <b>CARGO</b> " +
+    "— eu caso as duas.</p>" +
+    '<p class="small muted" style="margin:0 0 12px">Não cria ninguém, não duplica, ' +
+    "não traz setor, não traz matrícula, não traz mais nada.</p>" +
+    '<button class="btn btn-primary" data-cc-socargo>' + icone_("upload") +
+    "Trazer os cargos de uma planilha</button>" +
+    "</div></div>" +
+
     painel("semCargo", "Sem cargo (" + r.semCargo.length + ")",
       listaDeNomes(r.semCargo, { rotulo: "Cargo no crachá", render: function (x) {
         var r2 = x.reg || x;
@@ -100555,6 +100572,11 @@ emissao: hoje,
             modalPreencher(b.getAttribute("data-cc-preencher"));
           });
         });
+        var sc = document.querySelector("[data-cc-socargo]");
+        if (sc) sc.addEventListener("click", function () {
+          if (typeof SOCARGO !== "undefined" && SOCARGO && SOCARGO.modal) SOCARGO.modal();
+          else aviso_("warn", "Bloco não carregado", "O [SOCARGO] não está nesta versão.");
+        });
       }
     };
     return true;
@@ -100600,6 +100622,892 @@ emissao: hoje,
   C.__montarTela = montarTela;
   C.__noMenu = noMenu;
   C.__modalPreencher = modalPreencher;
+})();
+</script>
+
+
+<script>
+/* ############################################################
+ * A ROTA QUE JÁ FUNCIONA, USADA TAMBÉM PELA FICHA
+ *                                        busca: [ASSPC]
+ * ------------------------------------------------------------
+ * O QUE A FOTO DELE MOSTROU (02/11 20:19)
+ *   Duas pessoas diferentes — "...EY ADÃO DE OLIVEIRA DA SILVA,
+ *   matrícula 8600593701" e "...ADRIANO DOS SANTOS, matrícula 10"
+ *   — e a MESMA frase embaixo das duas:
+ *       "procurei em COLAB:USR_muh1pzct7d0c8d7e"
+ *   O mesmo endereço, para duas pessoas. Isso não é coincidência:
+ *   é defeito, e é meu.
+ *
+ * ------------------------------------------------------------
+ * DEFEITO 1 — A FRASE É GLOBAL, NÃO É DA PESSOA
+ *   epiFaixaAssinatura() chama EPIASS.porQueNaoAchou(), que lê
+ *   EPIASS.ultimaBusca — a ÚLTIMA busca feita, de quem quer que
+ *   seja. Como as 40 fichas são desenhadas depois de todas as
+ *   buscas, todo cartão herdava a frase da última pessoa.
+ *   Quem lia aquilo via o sistema dizer que procurou a assinatura
+ *   do Adriano no endereço de outro. Pior que não informar.
+ *   CONSERTO: a frase passa a sair da trilha DAQUELA ficha
+ *   (f.__ass.trilha). Sem trilha própria, nenhuma frase.
+ *
+ * ------------------------------------------------------------
+ * DEFEITO 2 — A FICHA ADIVINHA ENDEREÇO; O PAINEL PERGUNTA
+ *   O painel de Processo de Segurança mostra a assinatura porque
+ *   faz isto, e só isto (linha 51785 do arquivo dele):
+ *       pcApi("assinatura", { id: id })
+ *       = API.call("precadastro", "assinatura", { id: id })
+ *   Uma rota do Core que DEVOLVE a imagem. Sem endereço, sem
+ *   índice, sem palpite.
+ *   A ficha de EPI, enquanto isso, tentava adivinhar onde o
+ *   registro mora: COLAB:<id>, COLABNOME:<nome>, COLAB:MAT:<mat>.
+ *   Se o registro não estiver num desses três, ela não acha —
+ *   com a assinatura existindo e o painel mostrando.
+ *
+ *   E o caminho até o id também já existe no arquivo dele:
+ *       pcApi("localizar", { busca: <texto> })
+ *   cuja própria tela diz aceitar "o nome, o ID do processo, a
+ *   matrícula ou o CPF", e devolve dados.resultados[] com .id.
+ *
+ *   Então: matrícula -> localizar -> id -> assinatura -> imagem.
+ *   Nenhuma rota nova. Nenhum nome de ação inventado. São as duas
+ *   chamadas que o painel dele já faz hoje.
+ *
+ * ------------------------------------------------------------
+ * ONDE ISTO ENTRA
+ *   POR ÚLTIMO. Primeiro continua valendo tudo que já existe —
+ *   índice, endereços, varredura. Só quando nada achou é que eu
+ *   pergunto ao pré-cadastro. Assim nada que funciona hoje muda
+ *   de caminho, e a conta de chamadas não cresce para quem já
+ *   estava sendo achado.
+ *
+ * O QUE ELE NÃO FAZ
+ *   NÃO grava nada: localizar e assinatura são leitura.
+ *   NÃO escolhe entre dois resultados. Se "localizar" devolver
+ *   mais de uma pessoa e a matrícula não desempatar, ele para e
+ *   diz que parou. Assinatura trocada é o que ele mandou nunca
+ *   acontecer.
+ *   NÃO afirma que a rota existe: se o Core responder que não
+ *   conhece a ação, isso fica escrito na trilha, em vez de virar
+ *   "esta pessoa não assinou".
+ *
+ * AINDA NÃO CONFIRMADO POR MIM
+ *   Eu não tenho o Core dele para rodar. Sei que o painel dele
+ *   chama estas duas ações e mostra a imagem; não sei se o Core
+ *   as atende para TODA pessoa ou só para quem passou pelo
+ *   pré-cadastro. Por isso existe o botão de sonda abaixo: ele
+ *   responde isso em um clique, com a resposta do servidor à
+ *   vista, e não com a minha palavra.
+ * ############################################################ */
+(function assinaturaPeloPreCadastro() {
+
+  var P = { ligado: true, ultimo: null, ultimoErro: "", tentativas: 0, achadas: 0,
+            rotaResponde: null };
+  try { window.ASSPC = P; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(v) { return (typeof U !== "undefined" && U.esc) ? U.esc(v) : lp(v); }
+  function icone_(n) { return (typeof ic === "function") ? ic(n) : ""; }
+  function matK(v) {
+    return lp(v).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+  }
+  function nomeK(v) {
+    return lp(v).toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/\s+/g, " ").trim();
+  }
+  function imagemDe(o) {
+    if (!o) return "";
+    var t = [o.assinatura, o.imagem, o.assinaturaImagem, o.rubrica, o.foto64];
+    for (var i = 0; i < t.length; i++) if (lp(t[i])) return lp(t[i]);
+    return "";
+  }
+  /* o Core respondeu que não conhece a ação — isso é informação,
+     não ausência de assinatura */
+  function semRota(r) {
+    if (!r) return false;
+    var c = lp(r.codigo).toUpperCase();
+    return c === "MODULO_DESCONHECIDO" || c === "ACAO_DESCONHECIDA" ||
+           c === "MODULO_NAO_INSTALADO" || c === "MODULO_AUSENTE" ||
+           c === "SEM_ROTEADOR" ||
+           /não existe|nao existe|não encontrei a função/i.test(lp(r.mensagem));
+  }
+
+  /* ============================================================
+     1. matrícula -> processo -> imagem
+     ============================================================ */
+  P.procurar = function (f) {
+    var trilha = [];
+    var mat = lp(f && f.matricula);
+    var nome = lp(f && (f.nome || f.colaborador));
+    var busca = mat || nome;
+    if (!busca) {
+      return Promise.resolve({ tem: false, trilha: [{ chave: "(pré-cadastro)",
+        origem: "rota do painel", resultado: "não tentei",
+        detalhe: "a ficha não tem matrícula nem nome" }] });
+    }
+    P.tentativas++;
+
+    return Promise.resolve(API.call("precadastro", "localizar", { busca: busca }))
+      .then(function (r) {
+        if (semRota(r)) {
+          P.rotaResponde = false;
+          trilha.push({ chave: "precadastro.localizar", origem: "rota do painel",
+            resultado: "erro", detalhe: "o Core não conhece esta ação: " +
+              (lp(r.mensagem) || lp(r.codigo)) });
+          return { tem: false, trilha: trilha, semRota: true };
+        }
+        if (!r || !r.ok) {
+          trilha.push({ chave: "precadastro.localizar", origem: "rota do painel",
+            resultado: "erro", detalhe: lp(r && r.mensagem) || "não respondeu" });
+          return { tem: false, trilha: trilha };
+        }
+        P.rotaResponde = true;
+        var res = lista_(r.dados && (r.dados.resultados || r.dados.lista)) ;
+        if (!res.length) res = lista_(r.dados);
+        if (!res.length) {
+          trilha.push({ chave: "precadastro.localizar", origem: "busca por \"" + busca + "\"",
+            resultado: "não existe", detalhe: "o pré-cadastro não tem ninguém com isso" });
+          return { tem: false, trilha: trilha };
+        }
+
+        /* QUEM, DE VERDADE. A matrícula manda; o nome só confirma.
+           Dois resultados sem desempate = eu paro. */
+        var alvo = null, porque = "";
+        var mK = matK(mat);
+        if (mK) {
+          var porMat = res.filter(function (x) { return matK(x.matricula) === mK; });
+          if (porMat.length === 1) { alvo = porMat[0]; porque = "matrícula"; }
+          else if (porMat.length > 1) {
+            trilha.push({ chave: "precadastro.localizar", origem: "matrícula " + mat,
+              resultado: "ambíguo",
+              detalhe: porMat.length + " processos com esta matrícula — não escolho" });
+            return { tem: false, trilha: trilha, ambiguo: true };
+          }
+        }
+        if (!alvo && nome) {
+          var nK = nomeK(nome);
+          var porNome = res.filter(function (x) { return nomeK(x.nome) === nK; });
+          if (porNome.length === 1) { alvo = porNome[0]; porque = "nome completo"; }
+          else if (porNome.length > 1) {
+            trilha.push({ chave: "precadastro.localizar", origem: "nome " + nome,
+              resultado: "ambíguo",
+              detalhe: porNome.length + " pessoas com este nome — não escolho" });
+            return { tem: false, trilha: trilha, ambiguo: true };
+          }
+        }
+        if (!alvo) {
+          trilha.push({ chave: "precadastro.localizar", origem: "busca por \"" + busca + "\"",
+            resultado: "não existe",
+            detalhe: res.length + " resultado(s), nenhum com esta matrícula nem com este nome" });
+          return { tem: false, trilha: trilha };
+        }
+
+        var id = lp(alvo.id);
+        trilha.push({ chave: "precadastro.localizar", origem: "casou por " + porque,
+          resultado: "aponta para " + id });
+
+        return Promise.resolve(API.call("precadastro", "assinatura", { id: id }))
+          .then(function (a) {
+            if (semRota(a)) {
+              trilha.push({ chave: "precadastro.assinatura", origem: "processo " + id,
+                resultado: "erro", detalhe: "o Core não conhece esta ação" });
+              return { tem: false, trilha: trilha, semRota: true };
+            }
+            if (!a || !a.ok) {
+              trilha.push({ chave: "precadastro.assinatura", origem: "processo " + id,
+                resultado: "erro", detalhe: lp(a && a.mensagem) || "não respondeu" });
+              return { tem: false, trilha: trilha };
+            }
+            var img = imagemDe(a.dados);
+            if (!img) {
+              /* [DIAG] o estado que ele pediu por nome: registro
+                 encontrado, conteúdo de imagem ausente. */
+              trilha.push({ chave: "precadastro.assinatura", origem: "processo " + id,
+                resultado: "achou", detalhe: "respondeu ok, mas sem conteúdo de imagem" });
+              return { tem: false, semImagem: true, trilha: trilha };
+            }
+            P.achadas++;
+            trilha.push({ chave: "precadastro.assinatura", origem: "processo " + id,
+              resultado: "achou" });
+            return { tem: true, trilha: trilha, via: "precadastro", processo: id,
+              dados: { imagem: img, assinatura: img,
+                nome: lp(alvo.nome) || nome, matricula: lp(alvo.matricula) || mat,
+                foto: lp(alvo.foto), origem: "PRECADASTRO",
+                cadastradaEm: lp(a.dados && (a.dados.quando || a.dados.assinadaEm)),
+                cadastradaPor: lp(a.dados && a.dados.por) } };
+          }, function (e) {
+            trilha.push({ chave: "precadastro.assinatura", origem: "processo " + id,
+              resultado: "erro", detalhe: lp(e && e.message) || String(e) });
+            return { tem: false, trilha: trilha };
+          });
+      }, function (e) {
+        trilha.push({ chave: "precadastro.localizar", origem: "rota do painel",
+          resultado: "erro", detalhe: lp(e && e.message) || String(e) });
+        return { tem: false, trilha: trilha };
+      });
+  };
+
+  /* ============================================================
+     2. ENTRAR POR ÚLTIMO NO lerCadastro
+     ============================================================ */
+  function enxertarLeitura() {
+    if (typeof EPIASS === "undefined" || !EPIASS || !EPIASS.lerCadastro) return false;
+    if (EPIASS.__asspcEnxertado) return true;
+    EPIASS.__asspcEnxertado = true;
+    var antes = EPIASS.lerCadastro;
+
+    EPIASS.lerCadastro = function (f, forcar) {
+      var eu = this;
+      return Promise.resolve(antes.call(eu, f, forcar)).then(function (c) {
+        if (!P.ligado) return c;
+        if (c && c.tem) return c;            /* já achou: não mexo */
+        if (c && c.ambiguo) return c;        /* ambíguo continua ambíguo */
+        return P.procurar(f).then(function (pc) {
+          if (!pc || !pc.tem) {
+            /* junto a trilha do pré-cadastro à que já existia, para
+               o "Ver onde procurei" mostrar o caminho inteiro */
+            try {
+              var t = (c && c.trilha) ? c.trilha.slice() : [];
+              c = c || { ok: true, tem: false };
+              c.trilha = t.concat(lista_(pc && pc.trilha));
+              if (pc && pc.semImagem) c.semImagem = true;
+              if (pc && pc.ambiguo) c.ambiguo = true;
+            } catch (e) {}
+            return c;
+          }
+          var saida = { ok: true, tem: true, via: "precadastro",
+            chave: "precadastro:" + lp(pc.processo),
+            versao: 1, dados: pc.dados,
+            trilha: ((c && c.trilha) ? c.trilha.slice() : []).concat(pc.trilha) };
+          /* guarda na MESMA gaveta de sempre, para a impressão e o
+             painel acharem sem perguntar de novo */
+          try { EPIASS.guardar(f, saida); } catch (e) {}
+          try { EPIASS.ultimaBusca = { achou: true, chave: saida.chave, trilha: saida.trilha }; } catch (e) {}
+          P.ultimo = { quando: new Date().toISOString(), nome: lp(f && (f.nome || f.colaborador)),
+                       processo: pc.processo };
+          return saida;
+        }, function () { return c; });
+      });
+    };
+    return true;
+  }
+
+  /* ============================================================
+     3. A FRASE DEIXA DE SER DE OUTRA PESSOA
+     ------------------------------------------------------------
+     epiFaixaAssinatura usa porQueNaoAchou(), que é global. Eu não
+     troco a função dele: eu embrulho a FAIXA e, depois de pronta,
+     troco a frase herdada pela trilha desta ficha. Sem trilha
+     própria, a frase sai fora — melhor nada do que o endereço de
+     outro.
+     ============================================================ */
+  function fraseDaFicha(f) {
+    var c = f && f.__ass;
+    var t = lista_(c && c.trilha);
+    if (!t.length) return "";
+    var amb = t.filter(function (x) { return x.resultado === "ambíguo"; })[0];
+    if (amb) return lp(amb.detalhe) || "mais de uma pessoa com este nome completo";
+    var err = t.filter(function (x) { return x.resultado === "erro"; })[0];
+    if (err) return "o servidor não respondeu: " + lp(err.detalhe);
+    var meio = t.filter(function (x) { return x.resultado === "incompleta"; })[0];
+    if (meio) return lp(meio.detalhe) || "não terminei de procurar";
+    return "procurei em " + t.map(function (x) {
+      return lp(x.chave) + (x.origem ? " (" + lp(x.origem) + ")" : "");
+    }).join(", ") + " — nenhuma tinha registro.";
+  }
+
+  function enxertarFaixa() {
+    if (typeof window.epiFaixaAssinatura !== "function") return false;
+    if (window.__asspcFaixa) return true;
+    window.__asspcFaixa = true;
+    var antes = window.epiFaixaAssinatura;
+
+    window.epiFaixaAssinatura = function (f) {
+      var html = antes.apply(this, arguments);
+      try {
+        if (!/epi-ass-faixa pend/.test(String(html))) return html;
+        var caixa = document.createElement("div");
+        caixa.innerHTML = html;
+        var i = caixa.querySelector("i");          /* é nela que a frase mora */
+        if (!i) return html;
+        var minha = fraseDaFicha(f);
+        if (minha) {
+          i.textContent = minha;
+        } else {
+          /* nenhuma trilha própria: tiro a frase e o <br> que a
+             precede. Melhor nada do que o endereço de outro. */
+          var br = i.previousSibling;
+          if (br && br.nodeName === "BR" && br.parentNode) br.parentNode.removeChild(br);
+          if (i.parentNode) i.parentNode.removeChild(i);
+        }
+        return caixa.innerHTML;
+      } catch (e) { P.ultimoErro = lp(e && e.message); }
+      return html;
+    };
+    return true;
+  }
+
+  /* ============================================================
+     4. A SONDA — a resposta do servidor, não a minha palavra
+     ============================================================ */
+  P.sondar = function (f) {
+    var passos = [];
+    function passo(nome, pr) {
+      var t0 = Date.now();
+      return Promise.resolve(pr).then(function (r) {
+        passos.push({ nome: nome, ms: Date.now() - t0, ok: !!(r && r.ok),
+          codigo: lp(r && r.codigo), mensagem: lp(r && r.mensagem),
+          amostra: r && r.dados ? Object.keys(r.dados).slice(0, 10).join(", ") : "" });
+        return r;
+      }, function (e) {
+        passos.push({ nome: nome, ms: Date.now() - t0, ok: false,
+          codigo: "EXCECAO", mensagem: lp(e && e.message) || String(e) });
+        return null;
+      });
+    }
+    var mat = lp(f && f.matricula);
+    return passo("precadastro.localizar", API.call("precadastro", "localizar", { busca: mat }))
+      .then(function (r) {
+        var res = r && r.ok ? lista_(r.dados && (r.dados.resultados || r.dados.lista)) : [];
+        if (!res.length) return passos;
+        return passo("precadastro.assinatura", API.call("precadastro", "assinatura",
+          { id: lp(res[0].id) })).then(function (a) {
+            if (a && a.ok) {
+              passos[passos.length - 1].temImagem = !!imagemDe(a.dados);
+            }
+            return passos;
+          });
+      });
+  };
+
+  P.modalSonda = function (f) {
+    if (typeof UI === "undefined" || !UI.modal) return;
+    var w0 = UI.modal({
+      titulo: "De onde vem a assinatura",
+      sub: lp(f && (f.nome || f.colaborador)) + " · matrícula " + lp(f && f.matricula),
+      tamanho: "md",
+      corpo: '<div class="alert a-gray" id="spCorpo">' + icone_("sync") +
+        "<div>Perguntando ao Core, passo a passo…</div></div>",
+      rodape: '<button class="btn btn-ghost" data-x>Fechar</button>',
+      aoAbrir: function (w, fechar) {
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        P.sondar(f).then(function (passos) {
+          var cx = w.querySelector("#spCorpo");
+          cx.className = "";
+          cx.innerHTML = UI.tabela({
+            linhas: passos,
+            colunas: [
+              { rotulo: "Chamada", render: function (x) {
+                  return '<span class="mono small">' + esc_(x.nome) + "</span>"; } },
+              { rotulo: "Resposta", render: function (x) {
+                  return x.ok ? '<span class="badge b-green">ok</span>'
+                              : '<span class="badge b-red">' + esc_(x.codigo || "falhou") + "</span>"; } },
+              { rotulo: "ms", num: true, render: function (x) { return x.ms; } },
+              { rotulo: "O que veio", render: function (x) {
+                  if (x.temImagem === true) return "<b>imagem da assinatura</b>";
+                  if (x.temImagem === false) return "respondeu ok, <b>sem imagem</b>";
+                  return '<span class="small muted">' +
+                    esc_(x.amostra || x.mensagem || "—") + "</span>"; } }
+            ]
+          }) + '<p class="small muted mt8">Isto é só leitura. O que está escrito aqui é a ' +
+          "resposta do seu Core, não a minha conclusão.</p>";
+        });
+      }
+    });
+    return w0;
+  };
+
+  /* o botão entra ao lado dos dois que já existem na faixa */
+  function ligarSonda() {
+    document.querySelectorAll("[data-diag-ass]").forEach(function (b) {
+      if (b.__sondaPosta) return;
+      b.__sondaPosta = true;
+      var alvo = b.getAttribute("data-diag-ass") || "";
+      var bt = document.createElement("button");
+      bt.className = "btn btn-ghost btn-sm";
+      bt.innerHTML = icone_("doutor") + "De onde vem";
+      bt.title = "Pergunta ao Core, passo a passo, pela rota que o painel usa";
+      bt.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        var f = null;
+        try {
+          f = lista_(EPIASS.__fichasNaTela).filter(function (x) {
+            return lp(x.matricula) === lp(alvo) || lp(x.colaborador) === lp(alvo) ||
+                   lp(x.nome) === lp(alvo);
+          })[0] || { matricula: alvo, nome: alvo };
+        } catch (e) { f = { matricula: alvo, nome: alvo }; }
+        P.modalSonda(f);
+      });
+      if (b.parentNode) b.parentNode.appendChild(bt);
+    });
+  }
+
+  function enxertarSonda() {
+    if (typeof window.epiLigarDiagnosticoAssinatura !== "function") return false;
+    if (window.__asspcSonda) return true;
+    window.__asspcSonda = true;
+    var antes = window.epiLigarDiagnosticoAssinatura;
+    window.epiLigarDiagnosticoAssinatura = function () {
+      var r = antes.apply(this, arguments);
+      try { ligarSonda(); } catch (e) { P.ultimoErro = lp(e && e.message); }
+      return r;
+    };
+    return true;
+  }
+
+  function tudo() { enxertarLeitura(); enxertarFaixa(); enxertarSonda(); }
+  tudo();
+  try {
+    document.addEventListener("DOMContentLoaded", tudo);
+    setTimeout(tudo, 1200);
+  } catch (e) {}
+
+  P.__fraseDaFicha = fraseDaFicha;
+  P.__ligarSonda = ligarSonda;
+  P.__tudo = tudo;
+})();
+</script>
+
+
+<script>
+/* ############################################################
+ * SÓ O CARGO, SÓ ONDE ESTÁ VAZIO  ·  busca: [SOCARGO]
+ * ------------------------------------------------------------
+ * O PEDIDO, PALAVRA POR PALAVRA (02/11 21:02)
+ *   "A gente vai pegar a planilha que a gente tem, que é 118
+ *    pessoas, fazer upload, e ele só vai copiar somente os cargos
+ *    que tiver vazio. Por favor, trava essa informação para não
+ *    ficar copiando as informações que a gente tem.
+ *    Nessa opção de conferência, que mostra as pessoas que estão
+ *    sem cargo, a gente pode usar esse espaço mesmo para lançar a
+ *    planilha.
+ *    Não é para trazer as outras informações, somente o cargo das
+ *    pessoas que não tiver cargo dentro dos usuários.
+ *    Deixe bem amarradinho para não correr o risco de novamente
+ *    preencher duplicação de cadastro de pessoas.
+ *    Se o colaborador X já tiver com cargo, beleza, ele não vai
+ *    fazer nada. Se a linha do colaborador Y só tem o nome e não
+ *    tem cargo, ele vai preencher somente o cargo.
+ *    Aqui na tabela não é cargo que eles usam, colocaram como
+ *    FUNÇÃO, mas no sistema está como CARGO — casa essas duas.
+ *    Setor não tem; deixa setores para depois."
+ *
+ * ------------------------------------------------------------
+ * AS SEIS TRAVAS, E ONDE CADA UMA ESTÁ NO CÓDIGO
+ *
+ *   1. SÓ CARGO.
+ *      O que vai ao Core é montado pelo BASEMESTRE.paraCadastro,
+ *      que devolve ao servidor o valor QUE JÁ ESTÁ LÁ em todos os
+ *      outros campos. Depois de montado, conferirCarga() compara
+ *      campo a campo com o cadastro atual: se QUALQUER campo que
+ *      não seja cargo/funcao tiver mudado, a linha é RECUSADA e
+ *      aparece na tela com o motivo. Nada vai ao Core sem passar
+ *      por essa conferência.
+ *
+ *   2. SÓ ONDE ESTÁ VAZIO.
+ *      Quem já tem cargo (ou funcao) preenchido é pulado antes de
+ *      tudo, e aparece como "já tem cargo — não toquei".
+ *
+ *   3. NUNCA CRIA NINGUÉM.
+ *      Só entra linha que casou com um cadastro que já existe.
+ *      Quem está na planilha e não está no sistema aparece na
+ *      lista "não existe no sistema" e NÃO é criado. É assim que
+ *      a duplicação de cadastro fica impossível: não há caminho
+ *      de criação neste bloco.
+ *
+ *   4. NUNCA ESCOLHE ENTRE DOIS.
+ *      Casa pela matrícula limpa (0152 = 152). Pelo nome só
+ *      quando aquele nome aparece UMA vez na planilha E UMA vez
+ *      no sistema. Dois homônimos: recusa e mostra os dois.
+ *
+ *   5. SETOR NÃO ENTRA.
+ *      lotacao nunca é escrita no pedido, e a conferência da
+ *      trava 1 inclui lotacao — se ela mudar, a linha é recusada.
+ *
+ *   6. FUNÇÃO = CARGO.
+ *      O leitor que já existe (BASEMESTRE, APELIDOS.funcao) já
+ *      aceita os dois rótulos no cabeçalho: ['funcao','cargo',
+ *      'funcaocargo']. Não precisei inventar nada para casar.
+ *
+ * O QUE ELE NÃO FAZ
+ *   NÃO cria, NÃO exclui, NÃO renomeia, NÃO mexe em matrícula,
+ *   crachá, setor, admissão, uniforme, botina, capacete, perfil
+ *   nem status. NÃO sobrescreve cargo que já existe. NÃO grava
+ *   nada antes de ele ver a lista inteira e apertar.
+ * ############################################################ */
+(function soOCargo() {
+
+  var S = { ultimo: null, ultimoErro: "", LIDO: null };
+  try { window.SOCARGO = S; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(v) { return (typeof U !== "undefined" && U.esc) ? U.esc(v) : lp(v); }
+  function icone_(n) { return (typeof ic === "function") ? ic(n) : ""; }
+  function matK(v) {
+    return lp(v).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+  }
+  function nomeK(v) {
+    return lp(v).toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/\s+/g, " ").trim();
+  }
+  function aviso_(t, a, b) {
+    try { if (typeof toast === "function") toast(t, a, b); } catch (e) {}
+  }
+  function cargoDe(u) { return lp(u && (u.cargo || u.funcao)); }
+  function excluido_(u) { return /^EXCLU/.test(lp(u && u.status).toUpperCase()); }
+
+  /* ============================================================
+     TRAVA 1 — A CONFERÊNCIA DO PEDIDO
+     ------------------------------------------------------------
+     Montado o pedido, eu comparo com o cadastro que está no
+     sistema, campo a campo. Só cargo e funcao podem ter mudado.
+     Qualquer outra diferença e a linha não vai.
+     ============================================================ */
+  var PODE_MUDAR = { cargo: 1, funcao: 1, id: 1, editando: 1 };
+
+  S.conferirCarga = function (carga, atual) {
+    var ruins = [];
+    Object.keys(carga || {}).forEach(function (k) {
+      if (PODE_MUDAR[k]) return;
+      var novo = carga[k];
+      var velho = atual ? atual[k] : undefined;
+      /* o paraCadastro normaliza alguns campos vindos de sinônimos
+         (setor->lotacao, numeroCracha->crachaNumero). Aceito o
+         sinônimo como "igual" — mas só o sinônimo, nada mais. */
+      var sinonimos = {
+        lotacao: [atual && atual.lotacao, atual && atual.setor],
+        crachaNumero: [atual && atual.crachaNumero, atual && atual.numeroCracha],
+        perfil: [atual && atual.perfil, "colaborador"],
+        status: [atual && atual.status, "Ativo"]
+      };
+      var aceitos = sinonimos[k] || [velho];
+      var bate = aceitos.some(function (v) {
+        if (typeof novo === "boolean") return !!v === novo || (v === undefined && novo === false);
+        return lp(v) === lp(novo);
+      });
+      if (!bate) {
+        ruins.push(k + ': "' + lp(velho) + '" viraria "' + lp(novo) + '"');
+      }
+    });
+    return ruins;
+  };
+
+  /* ============================================================
+     O CASAMENTO — travas 3 e 4
+     ============================================================ */
+  S.casar = function (pessoas, usuarios) {
+    var us = lista_(usuarios).filter(function (u) { return u && !excluido_(u); });
+
+    var porMat = {}, porNome = {}, nomeRepetidoSis = {};
+    us.forEach(function (u) {
+      var m = matK(u.matricula);
+      if (m) (porMat[m] = porMat[m] || []).push(u);
+      var n = nomeK(u.nome);
+      if (!n) return;
+      if (!porNome[n]) porNome[n] = u;
+      else if (lp(porNome[n].id) !== lp(u.id)) nomeRepetidoSis[n] = true;
+    });
+
+    /* nome repetido DENTRO da planilha também desqualifica */
+    var vezesNomePl = {};
+    lista_(pessoas).forEach(function (p) {
+      var n = nomeK(p.nome);
+      if (n) vezesNomePl[n] = (vezesNomePl[n] || 0) + 1;
+    });
+
+    var r = { preencher: [], jaTemCargo: [], semFuncaoNaPlanilha: [],
+              naoExiste: [], ambiguo: [], recusado: [] };
+
+    lista_(pessoas).forEach(function (p) {
+      var nome = lp(p.nome);
+      var func = lp(p.funcao);
+      var m = matK(p.matricula);
+      var n = nomeK(nome);
+
+      var u = null, via = "";
+      if (m && porMat[m]) {
+        if (porMat[m].length === 1) { u = porMat[m][0]; via = "matrícula"; }
+        else {
+          r.ambiguo.push({ p: p, motivo: porMat[m].length +
+            " cadastros com a matrícula " + lp(p.matricula) + " — não escolho" });
+          return;
+        }
+      }
+      if (!u && n) {
+        if (nomeRepetidoSis[n] || vezesNomePl[n] > 1) {
+          r.ambiguo.push({ p: p, motivo: "este nome aparece mais de uma vez — não escolho" });
+          return;
+        }
+        if (porNome[n]) { u = porNome[n]; via = "nome completo"; }
+      }
+
+      /* TRAVA 3: não existe no sistema -> NÃO CRIA, só reporta */
+      if (!u) { r.naoExiste.push({ p: p }); return; }
+
+      /* TRAVA 2: já tem cargo -> não toco */
+      if (cargoDe(u)) { r.jaTemCargo.push({ p: p, u: u, atual: cargoDe(u) }); return; }
+
+      if (!func) { r.semFuncaoNaPlanilha.push({ p: p, u: u }); return; }
+
+      /* monta e CONFERE antes de aceitar */
+      var pedido = null, ruins = ["o BASEMESTRE não está nesta versão"];
+      try {
+        if (typeof BASEMESTRE !== "undefined" && BASEMESTRE && BASEMESTRE.paraCadastro) {
+          /* SÓ estes três campos saem daqui. lotacao, cracha,
+             admissao e o resto nem são tocados. */
+          pedido = BASEMESTRE.paraCadastro(
+            { idExistente: u.id, nome: lp(u.nome), matricula: lp(u.matricula), funcao: func },
+            u);
+          ruins = S.conferirCarga(pedido, u);
+        }
+      } catch (e) { ruins = [lp(e && e.message) || String(e)]; }
+
+      if (ruins.length) {
+        r.recusado.push({ p: p, u: u, motivos: ruins });
+        return;
+      }
+      r.preencher.push({ p: p, u: u, via: via, valor: func, pedido: pedido });
+    });
+
+    S.ultimo = r;
+    return r;
+  };
+
+  /* ============================================================
+     A JANELA
+     ============================================================ */
+  function travas() {
+    return '<div class="alert a-blue mb12">' + icone_("cadeado") +
+      "<div><b>O que está travado</b>" +
+      "<br>· Copio <b>só o cargo</b>. Nenhum outro campo sai daqui." +
+      "<br>· Só de quem está <b>sem cargo</b> no sistema. Quem já tem, eu não toco." +
+      "<br>· <b>Não crio ninguém.</b> Quem está na planilha e não está no sistema fica de fora." +
+      "<br>· Nome repetido eu <b>não escolho</b>: fica para você." +
+      "<br>· <b>Setor não entra</b> — você disse que fica para depois." +
+      "<br>· Na sua planilha a coluna é <b>FUNÇÃO</b>; no sistema é <b>CARGO</b>. Eu caso as duas." +
+      "</div></div>";
+  }
+
+  S.modal = function () {
+    UI.modal({
+      titulo: "Trazer os cargos da planilha",
+      sub: "só o cargo, só onde está vazio",
+      tamanho: "lg",
+      corpo: travas() +
+        '<div id="scPasso1">' +
+        '<div class="field"><label>Cole a planilha aqui (ou escolha o arquivo)</label>' +
+        '<textarea class="textarea mono" id="scTexto" rows="7" ' +
+        'placeholder="Abra a planilha, selecione tudo e cole aqui. ' +
+        'Precisa ter uma linha de cabeçalho com NOME e mais dois campos — por exemplo MATRÍCULA e FUNÇÃO."' +
+        "></textarea></div>" +
+        '<div class="flex gap8" style="flex-wrap:wrap">' +
+        '<input type="file" id="scArquivo" accept=".csv,.txt,.tsv" style="display:none">' +
+        '<button class="btn btn-ghost btn-sm" id="scEscolher">' + icone_("upload") +
+        "Escolher arquivo</button>" +
+        '<button class="btn btn-primary btn-sm" id="scLer">' + icone_("busca") +
+        "Conferir a planilha</button></div>" +
+        '<div id="scErro" class="mt8"></div>' +
+        "</div>" +
+        '<div id="scPasso2"></div>',
+      rodape: '<button class="btn btn-ghost" data-x>Fechar</button>',
+      aoAbrir: function (w, fechar) {
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        var esc = w.querySelector("#scEscolher");
+        var arq = w.querySelector("#scArquivo");
+        esc.addEventListener("click", function () { arq.click(); });
+        arq.addEventListener("change", function () {
+          var f = arq.files && arq.files[0];
+          if (!f) return;
+          var fr = new FileReader();
+          fr.onload = function () { w.querySelector("#scTexto").value = String(fr.result || ""); };
+          fr.readAsText(f, "utf-8");
+        });
+        w.querySelector("#scLer").addEventListener("click", function () {
+          conferir(w, fechar);
+        });
+      }
+    });
+  };
+
+  function conferir(w, fechar) {
+    var cx = w.querySelector("#scErro");
+    cx.innerHTML = "";
+    var texto = lp(w.querySelector("#scTexto").value);
+    if (!texto) {
+      cx.innerHTML = '<div class="alert a-yellow">' + icone_("alerta") +
+        "<div>Cole a planilha ou escolha o arquivo.</div></div>";
+      return;
+    }
+    if (typeof BASEMESTRE === "undefined" || !BASEMESTRE || !BASEMESTRE.ler) {
+      cx.innerHTML = '<div class="alert a-red">' + icone_("alerta") +
+        "<div>O leitor de planilha [BASEMESTRE] não está nesta versão.</div></div>";
+      return;
+    }
+    var lido = BASEMESTRE.ler(texto);
+    if (!lido || !lido.ok) {
+      cx.innerHTML = '<div class="alert a-red">' + icone_("alerta") +
+        "<div><b>" + esc_(lp(lido && lido.codigo) || "Não li") + "</b>" +
+        esc_(lp(lido && lido.mensagem)) + "</div></div>";
+      return;
+    }
+    S.LIDO = lido;
+
+    var bt = w.querySelector("#scLer");
+    bt.disabled = true; bt.innerHTML = "Lendo o cadastro…";
+    Promise.resolve(API.call("usuarios", "listar", {})).then(function (r) {
+      bt.disabled = false; bt.innerHTML = icone_("busca") + "Conferir a planilha";
+      if (!r || !r.ok) {
+        cx.innerHTML = '<div class="alert a-red">' + icone_("alerta") +
+          "<div>Não consegui ler os usuários: " +
+          esc_(lp(r && r.mensagem) || "o Core não respondeu") + "</div></div>";
+        return;
+      }
+      var res = S.casar(lido.pessoas, lista_(r.dados));
+      pintarResultado(w, fechar, lido, res);
+    }, function (e) {
+      bt.disabled = false; bt.innerHTML = icone_("busca") + "Conferir a planilha";
+      cx.innerHTML = '<div class="alert a-red">' + icone_("alerta") +
+        "<div>" + esc_(lp(e && e.message) || String(e)) + "</div></div>";
+    });
+  }
+
+  function bloco(titulo, cor, linhas, colunaExtra) {
+    if (!linhas.length) return "";
+    return '<div class="card mb12"><div class="card-body">' +
+      '<b style="font-size:13px">' + esc_(titulo) + " (" + linhas.length + ")</b>" +
+      '<div class="mt8" style="max-height:260px;overflow:auto">' +
+      UI.tabela({
+        linhas: linhas,
+        colunas: [
+          { rotulo: "Linha", num: true, render: function (x) { return x.p.linha; } },
+          { rotulo: "Nome", render: function (x) { return "<b>" + esc_(x.p.nome) + "</b>"; } },
+          { rotulo: "Matrícula", render: function (x) {
+              return '<span class="mono">' + esc_(x.p.matricula || "—") + "</span>"; } },
+          colunaExtra
+        ]
+      }) + "</div></div></div>";
+  }
+
+  function pintarResultado(w, fechar, lido, res) {
+    w.querySelector("#scPasso1").style.display = "none";
+    var alvo = w.querySelector("#scPasso2");
+
+    var total = lista_(lido.pessoas).length;
+    alvo.innerHTML =
+      '<div class="alert a-gray mb12">' + icone_("info") +
+      "<div><b>" + total + " linha(s) na sua planilha</b> · formato " +
+      esc_(lp(lido.formato) || "reconhecido") + "</div></div>" +
+
+      (res.preencher.length
+        ? '<div class="alert a-green mb12">' + icone_("checkC") +
+          "<div><b>" + res.preencher.length + " cargo(s) vão entrar.</b> " +
+          "Nenhum outro campo muda. Confira a lista abaixo antes.</div></div>"
+        : '<div class="alert a-yellow mb12">' + icone_("alerta") +
+          "<div><b>Nenhum cargo a preencher.</b> Veja abaixo o porquê de cada linha.</div></div>") +
+
+      bloco("Vão receber o cargo", "green", res.preencher,
+        { rotulo: "Cargo que entra", render: function (x) {
+            return "<b>" + esc_(x.valor) + "</b>" +
+              '<br><span class="small muted">casou por ' + esc_(x.via) + "</span>"; } }) +
+
+      bloco("Já tinham cargo — não toquei", "gray", res.jaTemCargo,
+        { rotulo: "Cargo que já está lá", render: function (x) {
+            return esc_(x.atual) +
+              (lp(x.p.funcao) && nomeK(x.p.funcao) !== nomeK(x.atual)
+                ? '<br><span class="small muted">a planilha diz "' + esc_(x.p.funcao) +
+                  '" — <b>não troquei</b></span>' : ""); } }) +
+
+      bloco("Não existem no sistema — NÃO criei", "yellow", res.naoExiste,
+        { rotulo: "O que faço", render: function () {
+            return '<span class="small">nada. Para entrar, use a importação ' +
+              "completa do cadastro, de propósito.</span>"; } }) +
+
+      bloco("Nome repetido — deixei para você", "yellow", res.ambiguo,
+        { rotulo: "Por quê", render: function (x) {
+            return '<span class="small">' + esc_(x.motivo) + "</span>"; } }) +
+
+      bloco("Sem função na planilha", "gray", res.semFuncaoNaPlanilha,
+        { rotulo: "O que faço", render: function () {
+            return '<span class="small">nada — não há cargo para copiar.</span>'; } }) +
+
+      bloco("Recusadas pela conferência", "red", res.recusado,
+        { rotulo: "O que mudaria além do cargo", render: function (x) {
+            return '<span class="small">' + esc_(lista_(x.motivos).join("; ")) + "</span>"; } }) +
+
+      '<div id="scAndamento" class="mt8"></div>' +
+      (res.preencher.length
+        ? '<button class="btn btn-orange btn-block mt8" id="scGravar">' + icone_("checkC") +
+          "Preencher os " + res.preencher.length + " cargos</button>"
+        : "");
+
+    var g = w.querySelector("#scGravar");
+    if (g) g.addEventListener("click", function () { gravar(w, res); });
+  }
+
+  /* ============================================================
+     A GRAVAÇÃO — uma por vez, e cada uma conferida de novo
+     ============================================================ */
+  function gravar(w, res) {
+    var g = w.querySelector("#scGravar");
+    g.disabled = true;
+    var cx = w.querySelector("#scAndamento");
+    var fila = res.preencher.slice();
+    var feitos = [], falhou = [], barrados = [];
+
+    function passo(i) {
+      if (i >= fila.length) {
+        cx.innerHTML =
+          (feitos.length ? '<div class="alert a-green">' + icone_("checkC") +
+            "<div><b>" + feitos.length + " cargo(s) preenchido(s)</b>" +
+            "Abra Usuários para conferir. Nenhum outro campo foi alterado.</div></div>" : "") +
+          (barrados.length ? '<div class="alert a-red mt8">' + icone_("cadeado") +
+            "<div><b>" + barrados.length + " barrada(s) na conferência</b>" +
+            barrados.slice(0, 10).map(function (x) { return "<br>" + esc_(x); }).join("") +
+            "</div></div>" : "") +
+          (falhou.length ? '<div class="alert a-red mt8">' + icone_("alerta") +
+            "<div><b>" + falhou.length + " não entrou</b>" +
+            falhou.slice(0, 10).map(function (x) { return "<br>" + esc_(x); }).join("") +
+            (falhou.length > 10 ? "<br>…" : "") + "</div></div>" : "");
+        g.disabled = false;
+        try { if (typeof CACHE !== "undefined" && CACHE.invalidar) CACHE.invalidar(); } catch (e) {}
+        if (feitos.length) aviso_("ok", "Cargos preenchidos",
+          feitos.length + " de " + fila.length + " · nenhum outro campo mudou.");
+        return;
+      }
+      var x = fila[i];
+      cx.innerHTML = '<div class="alert a-gray">' + icone_("sync") +
+        "<div><b>" + (i + 1) + " de " + fila.length + "</b>" + esc_(x.p.nome) + "</div></div>";
+
+      /* TRAVA 1, DE NOVO, NA HORA DE MANDAR.
+         Conferi quando montei a lista; confiro outra vez agora.
+         Entre uma coisa e outra alguém pode ter mexido na tela. */
+      var ruins = S.conferirCarga(x.pedido, x.u);
+      if (ruins.length) {
+        barrados.push(x.p.nome + " — " + ruins.join("; "));
+        return passo(i + 1);
+      }
+      if (cargoDe(x.u)) {        /* TRAVA 2, de novo */
+        barrados.push(x.p.nome + " — passou a ter cargo no meio do caminho; não sobrescrevi");
+        return passo(i + 1);
+      }
+
+      Promise.resolve(API.call("usuarios", "salvar", x.pedido)).then(function (r) {
+        if (r && r.ok) feitos.push(x.p.nome);
+        else falhou.push(x.p.nome + " — " + (lp(r && r.mensagem) || "o servidor não explicou"));
+      }, function (e) {
+        falhou.push(x.p.nome + " — " + (lp(e && e.message) || String(e)));
+      }).then(function () { passo(i + 1); });
+    }
+    passo(0);
+  }
+
+  S.__travas = travas;
+  S.__gravar = gravar;
 })();
 </script>
 
