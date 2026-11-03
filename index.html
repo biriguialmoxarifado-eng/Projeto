@@ -64819,8 +64819,10 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 376 · 03/11";
+var ALMOXA_VERSAO = "sistema 379 · 03/11";
 var ALMOXA_NOVIDADES = [
+  "378 · o e-mail com os icones da arte, a regua ligada e as datas de cada etapa",
+  "377 · modelo COESA do e-mail de pedido, montado com os dados reais e com previa",
   "376 · le planilha do Active Directory, e pergunta qual coluna e qual quando nao reconhece",
   "375 · ficha Identificacao/Cracha: foto do perfil e do cracha separadas, com a origem",
   "375 · crachas sem dono, pessoas com mais de um, e a sonda da imagem que nao aparece",
@@ -103209,6 +103211,691 @@ emissao: hoje,
 
   I.__fotoDe = fotoDe;
   I.__quadroFoto = quadroFoto;
+})();
+</script>
+
+
+<script>
+/* ############################################################
+ * MODELO DE E-MAIL DO PEDIDO  ·  busca: [EMAILPEDIDO]
+ * ------------------------------------------------------------
+ * O PEDIDO (03/11 11:34, com a arte anexada)
+ *   "Como que a gente vai fazer para atualizar o sistema com esse
+ *    modelo aqui? Porque isso vai ser automático, então o e-mail
+ *    vai atualizando e vai mandando esse e-mail atualizando tudo
+ *    certinho."
+ *
+ * ------------------------------------------------------------
+ * O QUE PRECISA FICAR CLARO ANTES DE QUALQUER LINHA
+ *   Esta página NÃO envia e-mail, e não tem como. Quem envia é o
+ *   Apps Script (MailApp / GmailApp). O módulo "notificacoes" do
+ *   Core dele atende credenciais, perfil e regras — NENHUMA ação
+ *   de enviar. Então o envio é um módulo .gs, que eu escrevo e ele
+ *   instala.
+ *
+ *   O que ESTE bloco faz é a outra metade, e é a que precisa estar
+ *   certa antes: montar o e-mail, com os dados REAIS do pedido, e
+ *   deixar ele ver exatamente como vai chegar. Modelo errado
+ *   enviado para a obra inteira não tem desfazer.
+ *
+ * ------------------------------------------------------------
+ * POR QUE O HTML AQUI É FEIO POR DENTRO (tabelas, estilo inline)
+ *   E-mail não é página. O Outlook usa o motor do Word: não tem
+ *   flex, não tem grid, ignora <style> externo e corta CSS que não
+ *   seja inline. Então tudo aqui é <table> com style="" em cada
+ *   célula. O arredondado e o degradê da arte aparecem no Gmail e
+ *   no celular; no Outlook antigo viram canto reto e cor sólida —
+ *   e isso é de propósito: prefiro quadrado que funciona a
+ *   redondo que quebra.
+ *
+ * ------------------------------------------------------------
+ * AS ETAPAS SAEM DO STATUS REAL
+ *   O documento dele manda: "As etapas deverão refletir eventos
+ *   reais. Não avançar automaticamente sem confirmação da operação
+ *   correspondente." Então etapaDe() lê o status gravado no pedido
+ *   e NADA MAIS. Status desconhecido não vira etapa adiantada:
+ *   fica na primeira e o e-mail diz o status cru, em vez de
+ *   inventar progresso.
+ *
+ * O QUE ELE NÃO FAZ
+ *   NÃO envia, NÃO grava, NÃO altera status, NÃO cria pedido.
+ *   NÃO inventa dado que o pedido não tem: campo vazio sai como
+ *   "—", nunca preenchido por conta própria.
+ * ############################################################ */
+(function emailDoPedido() {
+
+  var M = { ultimo: null, ultimoErro: "" };
+  try { window.EMAILPEDIDO = M; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(v) {
+    return String(v === undefined || v === null ? "" : v)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+  function icone_(n) { return (typeof ic === "function") ? ic(n) : ""; }
+  function aviso_(t, a, b) {
+    try { if (typeof toast === "function") toast(t, a, b); } catch (e) {}
+  }
+  function dataHora(v) {
+    var d = v ? new Date(v) : null;
+    if (!d || isNaN(d.getTime())) return lp(v) || "—";
+    function z(n) { return (n < 10 ? "0" : "") + n; }
+    return z(d.getDate()) + "/" + z(d.getMonth() + 1) + "/" + d.getFullYear() +
+      " às " + z(d.getHours()) + ":" + z(d.getMinutes());
+  }
+  function numero(v) {
+    var n = Number(v);
+    if (!isFinite(n)) return lp(v) || "—";
+    return n.toLocaleString("pt-BR");
+  }
+
+  /* ============================================================
+     AS CINCO ETAPAS DA ARTE DELE
+     ============================================================ */
+  M.ETAPAS = [
+    { chave: "REGISTRADO", rotulo: "Pedido<br>registrado" },
+    { chave: "FORNECIMENTO", rotulo: "Em<br>fornecimento" },
+    { chave: "RECEBIDO", rotulo: "Recebido no<br>almoxarifado" },
+    { chave: "CONFERENCIA", rotulo: "Em<br>conferência" },
+    { chave: "DISPONIVEL", rotulo: "Disponível<br>para retirada" }
+  ];
+
+  /* status gravado -> etapa. Só o que eu conheço; o resto fica na
+     primeira e o e-mail mostra o status cru. */
+  var MAPA = {
+    EMITIDO: 0, REGISTRADO: 0, ABERTO: 0, ABERTA: 0, PENDENTE: 0,
+    AGUARDANDO_APROVACAO: 0, APROVADO: 0, APROVADA: 0,
+    ENCAMINHADO: 1, EM_FORNECIMENTO: 1, FORNECIMENTO: 1, EM_ANDAMENTO: 1,
+    RECEBIDO: 2, RECEBIDO_PARCIAL: 2, ENTREGUE: 2,
+    EM_CONFERENCIA: 3, CONFERENCIA: 3, CONFERIDA: 3, DIVERGENCIA: 3,
+    DISPONIVEL: 4, DISPONIBILIZADA: 4, CONCLUIDO: 4, CONCLUIDA: 4
+  };
+
+  M.etapaDe = function (pedido) {
+    var st = lp(pedido && pedido.status).toUpperCase().replace(/[\s-]+/g, "_");
+    if (MAPA[st] !== undefined) return { indice: MAPA[st], conhecido: true, status: st };
+    return { indice: 0, conhecido: false, status: st || "(sem status)" };
+  };
+
+  /* a última linha do histórico é a "última atualização" da arte */
+  M.ultimaAtualizacao = function (pedido) {
+    var h = lista_(pedido && pedido.historico);
+    if (!h.length) {
+      return { quando: lp(pedido && (pedido.data || pedido.emissao)),
+               texto: "Pedido registrado no ALMOXA PRO." };
+    }
+    var u = h[h.length - 1];
+    return { quando: lp(u.quando), texto: lp(u.texto) || "Atualização registrada." };
+  };
+
+  /* os itens: o pedido às vezes é uma linha por item, às vezes traz .itens */
+  M.itensDe = function (pedido, todos) {
+    var p = pedido || {};
+    if (lista_(p.listaItens).length) return lista_(p.listaItens);
+    if (Array.isArray(p.itens)) return p.itens;
+    /* o MOCK.compras guarda UMA linha por item, com o mesmo precompra/id
+       base. Se me derem a lista inteira, eu junto as linhas irmãs. */
+    var irmas = lista_(todos).filter(function (x) {
+      return x !== p && lp(x.precompra) && lp(x.precompra) === lp(p.precompra);
+    });
+    return [p].concat(irmas).map(function (x) {
+      return { descricao: lp(x.descricao || x.item) || "—",
+               qtd: x.qtd, unidade: lp(x.unidade) || "un",
+               situacao: lp(x.status) };
+    });
+  };
+
+  /* ============================================================
+     A ARTE, EM HTML DE E-MAIL
+     ------------------------------------------------------------
+     [ICONES] 03/11 12:04 — ele comparou com a arte dele e disse:
+     "você não conseguiu montar o modelo assim". Tinha razão: o que
+     faltava eram os ÍCONES. E em e-mail ícone não é fonte nem SVG:
+     o Gmail APAGA <svg> embutido e BLOQUEIA imagem em base64. A
+     única coisa que Gmail, Outlook e celular mostram sem discutir
+     é PNG hospedado com endereço público.
+     Então eu desenhei os 24 ícones da arte dele e entreguei os
+     arquivos. Aqui eles entram por opts.icones (a pasta onde ele
+     subiu). Sem essa pasta, o e-mail sai igualzinho só que com
+     número no lugar do ícone — continua funcionando, nunca quebra.
+     ============================================================ */
+  var AZUL = "#0B2A55", AZUL2 = "#0F5BD8", CLARO = "#EAF2FB", CINZA = "#5F6B7A",
+      LINHA = "#C9D3E0", VERDE = "#16A34A";
+
+  function icoURL(base, nome) {
+    var b = lp(base);
+    if (!b) return "";
+    if (b.charAt(b.length - 1) !== "/") b += "/";
+    return b + nome + ".png";
+  }
+  function img(url, px, alt, estilo) {
+    if (!url) return "";
+    return '<img src="' + esc_(url) + '" width="' + px + '" height="' + px +
+      '" alt="' + esc_(alt || "") + '" style="display:block;border:0;' +
+      "width:" + px + "px;height:" + px + "px;" + (estilo || "") + '">';
+  }
+
+  /* o círculo de uma etapa: linha à esquerda, bola, linha à direita */
+  function bolaEtapa(base, n, estado) {
+    var fundo = estado === "futuro" ? "#FFFFFF" : AZUL2;
+    var borda = estado === "futuro" ? LINHA : AZUL2;
+    var cor = estado === "futuro" ? "#9AA4B2" : "#FFFFFF";
+    var tam = estado === "atual" ? 62 : 54;
+    var icone = icoURL(base, "etapa-" + (n + 1) + (estado === "futuro" ? "-cinza" : "-branco"));
+    var dentro = icone
+      ? img(icone, Math.round(tam * 0.5), "", "margin:0 auto")
+      : '<span style="font-family:Arial,Helvetica,sans-serif;font-size:19px;font-weight:bold;color:' +
+        cor + '">' + (n + 1) + "</span>";
+    return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" ' +
+      'align="center" style="margin:0 auto"><tr>' +
+      '<td width="' + tam + '" height="' + tam + '" align="center" valign="middle" ' +
+      'style="width:' + tam + "px;height:" + tam + "px;border-radius:" + (tam / 2) +
+      "px;background:" + fundo + ";border:2px solid " + borda +
+      ';text-align:center;vertical-align:middle">' + dentro + "</td>" +
+      "</tr></table>";
+  }
+
+  /* a linha que liga as bolas: fica numa linha própria da tabela,
+     atrás do nada — em e-mail é assim que se desenha régua */
+  function tracoEntre(estado) {
+    var cor = estado === "feito" ? AZUL2 : LINHA;
+    return '<td style="height:3px;background:' + cor + ';font-size:0;line-height:0">&nbsp;</td>';
+  }
+
+  M.montar = function (pedido, opts) {
+    var o = opts || {};
+    var p = pedido || {};
+    var et = M.etapaDe(p);
+    var ult = M.ultimaAtualizacao(p);
+    var itens = M.itensDe(p, o.todos);
+    var base = lp(o.icones);
+
+    var empresa = {};
+    try { if (typeof EMPRESA !== "undefined" && EMPRESA.ler) empresa = EMPRESA.ler() || {}; }
+    catch (e) { empresa = {}; }
+
+    var obra = lp(o.obra || p.obra || empresa.obra) || "—";
+    var local = lp(o.local || empresa.cidade) || "";
+    var logo = lp(o.logo);
+    var fotoObra = lp(o.fotoObra);
+    var link = lp(o.link);
+    var emailContato = lp(o.emailContato || empresa.email) || "almoxarifado@coesa.com.br";
+    var telefone = lp(o.telefone || empresa.telefone) || "";
+    var nomeEmpresa = (function () {
+      var n = lp(empresa.nome);
+      if (n && !/^almox[\s_-]*pro$/i.test(n)) return n;
+      return "COESA Engenharia";
+    })();
+
+    /* quando cada etapa aconteceu, do histórico real */
+    var quando = (function () {
+      var h = lista_(p.historico), fora = [];
+      for (var i = 0; i < M.ETAPAS.length; i++) fora.push("");
+      h.forEach(function (x, i) { if (i < fora.length) fora[i] = lp(x.quando); });
+      return fora;
+    })();
+
+    /* ---- a régua: três linhas de tabela (traço, bola, rótulo) ---- */
+    var celulasBola = "", celulasRotulo = "";
+    var ULTIMA = M.ETAPAS.length - 1;
+    M.ETAPAS.forEach(function (e, i) {
+      var estado = i < et.indice ? "feito" : (i === et.indice ? "atual" : "futuro");
+      var corLabel = estado === "futuro" ? "#9AA4B2" : AZUL;
+      var tamBola = estado === "atual" ? 62 : 54;
+      /* [REGUA] a linha tem de ATRAVESSAR as bolas, no meio delas.
+         Em e-mail isso não se faz com posição absoluta: faz-se com
+         a linha dentro da MESMA célula, à esquerda e à direita da
+         bola, alinhada ao centro vertical. Na primeira tentativa eu
+         pus a linha numa linha de tabela própria, por cima — e ela
+         flutuou longe das bolas, que foi o que ele viu. */
+      celulasBola += '<td width="20%" align="center" valign="top" style="width:20%;padding:0">' +
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>' +
+        '<td valign="middle" style="padding:0">' +
+        (i === 0 ? "" : '<div style="height:3px;background:' +
+          (i <= et.indice ? AZUL2 : LINHA) + ';font-size:0;line-height:0"></div>') +
+        "</td>" +
+        '<td width="' + tamBola + '" valign="middle" style="width:' + tamBola + 'px;padding:0">' +
+        bolaEtapa(base, i, estado) + "</td>" +
+        '<td valign="middle" style="padding:0">' +
+        (i === ULTIMA ? "" : '<div style="height:3px;background:' +
+          (i < et.indice ? AZUL2 : LINHA) + ';font-size:0;line-height:0"></div>') +
+        "</td></tr></table>" +
+        (estado === "feito" && icoURL(base, "visto-verde")
+          ? '<div style="margin-top:-10px">' +
+            img(icoURL(base, "visto-verde"), 20, "concluído", "margin:0 auto") + "</div>"
+          : estado === "feito"
+            ? '<div style="margin-top:2px;font-family:Arial,Helvetica,sans-serif;' +
+              'font-size:14px;color:' + VERDE + ';font-weight:bold">&#10003;</div>'
+            : "") +
+        "</td>";
+      celulasRotulo += '<td width="20%" align="center" valign="top" ' +
+        'style="width:20%;padding:8px 4px 0;font-family:Arial,Helvetica,sans-serif">' +
+        '<div style="font-size:12.5px;line-height:1.25;font-weight:bold;color:' + corLabel + '">' +
+        e.rotulo + "</div>" +
+        (estado === "atual"
+          ? '<div style="margin-top:6px"><span style="display:inline-block;padding:3px 9px;' +
+            "background:" + CLARO + ";color:" + AZUL + ';border-radius:10px;' +
+            'font-size:10.5px;font-weight:bold">Etapa atual</span></div>'
+          : quando[i]
+            ? '<div style="font-size:11px;color:' + CINZA + ';margin-top:5px">' +
+              esc_(dataHora(quando[i])) + "</div>"
+            : "") +
+        "</td>";
+    });
+
+    var linhas = itens.map(function (i) {
+      return "<tr>" +
+        '<td style="padding:10px 14px;border-bottom:1px solid #E8EDF3;' +
+        'font-family:Arial,Helvetica,sans-serif;font-size:13.5px;color:#10213B">' +
+        esc_(lp(i.descricao || i.item) || "—") + "</td>" +
+        '<td align="center" style="padding:10px 14px;border-bottom:1px solid #E8EDF3;' +
+        'font-family:Arial,Helvetica,sans-serif;font-size:13.5px;color:#10213B;white-space:nowrap">' +
+        esc_(numero(i.qtd)) + " " + esc_(lp(i.unidade) || "un") + "</td>" +
+        '<td align="center" style="padding:10px 14px;border-bottom:1px solid #E8EDF3">' +
+        '<span style="display:inline-block;padding:4px 12px;background:' + CLARO +
+        ";color:" + AZUL + ';border-radius:11px;font-family:Arial,Helvetica,sans-serif;' +
+        'font-size:11.5px;font-weight:bold">' +
+        esc_(lp(i.situacao) || "—") + "</span></td></tr>";
+    }).join("");
+
+    function dado(icone, rotulo, valor, destaque) {
+      var u = icoURL(base, icone);
+      return "<tr>" +
+        (u ? '<td width="26" valign="middle" style="width:26px;padding:6px 8px 6px 0">' +
+             img(u, 18, "") + "</td>"
+           : "") +
+        '<td valign="middle" style="padding:6px 10px 6px 0;font-family:Arial,Helvetica,sans-serif;' +
+        'font-size:13.5px;color:' + AZUL + ';font-weight:bold;white-space:nowrap">' +
+        esc_(rotulo) + ":</td>" +
+        '<td valign="middle" style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;' +
+        'font-size:13.5px;color:#10213B">' +
+        (destaque
+          ? '<span style="display:inline-block;padding:4px 12px;background:' + AZUL +
+            ';color:#fff;border-radius:7px;font-weight:bold;font-family:Consolas,monospace;' +
+            'font-size:13px">' + esc_(valor) + "</span>"
+          : "<b>" + esc_(valor) + "</b>") +
+        "</td></tr>";
+    }
+
+    function rodapeItem(icone, texto) {
+      var u = icoURL(base, icone);
+      return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" ' +
+        'style="display:inline-table;margin-right:18px"><tr>' +
+        (u ? '<td valign="middle" style="padding-right:7px">' + img(u, 15, "") + "</td>" : "") +
+        '<td valign="middle" style="font-family:Arial,Helvetica,sans-serif;font-size:12px;' +
+        'color:#C9DCF5;white-space:nowrap">' + esc_(texto) + "</td></tr></table>";
+    }
+
+    return '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">' +
+      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+      "<title>" + esc_("Atualização do pedido " + lp(p.id)) + "</title></head>" +
+      '<body style="margin:0;padding:0;background:#EEF2F7">' +
+
+      '<div style="display:none;max-height:0;overflow:hidden;opacity:0">' +
+      esc_("Pedido " + lp(p.id) + " — " +
+           lp(M.ETAPAS[et.indice].rotulo).replace(/<br>/g, " ") + " · " + obra) + "</div>" +
+
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
+      'style="background:#EEF2F7;padding:18px 10px"><tr><td align="center">' +
+      '<table role="presentation" width="660" cellpadding="0" cellspacing="0" border="0" ' +
+      'style="width:660px;max-width:100%;background:#FFFFFF;border-radius:12px;overflow:hidden">' +
+
+      /* 1. marca */
+      '<tr><td style="background:#FFFFFF;padding:16px 22px;border-bottom:3px solid ' + AZUL2 + '">' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>' +
+      '<td valign="middle" style="font-family:Arial,Helvetica,sans-serif">' +
+      (logo ? '<img src="' + esc_(logo) + '" alt="' + esc_(nomeEmpresa) +
+              '" height="42" style="display:block;border:0;height:42px">'
+            : '<div style="font-size:23px;font-weight:bold;color:' + AZUL + '">' +
+              esc_(nomeEmpresa) + "</div>") +
+      "</td>" +
+      '<td align="right" valign="middle" style="font-family:Arial,Helvetica,sans-serif;' +
+      'font-size:11px;color:' + CINZA + ';letter-spacing:.05em;border-left:1px solid ' + LINHA +
+      ';padding-left:16px">' +
+      "CONSTRUÇÃO CIVIL &nbsp;|&nbsp; INFRAESTRUTURA<br>ENERGIA, ÓLEO E GÁS" +
+      "</td></tr></table></td></tr>" +
+
+      /* 2. faixa do módulo */
+      '<tr><td style="background:' + AZUL + ';padding:11px 22px">' +
+      '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>' +
+      (icoURL(base, "banda-almoxarifado")
+        ? '<td valign="middle" style="padding-right:10px">' +
+          img(icoURL(base, "banda-almoxarifado"), 18, "") + "</td>" : "") +
+      '<td valign="middle" style="font-family:Arial,Helvetica,sans-serif;font-size:13px;' +
+      'color:#FFFFFF;letter-spacing:.06em"><b>ALMOXARIFADO</b>' +
+      '<span style="color:#9FC2F0">&nbsp;&nbsp;|&nbsp;&nbsp;ACOMPANHAMENTO DE PEDIDOS</span>' +
+      "</td></tr></table></td></tr>" +
+
+      /* 3. título + foto da obra */
+      '<tr><td style="padding:22px 22px 6px">' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>' +
+      '<td valign="top" style="font-family:Arial,Helvetica,sans-serif">' +
+      '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>' +
+      (icoURL(base, "titulo-prancheta")
+        ? '<td valign="middle" width="58" style="width:58px;padding-right:12px">' +
+          '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>' +
+          '<td width="52" height="52" align="center" valign="middle" style="width:52px;' +
+          "height:52px;background:" + CLARO + ';border-radius:12px">' +
+          img(icoURL(base, "titulo-prancheta"), 28, "", "margin:0 auto") + "</td></tr></table></td>"
+        : "") +
+      '<td valign="middle">' +
+      '<div style="font-size:27px;font-weight:bold;color:' + AZUL + ';line-height:1.1">' +
+      "Atualização do Pedido</div>" +
+      '<div style="font-size:13px;color:' + CINZA + ';margin-top:5px">' +
+      "Acompanhe abaixo o status do seu pedido de materiais.</div>" +
+      "</td></tr></table></td>" +
+      (fotoObra
+        ? '<td width="230" valign="top" style="width:230px;padding-left:14px">' +
+          '<img src="' + esc_(fotoObra) + '" alt="' + esc_(obra) +
+          '" width="230" style="display:block;border:0;border-radius:8px 8px 0 0;max-width:230px">' +
+          '<table role="presentation" width="230" cellpadding="0" cellspacing="0" border="0" ' +
+          'style="width:230px;background:' + AZUL + ';border-radius:0 0 8px 8px"><tr>' +
+          (icoURL(base, "rodape-pino")
+            ? '<td width="26" valign="middle" style="width:26px;padding:7px 0 7px 10px">' +
+              img(icoURL(base, "rodape-pino"), 14, "") + "</td>" : "") +
+          '<td valign="middle" style="padding:7px 10px;font-family:Arial,Helvetica,sans-serif;' +
+          'font-size:13px;color:#FFFFFF;font-weight:bold">' + esc_(obra) + "</td>" +
+          "</tr></table></td>"
+        : "") +
+      "</tr></table></td></tr>" +
+
+      /* 4. dados do pedido */
+      '<tr><td style="padding:14px 22px 0">' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
+      'style="background:' + CLARO + ';border-radius:10px"><tr><td style="padding:14px 18px">' +
+      '<table role="presentation" cellpadding="0" cellspacing="0" border="0">' +
+      dado("dado-pedido", "Pedido", lp(p.id) || "—", true) +
+      dado("dado-obra", "Obra", obra) +
+      dado("dado-responsavel", "Responsável", lp(p.solicitante) || "—") +
+      dado("dado-fornecedor", "Fornecedor", lp(p.fornecedor) || "—") +
+      (lp(p.previsao) ? dado("dado-pedido", "Previsão", lp(p.previsao)) : "") +
+      "</table></td></tr></table></td></tr>" +
+
+      /* 5. a régua de status */
+      '<tr><td style="padding:24px 18px 6px">' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>' +
+      '<td style="font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:bold;' +
+      'color:' + AZUL + ';white-space:nowrap;padding:0 12px 14px 4px">Status do Pedido</td>' +
+      '<td style="padding:0 0 14px"><div style="height:2px;background:' + LINHA + '"></div></td>' +
+      "</tr></table>" +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">' +
+      "<tr>" + celulasBola + "</tr>" +
+      "<tr>" + celulasRotulo + "</tr></table>" +
+      (et.conhecido ? "" :
+        '<div style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:#8A6D00;' +
+        'background:#FFF7E0;border:1px solid #E8C86A;border-radius:8px;padding:9px 11px;' +
+        'margin:14px 4px 0">O status gravado neste pedido é <b>' + esc_(et.status) +
+        "</b>, que eu não sei em qual etapa cai. Mostro a primeira e não adianto " +
+        "progresso que não aconteceu.</div>") +
+      "</td></tr>" +
+
+      /* 6. última atualização */
+      '<tr><td style="padding:20px 22px 0">' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
+      'style="border-radius:10px;overflow:hidden"><tr>' +
+      '<td width="196" valign="middle" style="width:196px;background:' + AZUL +
+      ';padding:16px 16px">' +
+      '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>' +
+      (icoURL(base, "calendario-branco")
+        ? '<td valign="middle" style="padding-right:10px">' +
+          img(icoURL(base, "calendario-branco"), 22, "") + "</td>" : "") +
+      '<td valign="middle" style="font-family:Arial,Helvetica,sans-serif;font-size:15px;' +
+      'font-weight:bold;color:#FFFFFF">Última<br>atualização</td></tr></table></td>' +
+      '<td valign="middle" style="background:' + CLARO + ';padding:16px 18px;' +
+      'font-family:Arial,Helvetica,sans-serif">' +
+      '<div style="font-size:15.5px;font-weight:bold;color:' + AZUL + '">' +
+      esc_(dataHora(ult.quando)) + "</div>" +
+      '<div style="font-size:13px;color:#10213B;margin-top:4px;line-height:1.45">' +
+      esc_(ult.texto) + "</div>" +
+      "</td></tr></table></td></tr>" +
+
+      /* 7. resumo do material */
+      '<tr><td style="padding:24px 22px 0">' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>' +
+      '<td style="font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:bold;' +
+      'color:' + AZUL + ';white-space:nowrap;padding:0 12px 12px 0">Resumo do material</td>' +
+      '<td style="padding:0 0 12px"><div style="height:2px;background:' + LINHA + '"></div></td>' +
+      "</tr></table>" +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
+      'style="border:1px solid #E8EDF3;border-radius:8px;overflow:hidden">' +
+      '<tr style="background:' + AZUL + '">' +
+      '<th align="left" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;' +
+      'font-size:12.5px;color:#FFFFFF">Material</th>' +
+      '<th align="center" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;' +
+      'font-size:12.5px;color:#FFFFFF">Quantidade</th>' +
+      '<th align="center" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;' +
+      'font-size:12.5px;color:#FFFFFF">Situação</th></tr>' +
+      (linhas || '<tr><td colspan="3" style="padding:12px;font-family:Arial,Helvetica,sans-serif;' +
+        'font-size:13px;color:' + CINZA + '">Nenhum item neste pedido.</td></tr>') +
+      "</table></td></tr>" +
+
+      /* 8. botão */
+      (link
+        ? '<tr><td align="center" style="padding:26px 22px 8px">' +
+          '<a href="' + esc_(link) + '" style="display:inline-block;background:' + AZUL +
+          ';color:#FFFFFF;text-decoration:none;padding:15px 30px;border-radius:9px;' +
+          'font-family:Arial,Helvetica,sans-serif;font-size:14.5px;font-weight:bold;' +
+          'letter-spacing:.04em">' +
+          '<table role="presentation" cellpadding="0" cellspacing="0" border="0" ' +
+          'style="display:inline-table"><tr>' +
+          (icoURL(base, "botao-externo")
+            ? '<td valign="middle" style="padding-right:10px">' +
+              img(icoURL(base, "botao-externo"), 17, "") + "</td>" : "") +
+          '<td valign="middle" style="color:#FFFFFF;font-family:Arial,Helvetica,sans-serif;' +
+          'font-size:14.5px;font-weight:bold">ACOMPANHAR PEDIDO NO ALMOXA PRO</td>' +
+          (icoURL(base, "botao-seta")
+            ? '<td valign="middle" style="padding-left:10px">' +
+              img(icoURL(base, "botao-seta"), 14, "") + "</td>"
+            : '<td valign="middle" style="padding-left:8px;color:#fff">&rsaquo;</td>') +
+          "</tr></table></a></td></tr>"
+        : "") +
+
+      /* 9. rodapé */
+      '<tr><td style="padding:24px 22px 0"><div style="border-top:1px solid #E8EDF3"></div></td></tr>' +
+      '<tr><td style="background:' + AZUL + ';padding:18px 22px">' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>' +
+      '<td valign="middle" style="font-family:Arial,Helvetica,sans-serif">' +
+      (logo ? '<img src="' + esc_(logo) + '" alt="" height="30" ' +
+              'style="display:block;border:0;height:30px;filter:brightness(0) invert(1)">'
+            : '<div style="font-size:16px;font-weight:bold;color:#FFFFFF">' +
+              esc_(nomeEmpresa) + "</div>") +
+      "</td>" +
+      '<td align="right" valign="middle">' +
+      rodapeItem("rodape-capacete", "Obra: " + obra) +
+      (local ? rodapeItem("rodape-pino", "Local: " + local) : "") +
+      "<br>" +
+      rodapeItem("rodape-envelope", emailContato) +
+      (telefone ? rodapeItem("rodape-telefone", telefone) : "") +
+      "</td></tr></table></td></tr>" +
+      '<tr><td style="background:#07203F;padding:11px 22px;' +
+      'font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:#8FB3DE">' +
+      "<b>Mensagem automática do ALMOXA PRO.</b> Este é um e-mail de acompanhamento do seu " +
+      "pedido. Por favor, não responda." +
+      "</td></tr>" +
+
+      "</table></td></tr></table></body></html>";
+  };
+
+  M.assunto = function (pedido) {
+    var p = pedido || {};
+    var et = M.etapaDe(p);
+    var rot = lp(M.ETAPAS[et.indice].rotulo).replace(/<br>/g, " ");
+    return "[ALMOXA PRO] Pedido " + (lp(p.id) || "—") + " · " + rot;
+  };
+
+  /* ============================================================
+     A TELA DE PRÉVIA — conferir antes de existir envio
+     ============================================================ */
+  function campoURL(id, rotulo, valor, dica) {
+    return '<div class="field"><label>' + esc_(rotulo) + "</label>" +
+      '<input class="input mono" id="' + id + '" value="' + esc_(valor || "") +
+      '" placeholder="' + esc_(dica) + '" style="font-size:12px"></div>';
+  }
+
+  M.tela = function () {
+    if (typeof SCREENS === "undefined" || SCREENS["email-pedido"]) return false;
+    SCREENS["email-pedido"] = {
+      titulo: "Modelo de e-mail do pedido",
+      modulo: "compras",
+      render: function () {
+        return Promise.resolve(API.call("compras", "listar", {})).then(function (r) {
+          var pedidos = (r && r.ok) ? lista_(r.dados) : [];
+          M.__pedidos = pedidos;
+          return UI.cabecalho({
+            trilha: ["Compras", "Modelo de e-mail"],
+            titulo: "Modelo de e-mail do pedido",
+            sub: pedidos.length + " pedido(s) no Core. Esta tela <b>não envia nada</b> — " +
+                 "ela monta o e-mail para você conferir."
+          }) +
+          '<div class="alert a-yellow mb16">' + icone_("alerta") +
+          "<div><b>Esta página não envia e-mail, e não tem como.</b> Quem envia é o Apps " +
+          "Script (<span class='mono'>MailApp</span>). O módulo <span class='mono'>" +
+          "notificacoes</span> do seu Core atende <span class='mono'>credenciais</span>, " +
+          "<span class='mono'>perfil</span> e <span class='mono'>regras</span> — nenhuma " +
+          "ação de enviar. O envio é um módulo <span class='mono'>.gs</span> que eu escrevo " +
+          "e você instala. O que está aqui é a outra metade: o modelo, com os dados reais, " +
+          "para conferir <b>antes</b> de sair para a obra inteira.</div></div>" +
+
+          '<div class="card mb16"><div class="card-body">' +
+          '<div class="section-title">Imagens e link (ficam só nesta tela, não são gravados)</div>' +
+          '<div class="grid g2">' +
+          campoURL("epLogo", "Endereço do logotipo COESA",
+            (M.__cfg && M.__cfg.logo) || "", "https://…/logo-coesa.png") +
+          campoURL("epFoto", "Endereço da foto da obra",
+            (M.__cfg && M.__cfg.fotoObra) || "", "https://…/ufn3.jpg") +
+          "</div>" +
+          '<div class="grid g2">' +
+          campoURL("epIcones", "Pasta dos ícones (onde você subiu os PNG)",
+            (M.__cfg && M.__cfg.icones) || "", "https://…/Projeto/icones/") +
+          campoURL("epLink", "Link de acompanhamento",
+            (M.__cfg && M.__cfg.link) || "", "https://…/Projeto/#/compras") +
+          campoURL("epObra", "Obra", (M.__cfg && M.__cfg.obra) || "", "UFN3 – TRÊS LAGOAS / MS") +
+          "</div>" +
+          '<p class="small muted">As imagens precisam de endereço público: o e-mail é aberto ' +
+          "fora do sistema, e o leitor não enxerga arquivo do seu computador. O seu próprio " +
+          "GitHub Pages serve.</p>" +
+          "</div></div>" +
+
+          (pedidos.length
+            ? '<div class="card mb16"><div class="card-body">' +
+              '<div class="section-title">Escolha o pedido</div>' +
+              '<select class="select" id="epPedido">' +
+              pedidos.map(function (p, i) {
+                return '<option value="' + i + '">' + esc_(lp(p.id)) + " · " +
+                  esc_(lp(p.descricao || p.item) || "—") + " · " +
+                  esc_(lp(p.status) || "sem status") + "</option>";
+              }).join("") + "</select>" +
+              '<div class="flex gap8 mt12" style="flex-wrap:wrap">' +
+              '<button class="btn btn-primary" data-ep-ver>' + icone_("olho") + "Ver o e-mail</button>" +
+              '<button class="btn btn-ghost" data-ep-copiar>' + icone_("copiar") + "Copiar o HTML</button>" +
+              '<button class="btn btn-ghost" data-ep-baixar>' + icone_("download") + "Baixar .html</button>" +
+              "</div></div></div>"
+            : '<div class="card mb16">' + UI.estado("vazio", "Nenhum pedido no Core",
+                "O e-mail se monta a partir de um pedido real. Quando houver pedido, ele aparece aqui.") +
+              "</div>") +
+
+          '<div id="epPalco"></div>';
+        }, function (e) {
+          return UI.estado("erro", "Não consegui ler os pedidos",
+            lp(e && e.message) || "o Core não respondeu");
+        });
+      },
+      mount: function () {
+        function cfg() {
+          function v(id) { var e = document.querySelector(id); return e ? lp(e.value) : ""; }
+          M.__cfg = { logo: v("#epLogo"), fotoObra: v("#epFoto"),
+                      link: v("#epLink"), obra: v("#epObra"),
+                      icones: v("#epIcones"),
+                      todos: M.__pedidos };
+          return M.__cfg;
+        }
+        function escolhido() {
+          var s = document.querySelector("#epPedido");
+          if (!s) return null;
+          return lista_(M.__pedidos)[Number(s.value)] || null;
+        }
+        var ver = document.querySelector("[data-ep-ver]");
+        if (ver) ver.addEventListener("click", function () {
+          var p = escolhido();
+          if (!p) { aviso_("warn", "Escolha um pedido", "Nenhum pedido selecionado."); return; }
+          var html = M.montar(p, cfg());
+          M.ultimo = { pedido: lp(p.id), html: html, assunto: M.assunto(p) };
+          var palco = document.querySelector("#epPalco");
+          palco.innerHTML = '<div class="card"><div class="card-body">' +
+            '<div class="section-title">Assunto</div>' +
+            '<p class="mono" style="font-size:13px">' + esc_(M.assunto(p)) + "</p>" +
+            '<div class="section-title mt12">Como vai chegar</div>' +
+            '<iframe id="epQuadro" style="width:100%;height:1100px;border:1px solid var(--linha,#E3E8EF);' +
+            'border-radius:10px;background:#EEF2F7"></iframe></div></div>';
+          var q = document.querySelector("#epQuadro");
+          try {
+            q.srcdoc = html;
+          } catch (e) {
+            var d = q.contentWindow.document;
+            d.open(); d.write(html); d.close();
+          }
+          palco.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+
+        var cop = document.querySelector("[data-ep-copiar]");
+        if (cop) cop.addEventListener("click", function () {
+          var p = escolhido(); if (!p) return;
+          var html = M.montar(p, cfg());
+          try {
+            navigator.clipboard.writeText(html).then(function () {
+              aviso_("ok", "HTML copiado", Math.round(html.length / 1024) + " KB na área de transferência.");
+            }, function () { aviso_("err", "Não consegui copiar", "O navegador recusou."); });
+          } catch (e) { aviso_("err", "Não consegui copiar", lp(e && e.message)); }
+        });
+
+        var bai = document.querySelector("[data-ep-baixar]");
+        if (bai) bai.addEventListener("click", function () {
+          var p = escolhido(); if (!p) return;
+          var html = M.montar(p, cfg());
+          try {
+            var a = document.createElement("a");
+            a.href = "data:text/html;charset=utf-8," + encodeURIComponent(html);
+            a.download = "email-" + (lp(p.id).replace(/[^\w-]/g, "") || "pedido") + ".html";
+            document.body.appendChild(a); a.click(); a.remove();
+          } catch (e) { aviso_("err", "Não consegui baixar", lp(e && e.message)); }
+        });
+      }
+    };
+    return true;
+  };
+
+  function noMenu() {
+    try {
+      if (typeof NAV === "undefined" || !NAV || window.__epNoMenu) return false;
+      for (var i = 0; i < NAV.length; i++) {
+        var g = NAV[i];
+        if (!g || !lista_(g.itens).length) continue;
+        if (lp(g.id) !== "compras" && !/compras/i.test(lp(g.rotulo))) continue;
+        if (g.itens.some(function (x) { return lp(x.rota) === "#/email-pedido"; })) {
+          window.__epNoMenu = true; return true;
+        }
+        g.itens.push({ rotulo: "Modelo de e-mail", rota: "#/email-pedido",
+                       icone: "email", modulo: "compras" });
+        window.__epNoMenu = true;
+        return true;
+      }
+    } catch (e) { M.ultimoErro = lp(e && e.message); }
+    return false;
+  }
+
+  M.tela();
+  if (!noMenu()) {
+    try {
+      document.addEventListener("DOMContentLoaded", function () { M.tela(); noMenu(); });
+      setTimeout(function () { M.tela(); noMenu(); }, 1200);
+    } catch (e) {}
+  }
+
+  M.__noMenu = noMenu;
 })();
 </script>
 
