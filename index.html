@@ -12640,12 +12640,19 @@ function modalCAemVarios(skuOrigem, itemOrigem, dados) {
         epiSalvarCA_(escolhidos, dados).then(function (r) {
           bt.disabled = false;
           bt.textContent = "Aplicar nos marcados";
-          saida.innerHTML = '<div class="alert ' + (r.ok ? "a-green" : "a-red") + ' mt12">' +
-            ic(r.ok ? "checkC" : "alerta") + "<div>" +
-            (r.feitos.length
-              ? "<b>CA " + U.esc(dados.ca) + " gravado em " + r.feitos.length + " item(ns).</b>"
-              : "<b>Nada foi gravado.</b>") +
-            (r.falhas.length ? " " + U.esc(r.motivo) : "") + "</div></div>";
+          /* [CAFICA] 04/11 — aqui era o mesmo engano da outra tela:
+             verde porque o Core respondeu ok, sem reler nada. */
+          var f = (typeof CAFICA !== "undefined" && CAFICA.frase)
+            ? CAFICA.frase(r, dados.ca)
+            : { classe: r.ok ? "a-green" : "a-red",
+                texto: (r.feitos.length
+                  ? "CA " + dados.ca + " gravado em " + r.feitos.length + " item(ns)."
+                  : "Nada foi gravado.") + (r.falhas.length ? " " + r.motivo : "") };
+          saida.innerHTML = '<div class="alert ' + f.classe + ' mt12">' +
+            ic(f.classe === "a-green" ? "checkC" : "alerta") + "<div>" +
+            (listaSegura(r.feitos).length
+              ? "<b>" + listaSegura(r.feitos).length + " item(ns) conferido(s) no Core.</b> "
+              : "") + U.esc(f.texto) + "</div></div>";
           if (r.feitos.length && typeof CACHE !== "undefined" && CACHE.invalidar) CACHE.invalidar();
         });
       });
@@ -12788,7 +12795,12 @@ if (btCa) btCa.addEventListener("click", function () {
   btCa.innerHTML = '<span class="spinner"></span> Salvando…';
   epiSalvarCA_([sku], d).then(function (res) {
     btCa.disabled = false; btCa.textContent = "Salvar CA";
-    if (res.ok) {
+    /* [CAFICA] 04/11 \u2014 a frase sai do bloco que conferiu no Core,
+       e n\u00e3o de "o Core respondeu ok". Verde s\u00f3 com prova. */
+    if (typeof CAFICA !== "undefined" && CAFICA.frase) {
+      var f = CAFICA.frase(res, d.ca);
+      dizer_(f.classe, f.texto);
+    } else if (res.ok) {
       dizer_("a-green", d.ca ? "CA " + d.ca + " gravado neste item." : "CA removido deste item.");
     } else {
       dizer_("a-red", "N\u00e3o gravei: " + res.motivo);
@@ -41972,7 +41984,22 @@ localId: i.localId || null,
 marca: i.marca || "",
 modelo: i.modelo || "",
 status: i.status || "Ativo",
-ca: i.ca || ""
+ca: i.ca || "",
+/* [CAFICA] 04/11 — esta linha faltava, e é toda a causa de
+   "salvei o CA e não ficou". Esta lista é um FILTRO: o que
+   não está escrito aqui é jogado fora na entrada, venha o
+   que vier do Core. O número do CA estava na lista; a DATA
+   DE VALIDADE não. Então ele digitava os dois, o Core até
+   guardava os dois, e na releitura a data era descartada
+   aqui dentro — o campo voltava vazio toda vez.
+   Provado em 04/11: Core devolvendo caValidade "2028-03-31",
+   MOCK.itens saindo sem a chave caValidade. */
+caValidade: i.caValidade || i.caVencimento || i.validadeCa || "",
+/* [VARIOSITENS] 04/11 — mesma história do caValidade: a
+   referência do fabricante vinha do Core e morria aqui, então
+   nenhuma tela conseguia mostrar nem procurar por ela. O prompt
+   de 04/11 pede referência na busca, na lista e no PDF. */
+referencia: i.referencia || i.refFabricante || i.codigoFabricante || ""
 };
 });
 }
@@ -64819,8 +64846,12 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 381 · 03/11";
+var ALMOXA_VERSAO = "sistema 390 · 04/11";
 var ALMOXA_NOVIDADES = [
+  "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
+  "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
+  "382 · a tela le e grava a configuracao no proprio modulo de envio, e manda o teste",
+  "382 · copia o gestor de quem pediu, pela coluna que voce apontar",
   "381 · a trava sabe de qual fila veio: o botao do tapa-buraco deixou de barrar a si mesmo",
   "381 · espaco duplo no nome nao e mais confundido com alteracao",
   "380 · separa e-mail de tapa-buraco (@almoxa.local) de divergencia de verdade",
@@ -103617,7 +103648,11 @@ emissao: hoje,
           ? '<div style="margin-top:6px"><span style="display:inline-block;padding:3px 9px;' +
             "background:" + CLARO + ";color:" + AZUL + ';border-radius:10px;' +
             'font-size:10.5px;font-weight:bold">Etapa atual</span></div>'
-          : quando[i]
+          /* [SODEPOIS] data só sob etapa CONCLUÍDA. Eu casava o
+             histórico com as etapas pela posição, e o histórico tem
+             linhas que não são mudança de etapa — na tela dele a
+             etapa 1 era a atual e as 2,3,4,5 mostravam hora. */
+          : (estado === "feito" && quando[i])
             ? '<div style="font-size:11px;color:' + CINZA + ';margin-top:5px">' +
               esc_(dataHora(quando[i])) + "</div>"
             : "") +
@@ -103865,6 +103900,53 @@ emissao: hoje,
   };
 
   /* ============================================================
+     [PONTEGS] 03/11 16:33 — a tela fala com o .gs
+     ------------------------------------------------------------
+     Ele abriu o sistema pelo /exec. Ali existe google.script.run,
+     e por ele a tela chama o módulo de envio direto — sem rota
+     nova no Core, sem duplicar configuração.
+     A fonte da configuração passa a ser UMA: o .gs. A tela lê de
+     lá, mostra nos campos, e grava de volta. Fora do /exec não há
+     google.script.run: aí os campos continuam valendo só para a
+     prévia, e a tela diz isso em vez de fingir que guardou.
+     ============================================================ */
+  function temGS_() {
+    try { return !!(typeof google !== "undefined" && google.script && google.script.run); }
+    catch (e) { return false; }
+  }
+  function chamarGS_(funcao, arg) {
+    return new Promise(function (resolve) {
+      if (!temGS_()) { resolve({ ok: false, semGS: true, mensagem: "fora do /exec" }); return; }
+      try {
+        var run = google.script.run
+          .withSuccessHandler(function (t) {
+            var d = t;
+            if (typeof t === "string") { try { d = JSON.parse(t); } catch (e) { d = null; } }
+            resolve(d || { ok: false, mensagem: "o módulo respondeu algo que não entendi" });
+          })
+          .withFailureHandler(function (e) {
+            resolve({ ok: false, semModulo: true,
+              mensagem: (e && e.message) || "o módulo [MAILPED] não está instalado" });
+          });
+        if (arg === undefined) run[funcao](); else run[funcao](arg);
+      } catch (e) {
+        resolve({ ok: false, mensagem: (e && e.message) || String(e) });
+      }
+    });
+  }
+  M.lerConfigDoGS = function () { return chamarGS_("AP_MAILPED_configuracao"); };
+  M.gravarConfigNoGS = function (cfg) {
+    return chamarGS_("AP_MAILPED_salvarConfiguracao", JSON.stringify(cfg || {}));
+  };
+  M.previaPeloGS = function (pedido) {
+    return chamarGS_("AP_MAILPED_previa", JSON.stringify(pedido || {}));
+  };
+  M.testarPeloGS = function (email) {
+    return chamarGS_("AP_MAILPED_testePelaTela", String(email || ""));
+  };
+  M.__temGS = temGS_;
+
+  /* ============================================================
      A TELA DE PRÉVIA — conferir antes de existir envio
      ============================================================ */
   function campoURL(id, rotulo, valor, dica) {
@@ -103898,7 +103980,13 @@ emissao: hoje,
           "para conferir <b>antes</b> de sair para a obra inteira.</div></div>" +
 
           '<div class="card mb16"><div class="card-body">' +
-          '<div class="section-title">Imagens e link (ficam só nesta tela, não são gravados)</div>' +
+          '<div class="alert a-green mb12">' + icone_("checkC") +
+          "<div><b>O layout já vem pronto.</b> O logotipo da COESA, a foto da UFN3 e os " +
+          "24 ícones estão <b>dentro do módulo de envio</b> e viajam junto com o e-mail. " +
+          "Você não precisa hospedar nem digitar endereço de imagem nenhum.<br>" +
+          "Os campos abaixo são <b>opcionais</b>: só preencha se um dia quiser trocar " +
+          "alguma imagem por outra.</div></div>" +
+          '<div class="section-title">Trocar alguma imagem (opcional)</div>' +
           '<div class="grid g2">' +
           campoURL("epLogo", "Endereço do logotipo COESA",
             (M.__cfg && M.__cfg.logo) || "", "https://…/logo-coesa.png") +
@@ -103912,9 +104000,35 @@ emissao: hoje,
             (M.__cfg && M.__cfg.link) || "", "https://…/Projeto/#/compras") +
           campoURL("epObra", "Obra", (M.__cfg && M.__cfg.obra) || "", "UFN3 – TRÊS LAGOAS / MS") +
           "</div>" +
-          '<p class="small muted">As imagens precisam de endereço público: o e-mail é aberto ' +
-          "fora do sistema, e o leitor não enxerga arquivo do seu computador. O seu próprio " +
-          "GitHub Pages serve.</p>" +
+          '<p class="small muted">Campo vazio = usa a imagem que já vem no módulo. ' +
+          "Se preencher, precisa ser endereço público: o e-mail é aberto fora do sistema, " +
+          "e o leitor não enxerga arquivo do seu computador.</p>" +
+          '<div class="flex gap8 mt12" style="flex-wrap:wrap">' +
+          '<button class="btn btn-primary btn-sm" data-ep-ler-cfg>' + icone_("download") +
+          "Ler a configuração do módulo</button>" +
+          '<button class="btn btn-orange btn-sm" data-ep-salvar-cfg>' + icone_("checkC") +
+          "Salvar no módulo (vale para o envio automático)</button>" +
+          "</div>" +
+          '<div id="epCfgAviso" class="mt8"></div>' +
+          "</div></div>" +
+
+          /* [TESTE] o que ele pediu: mandar para ele e para o gestor */
+          '<div class="card mb16" style="border-left:4px solid var(--verde,#2E9E5B)">' +
+          '<div class="card-body">' +
+          '<b style="font-size:14px">Mandar um e-mail de teste</b>' +
+          '<p class="small" style="margin:6px 0 10px">Usa <b>este mesmo modelo</b>, com um ' +
+          "pedido de exemplo. Não toca em pedido nenhum e não cria trava — dá para repetir " +
+          "quantas vezes quiser.</p>" +
+          '<div class="grid g2">' +
+          '<div class="field"><label>Para quem mandar</label>' +
+          '<input class="input mono" id="epTestePara" placeholder="ismael@coesa.com.br" ' +
+          'style="font-size:12px"></div>' +
+          '<div class="field"><label>E em cópia (opcional, separe por vírgula)</label>' +
+          '<input class="input mono" id="epTesteCopia" placeholder="gestor@coesa.com.br" ' +
+          'style="font-size:12px"></div></div>' +
+          '<button class="btn btn-primary" data-ep-testar>' + icone_("email") +
+          "Mandar o teste agora</button>" +
+          '<div id="epTesteAviso" class="mt8"></div>' +
           "</div></div>" +
 
           (pedidos.length
@@ -103955,27 +104069,174 @@ emissao: hoje,
           if (!s) return null;
           return lista_(M.__pedidos)[Number(s.value)] || null;
         }
+        function avisoCfg(html) {
+          var e = document.querySelector("#epCfgAviso"); if (e) e.innerHTML = html;
+        }
+        function porNaTela(c) {
+          function set(id, v) { var e = document.querySelector(id); if (e && v !== undefined) e.value = v || ""; }
+          set("#epLogo", c.logo); set("#epFoto", c.fotoObra);
+          set("#epIcones", c.icones); set("#epLink", c.link); set("#epObra", c.obra);
+        }
+
+        /* lê sozinho ao abrir, quando o módulo estiver lá */
+        if (M.__temGS()) {
+          M.lerConfigDoGS().then(function (c) {
+            if (c && c.ok) {
+              porNaTela(c);
+              M.__cfg = { logo: c.logo, fotoObra: c.fotoObra, icones: c.icones,
+                          link: c.link, obra: c.obra, todos: M.__pedidos };
+              avisoCfg('<div class="alert a-green">' + icone_("checkC") +
+                "<div><b>Configuração lida do módulo de envio.</b> É a mesma que o envio " +
+                "automático usa — o que você salvar aqui vale lá." +
+                (c.ligado ? "" : "<br>O envio está <b>desligado</b> no módulo " +
+                  "(<span class='mono'>AP_MAILPED_ligar(true)</span> para ligar).") +
+                "</div></div>");
+            } else if (c && c.semModulo) {
+              avisoCfg('<div class="alert a-yellow">' + icone_("alerta") +
+                "<div>O módulo <span class='mono'>ALMOXA_EMAIL_PEDIDO</span> ainda não está " +
+                "instalado no Apps Script. Os campos acima continuam valendo para a prévia " +
+                "aqui, mas não há onde guardar nem para onde enviar.</div></div>");
+            } else if (c && !c.ok) {
+              avisoCfg('<div class="alert a-yellow">' + icone_("alerta") +
+                "<div>" + esc_(lp(c.mensagem)) + " — rode " +
+                "<span class='mono'>AP_MAILPED_configurar()</span> uma vez no Apps Script." +
+                "</div></div>");
+            }
+          });
+        } else {
+          avisoCfg('<div class="alert a-gray">' + icone_("info") +
+            "<div>Esta página não está aberta pelo <b>/exec</b> do Apps Script, então não " +
+            "consigo falar com o módulo de envio daqui. Os campos valem só para a prévia " +
+            "desta tela. Abra pelo /exec para salvar e para testar o envio.</div></div>");
+        }
+
+        var lerCfg = document.querySelector("[data-ep-ler-cfg]");
+        if (lerCfg) lerCfg.addEventListener("click", function () {
+          avisoCfg('<div class="alert a-gray">' + icone_("sync") + "<div>Lendo…</div></div>");
+          M.lerConfigDoGS().then(function (c) {
+            if (c && c.ok) {
+              porNaTela(c);
+              avisoCfg('<div class="alert a-green">' + icone_("checkC") +
+                "<div>Lido do módulo.</div></div>");
+            } else {
+              avisoCfg('<div class="alert a-red">' + icone_("alerta") +
+                "<div>" + esc_(lp(c && c.mensagem) || "não consegui ler") + "</div></div>");
+            }
+          });
+        });
+
+        var salvarCfg = document.querySelector("[data-ep-salvar-cfg]");
+        if (salvarCfg) salvarCfg.addEventListener("click", function () {
+          function v(id) { var e = document.querySelector(id); return e ? lp(e.value) : ""; }
+          var pacote = { logo: v("#epLogo"), fotoObra: v("#epFoto"),
+                         icones: v("#epIcones"), link: v("#epLink"), obra: v("#epObra") };
+          avisoCfg('<div class="alert a-gray">' + icone_("sync") + "<div>Salvando…</div></div>");
+          M.gravarConfigNoGS(pacote).then(function (r) {
+            if (r && r.ok) {
+              aviso_("ok", "Configuração salva", "O envio automático passa a usar estes endereços.");
+              avisoCfg('<div class="alert a-green">' + icone_("checkC") +
+                "<div><b>Salvo no módulo.</b> Não precisa digitar de novo: o envio " +
+                "automático lê daqui.</div></div>");
+            } else {
+              avisoCfg('<div class="alert a-red">' + icone_("alerta") +
+                "<div>" + esc_(lp(r && r.mensagem) || "não consegui salvar") +
+                (r && r.semGS ? " — abra o sistema pelo /exec do Apps Script." : "") +
+                "</div></div>");
+            }
+          });
+        });
+
+        var testar = document.querySelector("[data-ep-testar]");
+        if (testar) testar.addEventListener("click", function () {
+          var para = lp((document.querySelector("#epTestePara") || {}).value);
+          var copia = lp((document.querySelector("#epTesteCopia") || {}).value);
+          var cx = document.querySelector("#epTesteAviso");
+          if (!para) {
+            cx.innerHTML = '<div class="alert a-yellow">' + icone_("alerta") +
+              "<div>Diga para quem mandar.</div></div>";
+            return;
+          }
+          var alvos = [para].concat(copia ? copia.split(/[,;]+/) : [])
+            .map(lp).filter(Boolean);
+          testar.disabled = true;
+          cx.innerHTML = '<div class="alert a-gray">' + icone_("sync") +
+            "<div>Mandando para " + alvos.length + "…</div></div>";
+          var feitos = [], falhou = [];
+          function passo(i) {
+            if (i >= alvos.length) {
+              testar.disabled = false;
+              cx.innerHTML =
+                (feitos.length ? '<div class="alert a-green">' + icone_("checkC") +
+                  "<div><b>Mandei para " + feitos.length + "</b>" +
+                  "<br>" + esc_(feitos.join(", ")) +
+                  "<br>Confira a caixa de entrada — e o lixo eletrônico na primeira vez." +
+                  "</div></div>" : "") +
+                (falhou.length ? '<div class="alert a-red mt8">' + icone_("alerta") +
+                  "<div><b>" + falhou.length + " não saiu</b>" +
+                  falhou.map(function (x) { return "<br>" + esc_(x); }).join("") +
+                  "</div></div>" : "");
+              return;
+            }
+            M.testarPeloGS(alvos[i]).then(function (r) {
+              if (r && r.enviado) feitos.push(alvos[i]);
+              else falhou.push(alvos[i] + " — " +
+                (lp(r && (r.motivo || r.mensagem)) || "o módulo não explicou") +
+                (r && r.semGS ? " (abra pelo /exec)" : "") +
+                (r && r.semModulo ? " (instale o ALMOXA_EMAIL_PEDIDO)" : ""));
+            }).then(function () { passo(i + 1); });
+          }
+          passo(0);
+        });
+
         var ver = document.querySelector("[data-ep-ver]");
         if (ver) ver.addEventListener("click", function () {
           var p = escolhido();
           if (!p) { aviso_("warn", "Escolha um pedido", "Nenhum pedido selecionado."); return; }
-          var html = M.montar(p, cfg());
-          M.ultimo = { pedido: lp(p.id), html: html, assunto: M.assunto(p) };
           var palco = document.querySelector("#epPalco");
-          palco.innerHTML = '<div class="card"><div class="card-body">' +
-            '<div class="section-title">Assunto</div>' +
-            '<p class="mono" style="font-size:13px">' + esc_(M.assunto(p)) + "</p>" +
-            '<div class="section-title mt12">Como vai chegar</div>' +
-            '<iframe id="epQuadro" style="width:100%;height:1100px;border:1px solid var(--linha,#E3E8EF);' +
-            'border-radius:10px;background:#EEF2F7"></iframe></div></div>';
-          var q = document.querySelector("#epQuadro");
-          try {
-            q.srcdoc = html;
-          } catch (e) {
-            var d = q.contentWindow.document;
-            d.open(); d.write(html); d.close();
+          palco.innerHTML = '<div class="alert a-gray">' + icone_("sync") +
+            "<div>Montando…</div></div>";
+
+          function mostrar(html, assunto, origem) {
+            M.ultimo = { pedido: lp(p.id), html: html, assunto: assunto };
+            palco.innerHTML = '<div class="card"><div class="card-body">' +
+              '<div class="section-title">Assunto</div>' +
+              '<p class="mono" style="font-size:13px">' + esc_(assunto) + "</p>" +
+              '<p class="small muted">' + esc_(origem) + "</p>" +
+              '<div class="section-title mt12">Como vai chegar</div>' +
+              '<iframe id="epQuadro" style="width:100%;height:1100px;' +
+              'border:1px solid var(--linha,#E3E8EF);border-radius:10px;' +
+              'background:#EEF2F7"></iframe></div></div>';
+            var q = document.querySelector("#epQuadro");
+            try { q.srcdoc = html; }
+            catch (e) {
+              var d = q.contentWindow.document; d.open(); d.write(html); d.close();
+            }
+            palco.scrollIntoView({ behavior: "smooth", block: "start" });
           }
-          palco.scrollIntoView({ behavior: "smooth", block: "start" });
+
+          /* [PREVIAGS] quando o módulo está lá, é ELE que monta —
+             assim a tela mostra o mesmo e-mail que vai sair, com as
+             imagens que viajam dentro dele. Sem módulo, monto aqui,
+             e digo que é sem as imagens embutidas. */
+          if (M.__temGS()) {
+            M.previaPeloGS(p).then(function (r) {
+              if (r && r.ok && r.html) {
+                mostrar(r.html, r.assunto || M.assunto(p),
+                  "montado pelo módulo de envio — é exatamente o que vai sair, " +
+                  "com o logotipo, a foto e os ícones que viajam dentro do e-mail");
+              } else {
+                mostrar(M.montar(p, cfg()), M.assunto(p),
+                  "montado aqui na tela: " +
+                  (lp(r && r.mensagem) || "o módulo não respondeu") +
+                  (r && r.semModulo ? " — instale o ALMOXA_EMAIL_PEDIDO e o " +
+                    "ALMOXA_EMAIL_IMAGENS no Apps Script" : ""));
+              }
+            });
+          } else {
+            mostrar(M.montar(p, cfg()), M.assunto(p),
+              "montado aqui na tela, fora do /exec — sem as imagens embutidas. " +
+              "Abra pelo /exec do Apps Script para ver o e-mail como ele vai chegar.");
+          }
         });
 
         var cop = document.querySelector("[data-ep-copiar]");
@@ -104034,6 +104295,2023 @@ emissao: hoje,
 
   M.__noMenu = noMenu;
 })();
+/* ############################################################
+ * O CA QUE FICA   ·   busca: [CAFICA]
+ * 04/11 — "entrei dentro do catálogo, ele não salvou. Apertou
+ * gravado mas nunca [ficou]. E para usar o mesmo em vários itens
+ * também não fez a salvação."
+ *
+ * A CAUSA, ACHADA NO CÓDIGO E PROVADA
+ *   sincronizarCadastro lê os itens do Core e monta MOCK.itens
+ *   com uma lista FECHADA de campos. Essa lista é um filtro: o
+ *   que não está escrito nela é descartado na entrada.
+ *   "ca" estava na lista. "caValidade" NÃO estava.
+ *   Resultado: ele digitava CA e validade, o Core guardava os
+ *   dois, e na releitura a data morria na entrada. O campo
+ *   voltava vazio sempre, e a tela parecia não ter salvado.
+ *   Provei em 04/11 com o Core devolvendo caValidade
+ *   "2028-03-31": MOCK.itens saiu sem a chave.
+ *   A linha que faltava foi acrescentada lá, onde é o lugar dela.
+ *
+ * OS OUTROS DOIS DEFEITOS DO MESMO CAMINHO
+ *   1. epiSalvarCA_ montava a carga copiando o item INTEIRO de
+ *      MOCK.itens — inclusive estoqueAtual e valorUnitario. Salvar
+ *      um CA mandava de volta o saldo de estoque que a tela tinha
+ *      em memória, que pode ser de minutos atrás. Se o Core grava
+ *      a linha toda, salvar um CA REESCREVE O SALDO com número
+ *      velho. Nunca mais: daqui para frente vai sku, descrição,
+ *      ca e validade. Mais nada.
+ *   2. Ele dizia "gravado" porque o Core respondeu ok, e atualizava
+ *      a cópia da tela na hora. Como a releitura descartava a data,
+ *      ficava verde na tela e vazio no dia seguinte. Agora eu
+ *      RELEIO DO CORE depois de salvar e só digo "gravado" do que
+ *      voltou de lá com o CA certo. Verde só com prova.
+ *
+ * A VALIDADE
+ *   "o CA é válido por vários anos, então pode usar o mesmo; ali
+ *   tem a data de validade, ele só vai parar e pedir um novo."
+ *   Então a data passa a valer para alguma coisa: cada item diz se
+ *   o CA está válido, se vence perto, ou se já venceu.
+ *
+ * O QUE ELE NÃO FAZ
+ *   NÃO cria tabela de CA. NÃO inventa número de CA. NÃO cria
+ *   coluna na planilha. NÃO mexe em estoque, preço, foto, nem em
+ *   nenhum campo do item fora ca e caValidade. NÃO reescreve
+ *   epiSalvarCA_ no arquivo: a original fica inteira, guardada em
+ *   CAFICA.antiga.
+ * ############################################################ */
+(function caQueFica() {
+
+  var C = { ultimo: null };
+  try { window.CAFICA = C; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(v) {
+    if (typeof U !== "undefined" && U && U.esc) return U.esc(v);
+    return lp(v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function caK(v) { return lp(v).replace(/[^0-9A-Za-z]/g, "").toUpperCase(); }
+
+  /* ============================================================
+     1. A VALIDADE DO CA, EM PALAVRA
+     ------------------------------------------------------------
+     Sem data eu NÃO digo "válido": digo que não sei. Um CA sem
+     validade registrada não é um CA em dia, é um CA sem controle.
+     ============================================================ */
+  C.DIAS_DE_AVISO = 60;
+  C.validade = function (texto, hoje) {
+    var t = lp(texto);
+    if (!t) return { estado: "semdata", cor: "b-gray", texto: "sem data de validade" };
+    var d = new Date(t.length <= 10 ? t + "T12:00:00" : t);
+    if (isNaN(d.getTime())) {
+      return { estado: "ilegivel", cor: "b-gray", texto: 'data não entendida ("' + t + '")' };
+    }
+    var ref = hoje ? new Date(hoje) : new Date();
+    var dias = Math.floor((d.getTime() - ref.getTime()) / 86400000);
+    if (dias < 0) {
+      return { estado: "vencido", cor: "b-red", dias: dias,
+               texto: "CA vencido há " + Math.abs(dias) + " dia(s) — precisa de um novo" };
+    }
+    if (dias <= C.DIAS_DE_AVISO) {
+      return { estado: "vencendo", cor: "b-yellow", dias: dias,
+               texto: "vence em " + dias + " dia(s)" };
+    }
+    return { estado: "valido", cor: "b-green", dias: dias, texto: "válido por mais " + dias + " dia(s)" };
+  };
+
+  /* ============================================================
+     2. A CARGA MÍNIMA
+     ------------------------------------------------------------
+     A descrição vai junto porque o Core recusa item sem ela — é
+     a primeira coisa que ele confere, antes até de olhar o
+     "editando". Fora isso, só o que muda.
+     ============================================================ */
+  C.carga = function (sku, descricao, ca, validade) {
+    return {
+      sku: lp(sku),
+      descricao: lp(descricao),
+      ca: lp(ca),
+      caValidade: lp(validade),
+      editando: true
+    };
+  };
+
+  /* o que o Core tem HOJE sobre estes itens, sem passar por cache */
+  C.lerDoCore = function (skus) {
+    try { if (typeof CACHE !== "undefined") CACHE.invalidar("itens"); } catch (e) {}
+    return Promise.resolve(API.call("itens", "listar", {})).then(function (r) {
+      var mapa = {};
+      if (!r || !r.ok) return { ok: false, mapa: mapa, mensagem: lp(r && r.mensagem) };
+      lista_(r.dados).forEach(function (i) {
+        if (!lp(i.sku)) return;
+        if (skus && skus.length && skus.indexOf(lp(i.sku)) < 0) return;
+        mapa[lp(i.sku)] = i;
+      });
+      return { ok: true, mapa: mapa };
+    }, function (e) {
+      return { ok: false, mapa: {}, mensagem: lp(e && e.message) };
+    });
+  };
+
+  /* ============================================================
+     3. GRAVAR, E DEPOIS CONFERIR
+     ------------------------------------------------------------
+     Mesma assinatura da função antiga: epiSalvarCA_(skus, dados)
+     devolvendo {ok, feitos, falhas, motivo}. Quem chama não muda.
+     O que muda é que "feitos" agora quer dizer "o Core releu e o
+     CA estava lá", não "o Core respondeu ok".
+     ============================================================ */
+  C.salvar = function (skus, dados) {
+    var ca = lp(dados && dados.ca);
+    var val = lp(dados && dados.caValidade);
+    var alvos = lista_(skus).map(lp).filter(Boolean);
+
+    if (!alvos.length) {
+      return Promise.resolve({ ok: false, motivo: "nenhum item escolhido", feitos: [], falhas: [] });
+    }
+
+    var recusados = [], mandados = [];
+
+    /* leio ANTES: preciso da descrição de verdade, não da cópia da
+       tela, que pode estar sem ela e aí o Core recusa tudo */
+    return C.lerDoCore(alvos).then(function (antes) {
+      function um(k) {
+        if (k >= alvos.length) return null;
+        var sku = alvos[k];
+        var doCore = antes.mapa[sku] || {};
+        var local = lista_(typeof MOCK !== "undefined" ? MOCK.itens : []).filter(function (i) {
+          return lp(i.sku) === sku;
+        })[0] || {};
+        var desc = lp(doCore.descricao) || lp(local.descricao) || lp(local.nome);
+
+        if (!desc) {
+          recusados.push({ sku: sku, motivo: "não achei a descrição deste item nem no Core nem na tela" });
+          return um(k + 1);
+        }
+
+        return Promise.resolve(API.call("itens", "salvar", C.carga(sku, desc, ca, val)))
+          .then(function (r) {
+            if (r && r.ok) mandados.push(sku);
+            else recusados.push({ sku: sku,
+              motivo: lp((r && (r.mensagem || r.codigo))) || "o Core não explicou" });
+            return um(k + 1);
+          }, function (e) {
+            recusados.push({ sku: sku, motivo: lp(e && e.message) || "falhou sem dizer por quê" });
+            return um(k + 1);
+          });
+      }
+
+      return Promise.resolve(um(0));
+    }).then(function () {
+      /* A PROVA. Sem ela eu estaria repetindo o defeito de origem:
+         dizer que gravou porque a resposta foi ok. */
+      if (!mandados.length) {
+        return { ok: false, feitos: [], falhas: recusados, conferido: false,
+                 motivo: recusados.length
+                   ? recusados.length + " item(ns) o Core recusou: " +
+                     recusados.map(function (f) { return f.sku + " (" + f.motivo + ")"; }).join("; ")
+                   : "nenhum item foi enviado" };
+      }
+      return C.lerDoCore(mandados).then(function (depois) {
+        if (!depois.ok) {
+          return { ok: false, feitos: [], falhas: recusados, conferido: false,
+                   naoConferi: mandados,
+                   motivo: "mandei " + mandados.length + " item(ns), mas não consegui reler para " +
+                           "conferir (" + (depois.mensagem || "o Core não respondeu") + "). " +
+                           "Não vou dizer que gravou sem ver." };
+        }
+        var feitos = [], perdidos = [];
+        mandados.forEach(function (sku) {
+          var v = depois.mapa[sku];
+          if (!v) { perdidos.push({ sku: sku, motivo: "sumiu da lista do Core depois de salvar" }); return; }
+          var caVolta = caK(v.ca);
+          var valVolta = lp(v.caValidade || v.caVencimento || v.validadeCa);
+          if (caVolta !== caK(ca)) {
+            perdidos.push({ sku: sku, motivo: ca
+              ? 'o Core aceitou mas releu o CA como "' + (lp(v.ca) || "vazio") + '"'
+              : "o CA continua lá depois de eu mandar apagar" });
+            return;
+          }
+          if (val && valVolta !== val) {
+            perdidos.push({ sku: sku, campo: "validade", caGravou: true,
+              motivo: 'o número do CA ficou, mas a validade voltou "' +
+                      (valVolta || "vazia") + '" em vez de "' + val + '"' });
+            return;
+          }
+          feitos.push(sku);
+        });
+
+        /* só agora a cópia da tela acompanha — depois da prova */
+        feitos.forEach(function (sku) {
+          lista_(typeof MOCK !== "undefined" ? MOCK.itens : []).forEach(function (i) {
+            if (lp(i.sku) === sku) { i.ca = ca; i.caValidade = val; }
+          });
+        });
+
+        var falhas = recusados.concat(perdidos);
+        C.ultimo = { feitos: feitos, falhas: falhas, conferido: true };
+        return {
+          ok: feitos.length > 0 && !falhas.length,
+          conferido: true,
+          feitos: feitos,
+          falhas: falhas,
+          soValidade: perdidos.filter(function (x) { return x.campo === "validade"; }).length,
+          motivo: falhas.length
+            ? falhas.map(function (f) { return f.sku + ": " + f.motivo; }).join(" · ")
+            : ""
+        };
+      });
+    });
+  };
+
+  /* a frase que a tela mostra — a mesma em todos os caminhos */
+  C.frase = function (res, ca) {
+    if (res && res.ok) {
+      return { classe: "a-green",
+               texto: (lp(ca) ? "CA " + lp(ca) + " gravado" : "CA removido") +
+                      " e conferido no Core em " + res.feitos.length + " item(ns)." };
+    }
+    if (res && res.soValidade) {
+      return { classe: "a-yellow",
+               texto: "O número do CA ficou gravado, mas a DATA DE VALIDADE não voltou do Core. " +
+                      "Quase sempre é porque a planilha de itens não tem coluna para ela. " +
+                      "Criar coluna muda a estrutura da planilha e eu não faço isso sem a sua " +
+                      "autorização — me diga e eu te mostro exatamente qual coluna criar. " +
+                      "Detalhe: " + lp(res.motivo) };
+    }
+    if (res && res.conferido === false && lista_(res.naoConferi).length) {
+      return { classe: "a-yellow", texto: lp(res.motivo) };
+    }
+    return { classe: "a-red", texto: "Não gravei: " + lp(res && res.motivo) };
+  };
+
+  /* ============================================================
+     4. O ENXERTO
+     ------------------------------------------------------------
+     epiSalvarCA_ continua inteira no arquivo. Eu ponho a minha no
+     lugar dela; as duas telas que a chamam (o CA do item e o CA em
+     vários itens) passam a usar esta sem saber.
+     ============================================================ */
+  C.ligado = false;
+  C.ligar = function () {
+    if (C.ligado) return false;
+    if (typeof epiSalvarCA_ !== "function") return false;
+    C.antiga = epiSalvarCA_;
+    window.epiSalvarCA_ = function (skus, dados) { return C.salvar(skus, dados); };
+    C.ligado = true;
+    return true;
+  };
+  C.restaurar = function () {
+    if (C.antiga) window.epiSalvarCA_ = C.antiga;
+    C.ligado = false;
+  };
+
+  if (!C.ligar()) {
+    try {
+      document.addEventListener("DOMContentLoaded", function () { C.ligar(); });
+      setTimeout(function () { C.ligar(); }, 1200);
+    } catch (e) {}
+  }
+})();
+/* ############################################################
+ * QUEM PEDIU, E EM QUE PÉ ESTÁ   ·   busca: [QUEMPEDIU]
+ * 04/11 — documento "INTEGRAÇÃO DE REQUISIÇÕES, COMPRAS E NOTAS
+ * FISCAIS", módulos 1, 2, 3 e 4.
+ *
+ * O QUE ESTAVA FALTANDO, E POR QUÊ
+ *   A tela "Novo pedido de compra" tem Item, Quantidade,
+ *   Fornecedor, Previsão, Valor e Observação. Não tem SOLICITANTE.
+ *   Quem emite não escolhe de quem é o pedido: o código grava
+ *   solicitante = nome de quem está logado, e ele abre o sistema
+ *   sem se identificar ("Identificar-se" ainda aparece na barra).
+ *   Então todo pedido nasce no nome do sistema.
+ *   É por isso que o módulo de e-mail não tem para quem mandar:
+ *   AP_MAILPED_acharEmail_ procura pelo solicitante, e o
+ *   solicitante não é uma pessoa do cadastro.
+ *   Não é bug do e-mail. É campo que nunca existiu no pedido.
+ *
+ *   E a tela "Acompanhar" tinha um segundo problema, mais sério:
+ *   ela oferece EMITIDO / CONFIRMADO / EM_TRANSITO / ENTREGUE /
+ *   CANCELADO. Os 17 pedidos dele estão em AGUARDANDO_APROVACAO,
+ *   que não está nessa lista. O <select> então abria já marcado em
+ *   EMITIDO, e salvar — mesmo sem tocar em nada — REBAIXAVA o
+ *   status do pedido sem ninguém pedir. Isso some aqui.
+ *
+ * O QUE ESTE BLOCO FAZ
+ *   1. Pergunta quem está pedindo ANTES do pedido, procurando na
+ *      base oficial de usuários (usuarios.listar). Mostra matrícula,
+ *      cargo, setor e o e-mail do cadastro — e avisa quando o
+ *      e-mail é tapa-buraco (@almoxa.local e parecidos), usando a
+ *      MESMA regra do [TAPABURACO].
+ *   2. Põe uma busca em cima da lista de itens (módulo 1 do
+ *      documento: código, referência, descrição, termo parcial).
+ *   3. Manda solicitante/matrícula/e-mail junto no compras.pedido
+ *      e CONFERE NA RESPOSTA se o Core guardou. Se não guardou, diz
+ *      na cara, não finge que foi.
+ *   4. Refaz o "Acompanhar" com as cinco etapas do e-mail, sempre
+ *      mostrando a situação que está gravada, sem rebaixar nada.
+ *   5. Primeiro e-mail: pergunta (módulo 3 — "o primeiro envio será
+ *      manual, após conferência e confirmação do usuário").
+ *      Dali em diante: sozinho (módulo 4), e só depois que ele
+ *      autorizar uma vez.
+ *
+ * O QUE ELE NÃO FAZ
+ *   NÃO cria rota nova no Core. NÃO cria usuário. NÃO inventa
+ *   e-mail. NÃO duplica pedido. NÃO toca em aprovação. NÃO apaga
+ *   nada. NÃO reescreve modalNovoPedido nem modalStatusPedido: as
+ *   duas continuam inteiras no arquivo, guardadas em
+ *   QUEMPEDIU.antigoNovo e QUEMPEDIU.antigoStatus.
+ *   NÃO trata nota fiscal, recebimento parcial nem vínculo
+ *   NF↔requisição (módulos 5, 6 e 7): aquilo mexe em estoque e
+ *   precisa do .gs de compras dele na mão.
+ * ############################################################ */
+(function quemPediu() {
+
+  var Q = {
+    usuarios: null,
+    lidosEm: 0,
+    escolhido: null,
+    ultimoEnvio: null,
+    ultimaConferencia: null
+  };
+  try { window.QUEMPEDIU = Q; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(v) {
+    if (typeof U !== "undefined" && U && U.esc) return U.esc(v);
+    return lp(v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function icone_(n) { return (typeof ic === "function") ? ic(n) : ""; }
+  function aviso_(t, a, b) {
+    try { if (typeof toast === "function") toast(t, a, b); } catch (e) {}
+  }
+  function semAcento(t) {
+    return String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "");
+  }
+  function nomeK(v) { return semAcento(lp(v)).toLowerCase().replace(/\s+/g, " "); }
+  function matK(v) { return lp(v).replace(/\D/g, "").replace(/^0+/, ""); }
+  function emailK(v) { return lp(v).toLowerCase(); }
+  function dataHora_(v) {
+    var d = v ? new Date(v) : null;
+    if (!d || isNaN(d.getTime())) return lp(v) || "—";
+    function z(n) { return (n < 10 ? "0" : "") + n; }
+    return z(d.getDate()) + "/" + z(d.getMonth() + 1) + "/" + d.getFullYear() +
+      " às " + z(d.getHours()) + ":" + z(d.getMinutes());
+  }
+
+  /* ============================================================
+     1. O QUE NÃO É E-MAIL DE NINGUÉM
+     ------------------------------------------------------------
+     Mesma régua do [TAPABURACO]. Se aquele bloco estiver na
+     versão, uso o dele — uma régua só, não duas que podem
+     discordar. Se não estiver, uso esta cópia.
+     ============================================================ */
+  var DOMINIO_FALSO = /@(.*\.)?(local|localhost|invalid|test|example|lan|internal)$/i;
+  Q.ehTapaBuraco = function (v) {
+    try {
+      if (window.EMAILCOLAB && typeof window.EMAILCOLAB.ehTapaBuraco === "function") {
+        return window.EMAILCOLAB.ehTapaBuraco(v);
+      }
+    } catch (e) {}
+    var t = emailK(v);
+    if (!t || t.indexOf("@") < 1) return false;
+    if (DOMINIO_FALSO.test(t)) return true;
+    if (/@almoxa(\.|$)/i.test(t)) return true;
+    var antes = t.split("@")[0];
+    if (/^\d{1,12}$/.test(antes)) return true;
+    return false;
+  };
+  Q.emailValido = function (v) {
+    var t = lp(v);
+    if (!t || /\s/.test(t) || t.split("@").length !== 2) return false;
+    var dom = t.split("@")[1] || "";
+    if (dom.indexOf(".") < 1 || /\.$/.test(dom)) return false;
+    return /^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/.test(t);
+  };
+  function emailDe(u) { return lp(u && (u.email || u.eMail || u.mail)); }
+
+  /* o estado do e-mail de uma pessoa, em uma frase */
+  Q.estadoDoEmail = function (u) {
+    var e = emailDe(u);
+    if (!e) return { cor: "yellow", pode: false, texto: "sem e-mail no cadastro" };
+    if (Q.ehTapaBuraco(e)) {
+      return { cor: "orange", pode: false, email: e,
+               texto: "o endereço do cadastro é tapa-buraco e não entrega" };
+    }
+    if (!Q.emailValido(e)) {
+      return { cor: "red", pode: false, email: e, texto: "o endereço do cadastro não é um e-mail" };
+    }
+    return { cor: "green", pode: true, email: e, texto: "recebe o acompanhamento neste endereço" };
+  };
+
+  /* ============================================================
+     2. A BASE OFICIAL DE USUÁRIOS
+     ------------------------------------------------------------
+     usuarios.listar, a mesma rota que o resto do sistema usa.
+     Guardo na memória por 2 minutos só para a busca não ir ao
+     Core a cada letra digitada. Isso é cache de digitação, não é
+     fonte: na hora de gravar, quem manda é o Core.
+     ============================================================ */
+  Q.carregarUsuarios = function (forcar) {
+    var agora = Date.now();
+    if (!forcar && Q.usuarios && (agora - Q.lidosEm) < 120000) {
+      return Promise.resolve({ ok: true, lista: Q.usuarios, doCache: true });
+    }
+    return Promise.resolve(API.call("usuarios", "listar", {})).then(function (r) {
+      if (!r || !r.ok) {
+        return { ok: false, lista: [], mensagem: lp(r && r.mensagem) || "o Core não respondeu" };
+      }
+      Q.usuarios = lista_(r.dados);
+      Q.lidosEm = Date.now();
+      return { ok: true, lista: Q.usuarios };
+    });
+  };
+
+  /* busca por nome, matrícula, cargo, setor ou e-mail — pedaço serve */
+  Q.procurar = function (lista, termo) {
+    var t = nomeK(termo);
+    var tm = matK(termo);
+    if (!t) return lista_(lista).slice(0, 40);
+    return lista_(lista).filter(function (u) {
+      if (tm && matK(u.matricula).indexOf(tm) === 0) return true;
+      var alvo = nomeK([u.nome, u.cargo, u.funcao, u.setor, emailDe(u)].join(" "));
+      return alvo.indexOf(t) > -1;
+    }).slice(0, 40);
+  };
+
+  /* ============================================================
+     3. AS CINCO ETAPAS
+     ------------------------------------------------------------
+     As mesmas do e-mail. "grava" é a palavra que vai para o Core
+     em compras.alterarStatus.
+     As três primeiras usam palavras que a tela de Compras JÁ
+     mandava antes de mim, então são palavras provadas. As duas
+     últimas (EM_CONFERENCIA, DISPONIVEL) o Core nunca recebeu
+     daqui — se ele recusar, a tela mostra a recusa dele, com as
+     palavras dele. Eu não escondo.
+     ============================================================ */
+  Q.ESCADA = [
+    { i: 0, chave: "REGISTRADO",   grava: "EMITIDO",
+      rotulo: "Pedido registrado",        dica: "a requisição foi lançada", provada: true },
+    { i: 1, chave: "FORNECIMENTO", grava: "EM_TRANSITO",
+      rotulo: "Em fornecimento",          dica: "fornecedor definido, material a caminho", provada: true },
+    { i: 2, chave: "RECEBIDO",     grava: "ENTREGUE",
+      rotulo: "Recebido no almoxarifado", dica: "o material chegou", provada: true },
+    { i: 3, chave: "CONFERENCIA",  grava: "EM_CONFERENCIA",
+      rotulo: "Em conferência",           dica: "conferindo a nota e as quantidades", provada: false },
+    { i: 4, chave: "DISPONIVEL",   grava: "DISPONIVEL",
+      rotulo: "Disponível para retirada", dica: "entrada feita, liberado", provada: false }
+  ];
+
+  /* o mesmo mapa do .gs, para a tela e o e-mail concordarem */
+  Q.MAPA = {
+    EMITIDO: 0, REGISTRADO: 0, ABERTO: 0, ABERTA: 0, PENDENTE: 0,
+    AGUARDANDO_APROVACAO: 0, APROVADO: 0, APROVADA: 0,
+    ENCAMINHADO: 1, EM_FORNECIMENTO: 1, FORNECIMENTO: 1, EM_ANDAMENTO: 1,
+    EM_TRANSITO: 1, TRANSITO: 1, CONFIRMADO: 1, COTACAO: 1, EM_COTACAO: 1,
+    RECEBIDO: 2, RECEBIDO_PARCIAL: 2, ENTREGUE: 2,
+    EM_CONFERENCIA: 3, CONFERENCIA: 3, CONFERIDA: 3, DIVERGENCIA: 3,
+    DISPONIVEL: 4, DISPONIBILIZADA: 4, CONCLUIDO: 4, CONCLUIDA: 4
+  };
+  Q.etapaDe = function (status) {
+    var st = lp(status).toUpperCase().replace(/[\s\-]+/g, "_");
+    if (Q.MAPA[st] !== undefined) return { indice: Q.MAPA[st], conhecido: true, status: st };
+    return { indice: 0, conhecido: false, status: st || "(sem status)" };
+  };
+
+  /* ============================================================
+     4. A PONTE COM O MÓDULO DE ENVIO
+     ------------------------------------------------------------
+     google.script.run só existe quando a página é servida pelo
+     /exec. No GitHub Pages não existe, e aí não há envio — a tela
+     diz isso em vez de girar para sempre.
+     ============================================================ */
+  function temGS_() {
+    try { return !!(typeof google !== "undefined" && google.script && google.script.run); }
+    catch (e) { return false; }
+  }
+  Q.temGS = temGS_;
+  Q.gs = function (obj) {
+    return new Promise(function (resolve) {
+      if (!temGS_()) {
+        resolve({ ok: false, semGS: true,
+                  mensagem: "esta página não está sendo servida pelo Apps Script (/exec)" });
+        return;
+      }
+      try {
+        google.script.run
+          .withSuccessHandler(function (t) {
+            var d = t;
+            if (typeof t === "string") { try { d = JSON.parse(t); } catch (e) { d = null; } }
+            resolve(d || { ok: false, mensagem: "o módulo respondeu algo que não entendi" });
+          })
+          .withFailureHandler(function (e) {
+            resolve({ ok: false, semModulo: true,
+                      mensagem: lp(e && e.message) || "o módulo [MAILPED] não está instalado" });
+          })
+          .AP_MAILPED_pelaTela(JSON.stringify(obj || {}));
+      } catch (e) {
+        resolve({ ok: false, mensagem: lp(e && e.message) || String(e) });
+      }
+    });
+  };
+
+  /* ============================================================
+     5. A TELA: QUEM ESTÁ PEDINDO
+     ------------------------------------------------------------
+     Vem ANTES do pedido, não dentro dele. Assim eu não preciso
+     mexer por dentro do modal que já existe — ele abre inteiro,
+     do jeito que sempre abriu, logo depois desta escolha.
+     ============================================================ */
+  function fichaPessoa(u) {
+    if (!u) return "";
+    var e = Q.estadoDoEmail(u);
+    var cores = { green: "a-green", yellow: "a-yellow", orange: "a-yellow", red: "a-red" };
+    return '<div class="alert ' + (cores[e.cor] || "a-gray") + '">' +
+      icone_(e.pode ? "checkC" : "alerta") +
+      "<div><b>" + esc_(u.nome) + "</b>" +
+      (lp(u.matricula) ? " · <span class='mono'>" + esc_(u.matricula) + "</span>" : "") +
+      (lp(u.cargo || u.funcao) ? "<br><span class='small'>" + esc_(u.cargo || u.funcao) +
+        (lp(u.setor) ? " · " + esc_(u.setor) : "") + "</span>" : "") +
+      "<br><span class='mono small'>" + esc_(e.email || "—") + "</span>" +
+      "<br><span class='small'>" + esc_(e.texto) + "</span>" +
+      (e.pode ? "" : "<br><span class='small'><b>O pedido é emitido do mesmo jeito.</b> " +
+        "O que não sai é o acompanhamento por e-mail, porque não há endereço que entregue.</span>") +
+      "</div></div>";
+  }
+
+  Q.escolher = function (aoEscolher) {
+    UI.modal({
+      titulo: "Quem está pedindo?",
+      sub: "A pessoa vem do cadastro oficial. O pedido fica no nome dela, e é para ela que o acompanhamento é enviado.",
+      tamanho: "lg",
+      corpo:
+        '<div class="field"><label>Procurar no cadastro</label>' +
+        '<input class="input" id="qpBusca" placeholder="nome, matrícula, cargo ou setor" autocomplete="off"></div>' +
+        '<div id="qpLista" class="mt8"><p class="small muted">Lendo o cadastro…</p></div>' +
+        '<div id="qpFicha" class="mt12"></div>',
+      rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' +
+              '<button class="btn btn-primary" data-ok disabled>Continuar para o pedido</button>',
+      aoAbrir: function (w, fechar) {
+        var escolhido = null;
+        var base = [];
+        var bok = w.querySelector("[data-ok]");
+
+        function pintarLista(linhas) {
+          var alvo = w.querySelector("#qpLista");
+          if (!linhas.length) {
+            alvo.innerHTML = '<p class="small muted">Ninguém no cadastro com esse termo. ' +
+              "Este bloco <b>não cria pessoa</b> — se faltar alguém, cadastre em Usuários.</p>";
+            return;
+          }
+          alvo.innerHTML = '<div style="max-height:240px;overflow:auto;border:1px solid var(--borda,#E3E9F2);border-radius:8px">' +
+            linhas.map(function (u, k) {
+              var e = Q.estadoDoEmail(u);
+              var ponto = e.pode ? "var(--verde,#1E9E54)" : "var(--laranja,#F08A1C)";
+              return '<div data-qp-pes="' + k + '" style="padding:8px 10px;cursor:pointer;' +
+                'border-bottom:1px solid var(--borda,#EEF2F7);display:flex;gap:8px;align-items:center">' +
+                '<span style="width:8px;height:8px;border-radius:50%;background:' + ponto + ';flex:none"></span>' +
+                "<div><b style='font-size:13px'>" + esc_(u.nome) + "</b>" +
+                (lp(u.matricula) ? " <span class='mono small muted'>" + esc_(u.matricula) + "</span>" : "") +
+                "<div class='small muted'>" + esc_(lp(u.cargo || u.funcao) || "sem cargo") +
+                (lp(u.setor) ? " · " + esc_(u.setor) : "") + "</div></div></div>";
+            }).join("") + "</div>";
+          alvo.querySelectorAll("[data-qp-pes]").forEach(function (el) {
+            el.addEventListener("click", function () {
+              escolhido = linhas[Number(el.getAttribute("data-qp-pes"))];
+              w.querySelector("#qpFicha").innerHTML = fichaPessoa(escolhido);
+              bok.disabled = false;
+            });
+          });
+        }
+
+        Q.carregarUsuarios().then(function (r) {
+          if (!r.ok) {
+            w.querySelector("#qpLista").innerHTML =
+              '<div class="alert a-red">' + icone_("alerta") +
+              "<div>Não consegui ler o cadastro: " + esc_(r.mensagem) + "</div></div>";
+            return;
+          }
+          base = r.lista;
+          pintarLista(Q.procurar(base, ""));
+        });
+
+        var t = null;
+        w.querySelector("#qpBusca").addEventListener("input", function () {
+          var v = this.value;
+          clearTimeout(t);
+          t = setTimeout(function () { pintarLista(Q.procurar(base, v)); }, 120);
+        });
+
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        bok.addEventListener("click", function () {
+          if (!escolhido) return;
+          Q.escolhido = escolhido;
+          fechar();
+          aoEscolher(escolhido);
+        });
+      }
+    });
+  };
+
+  /* ============================================================
+     6. A BUSCA DE MATERIAL DENTRO DO MODAL QUE JÁ EXISTE
+     ------------------------------------------------------------
+     Módulo 1 do documento: achar por código, referência, descrição
+     ou termo parcial. O modal antigo tem um <select> com a lista
+     inteira — com o cadastro cheio, rolar aquilo é inviável.
+     Eu não refaço o campo: ponho uma caixa de busca EM CIMA dele
+     e escondo as <option> que não casam. O que o modal lê na hora
+     de emitir continua sendo o mesmo <select>, com o mesmo id.
+     Se o campo não estiver lá, não faço nada e não quebro nada.
+     ============================================================ */
+  function porBusca(sel, termo) {
+    var t = nomeK(termo);
+    var vistas = 0, primeira = null;
+    for (var i = 0; i < sel.options.length; i++) {
+      var o = sel.options[i];
+      var bate = !t || nomeK(o.textContent).indexOf(t) > -1;
+      o.hidden = !bate;
+      o.disabled = !bate;
+      if (bate) { vistas++; if (!primeira) primeira = o; }
+    }
+    if (primeira && sel.selectedOptions && sel.selectedOptions[0] && sel.selectedOptions[0].hidden) {
+      sel.value = primeira.value;
+      try { sel.dispatchEvent(new Event("change")); } catch (e) {}
+    }
+    return vistas;
+  }
+
+  Q.poeBuscaDeItem = function () {
+    var sel = document.querySelector("#pdItem");
+    if (!sel || sel.getAttribute("data-qp-busca")) return false;
+    sel.setAttribute("data-qp-busca", "1");
+    var campo = sel.parentNode;
+    var cx = document.createElement("div");
+    cx.innerHTML =
+      '<input class="input" id="qpItemBusca" autocomplete="off" style="margin-bottom:6px" ' +
+      'placeholder="procurar por código, referência ou descrição">' +
+      '<div class="small muted" id="qpItemConta" style="margin:-2px 0 6px"></div>';
+    campo.insertBefore(cx, sel);
+    var conta = cx.querySelector("#qpItemConta");
+    var tot = sel.options.length;
+    conta.textContent = tot + " item(ns) no Cadastro Central";
+    cx.querySelector("#qpItemBusca").addEventListener("input", function () {
+      var n = porBusca(sel, this.value);
+      conta.textContent = lp(this.value)
+        ? (n ? n + " de " + tot + " item(ns)" : "nenhum item com esse termo — este bloco não cadastra material novo")
+        : tot + " item(ns) no Cadastro Central";
+    });
+    return true;
+  };
+
+  /* mostra, dentro do modal de pedido, de quem é o pedido */
+  Q.poeFichaNoPedido = function () {
+    if (!Q.escolhido) return false;
+    var sel = document.querySelector("#pdItem");
+    if (!sel) return false;
+    var corpo = sel.closest ? sel.closest(".grid") : null;
+    if (!corpo || corpo.querySelector("[data-qp-ficha]")) return false;
+    var cx = document.createElement("div");
+    cx.setAttribute("data-qp-ficha", "1");
+    cx.style.gridColumn = "1 / -1";
+    cx.innerHTML = fichaPessoa(Q.escolhido) +
+      '<div class="small muted" style="margin:-6px 0 4px">' +
+      "Para trocar de solicitante, feche e comece o pedido de novo.</div>";
+    corpo.insertBefore(cx, corpo.firstChild);
+    return true;
+  };
+
+  /* ============================================================
+     7. O QUE VIAJA JUNTO COM O PEDIDO
+     ------------------------------------------------------------
+     solicitante, matricula, matriculaSolicitante e emailSolicitante
+     NÃO são campos que eu inventei: são exatamente os nomes que
+     AP_MAILPED_acharEmail_ e AP_MAILPED_gestorDe_ já procuram, e
+     "solicitante" já é campo do registro de pedido no contrato
+     (compras.pedido grava solicitante desde antes de mim).
+     O que eu NÃO sei é se o Core DELE guarda esses campos. Então
+     eu mando, e depois CONFIRO NA RESPOSTA. Sem conferir, dizer
+     que ficou gravado seria chute.
+     ============================================================ */
+  Q.enriquecer = function (payload) {
+    var u = Q.escolhido;
+    if (!u) return payload;
+    var p = payload || {};
+    var e = Q.estadoDoEmail(u);
+    p.solicitante = lp(u.nome);
+    p.matricula = lp(u.matricula);
+    p.matriculaSolicitante = lp(u.matricula);
+    if (e.pode) p.emailSolicitante = e.email;
+    if (lp(u.id)) p.solicitanteId = lp(u.id);
+    return p;
+  };
+
+  Q.conferirGravacao = function (pedido) {
+    var u = Q.escolhido;
+    if (!u || !pedido) return null;
+    var gravado = lp(pedido.solicitante || pedido.nome);
+    var bate = nomeK(gravado) === nomeK(u.nome);
+    /* [EMAILNOCAMPO] 04/11 — "não guardou" era alarme demais. O
+       Core dele guarda SIM, só que guarda o e-mail da conta
+       logada em vez do nome. Isso é outra coisa, e para o e-mail
+       funcionar é até suficiente. Separo os dois casos. */
+    var guardouOEmail = !bate && Q.emailValido(gravado);
+    var r = {
+      guardou: bate,
+      guardouOEmail: guardouOEmail,
+      serve: bate || guardouOEmail,
+      queria: lp(u.nome),
+      veio: gravado,
+      matriculaGuardou: !!matK(pedido.matricula || pedido.matriculaSolicitante)
+    };
+    Q.ultimaConferencia = r;
+    return r;
+  };
+
+  /* ============================================================
+     8. OS DOIS ENXERTOS
+     ------------------------------------------------------------
+     modalNovoPedido e modalStatusPedido continuam inteiros no
+     arquivo. Eu guardo a referência e ponho a minha no lugar.
+     Trocar a função global é o contrário de reescrever: o código
+     antigo não foi tocado em nenhuma linha, e volta com
+     QUEMPEDIU.restaurar().
+     ============================================================ */
+  Q.ligado = false;
+  Q.ligar = function () {
+    if (Q.ligado) return false;
+    if (typeof modalNovoPedido !== "function" || typeof modalStatusPedido !== "function") return false;
+
+    Q.antigoNovo = modalNovoPedido;
+    Q.antigoStatus = modalStatusPedido;
+
+    window.modalNovoPedido = function (precompra) {
+      Q.escolher(function () {
+        Q.antigoNovo(precompra);
+        setTimeout(function () {
+          Q.poeFichaNoPedido();
+          Q.poeBuscaDeItem();
+        }, 30);
+      });
+    };
+
+    window.modalStatusPedido = function (id) { Q.acompanhar(id); };
+
+    /* o enxerto no caminho da gravação */
+    if (!Q.chamadaAntiga) {
+      Q.chamadaAntiga = API.call;
+      API.call = function (modulo, acao, payload, opcoes) {
+        if (modulo === "compras" && acao === "pedido") {
+          payload = Q.enriquecer(payload || {});
+          return Q.chamadaAntiga.call(API, modulo, acao, payload, opcoes).then(function (r) {
+            try {
+              if (r && r.ok) {
+                var p = (r.dados && lista_(r.dados.pedidos)[0]) || r.dados || null;
+                var c = Q.conferirGravacao(p);
+                if (p) {
+                  /* carimbo: este pedido é DESTA pessoa, que eu
+                     acabei de escolher. Não dependo mais de o nome
+                     voltar igual do Core. */
+                  if (Q.escolhido) p.__pessoa = Q.escolhido;
+                  Q.ultimoPedido = p;
+                  setTimeout(function () { Q.depoisDoPedido(p, c); }, 600);
+                }
+              }
+            } catch (e) {}
+            return r;
+          });
+        }
+        return Q.chamadaAntiga.call(API, modulo, acao, payload, opcoes);
+      };
+    }
+
+    Q.ligado = true;
+    return true;
+  };
+  Q.restaurar = function () {
+    if (Q.antigoNovo) window.modalNovoPedido = Q.antigoNovo;
+    if (Q.antigoStatus) window.modalStatusPedido = Q.antigoStatus;
+    if (Q.chamadaAntiga) API.call = Q.chamadaAntiga;
+    Q.ligado = false;
+  };
+
+  /* ============================================================
+     9. ACOMPANHAR — a escada, sem rebaixar ninguém
+     ============================================================ */
+  Q.pedidoDaTela = function (id) {
+    var achado = null;
+    try {
+      achado = lista_(typeof COMPRAS_NA_TELA !== "undefined" ? COMPRAS_NA_TELA : [])
+        .filter(function (x) { return String(x.id) === String(id); })[0] || null;
+    } catch (e) {}
+    if (achado) return Promise.resolve(achado);
+    return Promise.resolve(API.call("compras", "listar", {})).then(function (r) {
+      if (!r || !r.ok) return null;
+      return lista_(r.dados).filter(function (x) { return String(x.id) === String(id); })[0] || null;
+    });
+  };
+
+  function escadaHTML(atual) {
+    var et = Q.etapaDe(atual);
+    return '<div style="display:flex;gap:6px;margin:4px 0 14px;flex-wrap:wrap">' +
+      Q.ESCADA.map(function (e) {
+        var feito = e.i < et.indice, agora = e.i === et.indice;
+        var fundo = feito ? "var(--verde,#1E9E54)" : agora ? "var(--laranja,#F08A1C)" : "var(--borda,#DFE6EF)";
+        var cor = (feito || agora) ? "#FFFFFF" : "var(--texto-fraco,#8795A8)";
+        return '<div style="flex:1 1 92px;min-width:92px;text-align:center">' +
+          '<div style="background:' + fundo + ';color:' + cor + ';border-radius:7px;' +
+          'padding:7px 4px;font-size:11px;font-weight:700;line-height:1.25">' +
+          (e.i + 1) + " · " + esc_(e.rotulo) + "</div></div>";
+      }).join("") + "</div>" +
+      (et.conhecido ? "" :
+        '<div class="alert a-yellow mb12">' + icone_("alerta") +
+        "<div><b>A situação gravada é <span class='mono'>" + esc_(et.status) + "</span>, " +
+        "que não está na escada.</b> Mostro na etapa 1 por segurança, mas <b>não mudei nada</b> " +
+        "no pedido. Escolher uma etapa abaixo é o que grava.</div></div>");
+  }
+
+  Q.acompanhar = function (id) {
+    Q.pedidoDaTela(id).then(function (p) {
+      if (!p) { aviso_("err", "Pedido não localizado", lp(id)); return; }
+      var et = Q.etapaDe(p.status);
+      var hist = lista_(p.historico);
+
+      UI.modal({
+        titulo: "Pedido " + esc_(p.id),
+        sub: lp(p.descricao || p.item || "") + " · " + esc_(lp(p.fornecedor) || "fornecedor a definir"),
+        tamanho: "lg",
+        corpo:
+          escadaHTML(p.status) +
+
+          '<div class="grid g3 mb12">' +
+          '<div><div class="small">Quantidade</div><b style="font-size:15px">' + (p.qtd || 0) + "</b></div>" +
+          '<div><div class="small">Situação gravada</div><b class="mono" style="font-size:12px">' +
+            esc_(lp(p.status) || "—") + "</b></div>" +
+          '<div><div class="small">Solicitante</div><b style="font-size:13px">' +
+            esc_(lp(p.solicitante || p.nome) || "—") + "</b></div>" +
+          "</div>" +
+
+          '<div id="qpDestino" class="mb12"></div>' +
+
+          '<div class="field"><label>Mover para a etapa</label><select class="select" id="qpEtapa">' +
+          '<option value="">— manter como está (' + esc_(lp(p.status) || "sem status") + ") —</option>" +
+          /* NENHUMA etapa nasce marcada. Esse foi o defeito do campo
+             antigo e eu quase o repeti aqui: se a etapa atual vem
+             marcada, apertar "Gravar" sem escolher nada grava aquela
+             palavra por cima da que estava. Quem mostra onde o pedido
+             está é a escada colorida em cima e a situação crua ao
+             lado — não um <select> que já vem preenchido. */
+          Q.ESCADA.map(function (e) {
+            return '<option value="' + e.grava + '">' +
+              (e.i + 1) + " · " + esc_(e.rotulo) + " — " + esc_(e.dica) +
+              (e.i === et.indice && et.conhecido ? " (é onde está hoje)" : "") +
+              (e.provada ? "" : " (palavra nova para o Core)") + "</option>";
+          }).join("") +
+          '<option value="CANCELADO">Cancelar o pedido</option>' +
+          "</select></div>" +
+
+          '<div class="field"><label>Previsão de entrega</label>' +
+          '<input class="input" id="qpPrev" value="' + esc_(p.previsao || "") + '" placeholder="aaaa-mm-dd"></div>' +
+
+          '<div id="qpResultado"></div>' +
+
+          (hist.length
+            ? '<div class="section-title mt16">Histórico</div><div class="timeline">' +
+              hist.map(function (h) {
+                var texto = lp(h && h.texto ? h.texto : h);
+                return '<div class="tl-item"><b>' + esc_(texto) + "</b><small>" +
+                  (h && h.quando ? dataHora_(h.quando) : "") + "</small></div>";
+              }).join("") + "</div>"
+            : ""),
+        rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' +
+                '<button class="btn btn-primary" data-ok>' + icone_("salvar") + "Gravar a etapa</button>",
+        aoAbrir: function (w, fechar) {
+          /* quem receberia o e-mail deste pedido, dito antes de gravar */
+          Q.carregarUsuarios().then(function (r) {
+            var cx = w.querySelector("#qpDestino");
+            if (!cx) return;
+            if (!r.ok) { cx.innerHTML = ""; return; }
+            var nome = nomeK(p.solicitante || p.nome);
+            var mat = matK(p.matricula || p.matriculaSolicitante);
+            var achados = r.lista.filter(function (u) {
+              if (mat && matK(u.matricula) === mat) return true;
+              return nome && nomeK(u.nome) === nome;
+            });
+            if (!nome && !mat) {
+              cx.innerHTML = '<div class="alert a-yellow">' + icone_("alerta") +
+                "<div><b>Este pedido não diz de quem é.</b> Foi emitido antes de existir o campo " +
+                "de solicitante. A etapa grava normalmente, mas o e-mail não tem destinatário.</div></div>";
+              return;
+            }
+            if (achados.length > 1) {
+              cx.innerHTML = '<div class="alert a-yellow">' + icone_("alerta") +
+                "<div><b>" + achados.length + " cadastros com o nome <b>" + esc_(p.solicitante) +
+                "</b>.</b> Com homônimo eu não escolho — o e-mail não sai. " +
+                "Resolva o nome repetido em Usuários.</div></div>";
+              return;
+            }
+            if (!achados.length) {
+              cx.innerHTML = '<div class="alert a-yellow">' + icone_("alerta") +
+                "<div><b>“" + esc_(lp(p.solicitante || p.nome)) + "” não está no cadastro.</b> " +
+                "Sem cadastro não há e-mail, e eu não invento endereço.</div></div>";
+              return;
+            }
+            p.__pessoa = achados[0];     /* carimbo, como no pedido novo */
+            cx.innerHTML = fichaPessoa(achados[0]);
+          });
+
+          w.querySelector("[data-x]").addEventListener("click", fechar);
+          w.querySelector("[data-ok]").addEventListener("click", function () {
+            var novo = lp(w.querySelector("#qpEtapa").value);
+            var prev = lp(w.querySelector("#qpPrev").value);
+            var res = w.querySelector("#qpResultado");
+
+            if (!novo) {
+              if (prev === lp(p.previsao)) {
+                aviso_("info", "Nada mudou", "Nenhuma etapa escolhida e a previsão é a mesma.");
+                return;
+              }
+              novo = lp(p.status);           /* grava a MESMA situação: previsão muda, etapa não */
+            }
+
+            var bt = this;
+            bt.disabled = true;
+            bt.innerHTML = "Gravando…";
+            res.innerHTML = "";
+
+            /* alterarStatus não entra na lista de escrita do API.call,
+               então herdava o prazo de leitura (15s). Aqui eu digo o
+               prazo certo em vez de deixar dar "não respondeu" num
+               Core que ainda estava trabalhando. */
+            Promise.resolve(API.call("compras", "alterarStatus",
+              { id: p.id, status: novo, previsao: prev }, { limite: 45000 }
+            )).then(function (r) {
+              bt.disabled = false;
+              bt.innerHTML = icone_("salvar") + "Gravar a etapa";
+
+              if (!r || !r.ok) {
+                res.innerHTML = '<div class="alert a-red mt12">' + icone_("alerta") +
+                  "<div><b>O Core recusou.</b> Palavra enviada: <span class='mono'>" + esc_(novo) +
+                  "</span><br>Resposta dele: " + esc_(lp(r && r.mensagem) || "sem mensagem") +
+                  "</div></div>";
+                return;
+              }
+
+              var volta = r.dados || {};
+              var ficou = lp(volta.status);
+              p.status = ficou || novo;
+              p.previsao = lp(volta.previsao) || prev;
+              if (volta.historico) p.historico = volta.historico;
+
+              res.innerHTML = '<div class="alert ' +
+                (ficou && ficou !== novo ? "a-yellow" : "a-green") + ' mt12">' +
+                icone_(ficou && ficou !== novo ? "alerta" : "checkC") +
+                "<div><b>Gravado.</b> " +
+                (ficou && ficou !== novo
+                  ? "Mandei <span class='mono'>" + esc_(novo) + "</span> e o Core guardou <span class='mono'>" +
+                    esc_(ficou) + "</span>. Quem manda é ele; estou mostrando a palavra dele."
+                  : "Situação do pedido: <span class='mono'>" + esc_(p.status) + "</span>.") +
+                "</div></div>";
+
+              if (typeof CACHE !== "undefined") CACHE.invalidar("compras");
+              Q.depoisDaEtapa(p, res);
+            });
+          });
+        }
+      });
+    });
+  };
+
+  /* ============================================================
+     10. O E-MAIL — primeiro manual, depois sozinho
+     ------------------------------------------------------------
+     Módulo 3: "O primeiro envio será manual, após conferência e
+     confirmação do usuário." Módulo 4: depois dele, automático.
+     Quem sabe se já houve um primeiro é o próprio módulo de envio,
+     que guarda pedido+etapa para não repetir. Então eu pergunto a
+     ele em vez de guardar essa conta de novo aqui — duas contas da
+     mesma coisa é como se perde o controle.
+     ============================================================ */
+  Q.paraOEmail = function (p) {
+    return {
+      id: lp(p.id),
+      status: lp(p.status),
+      solicitante: lp(p.solicitante || p.nome),
+      matricula: lp(p.matricula || p.matriculaSolicitante),
+      fornecedor: lp(p.fornecedor),
+      descricao: lp(p.descricao || p.item),
+      qtd: Number(p.qtd) || 0,
+      unidade: lp(p.unidade) || "un",
+      historico: lista_(p.historico),
+      listaItens: lista_(p.__itens || p.itens).map(function (i) {
+        return { descricao: lp(i.descricao || i.item), qtd: Number(i.qtd) || 0,
+                 unidade: lp(i.unidade) || "un", situacao: lp(p.status) };
+      })
+    };
+  };
+
+  Q.depoisDaEtapa = function (p, ondeMostrar) {
+    if (!temGS_()) {
+      if (ondeMostrar) {
+        ondeMostrar.innerHTML += '<div class="alert a-gray mt8">' + icone_("info") +
+          "<div>A etapa foi gravada. O <b>e-mail não sai deste endereço</b>: quem envia é o " +
+          "Apps Script, e ele só existe quando o sistema é aberto pelo <span class='mono'>/exec</span>." +
+          "</div></div>";
+      }
+      return;
+    }
+    Q.gs({ acao: "jaFalou", id: p.id }).then(function (r) {
+      var jaFalou = !!(r && r.ok && lista_(r.etapas).length);
+      if (jaFalou) { Q.mandar(p, false, ondeMostrar); return; }
+      Q.perguntar(p, ondeMostrar);
+    });
+  };
+
+  Q.depoisDoPedido = function (p, conferencia) {
+    var aviso = "";
+    if (conferencia && conferencia.guardouOEmail) {
+      /* o caso dele: o Core grava o e-mail da conta logada */
+      aviso = '<div class="alert a-blue mb12">' + icone_("info") +
+        "<div><b>O seu Core guarda o solicitante como e-mail.</b> Mandei o nome <b>" +
+        esc_(conferencia.queria) + "</b> e o pedido voltou com <b>" +
+        esc_(conferencia.veio) + "</b> — o endereço da conta que está logada.<br>" +
+        "<b>Para o e-mail isso serve</b>, e é para lá que o acompanhamento vai. " +
+        "O que se perde é o nome por extenso no documento. Quando você me mandar o " +
+        "<span class='mono'>.gs</span> de compras do seu Core, os dois passam a caber.</div></div>";
+    } else if (conferencia && !conferencia.guardou) {
+      aviso = '<div class="alert a-yellow mb12">' + icone_("alerta") +
+        "<div><b>O seu Core não guardou o solicitante.</b> Mandei <b>" +
+        esc_(conferencia.queria) + "</b> e o pedido voltou com <b>" +
+        esc_(conferencia.veio || "(vazio)") + "</b>.<br>" +
+        "Isso não é erro da tela: o módulo <span class='mono'>compras</span> do Core grava o " +
+        "solicitante por conta própria e ignora o que vai no pedido. O e-mail ainda vai sair, " +
+        "porque eu guardei de quem é este pedido aqui na tela — mas quem abrir a lista depois " +
+        "não vai ver o nome. Para resolver de vez eu preciso do " +
+        "<span class='mono'>.gs</span> de compras do seu Core.</div></div>";
+    }
+    Q.perguntar(p, null, aviso);
+  };
+
+  Q.perguntar = function (p, ondeMostrar, avisoExtra) {
+    var et = Q.etapaDe(p.status);
+    UI.modal({
+      titulo: "Mandar o e-mail deste pedido?",
+      sub: "Pedido " + lp(p.id) + " · " + Q.ESCADA[et.indice].rotulo,
+      corpo:
+        (avisoExtra || "") +
+        '<div class="alert a-blue mb12">' + icone_("info") +
+        "<div><b>Este é o primeiro e-mail deste pedido.</b> Pelo que você escreveu, o primeiro " +
+        "é sempre conferido e confirmado por você. Os das etapas seguintes podem sair sozinhos.</div></div>" +
+        '<dl class="dl">' +
+        "<dt>Pedido</dt><dd class='mono'>" + esc_(lp(p.id)) + "</dd>" +
+        "<dt>Solicitante</dt><dd>" + esc_(lp(p.solicitante || p.nome) || "—") + "</dd>" +
+        "<dt>Etapa</dt><dd>" + esc_(Q.ESCADA[et.indice].rotulo) + "</dd>" +
+        "<dt>Material</dt><dd>" + esc_(lp(p.descricao || p.item) || "—") + "</dd>" +
+        "</dl>" +
+        '<div id="qpDestinoEnvio" class="mt12"></div>' +
+        '<div id="qpRemetente" class="mt12"></div>' +
+        '<label class="chip mt12" style="cursor:pointer"><input type="checkbox" id="qpAuto" checked> ' +
+        "<span>Daqui para frente, mandar sozinho nas próximas etapas deste e dos outros pedidos</span></label>" +
+        '<div id="qpEnvio" class="mt12"></div>',
+      rodape: '<button class="btn btn-ghost" data-x>Agora não</button>' +
+              '<button class="btn btn-primary" data-ok>' + icone_("email") + "Mandar o e-mail</button>",
+      aoAbrir: function (w, fechar) {
+        /* [NAHORA] PARA QUEM VAI — e o campo quando não há para quem */
+        function pintarDestino() {
+          var cx = w.querySelector("#qpDestinoEnvio");
+          var d = Q.destinoDe(p);
+          if (d) {
+            cx.innerHTML = '<div class="alert ' + (d.digitado ? "a-yellow" : "a-green") + '">' +
+              icone_(d.digitado ? "alerta" : "checkC") +
+              "<div><b>Vai para</b> <span class='mono'>" + esc_(d.email) + "</span>" +
+              "<br><span class='small'>" + esc_(d.via) + "</span>" +
+              (d.digitado
+                ? "<br><span class='small'>Vale <b>só para este envio</b>. O cadastro desta " +
+                  "pessoa continua como está — endereço digitado às pressas não é cadastro. " +
+                  "Para ficar valendo sempre, preencha em Usuários.</span>" +
+                  '<br><button class="btn btn-ghost btn-sm mt8" data-qp-trocar>Trocar o endereço</button>'
+                : "") +
+              "</div></div>";
+          } else {
+            cx.innerHTML = '<div class="alert a-yellow">' + icone_("alerta") +
+              "<div><b>Não há endereço para este pedido.</b> O cadastro desta pessoa não tem " +
+              "e-mail que entregue, e eu não invento endereço.<br>" +
+              "Se você souber, digite aqui — vale <b>só para este envio</b>, e o cadastro " +
+              "não é alterado." +
+              '<div class="flex gap8 mt8" style="align-items:center">' +
+              '<input class="input" id="qpDigitado" placeholder="nome@coesa.com.br" ' +
+              'autocomplete="off" style="flex:1">' +
+              '<button class="btn btn-ghost btn-sm" data-qp-usar>Usar este</button></div>' +
+              '<div id="qpDigitadoErro"></div></div></div>';
+          }
+          var bt = cx.querySelector("[data-qp-trocar]");
+          if (bt) bt.addEventListener("click", function () {
+            p.__digitado = ""; pintarDestino();
+          });
+          var bu = cx.querySelector("[data-qp-usar]");
+          if (bu) bu.addEventListener("click", function () {
+            var v = lp(cx.querySelector("#qpDigitado").value);
+            if (!Q.emailValido(v)) {
+              cx.querySelector("#qpDigitadoErro").innerHTML =
+                '<div class="small" style="color:var(--vermelho,#E5484D);margin-top:6px">' +
+                "Isto não é um endereço de e-mail.</div>";
+              return;
+            }
+            if (Q.ehTapaBuraco(v)) {
+              cx.querySelector("#qpDigitadoErro").innerHTML =
+                '<div class="small" style="color:var(--laranja,#F08A1C);margin-top:6px">' +
+                "Este domínio não existe na internet — mandar para lá volta.</div>";
+              return;
+            }
+            p.__digitado = v;
+            pintarDestino();
+          });
+        }
+        pintarDestino();
+
+        /* [REMETENTE] de quem o e-mail vai parecer vir — dito ANTES
+           de ele apertar, com a verdade que o Google permite, não
+           com o que está escrito na configuração. */
+        Q.gs({ acao: "remetente" }).then(function (r) {
+          var cx = w.querySelector("#qpRemetente");
+          if (!cx || !r || !r.ok) return;
+          var bom = r.como === "propria" || r.como === "alias";
+          cx.innerHTML = '<div class="alert ' + (bom ? "a-green" : "a-blue") + '">' +
+            icone_(bom ? "checkC" : "info") +
+            "<div><b>Quem aparece como remetente</b><br>" + esc_(lp(r.texto)) + "</div></div>";
+        });
+
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        w.querySelector("[data-ok]").addEventListener("click", function () {
+          var auto = w.querySelector("#qpAuto").checked;
+          if (!Q.destinoDe(p)) {
+            aviso_("warn", "Sem endereço",
+              "Digite um e-mail no campo acima, ou feche — eu não mando para o vazio.");
+            return;
+          }
+          var bt = this;
+          bt.disabled = true; bt.innerHTML = "Mandando…";
+          Q.mandar(p, true, w.querySelector("#qpEnvio")).then(function (r) {
+            bt.disabled = false; bt.innerHTML = icone_("email") + "Mandar o e-mail";
+            if (r && r.enviado && auto) {
+              Q.gs({ acao: "ligar", sim: true }).then(function () {
+                aviso_("ok", "Envio automático ligado",
+                  "As próximas etapas saem sozinhas. Você desliga em Compras › Modelo de e-mail.");
+              });
+            }
+            if (ondeMostrar && r) {
+              ondeMostrar.innerHTML += '<div class="alert ' + (r.enviado ? "a-green" : "a-yellow") +
+                ' mt8">' + icone_(r.enviado ? "checkC" : "alerta") +
+                "<div>" + esc_(r.enviado ? "E-mail enviado." : "E-mail não saiu: " + lp(r.motivo)) +
+                "</div></div>";
+            }
+          });
+        });
+      }
+    });
+  };
+
+  /* ============================================================
+     PARA ONDE ESTE PEDIDO VAI
+     ------------------------------------------------------------
+     [UMAFONTE] 04/11 — o e-mail que ESTA tela achou no cadastro
+     oficial vai junto. Sem isso o .gs ia procurar de novo, na
+     planilha, e podia achar outra coisa: duas fontes para o mesmo
+     dado é o que ele proibiu.
+
+     [ACHAVEERA] 04/11 — eu condicionava o e-mail a o nome do
+     pedido bater com o nome da pessoa escolhida. Parecia prudente
+     e era errado: o Core dele grava no solicitante o E-MAIL da
+     conta logada, não o nome. O nome nunca batia, o e-mail nunca
+     ia junto, e o .gs ia procurar na planilha uma pessoa chamada
+     "Ismael.Santos@coesa.com.br". A pessoa agora viaja PRESA ao
+     pedido, carimbada quando foi escolhida ou localizada.
+
+     [NAHORA] 04/11 18:14 — "deixa também uma opção, se por acaso
+     não tiver o e-mail ali da pessoa, mas eu consiga digitar o
+     e-mail". É o p.__digitado: vale para ESTE envio e só. Não
+     grava no cadastro, porque a regra dele é não substituir
+     e-mail existente em silêncio — e porque um endereço digitado
+     às pressas não é cadastro, é um envio.
+     ============================================================ */
+  Q.destinoDe = function (p) {
+    if (!p) return null;
+    if (Q.emailValido(p.__digitado)) {
+      return { email: lp(p.__digitado), via: "digitado agora, só para este envio",
+               digitado: true };
+    }
+    var doCampo = lp(p.emailSolicitante || p.email);
+    if (Q.emailValido(doCampo)) return { email: doCampo, via: "cadastro oficial" };
+    if (p.__pessoa) {
+      var ep = Q.estadoDoEmail(p.__pessoa);
+      if (ep.pode) return { email: ep.email, via: "cadastro de " + lp(p.__pessoa.nome) };
+    }
+    if (Q.emailValido(p.solicitante)) {
+      return { email: lp(p.solicitante), via: "o próprio pedido traz o endereço" };
+    }
+    return null;
+  };
+
+  Q.mandar = function (p, manual, ondeMostrar) {
+    var op = manual ? { manual: true } : {};
+    var destino = Q.destinoDe(p);
+    if (destino) op.emailSolicitante = destino.email;
+    return Q.gs({ acao: "mandar", pedido: Q.paraOEmail(p), opcoes: op })
+      .then(function (r) {
+        Q.ultimoEnvio = r;
+        if (!r || !r.ok) {
+          var m = lp(r && r.mensagem) || "não consegui falar com o módulo de envio";
+          if (ondeMostrar) {
+            ondeMostrar.innerHTML = '<div class="alert a-red">' + icone_("alerta") +
+              "<div><b>Não mandei.</b> " + esc_(m) + "</div></div>";
+          } else { aviso_("err", "E-mail não saiu", m); }
+          return { enviado: false, motivo: m };
+        }
+        if (ondeMostrar) {
+          ondeMostrar.innerHTML = '<div class="alert ' + (r.enviado ? "a-green" : "a-yellow") + '">' +
+            icone_(r.enviado ? "checkC" : "alerta") +
+            "<div><b>" + (r.enviado ? "E-mail enviado." : "Não mandei.") + "</b> " +
+            esc_(lp(r.motivo)) + "</div></div>";
+        } else {
+          aviso_(r.enviado ? "ok" : "warn",
+            r.enviado ? "E-mail enviado" : "E-mail não saiu", lp(r.motivo));
+        }
+        return r;
+      });
+  };
+
+  /* ============================================================
+     11. LIGAR — e continuar ligado quando a tela se redesenha
+     ============================================================ */
+  if (!Q.ligar()) {
+    try {
+      document.addEventListener("DOMContentLoaded", function () { Q.ligar(); });
+      setTimeout(function () { Q.ligar(); }, 1200);
+    } catch (e) {}
+  }
+})();
+/* ############################################################
+ * VÁRIOS MATERIAIS, E O PDF DE VOLTA   ·  busca: [VARIOSITENS]
+ * 04/11 — "PROMPT MESTRE — CORREÇÃO DA SOLICITAÇÃO DE AQUISIÇÃO
+ * E PEDIDOS", problemas 1 (PDF), 3 (múltiplos itens) e a parte
+ * da tela do problema 2 (e-mail).
+ *
+ * A AUDITORIA, QUE VEIO ANTES DE QUALQUER LINHA
+ *
+ *   PDF — gerarPedidoPDF (linha 42553) existe e está inteira. Ela
+ *   só olha para o lugar errado: lê MOCK.precompras e filtra
+ *   status === "APROVADA". Os pedidos dele moram em MOCK.compras
+ *   e estão em AGUARDANDO_APROVACAO. A lista volta vazia e a tela
+ *   diz "Nenhum pedido aprovado". Reproduzi com o #PC-000018 dele.
+ *   E mesmo funcionando, cada LINHA da tabela daquele PDF é um
+ *   registro inteiro, não um item: pedido com 5 materiais imprime
+ *   1 linha. É o "só o primeiro item" do prompt.
+ *
+ *   O MODELO BOM JÁ EXISTE. PRECONTA_DOCUMENTO (19464) +
+ *   PRECONTA_CSS (19423) desenham a folha COESA com Nº, obra,
+ *   PEP, centro de custo, fornecedor, prioridade, tabela completa
+ *   com RC/código, UN, quantidades, resumo por obra/PEP e o script
+ *   que encaixa tudo numa folha só. Ela foi escrita para pré-conta
+ *   e o pedido nunca chegou nela.
+ *   Então eu NÃO desenho documento nenhum: eu traduzo o pedido
+ *   para o formato que aquela função já entende e chamo ELA. A
+ *   identidade visual fica idêntica porque é literalmente a mesma
+ *   função — não uma imitação.
+ *
+ *   MÚLTIPLOS ITENS — compras.pedido JÁ aceita lista:
+ *     var itens = p.itens || [{sku:p.sku, qtd:p.qtd, ...}];
+ *   e devolve {pedidos: criados, quantidade: criados.length}.
+ *   Quem só manda um é a TELA, porque o campo é um <select>
+ *   simples. Não falta rota no Core; falta campo na tela.
+ *
+ * O QUE ELE NÃO FAZ
+ *   NÃO cria rota nova. NÃO cria segundo sistema de compras. NÃO
+ *   apaga gerarPedidoPDF nem modalNovoPedido — as duas continuam
+ *   no arquivo e voltam com VARIOSITENS.restaurar(). NÃO cadastra
+ *   material novo sozinho. NÃO duplica pedido. NÃO mexe em
+ *   estoque, nota fiscal nem aprovação.
+ * ############################################################ */
+(function variosItens() {
+
+  var V = { itens: [], ultimo: null, ultimaResposta: null };
+  try { window.VARIOSITENS = V; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(v) {
+    if (typeof U !== "undefined" && U && U.esc) return U.esc(v);
+    return lp(v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function icone_(n) { return (typeof ic === "function") ? ic(n) : ""; }
+  function aviso_(t, a, b) {
+    try { if (typeof toast === "function") toast(t, a, b); } catch (e) {}
+  }
+  function semAcento(t) {
+    return String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "");
+  }
+  function chave(v) { return semAcento(lp(v)).toLowerCase().replace(/\s+/g, " "); }
+  function num(v) { var n = Number(String(v).replace(",", ".")); return isFinite(n) ? n : 0; }
+
+  /* ============================================================
+     1. O CADASTRO CENTRAL
+     ------------------------------------------------------------
+     A mesma fonte do resto do sistema. Não monto lista própria de
+     material, e não cadastro material novo: se não achou, está
+     escrito que não achou.
+     ============================================================ */
+  V.catalogo = function () {
+    var local = lista_(typeof MOCK !== "undefined" ? MOCK.itens : []);
+    if (local.length) return Promise.resolve({ ok: true, lista: local });
+    return Promise.resolve(API.call("itens", "listar", {})).then(function (r) {
+      if (!r || !r.ok) return { ok: false, lista: [], mensagem: lp(r && r.mensagem) };
+      return { ok: true, lista: lista_(r.dados) };
+    });
+  };
+
+  V.referencia = function (i) {
+    return lp(i && (i.referencia || i.refFabricante || i.codigoFabricante ||
+                    i.codigoBarras || i.modelo));
+  };
+
+  /* código, referência, descrição, termo parcial — módulo 1 do prompt */
+  V.procurar = function (base, termo) {
+    var t = chave(termo);
+    if (!t) return lista_(base).slice(0, 60);
+    return lista_(base).filter(function (i) {
+      if (lp(i.status) === "Inativo") return false;
+      var alvo = chave([i.sku, V.referencia(i), i.descricao || i.nome,
+                        i.categoria, i.marca, i.modelo].join(" "));
+      return alvo.indexOf(t) > -1;
+    }).slice(0, 60);
+  };
+
+  /* ============================================================
+     2. A LISTA QUE CRESCE
+     ------------------------------------------------------------
+     "Não substituir a lista anterior ao adicionar um novo item."
+     Então aqui só se acrescenta. Repetido não entra escondido:
+     ou vira linha separada, ou soma — e somar é ele que confirma.
+     ============================================================ */
+  V.linhaDe = function (i, qtd) {
+    return {
+      sku: lp(i.sku),
+      referencia: V.referencia(i),
+      descricao: lp(i.descricao || i.nome || i.sku),
+      unidade: lp(i.unidade) || "un",
+      foto: lp(i.foto),
+      valorUnitario: num(i.valorUnitario),
+      qtd: num(qtd) || 1,
+      foraDoCadastro: false
+    };
+  };
+
+  V.repetido = function (linhas, nova) {
+    var k = -1;
+    lista_(linhas).forEach(function (l, idx) {
+      if (k > -1) return;
+      if (lp(l.sku) && lp(l.sku) === lp(nova.sku)) k = idx;
+    });
+    if (k < 0) return null;
+    return { indice: k, mesmaUnidade: chave(linhas[k].unidade) === chave(nova.unidade) };
+  };
+
+  /* devolve o que aconteceu, para a tela contar a verdade */
+  V.acrescentar = function (linhas, nova, somar) {
+    var r = V.repetido(linhas, nova);
+    if (!r) { linhas.push(nova); return { como: "novo", indice: linhas.length - 1 }; }
+    if (!r.mesmaUnidade) {
+      /* unidades diferentes NÃO somam: 2 caixas + 3 unidades não é 5 de nada */
+      linhas.push(nova);
+      return { como: "repetidoOutraUnidade", indice: linhas.length - 1, juntoCom: r.indice };
+    }
+    if (somar) {
+      linhas[r.indice].qtd = num(linhas[r.indice].qtd) + num(nova.qtd);
+      return { como: "somado", indice: r.indice };
+    }
+    return { como: "precisaConfirmar", indice: r.indice, nova: nova };
+  };
+
+  V.total = function (linhas) {
+    return lista_(linhas).reduce(function (s, l) {
+      return s + num(l.qtd) * num(l.valorUnitario);
+    }, 0);
+  };
+
+  /* ============================================================
+     3. O PEDIDO VIRA A FOLHA COESA
+     ------------------------------------------------------------
+     Tradução, não desenho. O que esta função faz é dizer, para a
+     função que já existe, o que cada campo do pedido significa no
+     vocabulário dela. Campo que o pedido não tem fica vazio e a
+     folha simplesmente não mostra a linha — nunca preencho por
+     conta própria.
+     ============================================================ */
+  V.paraFolha = function (pedido, linhas) {
+    var p = pedido || {};
+    var itens = lista_(linhas && linhas.length ? linhas : (p.__itens || p.itens));
+    var obra = lp(p.obra) || lp((typeof ST !== "undefined" && ST.obra) ? ST.obra.nome : "");
+    var pep = lp(p.pep) || lp((typeof ST !== "undefined" && ST.obra) ? ST.obra.pep : "");
+
+    var listaItens = itens.map(function (i) {
+      var qtd = num(i.qtd);
+      var unit = num(i.valorUnitario);
+      return {
+        rc: lp(i.referencia) || lp(i.sku),
+        sku: lp(i.sku),
+        descricao: lp(i.descricao || i.item) +
+          (i.foraDoCadastro ? "  [fora do cadastro central]" : ""),
+        unidade: lp(i.unidade) || "un",
+        qtd: qtd,
+        valorUnitario: unit || 0,
+        valorTotal: unit ? qtd * unit : 0,
+        valorEstimado: !unit,
+        obra: obra,
+        pep: pep,
+        solicitante: lp(p.solicitante || p.nome),
+        status: lp(p.status)
+      };
+    });
+
+    return {
+      numero: lp(p.id) || "(sem número)",
+      emissao: p.emissao || p.data || new Date().toISOString(),
+      status: lp(p.status),
+      solicitante: lp(p.solicitante || p.nome),
+      responsavel: lp(p.responsavel) ||
+        lp((typeof ST !== "undefined" && ST.usuario) ? ST.usuario.nome : ""),
+      obra: obra,
+      setor: lp(p.setor),
+      pep: pep,
+      centroCusto: lp(p.centroCusto || p.centro),
+      fornecedor: lp(p.fornecedor),
+      prioridade: lp(p.prioridade || p.urgencia),
+      tipo: lp(p.tipo) || "Pedido de compra",
+      dataAprovacao: p.dataAprovacao || "",
+      observacao: lp(p.observacao || p.obs),
+      linkAprovacao: "",
+      itens: listaItens,
+      valorTotal: listaItens.reduce(function (s, i) { return s + num(i.valorTotal); }, 0),
+      descontos: 0, frete: 0, impostos: 0,
+      /* o e-mail do solicitante, que o prompt pede no documento */
+      __email: lp(p.emailSolicitante || p.email)
+    };
+  };
+
+  /* a folha, com o nome certo: é pedido, não pré-conta */
+  V.documento = function (pedido, linhas) {
+    if (typeof PRECONTA_DOCUMENTO !== "function") return "";
+    var folha = V.paraFolha(pedido, linhas);
+    var html = PRECONTA_DOCUMENTO(folha);
+    /* a folha é a mesma; o que muda é o NOME do documento. Trocar
+       no texto gerado é melhor do que mexer na função dela, que
+       continua servindo as pré-compras exatamente como servia.
+       A última troca é a que mais importa: o rodapé da pré-conta
+       dizia "este documento não substitui o pedido de compra
+       oficial" — e aqui ele É o pedido de compra. Deixar aquela
+       frase seria o documento desmentir a si mesmo. */
+    html = html
+      .replace("PRÉ-CONTA DE COMPRAS", "PEDIDO DE COMPRA")
+      .replace("Solicitação de materiais e serviços", "Aquisição de materiais e serviços")
+      .replace("Nº Pré-conta", "Nº do pedido")
+      .split("TOTAIS DA PRÉ-CONTA").join("TOTAIS DO PEDIDO")
+      .split("TOTAL DA PRÉ-CONTA").join("TOTAL DO PEDIDO")
+      .split("Totais da pré-conta").join("Totais do pedido")
+      .split("esta pré-conta").join("este pedido")
+      .split("desta pré-conta").join("deste pedido")
+      .split("da pré-conta").join("do pedido")
+      .replace("Pré-conta gerada automaticamente com base nas solicitações registradas no sistema",
+               "Pedido de compra gerado no ALMOX-PRO com os materiais listados acima")
+      .split("Pré-conta").join("Pedido")
+      .replace("Após aprovação, será gerada a solicitação de compra no sistema.",
+               "O acompanhamento das etapas é enviado por e-mail ao solicitante.")
+      .replace("Este documento não substitui o pedido de compra oficial.",
+               "Este é o pedido de compra registrado no ALMOX-PRO sob o número acima.");
+    /* o e-mail entra junto do solicitante, sem mexer na função dela */
+    if (folha.__email) {
+      html = html.replace(
+        "<div class=\"pc-campo\"><span>Responsável:</span>",
+        "<div class=\"pc-campo\"><span>E-mail:</span><b>" + esc_(folha.__email) +
+        "</b></div><div class=\"pc-campo\"><span>Responsável:</span>");
+    }
+    return html;
+  };
+
+  /* ver antes de gerar — o prompt pede os dois */
+  V.verFolha = function (pedido, linhas, jaImprimir) {
+    if (typeof PRECONTA_CSS !== "function" || typeof PRECONTA_DOCUMENTO !== "function") {
+      aviso_("err", "Modelo não encontrado",
+        "As funções do documento COESA não estão nesta versão do arquivo.");
+      return false;
+    }
+    var doc = V.documento(pedido, linhas);
+    var w = window.open("", "_blank");
+    if (!w) {
+      aviso_("warn", "Permita a janela", "O navegador bloqueou a nova aba deste sistema.");
+      return false;
+    }
+    var script = (typeof PRECONTA_SCRIPT_UMA_FOLHA === "function")
+      ? PRECONTA_SCRIPT_UMA_FOLHA() : "";
+    w.document.write("<!doctype html><html lang=pt-BR><head><meta charset=utf-8>" +
+      "<title>" + esc_(lp(pedido && pedido.id)) + " — Pedido de compra</title>" +
+      "<style>" + PRECONTA_CSS() + "</style></head><body>" +
+      '<div id="pcRegua"></div>' +
+      '<div id="pcEnvoltorio" style="padding:10px">' + doc + "</div>" +
+      "<scr" + "ipt>" + script +
+      (jaImprimir
+        ? "window.addEventListener('load',function(){setTimeout(function(){window.print();},450);});"
+        : "") +
+      "</scr" + "ipt></body></html>");
+    w.document.close();
+    V.ultimo = { pedido: pedido, itens: lista_(linhas).length };
+    return true;
+  };
+
+  /* ============================================================
+     4. A BUSCA DE MATERIAL
+     ============================================================ */
+  V.modalBuscar = function (aoEscolher) {
+    UI.modal({
+      titulo: "Adicionar material",
+      sub: "Procure no Cadastro Central por código, referência ou descrição",
+      tamanho: "lg",
+      corpo:
+        '<div class="field"><label>Procurar</label>' +
+        '<input class="input" id="viBusca" autocomplete="off" ' +
+        'placeholder="código, referência ou parte da descrição"></div>' +
+        '<div id="viResultado"><p class="small muted">Lendo o Cadastro Central…</p></div>',
+      rodape: '<button class="btn btn-ghost" data-x>Fechar</button>',
+      aoAbrir: function (w, fechar) {
+        var base = [];
+
+        function pintar(linhas, termo) {
+          var alvo = w.querySelector("#viResultado");
+          if (!linhas.length) {
+            alvo.innerHTML = '<div class="alert a-yellow">' + icone_("alerta") +
+              "<div><b>Nenhum material com esse texto.</b> " +
+              "Este sistema <b>não cadastra material novo aqui</b> — se faltar, cadastre " +
+              "no Cadastro Central primeiro." +
+              (lp(termo)
+                ? '<br><button class="btn btn-ghost btn-sm mt8" data-vi-manual>' +
+                  "Incluir assim mesmo, marcado como fora do cadastro</button>"
+                : "") +
+              "</div></div>";
+            var bm = alvo.querySelector("[data-vi-manual]");
+            if (bm) bm.addEventListener("click", function () {
+              fechar();
+              aoEscolher({ sku: "", descricao: lp(termo), unidade: "un",
+                           valorUnitario: 0, __manual: true });
+            });
+            return;
+          }
+          alvo.innerHTML =
+            '<div class="small muted mb8">' + linhas.length + " material(is)</div>" +
+            '<div style="max-height:300px;overflow:auto;border:1px solid var(--borda,#E3E9F2);border-radius:8px">' +
+            linhas.map(function (i, k) {
+              var ref = V.referencia(i);
+              return '<div data-vi-item="' + k + '" style="padding:8px 10px;cursor:pointer;' +
+                'border-bottom:1px solid var(--borda,#EEF2F7);display:flex;gap:10px;align-items:center">' +
+                (lp(i.foto)
+                  ? '<img src="' + esc_(i.foto) + '" alt="" style="width:34px;height:34px;' +
+                    'object-fit:cover;border-radius:5px;flex:none">'
+                  : '<span style="width:34px;height:34px;border-radius:5px;flex:none;' +
+                    'background:var(--fundo,#F4F7FB);display:grid;place-items:center;font-size:14px">📦</span>') +
+                '<div style="min-width:0"><b style="font-size:13px">' +
+                esc_(i.descricao || i.nome || i.sku) + "</b>" +
+                '<div class="small muted mono">' + esc_(i.sku) +
+                (ref ? " · ref " + esc_(ref) : "") +
+                " · " + esc_(lp(i.unidade) || "un") + "</div></div></div>";
+            }).join("") + "</div>";
+          alvo.querySelectorAll("[data-vi-item]").forEach(function (el) {
+            el.addEventListener("click", function () {
+              fechar();
+              aoEscolher(linhas[Number(el.getAttribute("data-vi-item"))]);
+            });
+          });
+        }
+
+        V.catalogo().then(function (r) {
+          if (!r.ok) {
+            w.querySelector("#viResultado").innerHTML =
+              '<div class="alert a-red">' + icone_("alerta") +
+              "<div>Não li o Cadastro Central: " + esc_(r.mensagem) + "</div></div>";
+            return;
+          }
+          base = r.lista;
+          pintar(V.procurar(base, ""), "");
+        });
+
+        var t = null;
+        w.querySelector("#viBusca").addEventListener("input", function () {
+          var v = this.value;
+          clearTimeout(t);
+          t = setTimeout(function () { pintar(V.procurar(base, v), v); }, 120);
+        });
+      }
+    });
+  };
+
+  /* ============================================================
+     5. A TELA DO PEDIDO, COM A LISTA
+     ============================================================ */
+  function fotoCel(l) {
+    return lp(l.foto)
+      ? '<img src="' + esc_(l.foto) + '" alt="" style="width:30px;height:30px;' +
+        'object-fit:cover;border-radius:4px">'
+      : '<span class="muted" style="font-size:15px">📦</span>';
+  }
+
+  V.modalPedido = function (precompra) {
+    V.itens = [];
+
+    function tabela() {
+      if (!V.itens.length) {
+        return '<div class="alert a-blue">' + icone_("info") +
+          "<div>Nenhum material ainda. Use <b>Adicionar material</b> — pode acrescentar " +
+          "quantos precisar, e a lista não é substituída a cada um.</div></div>";
+      }
+      return '<div class="tbl-wrap" style="max-height:300px;overflow:auto">' +
+        '<table class="tbl"><thead><tr>' +
+        '<th style="width:40px"></th><th>Material</th><th>Referência</th>' +
+        '<th class="c">UN</th><th class="num" style="width:90px">Qtd.</th>' +
+        '<th class="num">Total</th><th style="width:40px"></th>' +
+        "</tr></thead><tbody>" +
+        V.itens.map(function (l, k) {
+          return "<tr>" +
+            "<td>" + fotoCel(l) + "</td>" +
+            "<td><b>" + esc_(l.descricao) + "</b>" +
+            (l.foraDoCadastro
+              ? '<div><span class="badge b-yellow">fora do cadastro central</span></div>'
+              : '<div class="muted small mono">' + esc_(l.sku) + "</div>") + "</td>" +
+            '<td class="mono small">' + (esc_(l.referencia) || '<span class="muted">—</span>') + "</td>" +
+            '<td class="c">' + esc_(l.unidade) + "</td>" +
+            '<td class="num"><input class="input" data-vi-qtd="' + k + '" value="' +
+              esc_(l.qtd) + '" style="width:78px;text-align:right;padding:4px 6px"></td>' +
+            '<td class="num">' + (num(l.valorUnitario)
+              ? U.moeda(num(l.qtd) * num(l.valorUnitario))
+              : '<span class="muted">a orçar</span>') + "</td>" +
+            '<td><button class="btn-icon" data-vi-rm="' + k + '" title="Remover">' +
+              icone_("lixo") + "</button></td>" +
+            "</tr>";
+        }).join("") + "</tbody></table></div>" +
+        '<div class="flex between center mt8">' +
+        '<span class="small muted">' + V.itens.length + " material(is) · " +
+        V.itens.reduce(function (s, l) { return s + num(l.qtd); }, 0) + " un. no total</span>" +
+        "<b>" + (V.total(V.itens) ? U.moeda(V.total(V.itens)) : "a orçar") + "</b></div>";
+    }
+
+    UI.modal({
+      titulo: "Novo pedido de compra",
+      sub: "Pode colocar quantos materiais precisar no mesmo pedido",
+      tamanho: "lg",
+      corpo:
+        '<div id="viFicha"></div>' +
+        '<div class="flex between center mb8">' +
+        '<b style="font-size:13px">Materiais</b>' +
+        '<button class="btn btn-orange btn-sm" data-vi-add>' + icone_("mais") +
+        "Adicionar material</button></div>" +
+        '<div id="viTabela">' + tabela() + "</div>" +
+        '<div class="grid g2 mt12">' +
+        '<div class="field"><label>Fornecedor</label><select class="select" id="viForn">' +
+        '<option value="">Não informado</option>' +
+        lista_(typeof MOCK !== "undefined" ? MOCK.fornecedores : []).map(function (f) {
+          return "<option>" + esc_(f.nome || f.razaoSocial) + "</option>";
+        }).join("") + "</select></div>" +
+        '<div class="field"><label>Previsão de entrega</label>' +
+        '<input class="input" id="viPrev" placeholder="aaaa-mm-dd"></div>' +
+        "</div>" +
+        '<div class="field"><label>Observação</label><input class="input" id="viObs"></div>' +
+        '<div id="viSaida"></div>',
+      rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' +
+        '<button class="btn btn-ghost" data-vi-ver>' + icone_("doc") + "Ver o PDF antes</button>" +
+        '<button class="btn btn-primary" data-ok>' + icone_("carrinho") + "Emitir pedido</button>",
+      aoAbrir: function (w, fechar) {
+        /* quem está pedindo, se o [QUEMPEDIU] já perguntou */
+        try {
+          if (window.QUEMPEDIU && QUEMPEDIU.escolhido) {
+            var u = QUEMPEDIU.escolhido;
+            var e = QUEMPEDIU.estadoDoEmail(u);
+            w.querySelector("#viFicha").innerHTML =
+              '<div class="alert ' + (e.pode ? "a-green" : "a-yellow") + ' mb12">' +
+              icone_(e.pode ? "checkC" : "alerta") +
+              "<div><b>" + esc_(u.nome) + "</b>" +
+              (lp(u.matricula) ? " · <span class='mono'>" + esc_(u.matricula) + "</span>" : "") +
+              "<br><span class='mono small'>" + esc_(e.email || "—") + "</span> — " +
+              esc_(e.texto) + "</div></div>";
+          }
+        } catch (ex) {}
+
+        function redesenhar() {
+          w.querySelector("#viTabela").innerHTML = tabela();
+          w.querySelectorAll("[data-vi-rm]").forEach(function (b) {
+            b.addEventListener("click", function () {
+              V.itens.splice(Number(b.getAttribute("data-vi-rm")), 1);
+              redesenhar();
+            });
+          });
+          w.querySelectorAll("[data-vi-qtd]").forEach(function (c) {
+            c.addEventListener("change", function () {
+              var k = Number(c.getAttribute("data-vi-qtd"));
+              var q = num(c.value);
+              if (q <= 0) {
+                aviso_("warn", "Quantidade inválida", "A quantidade tem que ser maior que zero.");
+                c.value = V.itens[k].qtd;
+                return;
+              }
+              V.itens[k].qtd = q;
+              redesenhar();
+            });
+          });
+        }
+
+        function entrar(escolhido) {
+          var nova = escolhido.__manual
+            ? { sku: "", referencia: "", descricao: lp(escolhido.descricao), unidade: "un",
+                foto: "", valorUnitario: 0, qtd: 1, foraDoCadastro: true }
+            : V.linhaDe(escolhido, 1);
+          var r = V.acrescentar(V.itens, nova, false);
+
+          if (r.como === "precisaConfirmar") {
+            var antes = V.itens[r.indice];
+            UI.modal({
+              titulo: "Este material já está na lista",
+              sub: antes.descricao,
+              corpo: '<div class="alert a-yellow">' + icone_("alerta") +
+                "<div>Já existe <b>" + esc_(antes.descricao) + "</b> com " +
+                esc_(antes.qtd) + " " + esc_(antes.unidade) + " nesta solicitação.<br>" +
+                "Somar vira <b>" + (num(antes.qtd) + num(nova.qtd)) + " " +
+                esc_(antes.unidade) + "</b>.</div></div>",
+              rodape: '<button class="btn btn-ghost" data-x>Deixar as duas linhas</button>' +
+                '<button class="btn btn-primary" data-somar>Somar numa linha só</button>',
+              aoAbrir: function (w2, f2) {
+                w2.querySelector("[data-x]").addEventListener("click", function () {
+                  V.itens.push(nova); f2(); redesenhar();
+                });
+                w2.querySelector("[data-somar]").addEventListener("click", function () {
+                  V.acrescentar(V.itens, nova, true); f2(); redesenhar();
+                });
+              }
+            });
+            return;
+          }
+          if (r.como === "repetidoOutraUnidade") {
+            aviso_("info", "Mesmo material, outra unidade",
+              "Entrou como linha separada: unidades diferentes não somam.");
+          }
+          redesenhar();
+        }
+
+        redesenhar();
+        w.querySelector("[data-vi-add]").addEventListener("click", function () {
+          V.modalBuscar(entrar);
+        });
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+
+        function daTela() {
+          var u = (window.QUEMPEDIU && QUEMPEDIU.escolhido) || {};
+          return {
+            id: "(ainda não emitido)",
+            solicitante: lp(u.nome),
+            matricula: lp(u.matricula),
+            emailSolicitante: lp(u.email),
+            setor: lp(u.setor),
+            status: "EMITIDO",
+            fornecedor: lp(w.querySelector("#viForn").value),
+            previsao: lp(w.querySelector("#viPrev").value),
+            observacao: lp(w.querySelector("#viObs").value)
+          };
+        }
+
+        w.querySelector("[data-vi-ver]").addEventListener("click", function () {
+          if (!V.itens.length) {
+            aviso_("warn", "Sem materiais", "Adicione pelo menos um material para ver o PDF.");
+            return;
+          }
+          V.verFolha(daTela(), V.itens, false);
+        });
+
+        w.querySelector("[data-ok]").addEventListener("click", function () {
+          if (!V.itens.length) {
+            aviso_("warn", "Sem materiais", "O pedido precisa de pelo menos um material.");
+            return;
+          }
+          var bt = this;
+          bt.disabled = true;
+          bt.innerHTML = '<span class="spinner"></span> Emitindo…';
+          var saida = w.querySelector("#viSaida");
+
+          var carga = {
+            itens: V.itens.map(function (l) {
+              return { sku: l.sku, item: l.descricao, descricao: l.descricao,
+                       referencia: l.referencia, unidade: l.unidade,
+                       qtd: num(l.qtd), valorUnitario: num(l.valorUnitario) || null };
+            }),
+            /* o primeiro item também vai solto, porque um Core que só
+               conheça o formato antigo ainda emite alguma coisa em vez
+               de recusar tudo. Quem entende itens[] ignora estes. */
+            sku: V.itens[0].sku,
+            qtd: num(V.itens[0].qtd),
+            valorUnitario: num(V.itens[0].valorUnitario) || null,
+            fornecedor: lp(w.querySelector("#viForn").value),
+            previsao: lp(w.querySelector("#viPrev").value),
+            observacao: lp(w.querySelector("#viObs").value),
+            precompra: precompra || null
+          };
+
+          Promise.resolve(API.call("compras", "pedido", carga, { limite: 60000 }))
+            .then(function (r) {
+              bt.disabled = false;
+              bt.innerHTML = icone_("carrinho") + "Emitir pedido";
+              V.ultimaResposta = r;
+
+              if (!r || !r.ok) {
+                saida.innerHTML = '<div class="alert a-red mt12">' + icone_("alerta") +
+                  "<div><b>O pedido não foi emitido.</b> " +
+                  esc_(lp(r && r.mensagem) || "o Core não explicou") +
+                  "<br>Nada foi gravado e a sua lista continua aqui — não precisa digitar de novo." +
+                  "</div></div>";
+                return;
+              }
+
+              var criados = lista_(r.dados && r.dados.pedidos);
+              if (!criados.length && r.dados && r.dados.id) criados = [r.dados];
+              var conta = V.conferir(criados, V.itens);
+
+              saida.innerHTML = '<div class="alert ' + (conta.ok ? "a-green" : "a-yellow") +
+                ' mt12">' + icone_(conta.ok ? "checkC" : "alerta") +
+                "<div>" + esc_(conta.texto) + "</div></div>" +
+                '<button class="btn btn-ghost btn-sm mt8" data-vi-verpdf>' +
+                icone_("doc") + "Ver o PDF deste pedido</button>";
+
+              var pedidoFeito = criados[0] || {};
+              var paraFolha = {};
+              Object.keys(daTela()).forEach(function (k) { paraFolha[k] = daTela()[k]; });
+              Object.keys(pedidoFeito).forEach(function (k) { paraFolha[k] = pedidoFeito[k]; });
+              paraFolha.emailSolicitante = daTela().emailSolicitante;
+
+              saida.querySelector("[data-vi-verpdf]").addEventListener("click", function () {
+                V.verFolha(paraFolha, V.itens, false);
+              });
+
+              if (typeof CACHE !== "undefined") CACHE.invalidar("compras");
+              aviso_(conta.ok ? "ok" : "warn",
+                conta.ok ? "Pedido emitido" : "Emitido em parte", conta.texto);
+            });
+        });
+      }
+    });
+  };
+
+  /* mandei N, o Core criou quantos? — sem isso eu estaria chutando */
+  V.conferir = function (criados, enviados) {
+    var fiz = lista_(criados).length;
+    var mandei = lista_(enviados).length;
+    if (!fiz) {
+      return { ok: false, criados: 0,
+        texto: "O Core respondeu que deu certo mas não devolveu pedido nenhum. " +
+               "Antes de emitir de novo, confira na lista de pedidos — pode ter gravado." };
+    }
+    if (fiz === 1 && mandei > 1) {
+      return { ok: false, criados: 1,
+        texto: "Mandei " + mandei + " materiais e o Core criou 1 pedido só (" +
+               lp(criados[0].id) + "). O módulo de compras dele ainda trabalha com um " +
+               "material por pedido. Os outros " + (mandei - 1) + " NÃO entraram. " +
+               "Para resolver de vez eu preciso do .gs de compras do seu Core." };
+    }
+    if (fiz < mandei) {
+      return { ok: false, criados: fiz,
+        texto: "Mandei " + mandei + " materiais e voltaram " + fiz + ". " +
+               "Confira quais entraram antes de repetir." };
+    }
+    return { ok: true, criados: fiz,
+      texto: fiz === 1
+        ? "Pedido " + lp(criados[0].id) + " emitido com " + mandei + " material(is)."
+        : fiz + " pedido(s) emitido(s), um por material." };
+  };
+
+  /* ============================================================
+     6. O PDF A PARTIR DA LISTA DE PEDIDOS
+     ------------------------------------------------------------
+     gerarPedidoPDF continua no arquivo. Eu ponho a minha no lugar:
+     ela procura nos DOIS lugares (compras e pré-compras), não exige
+     status aprovado para desenhar, e imprime TODOS os itens.
+     ============================================================ */
+  V.acharPedido = function (id) {
+    function em(colecao) {
+      return lista_(colecao).filter(function (x) { return lp(x.id) === lp(id); })[0] || null;
+    }
+    var achado = null;
+    try {
+      achado = em(typeof COMPRAS_NA_TELA !== "undefined" ? COMPRAS_NA_TELA : []) ||
+               em(typeof MOCK !== "undefined" ? MOCK.compras : []) ||
+               em(typeof MOCK !== "undefined" ? MOCK.precompras : []);
+    } catch (e) {}
+    if (achado) return Promise.resolve(achado);
+    return Promise.resolve(API.call("compras", "listar", {})).then(function (r) {
+      if (!r || !r.ok) return null;
+      return em(r.dados);
+    });
+  };
+
+  V.itensDoPedido = function (p) {
+    var brutos = lista_(p.__itens);
+    if (!brutos.length) brutos = lista_(p.itens).filter(function (x) {
+      return x && typeof x === "object";
+    });
+    if (!brutos.length) {
+      /* pedido de um material só, no formato antigo */
+      if (lp(p.descricao || p.item)) {
+        return [{ sku: lp(p.sku || p.codigo), referencia: "",
+                  descricao: lp(p.descricao || p.item), unidade: lp(p.unidade) || "un",
+                  qtd: num(p.qtd) || 1, valorUnitario: num(p.valorUnitario) }];
+      }
+      return [];
+    }
+    return brutos.map(function (i) {
+      return { sku: lp(i.sku || i.codigo), referencia: V.referencia(i),
+               descricao: lp(i.descricao || i.item || i.nome),
+               unidade: lp(i.unidade) || "un",
+               qtd: num(i.qtd), valorUnitario: num(i.valorUnitario) };
+    });
+  };
+
+  V.pdfDoPedido = function (id, jaImprimir) {
+    return V.acharPedido(id).then(function (p) {
+      if (!p) {
+        aviso_("err", "Pedido não localizado",
+          "Não achei " + lp(id) + " nem em compras nem em pré-compras.");
+        return false;
+      }
+      var itens = V.itensDoPedido(p);
+      if (!itens.length) {
+        aviso_("warn", "Pedido sem itens",
+          "Este pedido não trouxe nenhum material do servidor. O PDF sairia em branco.");
+        return false;
+      }
+      return V.verFolha(p, itens, !!jaImprimir);
+    });
+  };
+
+  /* ============================================================
+     7. OS ENXERTOS
+     ============================================================ */
+  V.ligado = false;
+  V.ligar = function () {
+    if (V.ligado) return false;
+    if (typeof UI === "undefined" || !UI.modal) return false;
+
+    if (typeof gerarPedidoPDF === "function" && !V.antigoPDF) {
+      V.antigoPDF = gerarPedidoPDF;
+      window.gerarPedidoPDF = function (ids) {
+        var lista = lista_(ids);
+        if (lista.length === 1) return V.pdfDoPedido(lista[0], true);
+        /* sem id: o comportamento antigo, que trata pré-compras aprovadas */
+        return V.antigoPDF(ids);
+      };
+    }
+
+    /* o [QUEMPEDIU] já troca modalNovoPedido para perguntar quem
+       está pedindo. Eu entro DEPOIS dele: a pergunta continua, e
+       no lugar do modal de um item só abre o meu, com a lista. */
+    if (window.QUEMPEDIU && typeof QUEMPEDIU.antigoNovo === "function" && !V.antigoNovo) {
+      V.antigoNovo = QUEMPEDIU.antigoNovo;
+      QUEMPEDIU.antigoNovo = function (precompra) { V.modalPedido(precompra); };
+    } else if (typeof modalNovoPedido === "function" && !V.antigoNovo) {
+      V.antigoNovo = modalNovoPedido;
+      window.modalNovoPedido = function (precompra) { V.modalPedido(precompra); };
+    }
+
+    V.ligado = true;
+    return true;
+  };
+  V.restaurar = function () {
+    if (V.antigoPDF) window.gerarPedidoPDF = V.antigoPDF;
+    if (V.antigoNovo) {
+      if (window.QUEMPEDIU && QUEMPEDIU.antigoNovo) QUEMPEDIU.antigoNovo = V.antigoNovo;
+      else window.modalNovoPedido = V.antigoNovo;
+    }
+    V.ligado = false;
+  };
+
+  if (!V.ligar()) {
+    try {
+      document.addEventListener("DOMContentLoaded", function () { V.ligar(); });
+      setTimeout(function () { V.ligar(); }, 1400);
+    } catch (e) {}
+  }
+})();
+
 </script>
 
 </body>

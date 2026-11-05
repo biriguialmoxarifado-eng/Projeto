@@ -1,0 +1,1232 @@
+/** ############################################################
+ * ALMOXA PRO — ENVIO DO E-MAIL DE ACOMPANHAMENTO DO PEDIDO
+ *                                      busca: [MAILPED]
+ * ------------------------------------------------------------
+ * O PEDIDO DELE (03/11 12:32)
+ *   "Tem que ser automático, eu não vou ficar preenchendo. Lanço a
+ *    requisição, gera o número, ele procura o e-mail da pessoa no
+ *    cadastro e manda: 'pedido registrado'. Depois fechou com
+ *    fornecedor, sobe de novo. A nota chegou, acha a requisição e
+ *    manda 'recebemos no almoxarifado'. Depois vai para conferência.
+ *    Depois de conferir a nota, gera o próximo."
+ *
+ * ------------------------------------------------------------
+ * POR QUE ISTO É UM .gs E NÃO ESTÁ NO HTML
+ *   A página não envia e-mail e não tem como. Quem envia é o Apps
+ *   Script, com MailApp. O módulo "notificacoes" do Core atende
+ *   credenciais, perfil e regras — nenhuma ação de enviar. Então
+ *   esta é a peça que faltava, e ela mora aqui.
+ *
+ * ------------------------------------------------------------
+ * COMO INSTALAR (3 passos, 5 minutos)
+ *   1. No editor do Apps Script: Arquivo > Novo > Script. Cole
+ *      este arquivo inteiro e salve com o nome ALMOXA_EMAIL_PEDIDO.
+ *   2. Rode UMA VEZ a função AP_MAILPED_configurar(), depois de
+ *      preencher os endereços lá dentro. Ela só guarda a
+ *      configuração; não envia nada.
+ *   3. Rode AP_MAILPED_teste("seu.email@coesa.com.br"). Deve
+ *      chegar um e-mail de exemplo. Se chegar, está pronto.
+ *
+ * ------------------------------------------------------------
+ * COMO LIGAR NO FLUXO (a linha que você acrescenta)
+ *   Onde o seu Core já muda o status do pedido — em
+ *   compras.alterarStatus, ou depois de lançar a nota — acrescente
+ *   UMA linha:
+ *
+ *       AP_MAILPED_aoMudarEtapa(pedido);
+ *
+ *   Só isso. O módulo descobre a etapa pelo status, acha o e-mail
+ *   do solicitante, monta e manda. Se já tiver mandado aquele
+ *   pedido naquela etapa, ele NÃO manda de novo e devolve o motivo.
+ *
+ * ------------------------------------------------------------
+ * O QUE ELE NÃO FAZ — de propósito
+ *   NÃO altera o pedido. NÃO muda status. NÃO cria requisição.
+ *   NÃO avança etapa sozinho: a etapa sai do status que já está
+ *   gravado, e status que eu não conheço fica na primeira e o
+ *   e-mail diz isso em vez de inventar progresso.
+ *   NÃO manda duas vezes o mesmo pedido na mesma etapa.
+ *   NÃO manda para endereço que não parece e-mail.
+ *   NÃO escreve senha, token nem dado pessoal no log.
+ *   NÃO apaga nem reescreve nada na planilha.
+ * ############################################################ */
+
+/* ============================================================
+   1. CONFIGURAÇÃO — preenchida UMA vez
+   ------------------------------------------------------------
+   Fica no PropertiesService do projeto, não no código, para você
+   poder trocar o endereço da foto sem mexer em script.
+   ============================================================ */
+function AP_MAILPED_configurar() {
+  var cfg = AP_MAILPED_padrao_();
+  PropertiesService.getScriptProperties()
+    .setProperty('MAILPED_CFG', JSON.stringify(cfg));
+  Logger.log('Configuração guardada. ligado = ' + cfg.ligado);
+  return cfg;
+}
+
+/* os valores de fábrica, num lugar só, para o configurar E o
+   completar-o-que-falta lerem da mesma fonte */
+function AP_MAILPED_padrao_() {
+  return {
+    /* o nome que assina o e-mail */
+    empresa: 'COESA Engenharia',
+
+    /* [REMETENTE] 04/11 — de quem o e-mail parece vir.
+       -----------------------------------------------------------
+       O Apps Script manda pela conta que é DONA do projeto. Ele
+       não deixa escrever qualquer endereço no "De:" — se deixasse,
+       qualquer script do mundo mandaria e-mail em nome de qualquer
+       um, e é exatamente por isso que não deixa.
+       Então o módulo olha, na hora, qual dos três casos é o seu:
+         1. este endereço É a conta que roda o script  -> sai assim
+         2. este endereço é um ALIAS dessa conta       -> sai assim
+         3. não é nem um nem outro                     -> sai pela
+            conta dona, com o nome abaixo, e com RESPOSTA indo para
+            este endereço. Quem responder, responde para você.
+       Em qualquer um dos três a tela diz qual foi. Eu não prometo
+       um "De:" que o Google não entrega. */
+    remetente:     'ismael.santos@coesa.com.br',
+    remetenteNome: 'Ismael da Silva dos Santos · Almoxarifado COESA',
+
+    /* [MAILIMG] DEIXE VAZIO. O logotipo, a foto da obra e os 24
+       ícones já vêm embutidos no ALMOXA_EMAIL_IMAGENS e viajam
+       com o e-mail. Você não precisa hospedar nada.
+       Só preencha se um dia quiser trocar por outra imagem: aí o
+       endereço ganha do embutido. */
+    logo:     '',
+    fotoObra: '',
+    icones:   '',
+
+    /* este sim é endereço, porque é link clicável e não imagem */
+    link:     'https://guialmoxarifado-eng.github.io/Projeto/#/compras',
+
+    /* rodapé */
+    obra:     'UFN3 – TRÊS LAGOAS / MS',
+    local:    'Três Lagoas – MS',
+    email:    'almoxarifado@coesa.com.br',
+    telefone: '(11) 2165-1490',
+
+    /* quem recebe SEMPRE, além do solicitante. Deixe [] se ninguém. */
+    copiaSempre: [],
+
+    /* [GESTOR] 03/11 — "vai seguir a linha de quem solicitou: se a
+       pessoa for subordinada de outra, copia o gestor".
+       Eu NÃO invento hierarquia. Diga aqui o nome da coluna da aba
+       de usuários que guarda o gestor — pode ser o e-mail dele ou
+       o nome completo dele; eu aceito os dois. Coluna vazia ou
+       inexistente: ninguém é copiado, e fica registrado o porquê. */
+    colGestor: '',
+
+    /* em quais etapas o e-mail sai. Tire da lista o que não quiser. */
+    etapasQueEnviam: ['REGISTRADO', 'FORNECIMENTO', 'RECEBIDO',
+                      'CONFERENCIA', 'DISPONIVEL'],
+
+    /* a aba onde moram os usuários, e os nomes das colunas.
+       Confira na sua planilha antes de rodar. */
+    abaUsuarios: 'USUARIOS',
+    colNome: 'nome',
+    colEmail: 'email',
+    colMatricula: 'matricula',
+
+    /* ligado? deixe false enquanto testa */
+    ligado: false
+  };
+}
+
+/* [SOZINHO] 03/11 18:40 — ele instalou e a tela disse três vezes
+   "O [MAILPED] não foi configurado. Rode AP_MAILPED_configurar()".
+   Não estava quebrado: faltava um passo manual. Mas ele já tinha
+   dito, com todas as letras, que não quer configurar nada — e ele
+   está certo: um módulo que precisa de ritual para existir é um
+   módulo mal feito.
+   Agora, na primeira vez que alguém pede a configuração e ela não
+   existe, ela se cria com os valores de fábrica — que já vêm com
+   as imagens embutidas e o envio DESLIGADO. Instalar passa a ser
+   colar os dois arquivos, e nada mais. */
+/* [CAMPONOVO] 04/11 — a tela dele disse "nenhum remetente
+   configurado" com o remetente escrito no arquivo. A causa: a
+   configuração dele foi GRAVADA ontem, antes de existir o campo
+   remetente. Esta função só lia o que estava gravado, então todo
+   campo que eu acrescentasse depois nascia vazio para quem já
+   tinha configurado uma vez — e só funcionaria para instalação
+   nova. Isso ia se repetir a cada campo novo.
+   Agora eu completo o que falta com o valor de fábrica, sem
+   tocar em nada que ele já tenha escolhido. */
+function AP_MAILPED_cfg_() {
+  var t = PropertiesService.getScriptProperties().getProperty('MAILPED_CFG');
+  if (!t) {
+    AP_MAILPED_configurar();
+    t = PropertiesService.getScriptProperties().getProperty('MAILPED_CFG');
+  }
+  var guardada = {};
+  try { guardada = JSON.parse(t) || {}; } catch (e) { guardada = {}; }
+
+  var padrao = AP_MAILPED_padrao_();
+  var faltou = [];
+  for (var k in padrao) {
+    if (guardada[k] === undefined || guardada[k] === null) {
+      guardada[k] = padrao[k];
+      faltou.push(k);
+    }
+  }
+  if (faltou.length) {
+    PropertiesService.getScriptProperties()
+      .setProperty('MAILPED_CFG', JSON.stringify(guardada));
+    Logger.log('[MAILPED] campo(s) novo(s) preenchido(s) com o padrão: ' + faltou.join(', '));
+  }
+  return guardada;
+}
+
+/* ============================================================
+   [CFGLIDA] 03/11 16:33 — "configurar porque vai ser tudo
+   automático, eu não vou ficar preenchendo".
+   Tem razão. A tela de prévia pedia os endereços toda vez, e a
+   configuração de verdade estava aqui. Duas fontes para a mesma
+   coisa é o que ele proibiu desde o começo.
+   Agora a fonte é UMA — esta — e a tela LÊ daqui pelo
+   google.script.run, que existe quando a página é servida pelo
+   /exec. Nada é digitado duas vezes.
+   O que sai daqui é só endereço de imagem e de link. Nenhuma
+   senha, nenhum token, nenhum dado de pessoa.
+   ============================================================ */
+function AP_MAILPED_configuracao() {
+  try {
+    var c = AP_MAILPED_cfg_();
+    return JSON.stringify({
+      ok: true,
+      empresa: c.empresa, logo: c.logo, fotoObra: c.fotoObra,
+      icones: c.icones, link: c.link, obra: c.obra, local: c.local,
+      email: c.email, telefone: c.telefone,
+      etapasQueEnviam: c.etapasQueEnviam, copiaSempre: c.copiaSempre,
+      ligado: c.ligado, abaUsuarios: c.abaUsuarios,
+      colGestor: c.colGestor || ''
+    });
+  } catch (e) {
+    return JSON.stringify({ ok: false, mensagem: String(e && e.message) });
+  }
+}
+
+/** A tela grava a configuração aqui. Só os campos de aparência e
+    envio; nada que seja segredo passa por este caminho. */
+function AP_MAILPED_salvarConfiguracao(textoJSON) {
+  try {
+    var novo = JSON.parse(textoJSON || '{}');
+    var c;
+    try { c = AP_MAILPED_cfg_(); } catch (e) { c = AP_MAILPED_configurar(); }
+    var podem = ['empresa', 'logo', 'fotoObra', 'icones', 'link', 'obra',
+                 'local', 'email', 'telefone', 'etapasQueEnviam',
+                 'copiaSempre', 'ligado', 'abaUsuarios', 'colGestor'];
+    podem.forEach(function (k) {
+      if (novo[k] !== undefined) c[k] = novo[k];
+    });
+    PropertiesService.getScriptProperties()
+      .setProperty('MAILPED_CFG', JSON.stringify(c));
+    return JSON.stringify({ ok: true, mensagem: 'configuração guardada' });
+  } catch (e) {
+    return JSON.stringify({ ok: false, mensagem: String(e && e.message) });
+  }
+}
+
+/* ============================================================
+   [PREVIAGS] a tela vê o MESMO e-mail, montado aqui
+   ------------------------------------------------------------
+   A prévia não pode usar cid: — isso só existe dentro do e-mail.
+   Mas também não vou duplicar as imagens no HTML: duas cópias da
+   mesma coisa é o que ele proibiu. Então a prévia é montada AQUI,
+   pelo mesmo código do envio, e na hora de devolver eu troco cada
+   cid: por data: — que o navegador mostra e o Gmail não precisa.
+   Uma fonte só, e a tela vê exatamente o que vai sair.
+   ============================================================ */
+function AP_MAILPED_previa(textoJSON) {
+  try {
+    var pedido = JSON.parse(textoJSON || '{}');
+    var cfg = AP_MAILPED_cfg_();
+    var html = AP_MAILPED_montar_(pedido, cfg, {});
+    /* cid -> data, só para o navegador */
+    for (var nome in AP_MAILPED_USADAS) {
+      var x = AP_MAILPED_IMAGENS[nome];
+      if (!x) continue;
+      html = html.split('cid:' + nome).join('data:' + x.t + ';base64,' + x.b);
+    }
+    return JSON.stringify({ ok: true, html: html,
+      assunto: '[ALMOXA PRO] Pedido ' + AP_MAILPED_lp_(pedido.id) + ' · ' +
+        AP_MAILPED_ETAPAS[AP_MAILPED_etapaDe_(pedido).indice].rotulo.replace(/<br>/g, ' ') });
+  } catch (e) {
+    return JSON.stringify({ ok: false, mensagem: String(e && e.message) });
+  }
+}
+
+/** A tela chama esta para mandar o teste. Devolve texto, porque é
+    assim que o google.script.run entrega sem se perder. */
+function AP_MAILPED_testePelaTela(paraOndeMandar) {
+  var r = AP_MAILPED_teste(paraOndeMandar);
+  return JSON.stringify(r);
+}
+
+/** Liga ou desliga o envio sem mexer no resto da configuração. */
+function AP_MAILPED_ligar(sim) {
+  var cfg = AP_MAILPED_cfg_();
+  cfg.ligado = (sim === true);
+  PropertiesService.getScriptProperties()
+    .setProperty('MAILPED_CFG', JSON.stringify(cfg));
+  Logger.log('ligado = ' + cfg.ligado);
+  return cfg.ligado;
+}
+
+/* ============================================================
+   2. AS ETAPAS — saem do status gravado, e só dele
+   ============================================================ */
+var AP_MAILPED_ETAPAS = [
+  { chave: 'REGISTRADO',   rotulo: 'Pedido<br>registrado' },
+  { chave: 'FORNECIMENTO', rotulo: 'Em<br>fornecimento' },
+  { chave: 'RECEBIDO',     rotulo: 'Recebido no<br>almoxarifado' },
+  { chave: 'CONFERENCIA',  rotulo: 'Em<br>conferência' },
+  { chave: 'DISPONIVEL',   rotulo: 'Disponível<br>para retirada' }
+];
+
+var AP_MAILPED_MAPA = {
+  EMITIDO: 0, REGISTRADO: 0, ABERTO: 0, ABERTA: 0, PENDENTE: 0,
+  AGUARDANDO_APROVACAO: 0, APROVADO: 0, APROVADA: 0,
+  ENCAMINHADO: 1, EM_FORNECIMENTO: 1, FORNECIMENTO: 1, EM_ANDAMENTO: 1,
+  /* [QUEMPEDIU] 04/11 — palavras que a tela de Compras já usava e
+     que este mapa não conhecia. Sem elas, "Em trânsito" caía na
+     etapa 1 como se fosse "não sei o que é isso". */
+  EM_TRANSITO: 1, TRANSITO: 1, CONFIRMADO: 1, COTACAO: 1, EM_COTACAO: 1,
+  RECEBIDO: 2, RECEBIDO_PARCIAL: 2, ENTREGUE: 2,
+  EM_CONFERENCIA: 3, CONFERENCIA: 3, CONFERIDA: 3, DIVERGENCIA: 3,
+  DISPONIVEL: 4, DISPONIBILIZADA: 4, CONCLUIDO: 4, CONCLUIDA: 4
+};
+
+function AP_MAILPED_etapaDe_(pedido) {
+  var st = AP_MAILPED_lp_(pedido && pedido.status)
+    .toUpperCase().replace(/[\s\-]+/g, '_');
+  if (AP_MAILPED_MAPA[st] !== undefined) {
+    return { indice: AP_MAILPED_MAPA[st], conhecido: true, status: st };
+  }
+  return { indice: 0, conhecido: false, status: st || '(sem status)' };
+}
+
+/* ============================================================
+   3. DE QUEM É O E-MAIL
+   ------------------------------------------------------------
+   Pela matrícula primeiro. Pelo nome só quando aquele nome
+   aparece UMA vez no cadastro: dois homônimos e eu não escolho —
+   mandar a movimentação de um para o outro é pior que não mandar.
+   ============================================================ */
+/* ============================================================
+   [CABECALHO] 04/11 — ACHAR A COLUNA SEM EXIGIR O NOME EXATO
+   ------------------------------------------------------------
+   Isto aqui era indexOf('email') cru. Quer dizer: a planilha
+   tinha que ter uma coluna escrita exatamente "email". Se
+   estivesse "E-mail", "E-MAIL", "Email " ou "Endereço de e-mail",
+   o indexOf devolvia -1 e NENHUM e-mail era achado nunca — sem
+   erro na tela, sem aviso, sem nada. O mesmo para "Matrícula"
+   com acento e "Nome Completo".
+   Agora comparo sem acento, sem maiúscula e sem pontuação, e
+   aceito os apelidos que a planilha de RH e a exportação do
+   Active Directory costumam usar — a mesma lista do [EMAILCOLAB],
+   que já funcionou com a planilha dele.
+   O nome configurado continua ganhando: se ele apontou a coluna,
+   é a dela que vale.
+   ============================================================ */
+var AP_MAILPED_APELIDOS = {
+  nome:      ['nome', 'nomecompleto', 'colaborador', 'funcionario', 'empregado',
+              'displayname', 'nomeexibicao', 'nomedeexibicao', 'cn', 'fullname', 'usuario'],
+  email:     ['email', 'emails', 'correio', 'correioeletronico', 'mail',
+              'enderecoeletronico', 'enderecodeemail', 'userprincipalname', 'upn',
+              'emailaddress', 'primarysmtpaddress', 'smtp'],
+  matricula: ['matricula', 'matricul', 'mat', 'chapa', 'registro',
+              'employeeid', 'employeenumber']
+};
+
+function AP_MAILPED_chaveCol_(t) {
+  return String(t || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function AP_MAILPED_acharColuna_(cab, configurado, tipo) {
+  var normal = [];
+  for (var i = 0; i < cab.length; i++) normal.push(AP_MAILPED_chaveCol_(cab[i]));
+
+  /* 1º o que ELE configurou — se apontou a coluna, é ela */
+  var alvo = AP_MAILPED_chaveCol_(configurado);
+  if (alvo) {
+    var j = normal.indexOf(alvo);
+    if (j > -1) return j;
+  }
+  /* 2º os apelidos conhecidos, em ordem de preferência */
+  var lista = AP_MAILPED_APELIDOS[tipo] || [];
+  for (var k = 0; k < lista.length; k++) {
+    var p = normal.indexOf(lista[k]);
+    if (p > -1) return p;
+  }
+  return -1;
+}
+
+/** Diz quais colunas da aba de usuários o módulo está enxergando. */
+function AP_MAILPED_conferirAba() {
+  var cfg = AP_MAILPED_cfg_();
+  var aba = SpreadsheetApp.getActive().getSheetByName(cfg.abaUsuarios);
+  if (!aba) {
+    return { ok: false, aba: cfg.abaUsuarios,
+             motivo: 'não existe aba chamada "' + cfg.abaUsuarios + '" nesta planilha' };
+  }
+  var dados = aba.getDataRange().getValues();
+  if (!dados.length) return { ok: false, aba: cfg.abaUsuarios, motivo: 'a aba está vazia' };
+  var cab = dados[0].map(function (c) { return String(c || '').toLowerCase().trim(); });
+  var iNome = AP_MAILPED_acharColuna_(cab, cfg.colNome, 'nome');
+  var iMail = AP_MAILPED_acharColuna_(cab, cfg.colEmail, 'email');
+  var iMat  = AP_MAILPED_acharColuna_(cab, cfg.colMatricula, 'matricula');
+
+  var comEmail = 0;
+  for (var i = 1; i < dados.length && iMail >= 0; i++) {
+    if (AP_MAILPED_emailValido_(AP_MAILPED_lp_(dados[i][iMail]))) comEmail++;
+  }
+  return {
+    ok: iNome >= 0 && iMail >= 0,
+    aba: cfg.abaUsuarios,
+    cabecalhos: cab,
+    linhas: Math.max(0, dados.length - 1),
+    colunaNome: iNome >= 0 ? cab[iNome] : '',
+    colunaEmail: iMail >= 0 ? cab[iMail] : '',
+    colunaMatricula: iMat >= 0 ? cab[iMat] : '',
+    comEmailValido: comEmail,
+    motivo: iNome < 0 || iMail < 0
+      ? 'não achei coluna de ' + (iNome < 0 ? 'nome ' : '') + (iMail < 0 ? 'e-mail' : '')
+      : ''
+  };
+}
+
+function AP_MAILPED_acharEmail_(pedido) {
+  var cfg = AP_MAILPED_cfg_();
+  var mat = AP_MAILPED_chaveMat_(pedido && (pedido.matricula || pedido.matriculaSolicitante));
+  var cru = AP_MAILPED_lp_(pedido && (pedido.solicitante || pedido.nome));
+  var nome = AP_MAILPED_chaveNome_(cru);
+
+  /* [EMAILNOCAMPO] 04/11 — o módulo compras do Core dele grava no
+     solicitante o E-MAIL da conta que está logada, não o nome.
+     Então chegava aqui "Ismael.Santos@coesa.com.br" e eu procurava
+     uma PESSOA com esse nome na planilha, não achava, e dizia
+     "nenhum cadastro com e-mail para esta pessoa" — com o endereço
+     da pessoa escrito na minha frente.
+     Se o campo já é um endereço, ele é o endereço. Isso não é
+     inventar e-mail: é o Core dizendo qual é. */
+  if (AP_MAILPED_emailValido_(cru)) {
+    return { ok: true, email: cru, via: 'o próprio pedido traz o endereço' };
+  }
+
+  if (!mat && !nome) {
+    return { ok: false, motivo: 'o pedido não diz de quem é (sem matrícula e sem nome)' };
+  }
+
+  var aba = SpreadsheetApp.getActive().getSheetByName(cfg.abaUsuarios);
+  if (!aba) {
+    return { ok: false, motivo: 'não achei a aba "' + cfg.abaUsuarios + '"' };
+  }
+  var dados = aba.getDataRange().getValues();
+  if (dados.length < 2) return { ok: false, motivo: 'a aba de usuários está vazia' };
+
+  var cab = dados[0].map(function (c) {
+    return String(c || '').toLowerCase().trim();
+  });
+  var iNome = AP_MAILPED_acharColuna_(cab, cfg.colNome, 'nome');
+  var iMail = AP_MAILPED_acharColuna_(cab, cfg.colEmail, 'email');
+  var iMat  = AP_MAILPED_acharColuna_(cab, cfg.colMatricula, 'matricula');
+  if (iNome < 0 || iMail < 0) {
+    return { ok: false, motivo: 'a aba "' + cfg.abaUsuarios + '" não tem coluna de ' +
+      (iNome < 0 ? 'nome' : '') + (iNome < 0 && iMail < 0 ? ' nem de ' : '') +
+      (iMail < 0 ? 'e-mail' : '') + '. Os cabeçalhos que achei: ' + cab.join(' | ') };
+  }
+
+  var porMat = [], porNome = [];
+  for (var i = 1; i < dados.length; i++) {
+    var l = dados[i];
+    var e = AP_MAILPED_lp_(l[iMail]);
+    if (!e) continue;
+    if (iMat >= 0 && mat && AP_MAILPED_chaveMat_(l[iMat]) === mat) {
+      porMat.push({ email: e, nome: AP_MAILPED_lp_(l[iNome]) });
+    } else if (nome && AP_MAILPED_chaveNome_(l[iNome]) === nome) {
+      porNome.push({ email: e, nome: AP_MAILPED_lp_(l[iNome]) });
+    }
+  }
+
+  if (porMat.length === 1) return { ok: true, email: porMat[0].email, via: 'matrícula' };
+  if (porMat.length > 1) {
+    return { ok: false, motivo: porMat.length + ' cadastros com a matrícula ' +
+      mat + ' — não escolho' };
+  }
+  if (porNome.length === 1) return { ok: true, email: porNome[0].email, via: 'nome completo' };
+  if (porNome.length > 1) {
+    return { ok: false, motivo: porNome.length +
+      ' pessoas com este nome e e-mails diferentes — não escolho' };
+  }
+  return { ok: false, motivo: 'nenhum cadastro com e-mail para esta pessoa' };
+}
+
+/* ============================================================
+   3b. [GESTOR] O GESTOR DE QUEM PEDIU
+   ------------------------------------------------------------
+   "Vai seguir a linha de quem solicitou: se a pessoa for
+   subordinada de outra, copia o gestor."
+   Eu não invento organograma. Leio a coluna que ele apontar em
+   cfg.colGestor, na mesma aba de usuários. O que estiver lá pode
+   ser o e-mail do gestor (uso direto) ou o nome completo dele
+   (procuro o e-mail pelo nome, e só aceito se for único).
+   Sem coluna, sem valor, ou nome repetido: ninguém é copiado, e o
+   motivo fica registrado — nunca copio alguém no palpite.
+   ============================================================ */
+function AP_MAILPED_gestorDe_(pedido) {
+  var cfg = AP_MAILPED_cfg_();
+  var col = AP_MAILPED_lp_(cfg.colGestor);
+  if (!col) return { email: '', motivo: 'nenhuma coluna de gestor configurada' };
+
+  var aba = SpreadsheetApp.getActive().getSheetByName(cfg.abaUsuarios);
+  if (!aba) return { email: '', motivo: 'não achei a aba de usuários' };
+  var dados = aba.getDataRange().getValues();
+  if (dados.length < 2) return { email: '', motivo: 'aba vazia' };
+
+  var cab = dados[0].map(function (c) { return String(c || '').toLowerCase().trim(); });
+  /* [CABECALHO] 04/11 — aqui era o mesmo indexOf cru da outra
+     função; se o cabeçalho tiver acento ou maiúscula, o gestor
+     nunca seria encontrado e ninguém seria copiado, em silêncio. */
+  var iNome = AP_MAILPED_acharColuna_(cab, cfg.colNome, 'nome');
+  var iMail = AP_MAILPED_acharColuna_(cab, cfg.colEmail, 'email');
+  var iMat  = AP_MAILPED_acharColuna_(cab, cfg.colMatricula, 'matricula');
+  var iGes  = AP_MAILPED_acharColuna_(cab, col, 'gestor');
+  if (iGes < 0) return { email: '', motivo: 'a aba não tem a coluna "' + col + '"' };
+
+  var mat = AP_MAILPED_chaveMat_(pedido && (pedido.matricula || pedido.matriculaSolicitante));
+  var nome = AP_MAILPED_chaveNome_(pedido && (pedido.solicitante || pedido.nome));
+
+  /* a linha de quem pediu */
+  var linha = null;
+  for (var i = 1; i < dados.length; i++) {
+    var l = dados[i];
+    if (iMat >= 0 && mat && AP_MAILPED_chaveMat_(l[iMat]) === mat) { linha = l; break; }
+  }
+  if (!linha && nome) {
+    var achadas = [];
+    for (var j = 1; j < dados.length; j++) {
+      if (AP_MAILPED_chaveNome_(dados[j][iNome]) === nome) achadas.push(dados[j]);
+    }
+    if (achadas.length === 1) linha = achadas[0];
+    else if (achadas.length > 1) {
+      return { email: '', motivo: 'nome de quem pediu aparece mais de uma vez — não escolho' };
+    }
+  }
+  if (!linha) return { email: '', motivo: 'não achei a linha de quem pediu' };
+
+  var valor = AP_MAILPED_lp_(linha[iGes]);
+  if (!valor) return { email: '', motivo: 'esta pessoa não tem gestor preenchido' };
+
+  /* já é e-mail? */
+  if (AP_MAILPED_emailValido_(valor)) {
+    return { email: valor, motivo: 'e-mail do gestor na própria coluna' };
+  }
+
+  /* é nome: procuro o e-mail dele, e só aceito se for único */
+  var alvo = AP_MAILPED_chaveNome_(valor), achados = [];
+  for (var k = 1; k < dados.length; k++) {
+    if (AP_MAILPED_chaveNome_(dados[k][iNome]) === alvo) {
+      var e = AP_MAILPED_lp_(dados[k][iMail]);
+      if (e && AP_MAILPED_emailValido_(e)) achados.push(e);
+    }
+  }
+  if (achados.length === 1) return { email: achados[0], motivo: 'gestor achado pelo nome' };
+  if (achados.length > 1) {
+    return { email: '', motivo: 'mais de um cadastro com o nome do gestor — não escolho' };
+  }
+  return { email: '', motivo: 'o gestor "' + valor + '" não tem e-mail no cadastro' };
+}
+
+/* ============================================================
+   4. A TRAVA DE DUPLICIDADE
+   ------------------------------------------------------------
+   "Enviar somente em eventos configurados e evitar duplicidade."
+   Guardo pedido+etapa. Se o Core chamar duas vezes a mesma coisa
+   — e vai chamar, porque toda tela que salva mexe no status — o
+   segundo não sai.
+   ============================================================ */
+function AP_MAILPED_jaMandou_(idPedido, etapa) {
+  var k = 'MAILPED:' + idPedido + ':' + etapa;
+  return !!PropertiesService.getScriptProperties().getProperty(k);
+}
+function AP_MAILPED_marcar_(idPedido, etapa) {
+  var k = 'MAILPED:' + idPedido + ':' + etapa;
+  PropertiesService.getScriptProperties()
+    .setProperty(k, new Date().toISOString());
+}
+/** Apaga a trava de um pedido — para reenviar de propósito. */
+function AP_MAILPED_destravar(idPedido) {
+  var pr = PropertiesService.getScriptProperties();
+  var todas = pr.getProperties();
+  var n = 0;
+  for (var k in todas) {
+    if (k.indexOf('MAILPED:' + idPedido + ':') === 0) { pr.deleteProperty(k); n++; }
+  }
+  Logger.log('destravei ' + n + ' etapa(s) do pedido ' + idPedido);
+  return n;
+}
+
+/* ============================================================
+   5. A PORTA — é esta que você chama no seu fluxo
+   ============================================================ */
+/**
+ * Chame onde o status do pedido muda.
+ *   AP_MAILPED_aoMudarEtapa(pedido);
+ * pedido: o objeto que você já tem, com id, status, solicitante,
+ *         fornecedor, itens/descricao, qtd e historico.
+ * Devolve {ok, enviado, motivo} e NUNCA lança erro para cima:
+ * e-mail não pode derrubar o lançamento do pedido.
+ */
+function AP_MAILPED_aoMudarEtapa(pedido, opcoes) {
+  try {
+    var cfg = AP_MAILPED_cfg_();
+    var o = opcoes || {};
+    var id = AP_MAILPED_lp_(pedido && pedido.id);
+    if (!id) return AP_MAILPED_fim_(false, 'o pedido não tem id');
+
+    var et = AP_MAILPED_etapaDe_(pedido);
+    var chave = AP_MAILPED_ETAPAS[et.indice].chave;
+
+    /* [QUEMPEDIU] 04/11 — o documento dele separa duas coisas:
+       "o primeiro envio será manual, após conferência e confirmação
+       do usuário" (módulo 3) e só depois o automático (módulo 4).
+       o.manual é o primeiro: ele olhou na tela e apertou. Esse passa
+       mesmo com o automático desligado — mas continua respeitando a
+       trava de duplicidade e continua marcando que já foi, senão o
+       automático repetiria a mesma etapa depois. o.forcar continua
+       sendo o que era: teste, não marca nada. */
+    if (!cfg.ligado && !o.forcar && !o.manual) {
+      return AP_MAILPED_fim_(false,
+        'o envio automático está desligado — rode AP_MAILPED_ligar(true) quando quiser ligar. ' +
+        'O botão de teste da tela funciona do mesmo jeito.');
+    }
+    if (cfg.etapasQueEnviam.indexOf(chave) < 0) {
+      return AP_MAILPED_fim_(false, 'a etapa ' + chave + ' não está na lista que envia');
+    }
+    if (AP_MAILPED_jaMandou_(id, chave) && !o.forcar) {
+      return AP_MAILPED_fim_(false, 'já mandei o pedido ' + id + ' na etapa ' + chave);
+    }
+
+    /* [UMAFONTE] 04/11 — a tela já achou o e-mail no CADASTRO
+       OFICIAL (usuarios.listar) antes de chamar. Ele mandar esse
+       endereço junto evita que eu vá procurar DE NOVO, na planilha,
+       e possivelmente ache outra coisa: duas fontes para o mesmo
+       dado é o que ele proibiu. Diferente de o.para, que é teste:
+       emailSolicitante é envio de verdade e continua copiando o
+       gestor normalmente. */
+    var quem;
+    if (o.para) {
+      quem = { ok: true, email: o.para, via: 'informado na chamada' };
+    } else if (AP_MAILPED_emailValido_(AP_MAILPED_lp_(o.emailSolicitante))) {
+      quem = { ok: true, email: AP_MAILPED_lp_(o.emailSolicitante),
+               via: 'cadastro oficial, resolvido pela tela' };
+    } else {
+      quem = AP_MAILPED_acharEmail_(pedido);
+    }
+    if (!quem.ok) return AP_MAILPED_fim_(false, quem.motivo);
+    if (!AP_MAILPED_emailValido_(quem.email)) {
+      return AP_MAILPED_fim_(false, 'o endereço achado não parece e-mail');
+    }
+
+    var copia = (cfg.copiaSempre || []).filter(AP_MAILPED_emailValido_);
+    var ges = { email: '', motivo: 'não procurei (envio de teste)' };
+    if (!o.para) {
+      try { ges = AP_MAILPED_gestorDe_(pedido); } catch (eg) {
+        ges = { email: '', motivo: 'falhou: ' + (eg && eg.message) };
+      }
+      if (ges.email && copia.indexOf(ges.email) < 0 && ges.email !== quem.email) {
+        copia.push(ges.email);
+      }
+    }
+    var html = AP_MAILPED_montar_(pedido, cfg, o);
+    var assunto = '[ALMOXA PRO] Pedido ' + id + ' · ' +
+      AP_MAILPED_ETAPAS[et.indice].rotulo.replace(/<br>/g, ' ');
+
+    /* [MAILIMG] só as imagens que o corpo realmente usou viajam
+       junto — mandar as 26 em todo e-mail seria peso à toa */
+    var embutidas = {}, quantas = 0;
+    for (var nm in AP_MAILPED_USADAS) {
+      var bl = AP_MAILPED_blob_(nm);
+      if (bl) { embutidas[nm] = bl; quantas++; }
+    }
+
+    /* [REMETENTE] 04/11 — o noReply que estava aqui saiu de
+       propósito: ele força o endereço de não-responder e CANCELA
+       qualquer resposta. Ele quer o contrário — quem receber tem
+       que conseguir responder para o almoxarifado. */
+    var rem = AP_MAILPED_remetente_();
+    AP_MAILPED_enviar_(rem, quem.email, copia, assunto, html,
+                       quantas ? embutidas : null);
+
+    if (!o.forcar) AP_MAILPED_marcar_(id, chave);
+    /* no registro vai o id, a etapa e o domínio — nunca o endereço
+       inteiro, que é dado pessoal e não precisa estar no log */
+    Logger.log('enviado · ' + id + ' · ' + chave + ' · via ' + quem.via +
+               ' · @' + String(quem.email).split('@')[1] +
+               ' · cópia: ' + copia.length + ' (' + ges.motivo + ')' +
+               ' · ' + quantas + ' imagem(ns) embutida(s)' +
+               ' · remetente: ' + rem.como);
+    return AP_MAILPED_fim_(true, 'enviado na etapa ' + chave,
+      { etapa: chave, via: quem.via, copias: copia.length, gestor: ges.motivo,
+        remetente: rem });
+
+  } catch (e) {
+    /* e-mail nunca derruba o lançamento */
+    Logger.log('[MAILPED] falhou: ' + (e && e.message));
+    return AP_MAILPED_fim_(false, 'falhou: ' + (e && e.message));
+  }
+}
+
+function AP_MAILPED_fim_(enviado, motivo, extra) {
+  var r = { ok: true, enviado: !!enviado, motivo: motivo || '' };
+  if (extra) for (var k in extra) r[k] = extra[k];
+  if (!enviado) Logger.log('[MAILPED] não enviei: ' + motivo);
+  return r;
+}
+
+/* ============================================================
+   [REMETENTE] 04/11 — DE QUEM O E-MAIL PARECE VIR
+   ------------------------------------------------------------
+   "quem enviou foi o Ismael, ismael.santos@coesa.com.br".
+   Isto aqui descobre, na hora do envio, o que o Google realmente
+   permite — e devolve a verdade, não o desejo. Três casos:
+
+     propria   o endereço configurado É a conta que roda o script.
+     alias     é um alias dela; o Gmail assina com ele.
+     resposta  não é nem um nem outro. Sai pela conta dona, com o
+               nome configurado, e a RESPOSTA vai para o endereço
+               configurado. É o máximo que existe, e é honesto:
+               quem responder, responde para o almoxarifado.
+
+   Nunca invento o terceiro caso como se fosse o primeiro. Se eu
+   escrevesse o endereço dele no "De:" sem ser dono nem alias, o
+   Google ou recusa, ou entrega marcado como suspeito, e aí o
+   e-mail de pedido cai no spam da obra inteira.
+   ============================================================ */
+function AP_MAILPED_remetente_() {
+  var cfg = AP_MAILPED_cfg_();
+  var querido = AP_MAILPED_lp_(cfg.remetente).toLowerCase();
+  var nome = AP_MAILPED_lp_(cfg.remetenteNome) || AP_MAILPED_lp_(cfg.empresa);
+
+  var dono = '';
+  try { dono = AP_MAILPED_lp_(Session.getEffectiveUser().getEmail()); } catch (e) { dono = ''; }
+
+  if (!querido) {
+    return { como: 'conta', de: dono, nome: nome, responderPara: '',
+             texto: 'nenhum remetente configurado — sai pela conta do script' };
+  }
+  if (dono && querido === dono.toLowerCase()) {
+    return { como: 'propria', de: dono, nome: nome, responderPara: '',
+             texto: 'sai como ' + dono + ' — é a própria conta que roda o script' };
+  }
+
+  var aliases = [];
+  try { aliases = GmailApp.getAliases() || []; } catch (e) { aliases = []; }
+  for (var i = 0; i < aliases.length; i++) {
+    if (AP_MAILPED_lp_(aliases[i]).toLowerCase() === querido) {
+      return { como: 'alias', de: AP_MAILPED_lp_(cfg.remetente), nome: nome, responderPara: '',
+               texto: 'sai como ' + cfg.remetente + ' — é um alias desta conta' };
+    }
+  }
+
+  return {
+    como: 'resposta', de: dono, nome: nome, responderPara: AP_MAILPED_lp_(cfg.remetente),
+    texto: '"' + cfg.remetente + '" não é a conta que roda o script nem um alias dela, ' +
+           'e o Google não deixa escrever esse endereço no "De:". ' +
+           'O e-mail sai por ' + (dono || 'a conta do script') + ' assinado como "' + nome +
+           '", e quem responder responde para ' + cfg.remetente + '. ' +
+           'Para o "De:" virar o seu endereço, ele precisa ser adicionado como alias ' +
+           'da conta do script (Gmail › Configurações › Contas › Enviar e-mail como).'
+  };
+}
+
+/* o único lugar do módulo que fala com o Gmail */
+function AP_MAILPED_enviar_(rem, para, copias, assunto, html, embutidas) {
+  var cc = (copias && copias.length) ? copias.join(',') : '';
+
+  if (rem.como === 'alias') {
+    /* só o GmailApp aceita "from", e só com alias de verdade */
+    GmailApp.sendEmail(para, assunto, '', {
+      htmlBody: html,
+      cc: cc || undefined,
+      inlineImages: embutidas || undefined,
+      from: rem.de,
+      name: rem.nome,
+      replyTo: rem.de
+    });
+    return rem;
+  }
+
+  MailApp.sendEmail({
+    to: para,
+    cc: cc || undefined,
+    subject: assunto,
+    htmlBody: html,
+    inlineImages: embutidas || undefined,
+    name: rem.nome,
+    replyTo: rem.responderPara || undefined
+  });
+  return rem;
+}
+
+/** Diz, em português, por onde o seu e-mail vai sair. Não manda nada. */
+function AP_MAILPED_remetente() {
+  return AP_MAILPED_remetente_();
+}
+
+/** Manda um e-mail de exemplo para você, sem tocar em pedido nenhum. */
+function AP_MAILPED_teste(paraOndeMandar) {
+  var exemplo = {
+    id: '#PED-000125',
+    status: 'RECEBIDO',
+    solicitante: 'Almoxarifado – Obra UFN3',
+    fornecedor: 'Fornecedor Exemplo Ltda.',
+    descricao: 'Cimento CP II 50 kg', qtd: 100, unidade: 'un',
+    historico: [
+      { quando: '2026-10-14T09:24:00', texto: 'Pedido emitido' },
+      { quando: '2026-10-15T14:37:00', texto: 'Encaminhado ao fornecedor' },
+      { quando: '2026-10-16T10:41:00',
+        texto: 'Material recebido no almoxarifado. Aguardando conferência e entrada no estoque.' }
+    ],
+    listaItens: [
+      { descricao: 'Cimento CP II 50 kg', qtd: 100, unidade: 'un', situacao: 'RECEBIDO' },
+      { descricao: 'Aço CA-50 10 mm (barra 12 m)', qtd: 50, unidade: 'br', situacao: 'RECEBIDO' },
+      { descricao: 'Bloco de Concreto 14x19x39 cm', qtd: 1000, unidade: 'un', situacao: 'RECEBIDO' }
+    ]
+  };
+  return AP_MAILPED_aoMudarEtapa(exemplo, { para: paraOndeMandar, forcar: true });
+}
+
+/* ============================================================
+   6. AJUDANTES
+   ============================================================ */
+function AP_MAILPED_lp_(v) {
+  return String(v === undefined || v === null ? '' : v).trim();
+}
+function AP_MAILPED_esc_(v) {
+  return String(v === undefined || v === null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function AP_MAILPED_chaveMat_(v) {
+  return AP_MAILPED_lp_(v).toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^0+/, '');
+}
+function AP_MAILPED_chaveNome_(v) {
+  return AP_MAILPED_lp_(v).toUpperCase()
+    .replace(/[ÁÀÂÃÄ]/g, 'A').replace(/[ÉÈÊË]/g, 'E').replace(/[ÍÌÎÏ]/g, 'I')
+    .replace(/[ÓÒÔÕÖ]/g, 'O').replace(/[ÚÙÛÜ]/g, 'U').replace(/Ç/g, 'C')
+    .replace(/\s+/g, ' ').trim();
+}
+function AP_MAILPED_emailValido_(v) {
+  var t = AP_MAILPED_lp_(v);
+  return /^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/.test(t);
+}
+function AP_MAILPED_dataHora_(v) {
+  if (!v) return '—';
+  var d = new Date(v);
+  if (isNaN(d.getTime())) return AP_MAILPED_lp_(v);
+  function z(n) { return (n < 10 ? '0' : '') + n; }
+  return z(d.getDate()) + '/' + z(d.getMonth() + 1) + '/' + d.getFullYear() +
+    ' às ' + z(d.getHours()) + ':' + z(d.getMinutes());
+}
+function AP_MAILPED_numero_(v) {
+  var n = Number(v);
+  if (!isFinite(n)) return AP_MAILPED_lp_(v) || '—';
+  return n.toLocaleString('pt-BR');
+}
+/* ============================================================
+   [MAILIMG] AS IMAGENS VÊM DE DENTRO — nada a configurar
+   ------------------------------------------------------------
+   03/11 18:14, ele: "não é para mim configurar, é para você já
+   configurar o layout; já tem tudo".
+   Estava certo. Agora as imagens moram no ALMOXA_EMAIL_IMAGENS e
+   viajam COM o e-mail, como inlineImages do MailApp — o corpo
+   aponta com src="cid:nome". Gmail, Outlook e celular mostram
+   todos. Nada hospedado, nenhum endereço para digitar.
+   Quem quiser trocar por um endereço público ainda pode: cfg.logo
+   e cfg.fotoObra, quando preenchidos, ganham do embutido.
+   ============================================================ */
+var AP_MAILPED_USADAS = {};
+
+function AP_MAILPED_temImagem_(nome) {
+  try { return !!(AP_MAILPED_IMAGENS && AP_MAILPED_IMAGENS[nome]); }
+  catch (e) { return false; }
+}
+
+/** O endereço de uma imagem: cid quando embutida, URL quando ele
+    mandou uma, vazio quando não há nenhuma das duas. */
+function AP_MAILPED_src_(nome, urlOpcional) {
+  var u = AP_MAILPED_lp_(urlOpcional);
+  if (u) return u;
+  if (!AP_MAILPED_temImagem_(nome)) return '';
+  AP_MAILPED_USADAS[nome] = true;
+  return 'cid:' + nome;
+}
+
+function AP_MAILPED_ico_(base, nome) {
+  /* base preenchida = ele apontou uma pasta pública; senão, embutida */
+  var b = AP_MAILPED_lp_(base);
+  if (b) {
+    if (b.charAt(b.length - 1) !== '/') b += '/';
+    return b + nome + '.png';
+  }
+  return AP_MAILPED_src_(nome, '');
+}
+function AP_MAILPED_img_(url, px) {
+  if (!url) return '';
+  return '<img src="' + AP_MAILPED_esc_(url) + '" width="' + px + '" height="' + px +
+    '" alt="" style="display:block;border:0;width:' + px + 'px;height:' + px + 'px;margin:0 auto">';
+}
+
+/* ============================================================
+   7. O MODELO — a mesma arte da prévia do sistema
+   ------------------------------------------------------------
+   Tabelas e estilo inline em cada célula. O Outlook usa o motor
+   do Word: não tem flex, não tem grid, ignora <style> e corta
+   class. Arredondado e sombra aparecem no Gmail e no celular; no
+   Outlook antigo viram canto reto — de propósito: prefiro
+   quadrado que funciona a redondo que quebra.
+   ============================================================ */
+function AP_MAILPED_montar_(pedido, cfg, o) {
+  var AZUL = '#0B2A55', AZUL2 = '#0F5BD8', CLARO = '#EAF2FB',
+      CINZA = '#5F6B7A', LINHA = '#C9D3E0', VERDE = '#16A34A';
+  var p = pedido || {}, base = AP_MAILPED_lp_(cfg.icones);
+  AP_MAILPED_USADAS = {};
+  var srcLogo = AP_MAILPED_src_('logo-coesa', cfg.logo);
+  var srcFoto = AP_MAILPED_src_('foto-obra', cfg.fotoObra);
+  var et = AP_MAILPED_etapaDe_(p);
+  var ULT = AP_MAILPED_ETAPAS.length - 1;
+
+  var itens = (function () {
+    if (p.listaItens && p.listaItens.length) return p.listaItens;
+    if (p.itens && p.itens.length) return p.itens;
+    return [{ descricao: AP_MAILPED_lp_(p.descricao || p.item) || '—',
+              qtd: p.qtd, unidade: AP_MAILPED_lp_(p.unidade) || 'un',
+              situacao: AP_MAILPED_lp_(p.status) }];
+  })();
+
+  var h = p.historico || [];
+  var quando = [];
+  for (var i = 0; i < AP_MAILPED_ETAPAS.length; i++) {
+    quando.push(h[i] ? AP_MAILPED_lp_(h[i].quando) : '');
+  }
+  var ultima = h.length ? h[h.length - 1]
+    : { quando: AP_MAILPED_lp_(p.data || p.emissao), texto: 'Pedido registrado no ALMOXA PRO.' };
+
+  function bola(n, estado) {
+    var fundo = estado === 'futuro' ? '#FFFFFF' : AZUL2;
+    var borda = estado === 'futuro' ? LINHA : AZUL2;
+    var cor = estado === 'futuro' ? '#9AA4B2' : '#FFFFFF';
+    var tam = estado === 'atual' ? 62 : 54;
+    var u = AP_MAILPED_ico_(base, 'etapa-' + (n + 1) + (estado === 'futuro' ? '-cinza' : '-branco'));
+    var dentro = u ? AP_MAILPED_img_(u, Math.round(tam * 0.5))
+      : '<span style="font-family:Arial,Helvetica,sans-serif;font-size:19px;' +
+        'font-weight:bold;color:' + cor + '">' + (n + 1) + '</span>';
+    return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" ' +
+      'align="center" style="margin:0 auto"><tr><td width="' + tam + '" height="' + tam +
+      '" align="center" valign="middle" style="width:' + tam + 'px;height:' + tam +
+      'px;border-radius:' + (tam / 2) + 'px;background:' + fundo + ';border:2px solid ' +
+      borda + ';text-align:center;vertical-align:middle">' + dentro + '</td></tr></table>';
+  }
+
+  var cBola = '', cRot = '';
+  AP_MAILPED_ETAPAS.forEach(function (e, i) {
+    var estado = i < et.indice ? 'feito' : (i === et.indice ? 'atual' : 'futuro');
+    var tam = estado === 'atual' ? 62 : 54;
+    var visto = AP_MAILPED_ico_(base, 'visto-verde');
+    cBola += '<td width="20%" align="center" valign="top" style="width:20%;padding:0">' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>' +
+      '<td valign="middle" style="padding:0">' +
+      (i === 0 ? '' : '<div style="height:3px;background:' +
+        (i <= et.indice ? AZUL2 : LINHA) + ';font-size:0;line-height:0"></div>') + '</td>' +
+      '<td width="' + tam + '" valign="middle" style="width:' + tam + 'px;padding:0">' +
+      bola(i, estado) + '</td>' +
+      '<td valign="middle" style="padding:0">' +
+      (i === ULT ? '' : '<div style="height:3px;background:' +
+        (i < et.indice ? AZUL2 : LINHA) + ';font-size:0;line-height:0"></div>') + '</td>' +
+      '</tr></table>' +
+      (estado === 'feito'
+        ? (visto ? '<div style="margin-top:-10px">' + AP_MAILPED_img_(visto, 20) + '</div>'
+                 : '<div style="margin-top:2px;font-family:Arial,Helvetica,sans-serif;' +
+                   'font-size:14px;color:' + VERDE + ';font-weight:bold">&#10003;</div>')
+        : '') + '</td>';
+    cRot += '<td width="20%" align="center" valign="top" ' +
+      'style="width:20%;padding:8px 4px 0;font-family:Arial,Helvetica,sans-serif">' +
+      '<div style="font-size:12.5px;line-height:1.25;font-weight:bold;color:' +
+      (estado === 'futuro' ? '#9AA4B2' : AZUL) + '">' + e.rotulo + '</div>' +
+      (estado === 'atual'
+        ? '<div style="margin-top:6px"><span style="display:inline-block;padding:3px 9px;' +
+          'background:' + CLARO + ';color:' + AZUL + ';border-radius:10px;font-size:10.5px;' +
+          'font-weight:bold">Etapa atual</span></div>'
+        /* [SODEPOIS] 03/11 — na tela dele a etapa 1 era a atual e as
+           etapas 2,3,4,5 mostravam data. Eu casava historico[i] com
+           etapa[i] pela posição, e o histórico tem linhas que não
+           são mudança de etapa. Data só sob etapa CONCLUÍDA: o que
+           não aconteceu não ganha hora. */
+        : (estado === 'feito' && quando[i]
+            ? '<div style="font-size:11px;color:' + CINZA + ';margin-top:5px">' +
+              AP_MAILPED_esc_(AP_MAILPED_dataHora_(quando[i])) + '</div>' : '')) +
+      '</td>';
+  });
+
+  var linhas = itens.map(function (i) {
+    return '<tr><td style="padding:10px 14px;border-bottom:1px solid #E8EDF3;' +
+      'font-family:Arial,Helvetica,sans-serif;font-size:13.5px;color:#10213B">' +
+      AP_MAILPED_esc_(AP_MAILPED_lp_(i.descricao || i.item) || '—') + '</td>' +
+      '<td align="center" style="padding:10px 14px;border-bottom:1px solid #E8EDF3;' +
+      'font-family:Arial,Helvetica,sans-serif;font-size:13.5px;color:#10213B;white-space:nowrap">' +
+      AP_MAILPED_esc_(AP_MAILPED_numero_(i.qtd)) + ' ' +
+      AP_MAILPED_esc_(AP_MAILPED_lp_(i.unidade) || 'un') + '</td>' +
+      '<td align="center" style="padding:10px 14px;border-bottom:1px solid #E8EDF3">' +
+      '<span style="display:inline-block;padding:4px 12px;background:' + CLARO + ';color:' +
+      AZUL + ';border-radius:11px;font-family:Arial,Helvetica,sans-serif;font-size:11.5px;' +
+      'font-weight:bold">' + AP_MAILPED_esc_(AP_MAILPED_lp_(i.situacao) || '—') +
+      '</span></td></tr>';
+  }).join('');
+
+  function dado(icone, rot, val, destaque) {
+    var u = AP_MAILPED_ico_(base, icone);
+    return '<tr>' +
+      (u ? '<td width="26" valign="middle" style="width:26px;padding:6px 8px 6px 0">' +
+           AP_MAILPED_img_(u, 18) + '</td>' : '') +
+      '<td valign="middle" style="padding:6px 10px 6px 0;font-family:Arial,Helvetica,sans-serif;' +
+      'font-size:13.5px;color:' + AZUL + ';font-weight:bold;white-space:nowrap">' +
+      AP_MAILPED_esc_(rot) + ':</td>' +
+      '<td valign="middle" style="padding:6px 0;font-family:Arial,Helvetica,sans-serif;' +
+      'font-size:13.5px;color:#10213B">' +
+      (destaque ? '<span style="display:inline-block;padding:4px 12px;background:' + AZUL +
+        ';color:#fff;border-radius:7px;font-weight:bold;font-family:Consolas,monospace;' +
+        'font-size:13px">' + AP_MAILPED_esc_(val) + '</span>'
+                : '<b>' + AP_MAILPED_esc_(val) + '</b>') + '</td></tr>';
+  }
+  function rodapeItem(icone, texto) {
+    var u = AP_MAILPED_ico_(base, icone);
+    return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" ' +
+      'style="display:inline-table;margin-right:18px"><tr>' +
+      (u ? '<td valign="middle" style="padding-right:7px">' + AP_MAILPED_img_(u, 15) + '</td>' : '') +
+      '<td valign="middle" style="font-family:Arial,Helvetica,sans-serif;font-size:12px;' +
+      'color:#C9DCF5;white-space:nowrap">' + AP_MAILPED_esc_(texto) + '</td></tr></table>';
+  }
+
+  var obra = AP_MAILPED_lp_((o && o.obra) || p.obra || cfg.obra) || '—';
+
+  return '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1"></head>' +
+    '<body style="margin:0;padding:0;background:#EEF2F7">' +
+    '<div style="display:none;max-height:0;overflow:hidden;opacity:0">' +
+    AP_MAILPED_esc_('Pedido ' + AP_MAILPED_lp_(p.id) + ' — ' +
+      AP_MAILPED_ETAPAS[et.indice].rotulo.replace(/<br>/g, ' ') + ' · ' + obra) + '</div>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
+    'style="background:#EEF2F7;padding:18px 10px"><tr><td align="center">' +
+    '<table role="presentation" width="660" cellpadding="0" cellspacing="0" border="0" ' +
+    'style="width:660px;max-width:100%;background:#FFFFFF;border-radius:12px;overflow:hidden">' +
+
+    '<tr><td style="background:#FFFFFF;padding:16px 22px;border-bottom:3px solid ' + AZUL2 + '">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>' +
+    '<td valign="middle">' +
+    (srcLogo ? '<img src="' + AP_MAILPED_esc_(srcLogo) + '" height="42" alt="' +
+      AP_MAILPED_esc_(cfg.empresa) + '" style="display:block;border:0;height:42px">'
+      : '<div style="font-family:Arial,Helvetica,sans-serif;font-size:23px;font-weight:bold;' +
+        'color:' + AZUL + '">' + AP_MAILPED_esc_(cfg.empresa) + '</div>') + '</td>' +
+    '<td align="right" valign="middle" style="font-family:Arial,Helvetica,sans-serif;' +
+    'font-size:11px;color:' + CINZA + ';letter-spacing:.05em;border-left:1px solid ' + LINHA +
+    ';padding-left:16px">CONSTRUÇÃO CIVIL &nbsp;|&nbsp; INFRAESTRUTURA<br>ENERGIA, ÓLEO E GÁS' +
+    '</td></tr></table></td></tr>' +
+
+    '<tr><td style="background:' + AZUL + ';padding:11px 22px">' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>' +
+    (AP_MAILPED_ico_(base, 'banda-almoxarifado')
+      ? '<td valign="middle" style="padding-right:10px">' +
+        AP_MAILPED_img_(AP_MAILPED_ico_(base, 'banda-almoxarifado'), 18) + '</td>' : '') +
+    '<td valign="middle" style="font-family:Arial,Helvetica,sans-serif;font-size:13px;' +
+    'color:#FFFFFF;letter-spacing:.06em"><b>ALMOXARIFADO</b>' +
+    '<span style="color:#9FC2F0">&nbsp;&nbsp;|&nbsp;&nbsp;ACOMPANHAMENTO DE PEDIDOS</span>' +
+    '</td></tr></table></td></tr>' +
+
+    '<tr><td style="padding:22px 22px 6px">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>' +
+    '<td valign="top">' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>' +
+    (AP_MAILPED_ico_(base, 'titulo-prancheta')
+      ? '<td valign="middle" width="58" style="width:58px;padding-right:12px">' +
+        '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>' +
+        '<td width="52" height="52" align="center" valign="middle" style="width:52px;' +
+        'height:52px;background:' + CLARO + ';border-radius:12px">' +
+        AP_MAILPED_img_(AP_MAILPED_ico_(base, 'titulo-prancheta'), 28) + '</td></tr></table></td>'
+      : '') +
+    '<td valign="middle" style="font-family:Arial,Helvetica,sans-serif">' +
+    '<div style="font-size:27px;font-weight:bold;color:' + AZUL + ';line-height:1.1">' +
+    'Atualização do Pedido</div>' +
+    '<div style="font-size:13px;color:' + CINZA + ';margin-top:5px">' +
+    'Acompanhe abaixo o status do seu pedido de materiais.</div></td></tr></table></td>' +
+    (srcFoto
+      ? '<td width="230" valign="top" style="width:230px;padding-left:14px">' +
+        '<img src="' + AP_MAILPED_esc_(srcFoto) + '" width="230" alt="' +
+        AP_MAILPED_esc_(obra) + '" style="display:block;border:0;border-radius:8px 8px 0 0;' +
+        'max-width:230px">' +
+        '<table role="presentation" width="230" cellpadding="0" cellspacing="0" border="0" ' +
+        'style="width:230px;background:' + AZUL + ';border-radius:0 0 8px 8px"><tr>' +
+        (AP_MAILPED_ico_(base, 'rodape-pino')
+          ? '<td width="26" valign="middle" style="width:26px;padding:7px 0 7px 10px">' +
+            AP_MAILPED_img_(AP_MAILPED_ico_(base, 'rodape-pino'), 14) + '</td>' : '') +
+        '<td valign="middle" style="padding:7px 10px;font-family:Arial,Helvetica,sans-serif;' +
+        'font-size:13px;color:#FFFFFF;font-weight:bold">' + AP_MAILPED_esc_(obra) +
+        '</td></tr></table></td>'
+      : '') + '</tr></table></td></tr>' +
+
+    '<tr><td style="padding:14px 22px 0">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
+    'style="background:' + CLARO + ';border-radius:10px"><tr><td style="padding:14px 18px">' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0">' +
+    dado('dado-pedido', 'Pedido', AP_MAILPED_lp_(p.id) || '—', true) +
+    dado('dado-obra', 'Obra', obra) +
+    dado('dado-responsavel', 'Responsável', AP_MAILPED_lp_(p.solicitante) || '—') +
+    dado('dado-fornecedor', 'Fornecedor', AP_MAILPED_lp_(p.fornecedor) || '—') +
+    '</table></td></tr></table></td></tr>' +
+
+    '<tr><td style="padding:24px 18px 6px">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>' +
+    '<td style="font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:bold;' +
+    'color:' + AZUL + ';white-space:nowrap;padding:0 12px 14px 4px">Status do Pedido</td>' +
+    '<td style="padding:0 0 14px"><div style="height:2px;background:' + LINHA + '"></div></td>' +
+    '</tr></table>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">' +
+    '<tr>' + cBola + '</tr><tr>' + cRot + '</tr></table>' +
+    (et.conhecido ? '' :
+      '<div style="font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:#8A6D00;' +
+      'background:#FFF7E0;border:1px solid #E8C86A;border-radius:8px;padding:9px 11px;' +
+      'margin:14px 4px 0">O status gravado neste pedido é <b>' + AP_MAILPED_esc_(et.status) +
+      '</b>, que eu não sei em qual etapa cai. Mostro a primeira e não adianto progresso ' +
+      'que não aconteceu.</div>') + '</td></tr>' +
+
+    '<tr><td style="padding:20px 22px 0">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
+    'style="border-radius:10px;overflow:hidden"><tr>' +
+    '<td width="196" valign="middle" style="width:196px;background:' + AZUL + ';padding:16px">' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>' +
+    (AP_MAILPED_ico_(base, 'calendario-branco')
+      ? '<td valign="middle" style="padding-right:10px">' +
+        AP_MAILPED_img_(AP_MAILPED_ico_(base, 'calendario-branco'), 22) + '</td>' : '') +
+    '<td valign="middle" style="font-family:Arial,Helvetica,sans-serif;font-size:15px;' +
+    'font-weight:bold;color:#FFFFFF">Última<br>atualização</td></tr></table></td>' +
+    '<td valign="middle" style="background:' + CLARO + ';padding:16px 18px;' +
+    'font-family:Arial,Helvetica,sans-serif">' +
+    '<div style="font-size:15.5px;font-weight:bold;color:' + AZUL + '">' +
+    AP_MAILPED_esc_(AP_MAILPED_dataHora_(ultima.quando)) + '</div>' +
+    '<div style="font-size:13px;color:#10213B;margin-top:4px;line-height:1.45">' +
+    AP_MAILPED_esc_(AP_MAILPED_lp_(ultima.texto) || 'Atualização registrada.') +
+    '</div></td></tr></table></td></tr>' +
+
+    '<tr><td style="padding:24px 22px 0">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>' +
+    '<td style="font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:bold;' +
+    'color:' + AZUL + ';white-space:nowrap;padding:0 12px 12px 0">Resumo do material</td>' +
+    '<td style="padding:0 0 12px"><div style="height:2px;background:' + LINHA + '"></div></td>' +
+    '</tr></table>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
+    'style="border:1px solid #E8EDF3;border-radius:8px;overflow:hidden">' +
+    '<tr style="background:' + AZUL + '">' +
+    '<th align="left" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;' +
+    'font-size:12.5px;color:#FFFFFF">Material</th>' +
+    '<th align="center" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;' +
+    'font-size:12.5px;color:#FFFFFF">Quantidade</th>' +
+    '<th align="center" style="padding:10px 14px;font-family:Arial,Helvetica,sans-serif;' +
+    'font-size:12.5px;color:#FFFFFF">Situação</th></tr>' + linhas + '</table></td></tr>' +
+
+    (cfg.link
+      ? '<tr><td align="center" style="padding:26px 22px 8px">' +
+        '<a href="' + AP_MAILPED_esc_(cfg.link) + '" style="display:inline-block;background:' +
+        AZUL + ';color:#FFFFFF;text-decoration:none;padding:15px 30px;border-radius:9px;' +
+        'font-family:Arial,Helvetica,sans-serif;font-size:14.5px;font-weight:bold;' +
+        'letter-spacing:.04em">ACOMPANHAR PEDIDO NO ALMOXA PRO &nbsp;&rsaquo;</a></td></tr>'
+      : '') +
+
+    '<tr><td style="padding:24px 22px 0"><div style="border-top:1px solid #E8EDF3"></div></td></tr>' +
+    '<tr><td style="background:' + AZUL + ';padding:18px 22px">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>' +
+    '<td valign="middle" style="font-family:Arial,Helvetica,sans-serif;font-size:16px;' +
+    'font-weight:bold;color:#FFFFFF">' + AP_MAILPED_esc_(cfg.empresa) + '</td>' +
+    '<td align="right" valign="middle">' +
+    rodapeItem('rodape-capacete', 'Obra: ' + obra) +
+    (cfg.local ? rodapeItem('rodape-pino', 'Local: ' + cfg.local) : '') + '<br>' +
+    rodapeItem('rodape-envelope', cfg.email) +
+    (cfg.telefone ? rodapeItem('rodape-telefone', cfg.telefone) : '') +
+    '</td></tr></table></td></tr>' +
+    '<tr><td style="background:#07203F;padding:11px 22px;' +
+    'font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:#8FB3DE">' +
+    '<b>Mensagem automática do ALMOXA PRO.</b> Este é um e-mail de acompanhamento do seu ' +
+    'pedido. Por favor, não responda.</td></tr>' +
+    '</table></td></tr></table></body></html>';
+}
+
+/* ============================================================
+   [QUEMPEDIU] 04/11 — A PORTA PARA A TELA
+   ------------------------------------------------------------
+   A tela de Compras precisa de três coisas, e eu não quero três
+   funções públicas novas nem uma rota nova no Core. Uma função
+   só, que recebe JSON e devolve JSON, do mesmo jeito que as
+   outras que a tela já chama por google.script.run.
+
+     {acao:'jaFalou', id:'#PC-000018'}
+         -> {ok:true, etapas:['REGISTRADO']}
+         Serve para a tela saber se aquele pedido JÁ teve e-mail.
+         Zero etapas = ainda não falei dele = é o primeiro envio,
+         e o primeiro, pelo documento dele, é manual.
+
+     {acao:'mandar', pedido:{...}, opcoes:{manual:true}}
+         -> {ok:true, enviado:true|false, motivo:'...'}
+
+     {acao:'ligar', sim:true}
+         -> {ok:true, ligado:true}
+         Só depois que ele confirmar o primeiro, e só se ele pedir.
+         Eu não ligo o automático por conta própria.
+
+   Nada aqui envia sozinho. Quem chama é a tela, depois de uma
+   gravação que deu certo no Core.
+   ============================================================ */
+function AP_MAILPED_jaFalou(idPedido) {
+  var pre = 'MAILPED:' + AP_MAILPED_lp_(idPedido) + ':';
+  var todas = PropertiesService.getScriptProperties().getProperties();
+  var etapas = [];
+  for (var k in todas) {
+    if (k.indexOf(pre) === 0) etapas.push(k.substring(pre.length));
+  }
+  return etapas;
+}
+
+function AP_MAILPED_pelaTela(json) {
+  var o = {};
+  try { o = JSON.parse(json || '{}') || {}; } catch (e) { o = {}; }
+  var acao = AP_MAILPED_lp_(o.acao);
+  try {
+    if (acao === 'jaFalou') {
+      return JSON.stringify({ ok: true, etapas: AP_MAILPED_jaFalou(o.id) });
+    }
+    if (acao === 'mandar') {
+      var r = AP_MAILPED_aoMudarEtapa(o.pedido || {}, o.opcoes || {});
+      r.ok = true;
+      return JSON.stringify(r);
+    }
+    if (acao === 'conferirAba') {
+      var ca = AP_MAILPED_conferirAba();
+      return JSON.stringify({ ok: true, aba: ca });
+    }
+    if (acao === 'remetente') {
+      var rem = AP_MAILPED_remetente_();
+      rem.ok = true;
+      return JSON.stringify(rem);
+    }
+    if (acao === 'ligar') {
+      AP_MAILPED_ligar(o.sim !== false);
+      return JSON.stringify({ ok: true, ligado: o.sim !== false });
+    }
+    return JSON.stringify({ ok: false, mensagem: 'ação desconhecida: ' + (acao || '(vazia)') });
+  } catch (e) {
+    /* mesma regra do resto do módulo: e-mail não derruba a tela */
+    return JSON.stringify({ ok: false, mensagem: String((e && e.message) || e) });
+  }
+}
