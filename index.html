@@ -12873,11 +12873,38 @@ var fichas = normalizarFichasEPI(r && r.dados);
    A tela mostrava só o número do crachá na coluna de recebimento.
    O crachá diz COMO a pessoa foi identificada; a assinatura é o que
    ela deixou. Agora as duas aparecem, como no aplicativo de campo. */
-var deFila = listaSegura(fichas).slice(0, 40);
-/* marcadas como NAO CONFERIDAS antes de comecar: quem nao for lido
-   a tempo continua assim, e a faixa diz "nao consegui conferir" em
-   vez de afirmar que a pessoa nao assinou. */
-deFila.forEach(function(f) { f.__assIncompleta = true; });
+/* [ASSTODAS] 06/11 — POR QUE A FICHA DIZIA "NAO ASSINOU" E A
+   IMPRESSAO TRAZIA A ASSINATURA
+   ------------------------------------------------------------
+   Aqui havia duas linhas quase certas, e o "quase" mentia.
+   O corte era slice(0, 40): so as 40 primeiras fichas tinham a
+   assinatura lida. E a marca de "nao conferida" era posta SO
+   nessas 40. Quem ficava da 41a em diante nao tinha __ass nem
+   __assIncompleta — e a faixa, sem nenhum dos dois, concluia a
+   pior das hipoteses: "Esta pessoa ainda nao tem assinatura no
+   cadastro". Uma frase falsa sobre alguem que assinou.
+   A impressao nunca errou porque ela le a assinatura da pessoa
+   sob demanda, uma a uma, sem corte.
+   Dois consertos, nesta ordem:
+   1) a marca de NAO CONFERIDA vai em TODAS antes de comecar.
+      Quem nao for lido fica com "nao consegui conferir", que e
+      verdade, em vez de "nao assinou", que e chute.
+   2) quem TEM entrega vai na frente da fila. Isso passou a
+      importar em 06/11, quando o bloco [TRESPONTAS] comecou a
+      trazer para esta lista tambem quem nunca recebeu EPI: essa
+      gente disputava as 40 vagas com quem tem ficha de verdade,
+      e empurrava fichas reais para fora da consulta.
+   O TETO CONTINUA 40, DE PROPOSITO. Medi o custo antes de mexer
+   nele: cada pessoa que nao esta no indice custa UMA ida a rede
+   (precadastro.localizar, uma por pessoa). Subir para 120 seria
+   trocar uma frase falsa por uma tela travada, que e pior. Com a
+   marca correta em todas, quem ficar de fora mostra "nao consegui
+   conferir" e o botao "Procurar de novo" — honesto e barato. */
+var todasAsFichas_ = listaSegura(fichas);
+todasAsFichas_.forEach(function(f) { f.__assIncompleta = true; });
+var comEntrega_ = todasAsFichas_.filter(function(f) { return listaSegura(f.itens).length > 0; });
+var semEntrega_ = todasAsFichas_.filter(function(f) { return listaSegura(f.itens).length === 0; });
+var deFila = comEntrega_.concat(semEntrega_).slice(0, 40);
 var carga = (typeof EPIASS !== "undefined" && EPIASS.lerCadastro)
 ? Promise.all(deFila.map(function(f) {
     return EPIASS.lerCadastro(f).then(function(c) { f.__ass = c; f.__assIncompleta = false; return c; },
@@ -64846,7 +64873,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 392 · 06/11";
+var ALMOXA_VERSAO = "sistema 393 · 06/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
