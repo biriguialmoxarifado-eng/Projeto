@@ -64846,7 +64846,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 391 · 05/11";
+var ALMOXA_VERSAO = "sistema 392 · 06/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -106392,14 +106392,51 @@ emissao: hoje,
      ir ao Core a cada clique. Na hora de GRAVAR eu releio — cache
      nunca decide gravação.
      ============================================================ */
+  /* [SEMLACO] 06/11 — A PORTA DE BAIXO, E POR QUE ELA PRECISA EXISTIR
+     ------------------------------------------------------------
+     Na 391 eu travei o sistema dele. "Página sem resposta", logo
+     ao entrar em EPI.
+     O laço: eu intercepto epi.fichas para juntar quem ainda não
+     recebeu EPI. Para juntar, preciso ler as três listas — e uma
+     delas É epi.fichas. Lendo pela porta que eu mesmo acabei de
+     interceptar, eu chamava a mim mesmo. Cada chamada virava
+     três, e três viravam nove, até o navegador parar.
+     A partir daqui, TUDO que este bloco lê passa por T.chamar,
+     que usa a porta ORIGINAL, de baixo do meu enxerto. Um
+     interceptador nunca pode se consultar pela própria porta. */
+  T.dentro = 0;
+  T.chamar = function (modulo, acao, carga, opcoes) {
+    /* Eu uso a porta NORMAL, como todo mundo — trocar de porta
+       pularia os enxertos dos outros blocos, e isso seria um
+       segundo erro em cima do primeiro. O que eu faço é levantar
+       uma bandeira: "esta chamada saiu de dentro de mim". O meu
+       interceptador olha a bandeira e deixa passar sem mexer.
+       Assim eu nunca me chamo, e ninguém mais é pulado. */
+    T.dentro++;
+    function baixar(x) { T.dentro = Math.max(0, T.dentro - 1); return x; }
+    try {
+      return Promise.resolve(API.call(modulo, acao, carga || {}, opcoes))
+        .then(baixar, function (e) {
+          baixar();
+          return { ok: false, mensagem: lp(e && e.message) || String(e) };
+        });
+    } catch (e) {
+      baixar();
+      return Promise.resolve({ ok: false, mensagem: lp(e && e.message) || String(e) });
+    }
+  };
+
   T.lerTudo = function (forcar) {
     if (!forcar && T.base && (Date.now() - T.lidoEm) < 90000) {
       return Promise.resolve(T.base);
     }
-    return Promise.all([
-      Promise.resolve(API.call("usuarios", "listar", {})).catch(function () { return null; }),
-      Promise.resolve(API.call("cracha", "listar", {})).catch(function () { return null; }),
-      Promise.resolve(API.call("epi", "fichas", {})).catch(function () { return null; })
+    /* e mesmo pela porta de baixo: uma leitura por vez. Duas telas
+       pedindo ao mesmo tempo compartilham a mesma ida. */
+    if (T.lendo) return T.lendo;
+    T.lendo = Promise.all([
+      T.chamar("usuarios", "listar").catch(function () { return null; }),
+      T.chamar("cracha", "listar").catch(function () { return null; }),
+      T.chamar("epi", "fichas").catch(function () { return null; })
     ]).then(function (r) {
       var base = {
         usuarios: (r[0] && r[0].ok) ? lista_(r[0].dados) : [],
@@ -106413,8 +106450,14 @@ emissao: hoje,
       };
       T.base = base;
       T.lidoEm = Date.now();
+      T.lendo = null;
       return base;
+    }, function (e) {
+      T.lendo = null;
+      return { usuarios: [], crachas: [], fichas: [],
+               falhou: { usuarios: lp(e && e.message), crachas: "", fichas: "" } };
     });
+    return T.lendo;
   };
 
   /* ============================================================
@@ -106962,9 +107005,9 @@ emissao: hoje,
               if (achado && achado.cracha.achou) feitos.push("crachá já existia, mantido");
               return null;
             }
-            return Promise.resolve(API.call("cracha", "emitir", {
+            return T.chamar("cracha", "emitir", {
               matricula: mat, colaborador: nome, funcao: cargo, setor: setor
-            })).then(function (rc) {
+            }).then(function (rc) {
               if (rc && rc.ok) feitos.push("crachá emitido sem foto");
               else falhas.push("crachá: " + lp(rc && rc.mensagem) || "o Core recusou");
               return rc;
@@ -107022,16 +107065,25 @@ emissao: hoje,
       if (modulo === "epi" && acao === "fichas") {
         return volta.then(function (r) {
           try {
-            if (r && r.ok && T.base) {
-              var juntas = T.juntarSemEPI(r.dados, T.base.usuarios, T.base.crachas);
-              return { ok: true, dados: juntas, __t3: true };
+            if (!r || !r.ok) return r;
+            /* a bandeira: esta leitura saiu de dentro de mim
+               (T.lerTudo). Devolvo como veio, sem juntar nada e
+               sem pedir mais nada. É aqui que o laço morre. */
+            if (T.dentro > 0) return r;
+            /* [SEMLACO] 06/11 — aqui eu NUNCA espero por T.lerTudo.
+               Era esse o laço: lerTudo lê epi.fichas, e epi.fichas
+               caía aqui de novo. Agora: se eu já tenho as outras
+               duas pontas na mão, junto na hora; se não tenho,
+               devolvo a lista do Core como ela veio e mando
+               buscar as outras pontas PARA A PRÓXIMA VEZ, sem
+               segurar esta resposta. A tela abre na mesma hora;
+               no segundo desenho ela vem completa. */
+            if (T.base) {
+              return { ok: true, __t3: true,
+                dados: T.juntarSemEPI(r.dados, T.base.usuarios, T.base.crachas) };
             }
-            /* ainda não li as outras duas pontas: leio e junto */
-            if (r && r.ok) {
-              return T.lerTudo().then(function (base) {
-                return { ok: true, __t3: true,
-                  dados: T.juntarSemEPI(r.dados, base.usuarios, base.crachas) };
-              });
+            if (!T.lendo) {
+              setTimeout(function () { try { T.lerTudo(); } catch (e) {} }, 0);
             }
           } catch (e) {}
           return r;
