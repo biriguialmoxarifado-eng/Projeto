@@ -64846,7 +64846,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 390 · 04/11";
+var ALMOXA_VERSAO = "sistema 391 · 05/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -106308,6 +106308,787 @@ emissao: hoje,
     try {
       document.addEventListener("DOMContentLoaded", function () { V.ligar(); });
       setTimeout(function () { V.ligar(); }, 1400);
+    } catch (e) {}
+  }
+})();
+
+/* ############################################################
+ * AS TRÊS PONTAS CONVERSANDO   ·   busca: [TRESPONTAS]
+ * 05/11 — usuário, crachá e ficha de EPI falando entre si, nos
+ * dois sentidos: emiti o crachá, nasce o usuário; preenchi o
+ * perfil rápido, nascem o crachá e o usuário.
+ *
+ * O QUE EU ENCONTREI ANTES DE ESCREVER
+ *
+ *   O CRACHÁ É O REGISTRO MAIS RICO DOS TRÊS. cracha.emitir já
+ *   guarda matrícula, colaborador, cpf, função, setor, unidade,
+ *   obra, admissão, tipo de acesso, nível e foto. O usuário tem
+ *   menos que isso. Então o crachá é a melhor origem possível
+ *   para completar o cadastro — não é chute, é o que já está lá.
+ *
+ *   CRIAR USUÁRIO NOVO PASSA PELO ROTEADOR QUEBRADO.
+ *   salvarUsuarioNoCore só usa a porta direta quando
+ *   dados.editando é verdadeiro. Para cadastro NOVO ele cai em
+ *   usuarios.salvar — o mesmo roteador medido em 24/10 como
+ *   incapaz, o que deu os onze "Já existe usuário com esta
+ *   matrícula ou e-mail". Ou seja: a criação automática pode
+ *   falhar no Core dele, e eu não tenho como consertar isso daqui.
+ *   Por isso TODA criação aqui é conferida relendo o Core. Se o
+ *   usuário não aparecer depois, a tela diz que não apareceu.
+ *   Dizer "criado" porque a resposta foi ok seria repetir o erro
+ *   que já me pegou duas vezes nesta semana.
+ *
+ *   A FICHA DE EPI NÃO É UM CADASTRO. epi.fichas agrupa as
+ *   ENTREGAS: quem nunca recebeu EPI não tem ficha. Por isso eu
+ *   NÃO crio ficha — criar ficha seria inventar uma entrega que
+ *   não houve. O que eu faço é mostrar a pessoa na lista de
+ *   fichas mesmo sem entrega, marcada como "sem EPI entregue",
+ *   com cargo e setor vindos do cadastro. A ficha vai se
+ *   enchendo conforme você entrega. Nenhuma linha inventada.
+ *
+ * AS TRAVAS (as regras que você já tinha dado, aplicadas aqui)
+ *   · casa por MATRÍCULA primeiro, depois ID interno, e por nome
+ *     SÓ quando existe um só — homônimo para o motor e chama você
+ *   · NUNCA cria quando já existe cadastro correspondente
+ *   · NUNCA sobrescreve foto; só preenche quem está sem
+ *   · NUNCA toca em matrícula nem em ID interno de quem existe
+ *   · NUNCA apaga usuário, crachá ou ficha
+ *   · só preenche campo VAZIO; campo preenchido diferente vira
+ *     divergência para você olhar, não gravação silenciosa
+ * ############################################################ */
+(function tresPontas() {
+
+  var T = { base: null, lidoEm: 0, ultimo: null, automatico: true };
+  try { window.TRESPONTAS = T; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(v) {
+    if (typeof U !== "undefined" && U && U.esc) return U.esc(v);
+    return lp(v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function icone_(n) { return (typeof ic === "function") ? ic(n) : ""; }
+  function aviso_(t, a, b) {
+    try { if (typeof toast === "function") toast(t, a, b); } catch (e) {}
+  }
+  function matK(v) {
+    return lp(v).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+  }
+  function nomeK(v) {
+    return lp(v).toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/\s+/g, " ").trim();
+  }
+  function excluido_(u) { return /^EXCLU/.test(lp(u && u.status).toUpperCase()); }
+  function cargoDe(x) { return lp(x && (x.cargo || x.funcao)); }
+  function nomeDe(x) { return lp(x && (x.nome || x.colaborador)); }
+
+  /* ============================================================
+     1. AS TRÊS LISTAS, LIDAS DO CORE
+     ------------------------------------------------------------
+     Leio as três e guardo por 90 segundos, só para o painel não
+     ir ao Core a cada clique. Na hora de GRAVAR eu releio — cache
+     nunca decide gravação.
+     ============================================================ */
+  T.lerTudo = function (forcar) {
+    if (!forcar && T.base && (Date.now() - T.lidoEm) < 90000) {
+      return Promise.resolve(T.base);
+    }
+    return Promise.all([
+      Promise.resolve(API.call("usuarios", "listar", {})).catch(function () { return null; }),
+      Promise.resolve(API.call("cracha", "listar", {})).catch(function () { return null; }),
+      Promise.resolve(API.call("epi", "fichas", {})).catch(function () { return null; })
+    ]).then(function (r) {
+      var base = {
+        usuarios: (r[0] && r[0].ok) ? lista_(r[0].dados) : [],
+        crachas: (r[1] && r[1].ok) ? lista_(r[1].dados && r[1].dados.crachas || r[1].dados) : [],
+        fichas: (r[2] && r[2].ok) ? lista_(r[2].dados) : [],
+        falhou: {
+          usuarios: !(r[0] && r[0].ok) ? lp(r[0] && r[0].mensagem) || "não respondeu" : "",
+          crachas: !(r[1] && r[1].ok) ? lp(r[1] && r[1].mensagem) || "não respondeu" : "",
+          fichas: !(r[2] && r[2].ok) ? lp(r[2] && r[2].mensagem) || "não respondeu" : ""
+        }
+      };
+      T.base = base;
+      T.lidoEm = Date.now();
+      return base;
+    });
+  };
+
+  /* ============================================================
+     2. CASAR — e saber quando NÃO dá para casar
+     ------------------------------------------------------------
+     A regra que você escreveu em 03/11: "não vincular somente
+     pelo nome quando houver homônimos ou divergências".
+     Então o nome é o ÚLTIMO recurso, e só vale sozinho.
+     ============================================================ */
+  T.casar = function (quem, lista) {
+    var mat = matK(quem && (quem.matricula || quem.mat));
+    var id = lp(quem && (quem.id || quem.usuarioId || quem.interno));
+    var nome = nomeK(nomeDe(quem));
+    var vivos = lista_(lista).filter(function (x) { return !excluido_(x); });
+
+    if (mat) {
+      var porMat = vivos.filter(function (x) { return matK(x.matricula) === mat; });
+      if (porMat.length === 1) return { achou: porMat[0], como: "matricula", seguro: true };
+      if (porMat.length > 1) {
+        return { achou: null, como: "matricula", seguro: false, varios: porMat,
+                 motivo: porMat.length + " cadastros com a matrícula " +
+                         lp(quem.matricula) + " — isso precisa ser resolvido à mão" };
+      }
+    }
+    if (id) {
+      var porId = vivos.filter(function (x) { return lp(x.id) === id; });
+      if (porId.length === 1) return { achou: porId[0], como: "id", seguro: true };
+    }
+    if (nome) {
+      var porNome = vivos.filter(function (x) { return nomeK(nomeDe(x)) === nome; });
+      if (porNome.length === 1) {
+        /* nome bate, mas se os DOIS têm matrícula e são diferentes,
+           são pessoas diferentes com o mesmo nome. Não caso. */
+        var outraMat = matK(porNome[0].matricula);
+        if (mat && outraMat && outraMat !== mat) {
+          return { achou: null, como: "nome", seguro: false, varios: porNome,
+                   motivo: "mesmo nome, matrícula diferente (" + lp(quem.matricula) +
+                           " aqui, " + lp(porNome[0].matricula) + " no cadastro) — " +
+                           "são duas pessoas, ou uma matrícula está errada" };
+        }
+        return { achou: porNome[0], como: "nome", seguro: true };
+      }
+      if (porNome.length > 1) {
+        return { achou: null, como: "nome", seguro: false, varios: porNome,
+                 motivo: porNome.length + ' pessoas chamadas "' + nomeDe(quem) +
+                         '" — com homônimo eu não escolho' };
+      }
+    }
+    return { achou: null, como: "nenhum", seguro: true, novo: true };
+  };
+
+  /* ============================================================
+     3. O QUE FALTA, E O QUE DIVERGE
+     ------------------------------------------------------------
+     Campo vazio no destino = falta, e falta pode ser preenchida.
+     Campo preenchido DIFERENTE = divergência, e divergência é
+     sua para decidir. Eu não escolho qual dos dois está certo.
+     ============================================================ */
+  T.CAMPOS = [
+    { de: "colaborador", para: "nome",      rotulo: "Nome" },
+    { de: "funcao",      para: "cargo",     rotulo: "Cargo / função" },
+    { de: "setor",       para: "setor",     rotulo: "Setor" },
+    { de: "cpf",         para: "cpf",       rotulo: "CPF" },
+    { de: "admissao",    para: "admissao",  rotulo: "Admissão" },
+    { de: "obra",        para: "obra",      rotulo: "Obra" }
+  ];
+
+  T.comparar = function (cracha, usuario) {
+    var faltas = [], divergencias = [];
+    T.CAMPOS.forEach(function (c) {
+      var vem = lp(cracha[c.de]);
+      if (!vem) return;
+      var tem = lp(usuario[c.para]) ||
+                (c.para === "cargo" ? cargoDe(usuario) : "");
+      if (!tem) { faltas.push({ campo: c.para, rotulo: c.rotulo, valor: vem }); return; }
+      if (nomeK(tem) !== nomeK(vem)) {
+        divergencias.push({ campo: c.para, rotulo: c.rotulo, noCadastro: tem, noCracha: vem });
+      }
+    });
+    /* FOTO: regra à parte, e a mais rígida das três.
+       "Não misturar foto do perfil com foto do crachá. Não
+       sobrescrever imagens. Não substituir fotografias antigas."
+       Então a foto do crachá só vai para o cadastro que está SEM
+       foto. Tendo foto, nem entra na lista de divergências — não
+       é divergência, são duas fotos, e as duas podem estar certas. */
+    var fotoVem = lp(cracha.foto);
+    var fotoTem = lp(usuario.foto);
+    var foto = null;
+    if (fotoVem && !fotoTem) foto = { pode: true, motivo: "o cadastro está sem foto" };
+    else if (fotoVem && fotoTem) foto = { pode: false, motivo: "o cadastro já tem foto — não troco" };
+    return { faltas: faltas, divergencias: divergencias, foto: foto };
+  };
+
+  /* ============================================================
+     4. O PLANO — escrito antes de qualquer gravação
+     ============================================================ */
+  T.planoDoCracha = function (cracha, base) {
+    var c = cracha || {};
+    var casa = T.casar(c, base.usuarios);
+    var temFicha = T.casar(c, base.fichas);
+
+    var plano = {
+      cracha: c,
+      acao: "",
+      usuario: casa.achou || null,
+      como: casa.como,
+      seguro: casa.seguro,
+      motivo: lp(casa.motivo),
+      varios: lista_(casa.varios),
+      faltas: [], divergencias: [], foto: null,
+      ficha: temFicha.achou || null,
+      fichaItens: temFicha.achou ? lista_(temFicha.achou.itens).length : 0
+    };
+
+    if (!casa.seguro) { plano.acao = "parar"; return plano; }
+
+    if (!casa.achou) {
+      plano.acao = "criar";
+      plano.novo = {
+        nome: lp(c.colaborador),
+        matricula: lp(c.matricula),
+        cargo: lp(c.funcao),
+        setor: lp(c.setor),
+        cpf: lp(c.cpf),
+        admissao: lp(c.admissao),
+        obra: lp(c.obra),
+        foto: lp(c.foto),
+        status: "Ativo",
+        editando: false
+      };
+      return plano;
+    }
+
+    var comp = T.comparar(c, casa.achou);
+    plano.faltas = comp.faltas;
+    plano.divergencias = comp.divergencias;
+    plano.foto = comp.foto;
+    plano.acao = (comp.faltas.length || (comp.foto && comp.foto.pode)) ? "completar" : "nada";
+    return plano;
+  };
+
+  /* ============================================================
+     5. GRAVAR — e conferir relendo
+     ============================================================ */
+  T.salvar = function (dados) {
+    try {
+      if (typeof salvarUsuarioNoCore === "function") return salvarUsuarioNoCore(dados);
+      if (typeof window.salvarUsuarioNoCore === "function") return window.salvarUsuarioNoCore(dados);
+    } catch (e) {}
+    return API.call("usuarios", "salvar", dados);
+  };
+
+  T.aplicar = function (plano) {
+    if (!plano || plano.acao === "nada" || plano.acao === "parar") {
+      return Promise.resolve({ ok: false, feito: "nada", motivo: lp(plano && plano.motivo) });
+    }
+
+    var carga;
+    if (plano.acao === "criar") {
+      carga = {};
+      Object.keys(plano.novo).forEach(function (k) {
+        if (lp(plano.novo[k]) || k === "editando") carga[k] = plano.novo[k];
+      });
+    } else {
+      /* completar: SÓ os campos vazios, mais o ID interno e o
+         editando, para a gravação ir pela porta direta e para o
+         Core saber que é a mesma pessoa. Matrícula NÃO vai: a
+         regra é não modificar matrícula de quem já existe. */
+      carga = { id: lp(plano.usuario.id), editando: true };
+      plano.faltas.forEach(function (f) { carga[f.campo] = f.valor; });
+      if (plano.foto && plano.foto.pode) carga.foto = lp(plano.cracha.foto);
+      if (Object.keys(carga).length <= 2) {
+        return Promise.resolve({ ok: false, feito: "nada", motivo: "não havia campo vazio para preencher" });
+      }
+    }
+
+    return Promise.resolve(T.salvar(carga)).then(function (r) {
+      var respondeuOk = !!(r && r.ok);
+      /* A CONFERÊNCIA. Criar usuário novo passa pelo roteador do
+         Core, que está medido como quebrado desde 24/10. Resposta
+         ok não prova nada: eu releio. */
+      return T.lerTudo(true).then(function (base) {
+        var casa = T.casar(plano.acao === "criar" ? plano.novo : plano.usuario, base.usuarios);
+        var agora = casa.achou;
+        if (!agora) {
+          return { ok: false, feito: plano.acao, conferido: true, achouDepois: false,
+            motivo: respondeuOk
+              ? "o Core respondeu que deu certo, mas reli o cadastro e a pessoa não está lá. " +
+                "É o roteador de usuários do Core, o mesmo que já recusava edição desde 24/10. " +
+                "Para a criação automática funcionar eu preciso do .gs de usuários do seu Core."
+              : lp(r && r.mensagem) || "o Core recusou e não explicou" };
+        }
+        if (plano.acao === "completar") {
+          var sobrou = plano.faltas.filter(function (f) {
+            return !lp(agora[f.campo]) && !(f.campo === "cargo" && cargoDe(agora));
+          });
+          return { ok: sobrou.length === 0, feito: "completar", conferido: true,
+                   usuario: agora, preenchidos: plano.faltas.length - sobrou.length,
+                   naoPegaram: sobrou,
+                   motivo: sobrou.length
+                     ? sobrou.length + " campo(s) voltaram vazios do Core: " +
+                       sobrou.map(function (f) { return f.rotulo; }).join(", ")
+                     : "" };
+        }
+        return { ok: true, feito: "criar", conferido: true, usuario: agora,
+                 motivo: "" };
+      });
+    });
+  };
+
+  /* ============================================================
+     6. A TELA — o que vai acontecer, antes de acontecer
+     ============================================================ */
+  function linhaCampo(rotulo, valor) {
+    return "<dt>" + esc_(rotulo) + "</dt><dd>" + (lp(valor)
+      ? esc_(valor) : '<span class="muted">—</span>') + "</dd>";
+  }
+
+  T.mostrarPlano = function (plano, aoTerminar) {
+    var c = plano.cracha;
+
+    if (plano.acao === "parar") {
+      UI.modal({
+        titulo: "Não dá para ligar sozinho",
+        sub: lp(c.colaborador) + " · " + lp(c.matricula),
+        corpo: '<div class="alert a-yellow">' + icone_("alerta") +
+          "<div><b>" + esc_(plano.motivo) + "</b><br>" +
+          "O crachá foi emitido normalmente. O que eu <b>não</b> fiz foi ligar a um cadastro, " +
+          "porque ligar no chute é como se troca a ficha de EPI de uma pessoa pela de outra." +
+          "</div></div>" +
+          (plano.varios.length
+            ? '<div class="section-title mt12">Os cadastros parecidos</div><dl class="dl">' +
+              plano.varios.map(function (u) {
+                return "<dt>" + esc_(nomeDe(u)) + "</dt><dd class='mono'>" +
+                  esc_(lp(u.matricula) || "sem matrícula") + " · " +
+                  esc_(cargoDe(u) || "sem cargo") + "</dd>";
+              }).join("") + "</dl>"
+            : ""),
+        rodape: '<button class="btn btn-primary" data-x>Entendi</button>',
+        aoAbrir: function (w, fechar) {
+          w.querySelector("[data-x]").addEventListener("click", fechar);
+        }
+      });
+      return;
+    }
+
+    var corpo = "";
+    if (plano.acao === "criar") {
+      corpo = '<div class="alert a-blue mb12">' + icone_("info") +
+        "<div><b>Não existe cadastro para esta pessoa.</b> Posso criar um usando o que você " +
+        "acabou de pôr no crachá — nada é inventado, é o mesmo dado.</div></div>" +
+        '<dl class="dl">' +
+        linhaCampo("Nome", plano.novo.nome) +
+        linhaCampo("Matrícula", plano.novo.matricula) +
+        linhaCampo("Cargo / função", plano.novo.cargo) +
+        linhaCampo("Setor", plano.novo.setor) +
+        linhaCampo("CPF", plano.novo.cpf) +
+        linhaCampo("Admissão", plano.novo.admissao) +
+        "<dt>Foto</dt><dd>" + (lp(plano.novo.foto)
+          ? "a do crachá" : '<span class="muted">o crachá está sem foto</span>') + "</dd>" +
+        "</dl>" +
+        '<div class="alert a-gray mt12">' + icone_("info") +
+        "<div><b>Senha fica para depois</b>, como você falou. O cadastro nasce sem acesso; " +
+        "quando quiser, é em Usuários que se define.</div></div>";
+    } else if (plano.acao === "completar") {
+      corpo = '<div class="alert a-blue mb12">' + icone_("info") +
+        "<div><b>" + esc_(nomeDe(plano.usuario)) + "</b> já tem cadastro" +
+        (plano.como === "matricula" ? " (achei pela matrícula)" :
+         plano.como === "id" ? " (achei pelo ID interno)" : " (achei pelo nome, e é um só)") +
+        ". <b>Não vou criar outro.</b> O que dá para fazer é preencher o que está vazio." +
+        "</div></div>" +
+        '<div class="section-title">Vou preencher só isto</div><dl class="dl">' +
+        plano.faltas.map(function (f) { return linhaCampo(f.rotulo, f.valor); }).join("") +
+        (plano.foto && plano.foto.pode ? "<dt>Foto</dt><dd>a do crachá</dd>" : "") +
+        "</dl>";
+    } else {
+      corpo = '<div class="alert a-green mb12">' + icone_("checkC") +
+        "<div><b>Já estava tudo ligado.</b> " + esc_(nomeDe(plano.usuario)) +
+        " tem cadastro e nada estava faltando.</div></div>";
+    }
+
+    if (plano.divergencias.length) {
+      corpo += '<div class="alert a-yellow mt12">' + icone_("alerta") +
+        "<div><b>" + plano.divergencias.length + " informação(ões) diferentes entre o crachá e o " +
+        "cadastro.</b> Eu <b>não</b> mexo nelas — não sei qual das duas está certa, e " +
+        "sobrescrever o cadastro com o crachá apagaria o que alguém digitou de propósito." +
+        "<dl class='dl mt8'>" +
+        plano.divergencias.map(function (d) {
+          return "<dt>" + esc_(d.rotulo) + "</dt><dd>cadastro: <b>" + esc_(d.noCadastro) +
+            "</b><br>crachá: <b>" + esc_(d.noCracha) + "</b></dd>";
+        }).join("") + "</dl></div></div>";
+    }
+
+    /* a terceira ponta */
+    corpo += '<div class="alert a-gray mt12">' + icone_("info") +
+      "<div><b>Ficha de EPI</b><br>" +
+      (plano.fichaItens
+        ? "já tem " + plano.fichaItens + " item(ns) entregue(s) — a ficha existe e continua como está."
+        : "ainda não tem entrega nenhuma. <b>Eu não crio ficha</b>: ficha é feita de entrega, e " +
+          "inventar uma entrega que não houve seria mentira no documento que a pessoa assina. " +
+          "Ela já aparece na lista de fichas marcada como <b>sem EPI entregue</b>, e vai se " +
+          "enchendo conforme você entrega.") +
+      "</div></div>";
+
+    UI.modal({
+      titulo: plano.acao === "criar" ? "Criar o cadastro desta pessoa?"
+            : plano.acao === "completar" ? "Completar o cadastro?" : "As três pontas",
+      sub: lp(c.colaborador) + " · " + lp(c.matricula),
+      tamanho: "lg",
+      corpo: corpo + '<div id="t3Saida"></div>',
+      rodape: (plano.acao === "nada"
+        ? '<button class="btn btn-primary" data-x>Fechar</button>'
+        : '<button class="btn btn-ghost" data-x>Agora não</button>' +
+          '<button class="btn btn-primary" data-ok>' + icone_("salvar") +
+          (plano.acao === "criar" ? "Criar o cadastro" : "Preencher o que falta") + "</button>"),
+      aoAbrir: function (w, fechar) {
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        var bo = w.querySelector("[data-ok]");
+        if (!bo) return;
+        bo.addEventListener("click", function () {
+          bo.disabled = true;
+          bo.innerHTML = "Gravando…";
+          T.aplicar(plano).then(function (r) {
+            bo.disabled = false;
+            bo.innerHTML = icone_("salvar") +
+              (plano.acao === "criar" ? "Criar o cadastro" : "Preencher o que falta");
+            T.ultimo = r;
+            var cx = w.querySelector("#t3Saida");
+            cx.innerHTML = '<div class="alert ' + (r.ok ? "a-green" : "a-yellow") + ' mt12">' +
+              icone_(r.ok ? "checkC" : "alerta") + "<div>" +
+              (r.ok
+                ? "<b>" + (r.feito === "criar" ? "Cadastro criado" : "Cadastro completado") +
+                  " e conferido no Core.</b>"
+                : "<b>Não confirmei.</b> " + esc_(lp(r.motivo))) +
+              "</div></div>";
+            if (r.ok) {
+              aviso_("ok", "As três pontas ligadas", nomeDe(plano.cracha));
+              if (typeof CACHE !== "undefined") { CACHE.invalidar("usuarios"); CACHE.invalidar("epi"); }
+              if (aoTerminar) aoTerminar(r);
+            }
+          });
+        });
+      }
+    });
+  };
+
+  /* ============================================================
+     7. O GATILHO: emitiu crachá, as três conversam
+     ------------------------------------------------------------
+     Enxerto em API.call, como nos outros blocos: pega as três
+     telas que emitem crachá de uma vez só, sem eu tocar em
+     nenhuma delas.
+     ============================================================ */
+  T.depoisDoCracha = function (cracha) {
+    return T.lerTudo(true).then(function (base) {
+      var plano = T.planoDoCracha(cracha, base);
+      T.ultimoPlano = plano;
+
+      /* automático quando NÃO há dúvida nenhuma: ninguém parecido
+         no cadastro, nenhum homônimo, nada divergindo. Havendo
+         qualquer sombra, eu paro e mostro. */
+      var semSombra = plano.acao === "criar" && plano.seguro &&
+                      !plano.divergencias.length && !plano.varios.length;
+      if (T.automatico && semSombra) {
+        return T.aplicar(plano).then(function (r) {
+          if (r.ok) {
+            aviso_("ok", "Cadastro criado a partir do crachá",
+              nomeDe(cracha) + " — matrícula " + lp(cracha.matricula));
+            if (typeof CACHE !== "undefined") { CACHE.invalidar("usuarios"); CACHE.invalidar("epi"); }
+          } else {
+            T.mostrarPlano(plano);
+          }
+          return r;
+        });
+      }
+      if (plano.acao !== "nada") T.mostrarPlano(plano);
+      return plano;
+    });
+  };
+
+  /* ============================================================
+     8. A LISTA DE FICHAS COM QUEM AINDA NÃO RECEBEU NADA
+     ------------------------------------------------------------
+     Sem inventar entrega. A pessoa aparece com itens: [] e
+     status SEM_EPI, e cargo/setor vindos do cadastro de verdade.
+     ============================================================ */
+  T.juntarSemEPI = function (fichas, usuarios, crachas) {
+    var saida = lista_(fichas).slice();
+    var jaTem = {};
+    saida.forEach(function (f) {
+      var m = matK(f.matricula);
+      if (m) jaTem[m] = 1;
+      var n = nomeK(f.colaborador);
+      if (n) jaTem["N:" + n] = 1;
+    });
+
+    function talvezEntrar(p, origem) {
+      if (excluido_(p)) return;
+      var m = matK(p.matricula);
+      var n = nomeK(nomeDe(p));
+      if (!m && !n) return;
+      /* TEM matrícula: a matrícula é quem diz se é a mesma pessoa, e
+         o nome não opina. Sem isto, os dois José da Silva — nomes
+         iguais, matrículas 001111 e 002222 — viravam um só, e o
+         segundo sumia da lista de fichas. Uma pessoa some da lista
+         de EPI e ninguém percebe até a auditoria.
+         SEM matrícula: aí o nome é tudo que eu tenho. */
+      var minhaChave = m || ("N:" + n);
+      if (jaTem[minhaChave]) return;
+      jaTem[minhaChave] = 1;
+      if (!m && n) jaTem["N:" + n] = 1;
+      saida.push({
+        id: lp(p.id) || ("SEMEPI:" + (m || n)),
+        colaborador: nomeDe(p) || "Não informado",
+        matricula: lp(p.matricula) || "Não informada",
+        cargo: cargoDe(p) || "Não informado",
+        setor: lp(p.setor) || "Não informado",
+        status: "SEM_EPI",
+        semEntrega: true,
+        origem: origem,
+        matriculas: lp(p.matricula) ? [lp(p.matricula)] : [],
+        itens: []
+      });
+    }
+
+    lista_(usuarios).forEach(function (u) { talvezEntrar(u, "cadastro"); });
+    lista_(crachas).forEach(function (c) { talvezEntrar(c, "crachá"); });
+    return saida;
+  };
+
+  /* ============================================================
+     9. O PERFIL RÁPIDO — o caminho de volta
+     ------------------------------------------------------------
+     "estou na parte da ficha de EPI, preencho ali no perfil
+     rápido, e já cria o perfil dele, o crachá dele sem foto
+     (depois eu coloco), e o usuário também."
+     Um formulário, três pontas. E, de novo: antes de criar
+     qualquer coisa eu procuro. Se já existir, eu não crio —
+     mostro o que achei.
+     ============================================================ */
+  T.perfilRapido = function (sugestao) {
+    var s = sugestao || {};
+    UI.modal({
+      titulo: "Perfil rápido",
+      sub: "Preencha o básico. O cadastro e o crachá nascem daqui; a foto e a senha ficam para depois.",
+      tamanho: "lg",
+      corpo:
+        '<div class="grid g2">' +
+        '<div class="field"><label>Nome completo *</label>' +
+        '<input class="input" id="t3Nome" value="' + esc_(nomeDe(s)) + '" autocomplete="off"></div>' +
+        '<div class="field"><label>Matrícula *</label>' +
+        '<input class="input" id="t3Mat" value="' + esc_(lp(s.matricula)) + '" autocomplete="off"></div>' +
+        '<div class="field"><label>Cargo / função</label>' +
+        '<input class="input" id="t3Cargo" value="' + esc_(cargoDe(s)) + '"></div>' +
+        '<div class="field"><label>Setor</label>' +
+        '<input class="input" id="t3Setor" value="' + esc_(lp(s.setor)) + '"></div>' +
+        "</div>" +
+        '<div id="t3Procura" class="mt8"></div>' +
+        '<label class="chip mt8" style="cursor:pointer">' +
+        '<input type="checkbox" id="t3FazCracha" checked> ' +
+        "<span>Emitir também o crachá (sem foto — você põe depois)</span></label>" +
+        '<div class="alert a-gray mt12">' + icone_("info") +
+        "<div>A <b>ficha de EPI</b> não é criada aqui. Ficha é feita de entrega: a pessoa já " +
+        "passa a aparecer na lista marcada como <b>sem EPI entregue</b>, e a ficha se enche " +
+        "quando você entregar o primeiro item.</div></div>" +
+        '<div id="t3Saida2"></div>',
+      rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' +
+              '<button class="btn btn-primary" data-ok>' + icone_("salvar") + "Criar</button>",
+      aoAbrir: function (w, fechar) {
+        var achado = null;
+
+        function procurar() {
+          var quem = { nome: lp(w.querySelector("#t3Nome").value),
+                       matricula: lp(w.querySelector("#t3Mat").value) };
+          var cx = w.querySelector("#t3Procura");
+          if (!lp(quem.nome) && !lp(quem.matricula)) { cx.innerHTML = ""; achado = null; return; }
+          T.lerTudo().then(function (base) {
+            var u = T.casar(quem, base.usuarios);
+            var c = T.casar(quem, base.crachas);
+            achado = { usuario: u, cracha: c };
+            var partes = [];
+            if (!u.seguro || !c.seguro) {
+              cx.innerHTML = '<div class="alert a-yellow">' + icone_("alerta") +
+                "<div><b>" + esc_(lp(u.motivo) || lp(c.motivo)) + "</b><br>" +
+                "Resolva isso em Usuários antes — criar mais um aqui só aumenta a confusão." +
+                "</div></div>";
+              return;
+            }
+            if (u.achou) partes.push("<b>já tem cadastro</b> (" + esc_(lp(u.achou.matricula) ||
+              "sem matrícula") + ") — não vou criar outro, vou só preencher o que falta");
+            if (c.achou) partes.push("<b>já tem crachá</b> " + esc_(lp(c.achou.codigo)) +
+              " — não vou emitir outro");
+            cx.innerHTML = partes.length
+              ? '<div class="alert a-blue">' + icone_("info") + "<div>" +
+                esc_(nomeDe(u.achou || c.achou)) + " " + partes.join(", e ") + ".</div></div>"
+              : '<div class="alert a-green">' + icone_("checkC") +
+                "<div>Ninguém com esse nome ou matrícula ainda. Vai ser cadastro novo.</div></div>";
+          });
+        }
+
+        var t = null;
+        ["#t3Nome", "#t3Mat"].forEach(function (sel) {
+          w.querySelector(sel).addEventListener("input", function () {
+            clearTimeout(t); t = setTimeout(procurar, 300);
+          });
+        });
+        procurar();
+
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        w.querySelector("[data-ok]").addEventListener("click", function () {
+          var nome = lp(w.querySelector("#t3Nome").value);
+          var mat = lp(w.querySelector("#t3Mat").value);
+          var cargo = lp(w.querySelector("#t3Cargo").value);
+          var setor = lp(w.querySelector("#t3Setor").value);
+          var fazCracha = w.querySelector("#t3FazCracha").checked;
+          var saida = w.querySelector("#t3Saida2");
+
+          if (!nome || !mat) {
+            aviso_("warn", "Faltou o básico",
+              "Nome e matrícula são o que identifica a pessoa nas três pontas.");
+            return;
+          }
+          if (achado && (!achado.usuario.seguro || !achado.cracha.seguro)) {
+            aviso_("err", "Tem nome repetido no caminho",
+              "Não crio nada enquanto isso não estiver resolvido.");
+            return;
+          }
+
+          var bt = this;
+          bt.disabled = true; bt.innerHTML = "Criando…";
+          var feitos = [], falhas = [];
+
+          var passoUsuario = (achado && achado.usuario.achou)
+            ? Promise.resolve({ ok: true, feito: "nada", jaTinha: achado.usuario.achou })
+            : T.aplicar({ acao: "criar", cracha: {}, divergencias: [], faltas: [],
+                novo: { nome: nome, matricula: mat, cargo: cargo, setor: setor,
+                        status: "Ativo", editando: false } });
+
+          passoUsuario.then(function (ru) {
+            if (ru.jaTinha) feitos.push("cadastro já existia, mantido");
+            else if (ru.ok) feitos.push("cadastro criado");
+            else falhas.push("cadastro: " + lp(ru.motivo));
+
+            if (!fazCracha || (achado && achado.cracha.achou)) {
+              if (achado && achado.cracha.achou) feitos.push("crachá já existia, mantido");
+              return null;
+            }
+            return Promise.resolve(API.call("cracha", "emitir", {
+              matricula: mat, colaborador: nome, funcao: cargo, setor: setor
+            })).then(function (rc) {
+              if (rc && rc.ok) feitos.push("crachá emitido sem foto");
+              else falhas.push("crachá: " + lp(rc && rc.mensagem) || "o Core recusou");
+              return rc;
+            });
+          }).then(function () {
+            bt.disabled = false; bt.innerHTML = icone_("salvar") + "Criar";
+            T.lidoEm = 0;
+            if (typeof CACHE !== "undefined") {
+              CACHE.invalidar("usuarios"); CACHE.invalidar("cracha"); CACHE.invalidar("epi");
+            }
+            saida.innerHTML = '<div class="alert ' + (falhas.length ? "a-yellow" : "a-green") +
+              ' mt12">' + icone_(falhas.length ? "alerta" : "checkC") + "<div>" +
+              (feitos.length ? "<b>" + esc_(feitos.join(" · ")) + ".</b>" : "") +
+              (falhas.length ? "<br>Não deu em: " + esc_(falhas.join(" · ")) : "") +
+              "</div></div>";
+            if (!falhas.length) aviso_("ok", "Perfil criado", nome);
+          });
+        });
+      }
+    });
+  };
+
+  /* ============================================================
+     10. OS ENXERTOS
+     ============================================================ */
+  T.ligado = false;
+  T.ligar = function () {
+    if (T.ligado) return false;
+    if (typeof API === "undefined" || !API.call) return false;
+    if (T.chamadaAntiga) return false;
+
+    T.chamadaAntiga = API.call;
+    API.call = function (modulo, acao, payload, opcoes) {
+      var volta = T.chamadaAntiga.call(API, modulo, acao, payload, opcoes);
+
+      if (modulo === "cracha" && (acao === "emitir" || acao === "reemitir")) {
+        return volta.then(function (r) {
+          try {
+            if (r && r.ok) {
+              var c = (r.dados && (r.dados.cracha || r.dados)) || payload || {};
+              /* o que voltou do Core manda; o que eu mandei completa */
+              var cheio = {};
+              Object.keys(payload || {}).forEach(function (k) { cheio[k] = payload[k]; });
+              Object.keys(c || {}).forEach(function (k) {
+                if (lp(c[k])) cheio[k] = c[k];
+              });
+              T.lidoEm = 0;
+              setTimeout(function () { T.depoisDoCracha(cheio); }, 700);
+            }
+          } catch (e) {}
+          return r;
+        });
+      }
+
+      if (modulo === "epi" && acao === "fichas") {
+        return volta.then(function (r) {
+          try {
+            if (r && r.ok && T.base) {
+              var juntas = T.juntarSemEPI(r.dados, T.base.usuarios, T.base.crachas);
+              return { ok: true, dados: juntas, __t3: true };
+            }
+            /* ainda não li as outras duas pontas: leio e junto */
+            if (r && r.ok) {
+              return T.lerTudo().then(function (base) {
+                return { ok: true, __t3: true,
+                  dados: T.juntarSemEPI(r.dados, base.usuarios, base.crachas) };
+              });
+            }
+          } catch (e) {}
+          return r;
+        });
+      }
+
+      return volta;
+    };
+
+    /* o botão do perfil rápido na lista de fichas. Se a tela não
+       estiver aí, não faço nada e não quebro nada. */
+    if (typeof epiFichasTela === "function" && !T.telaAntiga) {
+      T.telaAntiga = epiFichasTela;
+      window.epiFichasTela = function (fichas) {
+        var r = T.telaAntiga.apply(this, arguments);
+        setTimeout(T.poeBotao, 60);
+        return r;
+      };
+    }
+
+    T.ligado = true;
+    return true;
+  };
+
+  T.poeBotao = function () {
+    try {
+      if (document.querySelector("[data-t3-perfil]")) return false;
+      var alvo = document.querySelector("[data-fl-imprimir]");
+      var bar = alvo ? alvo.parentNode : null;
+      if (!bar) {
+        /* sem a barra do [FICHALISTA]: procuro o cabeçalho da tela */
+        var h = document.querySelector(".page-head .acoes, .page-actions, .head-actions");
+        if (!h) return false;
+        bar = h;
+      }
+      var b = document.createElement("button");
+      b.className = "btn btn-orange btn-sm";
+      b.setAttribute("data-t3-perfil", "1");
+      b.innerHTML = icone_("mais") + "Perfil rápido";
+      b.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        T.perfilRapido();
+      });
+      bar.appendChild(b);
+      return true;
+    } catch (e) { return false; }
+  };
+  T.restaurar = function () {
+    if (T.chamadaAntiga) { API.call = T.chamadaAntiga; T.chamadaAntiga = null; }
+    if (T.telaAntiga) { window.epiFichasTela = T.telaAntiga; T.telaAntiga = null; }
+    T.ligado = false;
+  };
+
+  if (!T.ligar()) {
+    try {
+      document.addEventListener("DOMContentLoaded", function () { T.ligar(); });
+      setTimeout(function () { T.ligar(); }, 1600);
     } catch (e) {}
   }
 })();
