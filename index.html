@@ -65134,7 +65134,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 400 · 07/11";
+var ALMOXA_VERSAO = "sistema 401 · 07/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -108157,6 +108157,273 @@ emissao: hoje,
     try {
       document.addEventListener("DOMContentLoaded", function () { M.ligar(); });
       setTimeout(function () { M.ligar(); }, 2000);
+    } catch (e) {}
+  }
+})();
+
+/* ============================================================
+   [ASSPAINEL]  ·  07/11  ·  busca: [ASSPAINEL]
+   ------------------------------------------------------------
+   PEDIDO DELE, 07/11:
+
+     "já que na ficha de EPI não está puxando assinatura, adicione
+      o campo com a assinatura da pessoa dentro do painel, ali em
+      EPIs por colaborador, perto do usuário. Já que já está
+      puxando para imprimir, quer dizer que está salvo em algum
+      canto. Então mostra ali para mim, fica mais fácil saber
+      quem assinou."
+
+   O raciocínio dele está certo, e é o mesmo que eu usei para
+   achar o defeito: a impressão (modalImprimirFichaEPI) chama
+   EPIASS.lerCadastro(f, TRUE) — com o "true", que manda pular o
+   índice e ir direto no servidor. Por isso ela sempre achou.
+
+   Este bloco usa EXATAMENTE essa porta, a que funciona. Aqui o
+   custo de forçar é justo: é UMA pessoa, aberta por ele na tela,
+   não as quarenta de uma lista.
+
+   ------------------------------------------------------------
+   O QUE ESTE BLOCO NÃO FAZ
+
+   - Não inventa assinatura. Se o servidor não tem, o campo diz
+     que não tem, com essas palavras.
+   - Não mostra a rubrica de outra pessoa. Nome repetido sem
+     matrícula não escolhe ninguém: avisa e para. É regra dele,
+     e é a mais importante deste sistema.
+   - Não confunde "não consegui conferir" com "não assinou".
+     Busca que falhou dá o aviso cinza e o botão de tentar de
+     novo — nunca a frase de ausência.
+   - Não é prova de recebimento de uma entrega. O que aparece
+     aqui é a RUBRICA DO CADASTRO da pessoa, igual ao quadro
+     "Identificação do colaborador" da ficha impressa. Quem
+     assinou o quê, em qual entrega, continua sendo a ficha.
+   - Não grava nada. Só leitura.
+   - Não mexe no desenho que já existe: pendura uma caixa ao
+     lado dos botões, depois que a tela foi montada.
+
+   ASSPAINEL.restaurar() desfaz tudo.
+   ============================================================ */
+(function () {
+  "use strict";
+
+  if (window.ASSPAINEL && window.ASSPAINEL.ligado) return;
+
+  var A = {
+    nome: "ASSPAINEL",
+    versao: "07/11",
+    ligado: false,
+    telaAntiga: null,
+    pedidos: 0,
+    achadas: 0,
+    ultima: null
+  };
+
+  function lp(v) { return (v === null || v === undefined) ? "" : String(v).trim(); }
+  function esc(v) {
+    return lp(v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function dataBr(v) {
+    var d = null;
+    try { d = v ? new Date(v) : null; } catch (e) { d = null; }
+    if (!d || isNaN(d.getTime())) return "";
+    function dd(n) { return (n < 10 ? "0" : "") + n; }
+    return dd(d.getDate()) + "/" + dd(d.getMonth() + 1) + "/" + d.getFullYear();
+  }
+
+  /* a imagem pode vir em campos diferentes, conforme quem gravou */
+  A.imagemDe = function (c) {
+    var d = (c && (c.dados || c)) || {};
+    var cand = [d.imagem, d.assinatura, d.rubrica, d.imagemAssinatura, d.base64];
+    for (var i = 0; i < cand.length; i++) {
+      var v = lp(cand[i]);
+      if (v.length < 200) continue;                         /* curto demais para ser imagem */
+      if (/^data:image\//i.test(v)) return v;
+      if (/^https?:\/\//i.test(v)) return v;
+      if (/^[A-Za-z0-9+/=\s]+$/.test(v)) return "data:image/png;base64," + v.replace(/\s+/g, "");
+    }
+    return "";
+  };
+
+  /* ------------------------------------------------------------
+     A CAIXA, nos quatro estados possíveis — e só nestes quatro
+     ------------------------------------------------------------ */
+  var MOLDURA = "border:1px dashed var(--borda,#CBD5E1);border-radius:10px;" +
+                "padding:10px 12px;min-width:180px;text-align:center";
+
+  A.caixa = function (estado, dados) {
+    var titulo = '<div class="small" style="color:var(--texto-3);letter-spacing:.04em;' +
+                 'text-transform:uppercase;font-size:10px;margin-bottom:6px">' +
+                 "Identificação do colaborador</div>";
+
+    if (estado === "procurando") {
+      return '<div style="' + MOLDURA + '">' + titulo +
+        '<div class="small" style="color:var(--texto-3);padding:10px 0">' +
+        "procurando a assinatura…</div></div>";
+    }
+
+    if (estado === "tem") {
+      return '<div style="' + MOLDURA + ';border-style:solid">' + titulo +
+        '<img src="' + esc(dados.imagem) + '" alt="assinatura" ' +
+        'style="max-width:100%;max-height:54px;object-fit:contain;display:block;margin:0 auto 6px">' +
+        '<b style="font-size:12px;display:block">Assinatura cadastrada</b>' +
+        '<div class="small" style="color:var(--texto-3);font-size:10.5px">' +
+        (dados.origem ? esc(dados.origem) : "cadastro") +
+        (dados.quando ? " · " + esc(dataBr(dados.quando)) : "") + "</div></div>";
+    }
+
+    if (estado === "ambiguo") {
+      return '<div style="' + MOLDURA + '">' + titulo +
+        '<div class="small" style="font-size:11px;line-height:1.4">' +
+        "<b>Mais de uma pessoa com este nome.</b> Não vou escolher a rubrica " +
+        "sem a matrícula — mostrar a assinatura errada é pior que não mostrar.</div></div>";
+    }
+
+    if (estado === "naoTem") {
+      return '<div style="' + MOLDURA + '">' + titulo +
+        '<div class="small" style="font-size:11px;line-height:1.4;color:var(--texto-2)">' +
+        "Esta pessoa <b>ainda não tem assinatura</b> no cadastro. " +
+        "Ela é coletada no aplicativo de campo, na entrega.</div></div>";
+    }
+
+    /* "naoSei" — o estado honesto: a busca não terminou */
+    return '<div style="' + MOLDURA + '">' + titulo +
+      '<div class="small" style="font-size:11px;line-height:1.4;color:var(--texto-2)">' +
+      "<b>Não consegui conferir.</b> Isto <u>não</u> quer dizer que a pessoa não " +
+      "assinou — quer dizer que a consulta não terminou." +
+      (dados && dados.motivo ? "<br><span style='opacity:.75'>" + esc(dados.motivo) + "</span>" : "") +
+      '</div><button class="btn btn-ghost btn-sm mt8" data-asspainel-tentar="1" ' +
+      'style="width:100%">Procurar de novo</button></div>';
+  };
+
+  /* ------------------------------------------------------------
+     A BUSCA — pela MESMA porta da impressão
+     ------------------------------------------------------------ */
+  A.buscar = function (f) {
+    A.pedidos++;
+    if (typeof EPIASS === "undefined" || !EPIASS || typeof EPIASS.lerCadastro !== "function") {
+      return Promise.resolve({ estado: "naoSei",
+        motivo: "o módulo de assinaturas não está neste arquivo" });
+    }
+    var alvo = { nome: f && (f.nome || f.colaborador), colaborador: f && (f.nome || f.colaborador),
+                 matricula: f && f.matricula, cracha: f && f.cracha };
+    var pr;
+    /* o "true" é o que a impressão usa: pula o índice, vai no servidor */
+    try { pr = EPIASS.lerCadastro(alvo, true); }
+    catch (e) { return Promise.resolve({ estado: "naoSei", motivo: lp(e && e.message) }); }
+
+    return Promise.resolve(pr).then(function (c) {
+      A.ultima = c;
+      if (c && c.ambiguo) return { estado: "ambiguo" };
+      if (c && c.tem) {
+        var img = A.imagemDe(c);
+        if (!img) {
+          return { estado: "naoSei",
+            motivo: "o cadastro foi encontrado, mas sem imagem de assinatura dentro" };
+        }
+        A.achadas++;
+        var d = (c.dados || {});
+        return { estado: "tem", imagem: img, origem: d.origem, quando: d.cadastradaEm || d.em };
+      }
+      /* só digo "não tem" quando a busca CHEGOU AO FIM sem erro */
+      if (c && c.ok === true) return { estado: "naoTem" };
+      return { estado: "naoSei",
+        motivo: lp(c && c.mensagem) || "a consulta não chegou ao fim" };
+    }, function (e) {
+      return { estado: "naoSei", motivo: lp(e && e.message) || "a consulta falhou" };
+    });
+  };
+
+  /* ------------------------------------------------------------
+     PENDURAR NA TELA, depois que ela foi montada
+     ------------------------------------------------------------
+     Não mexo na string que a função original devolve: espero a
+     tela existir no documento e encaixo a caixa ao lado dos
+     botões, usando o botão de imprimir como âncora — ele é único
+     e está exatamente onde ele pediu.
+     ------------------------------------------------------------ */
+  A.ancora = function () {
+    try {
+      var b = document.querySelector("[data-epi-ficha-imprimir]");
+      return (b && b.parentNode) || null;
+    } catch (e) { return null; }
+  };
+
+  A.encaixar = function (f, tentativa) {
+    var col = A.ancora();
+    if (!col) {
+      if ((tentativa || 0) < 40) {
+        setTimeout(function () { A.encaixar(f, (tentativa || 0) + 1); }, 60);
+      }
+      return;
+    }
+    var velha = col.querySelector("[data-asspainel]");
+    if (velha && velha.parentNode) velha.parentNode.removeChild(velha);
+
+    var caixa = document.createElement("div");
+    caixa.setAttribute("data-asspainel", "1");
+    caixa.innerHTML = A.caixa("procurando");
+    col.appendChild(caixa);
+
+    A.buscar(f).then(function (r) {
+      /* se ele já trocou de pessoa, não pinto por cima */
+      if (!caixa.parentNode) return;
+      caixa.innerHTML = A.caixa(r.estado, r);
+      var btn = caixa.querySelector("[data-asspainel-tentar]");
+      if (btn) {
+        btn.addEventListener("click", function (ev) {
+          try { ev.preventDefault(); ev.stopPropagation(); } catch (e) {}
+          caixa.innerHTML = A.caixa("procurando");
+          A.buscar(f).then(function (r2) {
+            if (!caixa.parentNode) return;
+            caixa.innerHTML = A.caixa(r2.estado, r2);
+            var b2 = caixa.querySelector("[data-asspainel-tentar]");
+            if (b2) b2.addEventListener("click", function () { A.encaixar(f, 0); });
+          });
+        });
+      }
+    });
+  };
+
+  /* ------------------------------------------------------------
+     LIGAR
+     ------------------------------------------------------------ */
+  A.ligar = function () {
+    if (A.ligado) return false;
+    if (typeof window.fichaDoColaborador !== "function") return false;
+
+    A.telaAntiga = window.fichaDoColaborador;
+    window.fichaDoColaborador = function (f) {
+      var html = A.telaAntiga.apply(this, arguments);
+      try { setTimeout(function () { A.encaixar(f, 0); }, 0); } catch (e) {}
+      return html;
+    };
+    A.ligado = true;
+    return true;
+  };
+
+  A.restaurar = function () {
+    if (typeof A.telaAntiga === "function") window.fichaDoColaborador = A.telaAntiga;
+    try {
+      var v = document.querySelectorAll("[data-asspainel]");
+      for (var i = 0; i < v.length; i++) {
+        if (v[i].parentNode) v[i].parentNode.removeChild(v[i]);
+      }
+    } catch (e) {}
+    A.ligado = false;
+    return true;
+  };
+
+  A.contas = function () {
+    return { pedidos: A.pedidos, achadas: A.achadas, ligado: A.ligado };
+  };
+
+  try { window.ASSPAINEL = A; } catch (e) {}
+
+  if (!A.ligar()) {
+    try {
+      document.addEventListener("DOMContentLoaded", function () { A.ligar(); });
+      setTimeout(function () { A.ligar(); }, 2000);
     } catch (e) {}
   }
 })();
