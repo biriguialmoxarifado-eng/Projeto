@@ -42272,7 +42272,23 @@ localId: i.localId || null,
 marca: i.marca || "",
 modelo: i.modelo || "",
 status: i.status || "Ativo",
-ca: i.ca || "",
+/* [CAMAIUSCULO] 07/11 — O CAMPO PODE CHEGAR COM OUTRO NOME
+   ------------------------------------------------------------
+   Ele criou a coluna na planilha escrita "CA", em maiúsculas —
+   e faz sentido, CA é sigla. O Core usa o texto do cabeçalho
+   como nome do campo, então o item chega aqui com a chave "CA".
+
+   Esta linha lia só "i.ca", minúsculo. Resultado: o número
+   estava na planilha, o Core devolvia direitinho, e MORRIA
+   AQUI — este filtro jogava fora, e a tela dizia "não
+   informado". Era a queixa dele: "não está identificando o
+   número do CA no item".
+
+   Eu já tinha deixado tolerante a conferência da gravação e a
+   busca das fichas, e esqueci justamente do caminho por onde
+   TODO item passa. Agora aceito como ele escreveu.
+   ------------------------------------------------------------ */
+ca: i.ca || i.CA || i.Ca || i.numeroCa || i.numeroCA || i.caNumero || "",
 /* [CAFICA] 04/11 — esta linha faltava, e é toda a causa de
    "salvei o CA e não ficou". Esta lista é um FILTRO: o que
    não está escrito aqui é jogado fora na entrada, venha o
@@ -42282,7 +42298,14 @@ ca: i.ca || "",
    aqui dentro — o campo voltava vazio toda vez.
    Provado em 04/11: Core devolvendo caValidade "2028-03-31",
    MOCK.itens saindo sem a chave caValidade. */
-caValidade: i.caValidade || i.caVencimento || i.validadeCa || "",
+/* [CAMAIUSCULO] 07/11 — a validade sofre do mesmo mal: o
+   cabeçalho pode estar "CAVALIDADE", "validadeCA" ou
+   "Validade do CA". Aceito todas as formas que o
+   ALMOXA_ITENS_CA.gs também aceita, para os dois lados da
+   ponte falarem a mesma língua. */
+caValidade: i.caValidade || i.caVencimento || i.validadeCa ||
+            i.CAVALIDADE || i.validadeCA || i.CaValidade ||
+            i.validadeDoCa || i["Validade do CA"] || "",
 /* [VARIOSITENS] 04/11 — mesma história do caValidade: a
    referência do fabricante vinha do Core e morria aqui, então
    nenhuma tela conseguia mostrar nem procurar por ela. O prompt
@@ -65134,7 +65157,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 407 · 07/11";
+var ALMOXA_VERSAO = "sistema 408 · 07/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
