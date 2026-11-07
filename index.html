@@ -64915,7 +64915,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 396 · 06/11";
+var ALMOXA_VERSAO = "sistema 397 · 06/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -107439,6 +107439,454 @@ emissao: hoje,
     try {
       document.addEventListener("DOMContentLoaded", function () { A.ligar(); });
       setTimeout(function () { A.ligar(); }, 1800);
+    } catch (e) {}
+  }
+})();
+
+/* ############################################################
+ * MOTOR DE INTEGRAÇÃO DE ASSINATURAS
+ *                         busca: [MAB]  ·  MotorAssinaturasBridge
+ * 06/11 — ALMOXA CAMPO → Core → Ficha de EPI → PDF.
+ *
+ * ETAPA 1 — A INVESTIGAÇÃO, ANTES DE QUALQUER LINHA
+ *
+ *   ONDE O CAMPO GRAVA
+ *     Conjunto "usuarios" (CONJUNTO_COLAB, linha 68241), registros
+ *     com id "COLAB:<...>", e dentro de `dados`: nome, matricula e
+ *     a imagem da rubrica. É o que o diagnóstico dele mostra:
+ *     "ORIGEM: ALMOXA_CAMPO · CONJUNTO: usuarios · LOCALIZAÇÃO:
+ *      COLAB · IDENTIFICAÇÃO: matrícula do colaborador".
+ *
+ *   QUAL API ENTREGA A IMAGEM
+ *     REPOCLI (linha 65687) → API.call("repo", ...) com prazo de
+ *     90 segundos, porque cada registro traz uma imagem em base64.
+ *     As duas operações que importam: listarRegistros (páginas de
+ *     50) e lerRegistro (um por id). Esse caminho FUNCIONA — é
+ *     por ele que o diagnóstico diz ASSINATURA: ENCONTRADA.
+ *
+ *   POR QUE precadastro.localizar É CHAMADA, E POR QUE FALHA
+ *     Fui eu que a liguei, no bloco [ASSPC], como segunda tentativa
+ *     para quem o índice não achasse. O Core dele NÃO TEM essa
+ *     ação. O diagnóstico que ele mandou é inequívoco:
+ *       CHAMADA: precadastro.localizar
+ *       RESPOSTA: ACAO_DESCONHECIDA
+ *       TEMPO: 8427 ms
+ *     Oito segundos e meio para o Core dizer que não conhece. E o
+ *     meu código guardava isso em P.rotaResponde = false... e
+ *     NUNCA LIA essa variável. Gravada em 101368, lida em lugar
+ *     nenhum. Resultado: a mesma rota morta era chamada de novo
+ *     para cada pessoa da lista. Quarenta pessoas × 8,4 s = mais
+ *     de cinco minutos esperando por uma ação que não existe.
+ *     ERA ESSE O TRAVAMENTO, e era essa a fila que empurrava a
+ *     gravação dele para o timeout.
+ *
+ * ETAPA 2 — O QUE ESTE MOTOR FAZ
+ *   1. lembra qual ação o Core recusou e NUNCA MAIS a chama;
+ *   2. localiza o colaborador por matrícula, depois id, depois
+ *      nome — e para quando o nome é repetido;
+ *   3. busca a rubrica pelo caminho que funciona (o repositório);
+ *   4. confere que o que voltou é imagem de verdade;
+ *   5. entrega à ficha e ao PDF pela mesma gaveta de sempre;
+ *   6. registra origem, data e resultado de cada busca.
+ *
+ * ETAPA 4 — A REGRA QUE ELE ACRESCENTOU HOJE, E QUE MUDA TUDO
+ *   "Não usar a última assinatura do colaborador como substituta
+ *    de uma assinatura histórica de outra entrega."
+ *   Então passam a existir DUAS coisas com nomes diferentes:
+ *     · a assinatura DAQUELA ENTREGA, que a pessoa deu na hora de
+ *       receber aquele item — essa é prova;
+ *     · a rubrica DO CADASTRO, que a pessoa deixou uma vez no
+ *       ALMOXA CAMPO — essa identifica, mas não prova que ela
+ *       recebeu aquele item naquele dia.
+ *   O motor devolve as duas separadas e DIZ QUAL É QUAL. Pôr a
+ *   rubrica do cadastro no lugar da assinatura de uma entrega
+ *   antiga seria fabricar prova de recebimento.
+ *
+ * O QUE ELE NÃO FAZ
+ *   NÃO cria ação no Core. NÃO inventa endpoint. NÃO apaga nem
+ *   substitui assinatura original. NÃO grava nada — é só leitura.
+ *   NÃO reconstrói a Ficha de EPI. NÃO duplica o índice que já
+ *   existe: usa o de EPIASS.
+ * ############################################################ */
+(function motorAssinaturas() {
+
+  var M = {
+    nome: "MotorAssinaturasBridge",
+    versao: "1.0",
+    rotasMortas: {},     /* acao -> quando o Core disse que não existe */
+    historico: [],       /* origem, data e resultado de cada busca */
+    buscas: 0, achadas: 0
+  };
+  try { window.MAB = M; window.MotorAssinaturasBridge = M; } catch (e) {}
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function matK(v) {
+    return lp(v).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+  }
+  function nomeK(v) {
+    return lp(v).toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/\s+/g, " ").trim();
+  }
+
+  /* ============================================================
+     1. A ROTA MORTA — a correção que destrava tudo
+     ------------------------------------------------------------
+     O Core respondeu ACAO_DESCONHECIDA. Isso não muda de ideia no
+     minuto seguinte: é configuração do servidor. Perguntar de novo
+     custa 8,4 segundos e devolve a mesma coisa.
+     Fica morta até a página ser recarregada — que é exatamente
+     quando faz sentido reperguntar, porque é quando o Apps Script
+     pode ter sido republicado com a ação nova.
+     ============================================================ */
+  var CODIGOS_DE_AUSENCIA = /MODULO_DESCONHECIDO|ACAO_DESCONHECIDA|OPERACAO_DESCONHECIDA|MODULO_NAO_INSTALADO|MODULO_AUSENTE|SEM_ROTEADOR|SEM_REPOSITORIO/;
+
+  M.ehAusencia = function (r) {
+    if (!r) return false;
+    if (CODIGOS_DE_AUSENCIA.test(lp(r.codigo).toUpperCase())) return true;
+    return /não existe|nao existe|não encontrei a função|nao encontrei a funcao/i.test(lp(r.mensagem));
+  };
+
+  M.marcarMorta = function (acao, porque) {
+    var k = lp(acao);
+    if (!k || M.rotasMortas[k]) return false;
+    M.rotasMortas[k] = { quando: Date.now(), porque: lp(porque) || "o Core não conhece esta ação" };
+    try {
+      console.warn("[MAB] rota morta: " + k + " — " + M.rotasMortas[k].porque +
+                   ". Não pergunto de novo até recarregar a página.");
+    } catch (e) {}
+    return true;
+  };
+
+  M.estaMorta = function (acao) { return !!M.rotasMortas[lp(acao)]; };
+
+  /* chama uma ação do Core guardando a lição: se não existe, não
+     volta a ser chamada. Devolve sempre resposta, nunca lança. */
+  M.chamar = function (modulo, acao, carga, opcoes) {
+    var k = modulo + "." + acao;
+    if (M.estaMorta(k)) {
+      return Promise.resolve({ ok: false, codigo: "ROTA_MORTA", pulada: true,
+        mensagem: "não perguntei: o Core já respondeu que " + k + " não existe" });
+    }
+    return Promise.resolve(API.call(modulo, acao, carga || {}, opcoes)).then(function (r) {
+      if (M.ehAusencia(r)) M.marcarMorta(k, lp(r.mensagem) || lp(r.codigo));
+      return r || { ok: false, mensagem: "sem resposta" };
+    }, function (e) {
+      return { ok: false, mensagem: lp(e && e.message) || String(e) };
+    });
+  };
+
+  /* ============================================================
+     2. LOCALIZAR O COLABORADOR
+     ------------------------------------------------------------
+     Matrícula primeiro, porque é o que o CAMPO grava. Nome só
+     quando é um só — homônimo para o motor, como em todo o resto
+     deste sistema.
+     ============================================================ */
+  M.identificar = function (pessoa) {
+    var p = pessoa || {};
+    return {
+      matricula: matK(p.matricula || p.mat || p.matriculaSolicitante),
+      id: lp(p.id || p.usuarioId || p.interno),
+      nome: nomeK(p.nome || p.colaborador),
+      comoVeio: { matricula: lp(p.matricula), nome: lp(p.nome || p.colaborador) }
+    };
+  };
+
+  M.noIndice = function (quem) {
+    var trilha = [];
+    var ix = null;
+    try { ix = (typeof EPIASS !== "undefined") ? EPIASS.indice : null; } catch (e) {}
+    if (!ix) {
+      trilha.push({ chave: "índice do repositório", origem: "conjunto usuarios",
+        resultado: "não tentei", detalhe: "o índice ainda não foi carregado" });
+      return { tem: false, trilha: trilha, semIndice: true };
+    }
+    if (quem.matricula && ix.porMat && ix.porMat[quem.matricula]) {
+      trilha.push({ chave: "COLAB por matrícula", origem: "índice do conjunto usuarios",
+        resultado: "achou", detalhe: "matrícula " + quem.comoVeio.matricula });
+      return { tem: true, reg: ix.porMat[quem.matricula], por: "matrícula", trilha: trilha };
+    }
+    if (quem.nome && ix.nomeAmbiguo && ix.nomeAmbiguo[quem.nome]) {
+      trilha.push({ chave: "COLAB por nome", origem: "índice do conjunto usuarios",
+        resultado: "ambíguo", detalhe: "mais de uma pessoa com este nome" });
+      return { tem: false, ambiguo: true, trilha: trilha };
+    }
+    if (quem.nome && ix.porNome && ix.porNome[quem.nome]) {
+      trilha.push({ chave: "COLAB por nome", origem: "índice do conjunto usuarios",
+        resultado: "achou", detalhe: quem.comoVeio.nome });
+      return { tem: true, reg: ix.porNome[quem.nome], por: "nome", trilha: trilha };
+    }
+    trilha.push({ chave: "índice do repositório", origem: "conjunto usuarios",
+      resultado: ix.completo ? "não existe" : "incompleta",
+      detalhe: ix.completo
+        ? "o conjunto foi lido inteiro e esta pessoa não está nele"
+        : (lp(ix.erro) || "o índice não ficou pronto") });
+    return { tem: false, trilha: trilha, incompleto: !ix.completo };
+  };
+
+  /* ============================================================
+     3. A IMAGEM — e a conferência de que é imagem mesmo
+     ------------------------------------------------------------
+     "Não declarar sucesso sem comprovação de que a imagem foi
+      efetivamente carregada." Então eu confiro: tem que ser data
+     URI de imagem, ou base64 com tamanho de imagem de verdade.
+     Uma string de 12 letras não é uma assinatura.
+     ============================================================ */
+  M.MINIMO_BYTES = 200;
+
+  M.imagemDe = function (dados) {
+    var d = dados || {};
+    var bruto = lp(d.imagem || d.assinatura || d.rubrica || d.assinaturaImagem);
+    if (!bruto) return { ok: false, motivo: "o registro não traz campo de imagem" };
+    if (/^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,/i.test(bruto)) {
+      var corpo = bruto.split(",")[1] || "";
+      if (corpo.length < M.MINIMO_BYTES) {
+        return { ok: false, motivo: "a imagem veio pequena demais para ser uma assinatura (" +
+                 corpo.length + " caracteres)" };
+      }
+      return { ok: true, imagem: bruto, bytes: Math.round(corpo.length * 0.75) };
+    }
+    if (/^https?:\/\//i.test(bruto)) {
+      return { ok: true, imagem: bruto, porLink: true };
+    }
+    if (/^[A-Za-z0-9+/=\s]+$/.test(bruto) && bruto.length >= M.MINIMO_BYTES) {
+      /* base64 sem cabeçalho: ponho o cabeçalho, não invento conteúdo */
+      return { ok: true, imagem: "data:image/png;base64," + bruto.replace(/\s+/g, ""),
+               bytes: Math.round(bruto.length * 0.75), semCabecalho: true };
+    }
+    return { ok: false, motivo: "o campo de imagem não parece uma imagem (" +
+             bruto.length + " caracteres, sem cabeçalho reconhecível)" };
+  };
+
+  /* ============================================================
+     4. A BUSCA — o contrato público do motor
+     ------------------------------------------------------------
+     Devolve SEMPRE a mesma forma, dê certo ou não:
+       { ok, tem, imagem, via, origem, quando, trilha, motivo }
+     ============================================================ */
+  M.buscar = function (pessoa) {
+    var t0 = Date.now();
+    var quem = M.identificar(pessoa);
+    M.buscas++;
+
+    if (!quem.matricula && !quem.nome && !quem.id) {
+      return Promise.resolve(M.fim_({ tem: false, motivo: "a ficha não diz de quem é",
+        trilha: [{ chave: "(nada)", origem: "ficha", resultado: "não tentei",
+                   detalhe: "sem matrícula, sem nome e sem id" }] }, t0, quem));
+    }
+
+    var achado = M.noIndice(quem);
+    if (achado.ambiguo) {
+      return Promise.resolve(M.fim_({ tem: false, ambiguo: true,
+        motivo: "mais de uma pessoa com este nome — informe a matrícula",
+        trilha: achado.trilha }, t0, quem));
+    }
+    if (achado.tem) {
+      var img = M.imagemDe(achado.reg.dados);
+      if (!img.ok) {
+        /* o registro existe mas não tem imagem servível: isso é
+           informação, não ausência de assinatura */
+        return Promise.resolve(M.fim_({ tem: false, semImagem: true, motivo: img.motivo,
+          trilha: achado.trilha.concat([{ chave: lp(achado.reg.id),
+            origem: "registro do conjunto usuarios", resultado: "sem imagem",
+            detalhe: img.motivo }]) }, t0, quem));
+      }
+      return Promise.resolve(M.fim_({
+        tem: true, imagem: img.imagem, bytes: img.bytes || 0,
+        via: "repositório · " + achado.por, origem: "ALMOXA_CAMPO",
+        chave: lp(achado.reg.id), versao: achado.reg.versao || 1,
+        quando: lp(achado.reg.dados && (achado.reg.dados.cadastradaEm ||
+                   achado.reg.dados.assinaturaEm)),
+        porQuem: lp(achado.reg.dados && achado.reg.dados.cadastradaPor),
+        trilha: achado.trilha }, t0, quem));
+    }
+
+    /* o índice não tinha. Antes de desistir, UMA leitura direta
+       pelo id provável — e só se o repositório estiver de pé. */
+    if (quem.id && typeof REPOCLI !== "undefined" && REPOCLI.ler && REPOCLI.instalado !== false) {
+      return Promise.resolve(REPOCLI.ler("usuarios", "COLAB:" + quem.id)).then(function (r) {
+        var t = achado.trilha.slice();
+        if (!r || !r.ok) {
+          t.push({ chave: "COLAB:" + quem.id, origem: "leitura direta no repositório",
+            resultado: "erro", detalhe: lp(r && r.mensagem) || "não respondeu" });
+          return M.fim_({ tem: false, motivo: lp(r && r.mensagem) || "não respondeu",
+                          trilha: t, incompleto: !!achado.incompleto }, t0, quem);
+        }
+        var d = (r.dados && r.dados.dados) || r.dados || {};
+        var im = M.imagemDe(d);
+        if (!im.ok) {
+          t.push({ chave: "COLAB:" + quem.id, origem: "leitura direta no repositório",
+            resultado: "sem imagem", detalhe: im.motivo });
+          return M.fim_({ tem: false, semImagem: true, motivo: im.motivo, trilha: t }, t0, quem);
+        }
+        t.push({ chave: "COLAB:" + quem.id, origem: "leitura direta no repositório",
+          resultado: "achou", detalhe: "" });
+        return M.fim_({ tem: true, imagem: im.imagem, bytes: im.bytes || 0,
+          via: "repositório · id interno", origem: "ALMOXA_CAMPO",
+          chave: "COLAB:" + quem.id, versao: r.versao || 1, trilha: t }, t0, quem);
+      }, function (e) {
+        return M.fim_({ tem: false, motivo: lp(e && e.message) || String(e),
+                        trilha: achado.trilha }, t0, quem);
+      });
+    }
+
+    return Promise.resolve(M.fim_({ tem: false, incompleto: !!achado.incompleto,
+      motivo: achado.incompleto
+        ? "o índice não ficou pronto — não sei se esta pessoa assinou"
+        : "o conjunto foi lido inteiro e esta pessoa não está nele",
+      trilha: achado.trilha }, t0, quem));
+  };
+
+  /* fecha o resultado no formato do contrato e registra o histórico */
+  M.fim_ = function (r, t0, quem) {
+    r.ok = true;
+    r.ms = Date.now() - t0;
+    r.motor = M.nome + " " + M.versao;
+    if (r.tem) M.achadas++;
+    M.historico.push({
+      quando: new Date().toISOString(),
+      matricula: (quem && quem.comoVeio.matricula) || "",
+      resultado: r.tem ? "achou" : (r.ambiguo ? "ambíguo" : r.semImagem ? "sem imagem" : "não achou"),
+      via: lp(r.via), ms: r.ms
+    });
+    if (M.historico.length > 300) M.historico = M.historico.slice(-300);
+    return r;
+  };
+
+  /* ============================================================
+     5. ENTREGA × CADASTRO — a regra de 06/11
+     ------------------------------------------------------------
+     A assinatura que a pessoa deu ao receber AQUELE item é prova
+     daquele recebimento. A rubrica do cadastro, não: ela
+     identifica a pessoa, e só. Trocar uma pela outra numa ficha
+     antiga seria fabricar prova.
+     ============================================================ */
+  M.daEntrega = function (item) {
+    var i = item || {};
+    var bruto = lp(i.assinatura || i.assinaturaRecebimento || i.recebimentoAssinatura ||
+                   i.rubrica || (i.recebimento && i.recebimento.assinatura));
+    if (!bruto) return { tem: false };
+    var im = M.imagemDe({ imagem: bruto });
+    if (!im.ok) return { tem: false, motivo: im.motivo };
+    return { tem: true, imagem: im.imagem, origem: "entrega",
+             rotulo: "assinada no recebimento",
+             quando: lp(i.assinadaEm || i.entrega || i.data) };
+  };
+
+  M.paraLinha = function (item, doCadastro) {
+    var daLinha = M.daEntrega(item);
+    if (daLinha.tem) return daLinha;
+    if (doCadastro && doCadastro.tem) {
+      return { tem: true, imagem: doCadastro.imagem, origem: "cadastro",
+        rotulo: "rubrica do cadastro — NÃO é a assinatura desta entrega",
+        substituta: true, quando: lp(doCadastro.quando) };
+    }
+    return { tem: false, origem: "", rotulo: "sem assinatura nesta entrega" };
+  };
+
+  /* ============================================================
+     6. O ENXERTO — cortar a rota morta de uma vez
+     ------------------------------------------------------------
+     O bloco [ASSPC] grava P.rotaResponde = false quando o Core
+     recusa, e nunca lê. Eu leio por ele: envolvo P.procurar e,
+     uma vez morta a rota, devolvo na hora sem chamar o Core.
+     Também ponho o motor como PRIMEIRA tentativa do lerCadastro,
+     porque é ele que usa o caminho que funciona.
+     ============================================================ */
+  M.ligado = false;
+  M.ligar = function () {
+    if (M.ligado) return false;
+    var fez = false;
+
+    /* corta a rota morta no [ASSPC] */
+    try {
+      if (window.ASSPC && typeof ASSPC.procurar === "function" && !M.procurarAntigo) {
+        M.procurarAntigo = ASSPC.procurar;
+        ASSPC.procurar = function (f) {
+          if (M.estaMorta("precadastro.localizar")) {
+            return Promise.resolve({ tem: false, rotaMorta: true, trilha: [{
+              chave: "precadastro.localizar", origem: "rota do painel",
+              resultado: "não tentei",
+              detalhe: "o Core já respondeu que esta ação não existe (" +
+                       Math.round((Date.now() - M.rotasMortas["precadastro.localizar"].quando) / 1000) +
+                       "s atrás). Perguntar de novo custa 8 segundos e devolve o mesmo." }] });
+          }
+          return Promise.resolve(M.procurarAntigo.call(ASSPC, f)).then(function (r) {
+            /* a primeira recusa mata a rota para todas as outras pessoas */
+            try {
+              var t = lista_(r && r.trilha);
+              var morreu = (r && r.semRota) || t.some(function (x) {
+                return /não conhece esta ação|nao conhece esta acao/i.test(lp(x.detalhe));
+              });
+              if (morreu) M.marcarMorta("precadastro.localizar",
+                "ACAO_DESCONHECIDA na primeira tentativa");
+            } catch (e) {}
+            return r;
+          });
+        };
+        fez = true;
+      }
+    } catch (e) {}
+
+    /* o motor entra como primeira tentativa da leitura de cadastro */
+    try {
+      if (typeof EPIASS !== "undefined" && typeof EPIASS.lerCadastro === "function" &&
+          !M.lerAntigo) {
+        M.lerAntigo = EPIASS.lerCadastro;
+        EPIASS.lerCadastro = function (f, forcar) {
+          var eu = this;
+          return M.buscar(f).then(function (r) {
+            if (r && r.tem) {
+              return { ok: true, tem: true, via: r.via, chave: r.chave,
+                versao: r.versao || 1,
+                dados: { imagem: r.imagem, cadastradaEm: r.quando, cadastradaPor: r.porQuem },
+                trilha: r.trilha, motor: r.motor };
+            }
+            /* o motor não achou: deixo o caminho antigo tentar,
+               mas ele já não vai bater na rota morta */
+            return Promise.resolve(M.lerAntigo.call(eu, f, forcar)).then(function (c) {
+              if (c && c.tem) return c;
+              try {
+                c = c || { ok: true, tem: false };
+                c.trilha = lista_(r && r.trilha).concat(lista_(c.trilha));
+                if (r && r.ambiguo) c.ambiguo = true;
+                if (r && r.semImagem) c.semImagem = true;
+              } catch (e) {}
+              return c;
+            }, function () { return { ok: true, tem: false, trilha: lista_(r && r.trilha) }; });
+          });
+        };
+        fez = true;
+      }
+    } catch (e) {}
+
+    M.ligado = fez;
+    return fez;
+  };
+
+  M.restaurar = function () {
+    try { if (M.procurarAntigo && window.ASSPC) ASSPC.procurar = M.procurarAntigo; } catch (e) {}
+    try { if (M.lerAntigo && typeof EPIASS !== "undefined") EPIASS.lerCadastro = M.lerAntigo; } catch (e) {}
+    M.ligado = false;
+  };
+
+  /* o relatório que o prompt pede: origem, data e resultado */
+  M.relatorio = function () {
+    return {
+      motor: M.nome + " " + M.versao,
+      buscas: M.buscas, achadas: M.achadas,
+      rotasMortas: Object.keys(M.rotasMortas),
+      ultimas: M.historico.slice(-20)
+    };
+  };
+
+  if (!M.ligar()) {
+    try {
+      document.addEventListener("DOMContentLoaded", function () { M.ligar(); });
+      setTimeout(function () { M.ligar(); }, 2000);
     } catch (e) {}
   }
 })();
