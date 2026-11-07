@@ -26686,6 +26686,186 @@ publicoVersoes: painelCfg.publicoVersoes
 }
 
 /* ============================================================
+   [UMPAINEL]  ·  07/11  ·  busca: [UMPAINEL]
+   ------------------------------------------------------------
+   O QUE ESTE BLOCO CONSERTA
+
+   Medido no navegador, numa cópia instrumentada do próprio
+   arquivo: ao abrir o sistema, painelCarregar() era chamado
+   TRÊS vezes em 28 milissegundos, por três donos diferentes —
+   carregarConfig, recarregar e um segundo recarregar.
+
+   São três idas à rede pedindo exatamente a mesma coisa, ao
+   mesmo tempo, num Core que já estava estourando o prazo de 15
+   segundos. Elas não se ajudam: competem.
+
+   O CONSERTO. Quando uma leitura do painel já está no ar e
+   chega outra igual, a segunda NÃO abre uma nova ida: ela pega
+   carona na que já está voando e recebe a mesma resposta. Uma
+   ida à rede em vez de três.
+
+   ------------------------------------------------------------
+   O CUIDADO QUE ESTE BLOCO TEM — E QUE É A PARTE IMPORTANTE
+
+   painelCarregar() não serve só para desenhar a tela. A função
+   gravar() usa ela como RELEITURA DE CONFERÊNCIA depois de
+   salvar: grava, relê, e compara o conteúdo para decidir se
+   avisa "publicado" ou "trate como NÃO publicado".
+
+   Se essa releitura pegasse carona numa leitura que começou
+   ANTES da gravação, ela conferiria o estado velho e diria
+   "gravou" sem ter conferido nada. A conferência passaria a
+   mentir — que é justamente o defeito que eu passei a semana
+   consertando em outros lugares.
+
+   Então a carona tem uma regra dura: só vale para uma leitura
+   que começou DEPOIS da última gravação. Toda gravação marca a
+   hora; qualquer leitura que estava no ar antes dela fica
+   desqualificada na mesma hora, e quem chegar depois abre uma
+   ida nova e limpa.
+
+   E não existe memória aqui: a carona vive só enquanto a
+   leitura está no ar. Quando ela termina — com resposta ou com
+   erro — a porta fecha. Erro nunca fica guardado: a próxima
+   chamada tenta de novo, do zero.
+
+   NÃO MEXE em painelCfg, não mexe no desenho da tela, não
+   mexe no Core e não muda o que painelCarregar devolve (segue
+   devolvendo o mesmo painelCfg de sempre). UMPAINEL.restaurar()
+   desfaz tudo.
+   ============================================================ */
+(function () {
+  "use strict";
+
+  if (window.UMPAINEL && window.UMPAINEL.ligado) return;
+
+  var U = {
+    nome: "UMPAINEL",
+    versao: "07/11",
+    ligado: false,
+
+    /* o estado da carona */
+    voando: null,        /* a promessa que está no ar, ou null */
+    voandoDesde: 0,      /* quando ela começou */
+    ultimaGravacao: 0,   /* quando a última gravação COMEÇOU */
+
+    /* números, para provar e para diagnóstico */
+    idas: 0,             /* idas de verdade à rede */
+    caronas: 0,          /* chamadas que pegaram carona */
+    recusadas: 0,        /* caronas negadas por causa de gravação */
+    erros: 0,
+
+    antiga: null,
+    antigaSalvar: null
+  };
+
+  function agora_() { return Date.now(); }
+
+  /* ------------------------------------------------------------
+     A LEITURA, COM CARONA
+     ------------------------------------------------------------ */
+  U.carregar = function () {
+    if (typeof U.antiga !== "function") return Promise.resolve(null);
+
+    if (U.voando) {
+      /* a regra dura: a leitura no ar só serve de carona se ela
+         começou DEPOIS da última gravação. Senão ela é velha,
+         e quem está chamando agora pode ser a conferência. */
+      if (U.ultimaGravacao <= U.voandoDesde) {
+        U.caronas++;
+        return U.voando;
+      }
+      U.recusadas++;
+      /* não cancelo a que está no ar — ela tem donos próprios.
+         Só não ofereço carona nela. */
+    }
+
+    U.idas++;
+    U.voandoDesde = agora_();
+
+    var minha = null;
+    function fechar_() { if (U.voando === minha) { U.voando = null; } }
+
+    try {
+      minha = Promise.resolve(U.antiga.call(null)).then(
+        function (v) { fechar_(); return v; },
+        function (e) { U.erros++; fechar_(); throw e; }
+      );
+    } catch (e) {
+      U.erros++;
+      U.voando = null;
+      return Promise.reject(e);
+    }
+
+    U.voando = minha;
+    return minha;
+  };
+
+  /* ------------------------------------------------------------
+     A GRAVAÇÃO, QUE INVALIDA A CARONA
+     ------------------------------------------------------------
+     Marco a hora ANTES de a gravação sair. Assim, qualquer
+     leitura que já estava no ar fica para trás no mesmo
+     instante — e não só quando o servidor responder.
+     ------------------------------------------------------------ */
+  U.salvar = function () {
+    U.ultimaGravacao = agora_();
+    U.voando = null;          /* ninguém mais pega carona na antiga */
+    if (typeof U.antigaSalvar !== "function") {
+      return Promise.resolve({ ok: false, mensagem: "painelSalvar não existe neste arquivo" });
+    }
+    return U.antigaSalvar.apply(null, arguments);
+  };
+
+  /* ------------------------------------------------------------
+     LIGAR E DESLIGAR
+     ------------------------------------------------------------ */
+  U.ligar = function () {
+    if (U.ligado) return false;
+    if (typeof window.painelCarregar !== "function") return false;
+
+    U.antiga = window.painelCarregar;
+    window.painelCarregar = function () { return U.carregar(); };
+
+    if (typeof window.painelSalvar === "function") {
+      U.antigaSalvar = window.painelSalvar;
+      window.painelSalvar = function () { return U.salvar.apply(null, arguments); };
+    }
+
+    U.ligado = true;
+    return true;
+  };
+
+  U.restaurar = function () {
+    if (typeof U.antiga === "function") window.painelCarregar = U.antiga;
+    if (typeof U.antigaSalvar === "function") window.painelSalvar = U.antigaSalvar;
+    U.voando = null;
+    U.ligado = false;
+    return true;
+  };
+
+  /* o relatório, para o diagnóstico — nada desenhado na tela */
+  U.contas = function () {
+    return { idas: U.idas, caronas: U.caronas, recusadas: U.recusadas,
+             erros: U.erros, noAr: !!U.voando };
+  };
+
+  try { window.UMPAINEL = U; } catch (e) {}
+
+  /* ligo o mais cedo possível: o ganho está justamente nos
+     primeiros 30 milissegundos, antes de a tela aparecer. */
+  try { U.ligar(); } catch (e) {}
+  if (!U.ligado) {
+    try {
+      document.addEventListener("DOMContentLoaded", function () {
+        try { U.ligar(); } catch (e) {}
+      });
+    } catch (e) {}
+  }
+})();
+
+
+/* ============================================================
    [v237] POR QUE A VITRINE VIAJA DENTRO DE "conteudo"
    ------------------------------------------------------------
    "Gravou, mas a releitura nao trouxe de volta." O painel.salvar
@@ -64915,7 +65095,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 397 · 06/11";
+var ALMOXA_VERSAO = "sistema 399 · 07/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -68995,14 +69175,43 @@ function modalPendencias() {
     lerCadastroResolvido: function (f, forcar) {
       /* o índice primeiro: é ele que faz a tela de 40 fichas caber
          em uma leitura, em vez de quarenta buscas */
+      /* [INDICENAOMANDA] 06/11 — O ÍNDICE É ATALHO, NÃO AUTORIDADE
+         ------------------------------------------------------------
+         Aqui estava a diferença entre o diagnóstico e a ficha, que
+         ele notou e não conseguia explicar: "ele fala que achou
+         assinatura mas não consegue puxar".
+         O diagnóstico chama esta mesma função com forcar = true e
+         PULA o índice. A ficha chama com forcar falso — e a linha
+         "return Promise.resolve(doIndice)" encerrava a busca com o
+         "não achei" do índice. As chaves, o ponteiro COLABNOME e a
+         varredura do conjunto NUNCA rodavam.
+         A prova veio na foto dele, no caso do Jardel Avelino Dos
+         Bravaresco, matrícula 73224381:
+           COLABNOME:JARDEL AVELINO DOS BRAVARESCO -> aponta para
+           COLAB:USR_muzn4gfeb30939c2 -> achou
+         O índice NÃO GUARDA ponteiros COLABNOME — carregarIndice
+         descarta esses registros de propósito (linha 68918). Então
+         para toda pessoa cuja assinatura só é alcançável pelo
+         ponteiro de nome, o índice sempre erra, e o erro dele
+         virava a resposta final.
+         Agora: índice que ACHA continua sendo o atalho que faz 40
+         fichas caberem numa leitura. Índice que NÃO ACHA não
+         encerra nada — a busca segue pelos outros caminhos, que
+         são justamente os que acham. */
       if (!forcar) {
         var doIndice = EPIASS.noIndice(f);
-        if (doIndice) {
-          EPIASS.ultimaBusca = { achou: !!doIndice.tem, chave: doIndice.chave,
+        if (doIndice && doIndice.tem) {
+          EPIASS.ultimaBusca = { achou: true, chave: doIndice.chave,
                                  trilha: doIndice.trilha };
-          if (doIndice.tem) return Promise.resolve(EPIASS.guardar(f, doIndice));
+          return Promise.resolve(EPIASS.guardar(f, doIndice));
+        }
+        if (doIndice && doIndice.ambiguo) {
+          /* homônimo continua parando: escolher no chute é pior */
+          EPIASS.ultimaBusca = { achou: false, trilha: doIndice.trilha };
           return Promise.resolve(doIndice);
         }
+        /* o índice não achou: guardo a trilha dele e SIGO procurando */
+        if (doIndice) EPIASS.__trilhaDoIndice = listaDeTrilha(doIndice.trilha);
       }
       var quem = EPIASS.quemE(f);
       if (quem.ambiguo) {
@@ -69015,6 +69224,11 @@ function modalPendencias() {
       }
       var tentativas = EPIASS.chavesPossiveis(f);
       var guardarEm = "COLAB:" + (EPIASS.idDoColaborador(f) || "");
+      /* [INDICENAOMANDA] o passo do índice entra na trilha mesmo
+         tendo falhado — "Ver onde procurei" tem que mostrar o
+         caminho inteiro, inclusive o atalho que não serviu. */
+      var trilhaDoIndice = listaDeTrilha(EPIASS.__trilhaDoIndice);
+      EPIASS.__trilhaDoIndice = null;
       if (!tentativas.length) {
         EPIASS.ultimaBusca = { achou: false, trilha: [], motivo: "a ficha não tem nome nem matrícula" };
         return Promise.resolve({ ok: true, tem: false });
@@ -69023,7 +69237,7 @@ function modalPendencias() {
         return Promise.resolve(EPIASS.cadastroEmMemoria[guardarEm]);
       }
 
-      var trilha = [];
+      var trilha = trilhaDoIndice.slice();
 
       function lerUma(chave) {
         return REPOCLI.ler(CONJUNTO_COLAB, chave).then(function (r) { return r; },
@@ -69102,7 +69316,24 @@ function modalPendencias() {
             EPIASS.ultimaBusca = { achou: true, chave: t.chave, trilha: trilha };
             return EPIASS.guardar(f, ok);
           }
-          var naoAchou = r && (r.codigo === "NAO_ENCONTRADO" || /não encontr|nao encontr/i.test(r.mensagem || ""));
+          /* [LEUENAOTEM] 06/11 — LEITURA QUE DEU CERTO E NÃO ACHOU
+             NADA NÃO É ERRO DE LEITURA.
+             Isto só reconhecia o código NAO_ENCONTRADO e a palavra
+             "não encontrado" na mensagem. Um repositório que
+             responde ok com registro vazio — que é como se responde
+             "esse id não existe" — caía no ramo do "erro". E erro na
+             trilha faz a ficha dizer "Não consegui conferir" para
+             quem o sistema conferiu direitinho e que, de fato, não
+             tem assinatura.
+             É o espelho do defeito que consertei hoje de manhã: lá,
+             ausência virava acusação; aqui, ausência virava falha.
+             A régua certa é a resposta: r.ok verdadeiro = a leitura
+             aconteceu. Sem registro, o id não existe. Só r.ok falso
+             (ou resposta nenhuma) é erro de verdade. */
+          var leuBem = !!(r && r.ok);
+          var naoAchou = leuBem ||
+            (r && (r.codigo === "NAO_ENCONTRADO" || r.codigo === "NAO_EXISTE" ||
+                   /não encontr|nao encontr|não existe|nao existe/i.test(r.mensagem || "")));
           trilha.push({ chave: t.chave, origem: t.origem,
             resultado: naoAchou ? "não existe" : "erro",
             detalhe: naoAchou ? "" : ((r && r.mensagem) || "o repositório não respondeu") });
