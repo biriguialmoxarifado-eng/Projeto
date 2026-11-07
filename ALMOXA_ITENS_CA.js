@@ -232,6 +232,131 @@ function AP_ITENSCA_conferirDados_() {
 }
 
 /* ============================================================
+   2-B. BACKUP — antes de qualquer coisa
+   ------------------------------------------------------------
+   Copia a aba de itens inteira para uma aba nova, com a data e a
+   hora no nome. Não altera a original, não apaga nada, não
+   sobrescreve backup anterior.
+
+   Rode antes de consertar linha torta. Linha torta consertada
+   errado é pior que linha torta.
+   ============================================================ */
+function AP_ITENSCA_backup() {
+  var pl = SpreadsheetApp.getActiveSpreadsheet();
+  var aba = AP_ITENSCA_aba_();
+  var agora = new Date();
+  function dd(n) { return (n < 10 ? '0' : '') + n; }
+  var carimbo = agora.getFullYear() + dd(agora.getMonth() + 1) + dd(agora.getDate()) +
+                '_' + dd(agora.getHours()) + dd(agora.getMinutes());
+  var nome = 'BKP_' + AP_ITENSCA_ABA + '_' + carimbo;
+
+  /* nunca sobrescrevo um backup: se já existe, ponho um sufixo */
+  var tentativa = nome, n = 2;
+  while (pl.getSheetByName(tentativa)) { tentativa = nome + '_' + n; n++; }
+
+  var copia = aba.copyTo(pl);
+  copia.setName(tentativa);
+
+  var r = { ok: true, backup: tentativa,
+            linhas: Math.max(0, aba.getLastRow() - 1),
+            colunas: aba.getLastColumn(),
+            recado: 'Cópia feita. A aba original não foi tocada. ' +
+                    'Para descartar o backup depois, apague a aba "' + tentativa + '" na mão.' };
+  Logger.log(JSON.stringify(r, null, 2));
+  return r;
+}
+
+/* ============================================================
+   2-C. RELATÓRIO DE DESALINHAMENTO
+   ------------------------------------------------------------
+   Responde à pergunta "quantos registros podem estar
+   comprometidos", que é a que importa antes de mexer em
+   qualquer coisa.
+
+   COMO EU SEI QUE UMA LINHA ESTÁ TORTA. O desalinhamento tem uma
+   assinatura que não acontece por acaso: o valor da coluna do CA
+   é igual, letra por letra, ao valor que DEVERIA estar na coluna
+   seguinte — porque a gravação por posição empurrou tudo uma casa.
+   Então eu procuro duas marcas juntas:
+
+     1. a coluna do CA tem algo que não é número de CA;
+     2. e esse algo bate com o conteúdo típico da coluna vizinha
+        (categoria), ou a vizinha ficou vazia.
+
+   Uma marca sozinha é suspeita. As duas juntas é desalinhamento.
+
+   NÃO CONSERTA NADA. Só conta e lista, como você pediu.
+   ============================================================ */
+function AP_ITENSCA_relatorioDesalinhamento() {
+  var r = AP_ITENSCA_relatorioDados_();
+  Logger.log(JSON.stringify(r, null, 2));
+  return r;
+}
+
+function AP_ITENSCA_relatorioDados_() {
+  var saida = { ok: false, aba: AP_ITENSCA_ABA };
+  var aba;
+  try { aba = AP_ITENSCA_aba_(); }
+  catch (e) { saida.erro = String(e.message || e); return saida; }
+
+  var col = AP_ITENSCA_colunas_(aba);
+  saida.cabecalhosReais = [];
+  for (var c = 0; c < col.cabecalhos.length; c++) {
+    saida.cabecalhosReais.push({ coluna: c + 1, nome: col.cabecalhos[c] });
+  }
+  saida.posicaoDoCa = col.ca || null;
+  saida.posicaoDaValidade = col.validade || null;
+  saida.totalDeColunas = col.largura;
+
+  if (!col.sku) { saida.erro = 'Não achei a coluna do SKU.'; return saida; }
+  if (!col.ca) {
+    saida.recado = 'A coluna do CA não existe: não há como estar desalinhada.';
+    saida.ok = true; saida.tortas = []; saida.quantas = 0;
+    return saida;
+  }
+
+  /* a coluna logo depois do CA é a que foi empurrada */
+  var vizinha = (col.ca + 1 <= col.largura) ? col.ca + 1 : 0;
+  saida.colunaVizinha = vizinha ? col.cabecalhos[vizinha - 1] : null;
+
+  var ult = aba.getLastRow();
+  var tortas = [], suspeitas = [], total = 0;
+  if (ult >= 2) {
+    var dados = aba.getRange(2, 1, ult - 1, col.largura).getValues();
+    for (var i = 0; i < dados.length; i++) {
+      total++;
+      var vCa = AP_ITENSCA_lp_(dados[i][col.ca - 1]);
+      if (!vCa) continue;
+      if (/^[0-9]{3,7}$/.test(vCa)) continue;          /* CA de verdade: tudo bem */
+
+      var vViz = vizinha ? AP_ITENSCA_lp_(dados[i][vizinha - 1]) : '';
+      var achado = { linha: i + 2,
+                     sku: AP_ITENSCA_lp_(dados[i][col.sku - 1]),
+                     noCa: vCa,
+                     naVizinha: vViz,
+                     vizinhaVazia: !vViz };
+      /* as duas marcas juntas = desalinhamento */
+      if (!vViz || AP_ITENSCA_chave_(vViz) === AP_ITENSCA_chave_(vCa)) tortas.push(achado);
+      else suspeitas.push(achado);
+    }
+  }
+
+  saida.linhasLidas = total;
+  saida.quantas = tortas.length;
+  saida.tortas = tortas.slice(0, 50);
+  saida.suspeitas = suspeitas.slice(0, 50);
+  saida.resumo = tortas.length
+    ? tortas.length + ' linha(s) com assinatura de DESALINHAMENTO: a coluna do CA ' +
+      'contém o valor que deveria estar em "' + (saida.colunaVizinha || '?') + '". ' +
+      'Rode AP_ITENSCA_backup() antes de consertar qualquer uma.'
+    : 'Nenhuma linha com assinatura de desalinhamento.' +
+      (suspeitas.length ? ' Mas há ' + suspeitas.length +
+        ' com algo estranho na coluna do CA — confira na mão.' : '');
+  saida.ok = true;
+  return saida;
+}
+
+/* ============================================================
    3. CRIAR AS COLUNAS — você roda, de propósito, uma vez só
    ============================================================ */
 /**
@@ -415,6 +540,10 @@ function AP_ITENSCA_pelaTela(json) {
       r = AP_ITENSCA_criarColunas();
     } else if (o.acao === 'conferir') {
       r = AP_ITENSCA_conferirDados_();
+    } else if (o.acao === 'relatorio') {
+      r = AP_ITENSCA_relatorioDados_();
+    } else if (o.acao === 'backup') {
+      r = AP_ITENSCA_backup();
     } else {
       r = { ok: false, mensagem: 'ação desconhecida: ' + AP_ITENSCA_lp_(o.acao) };
     }
@@ -436,6 +565,9 @@ function onOpen() {
     SpreadsheetApp.getUi()
       .createMenu('CA dos itens')
       .addItem('Conferir as colunas do CA', 'AP_ITENSCA_conferir')
+      .addItem('Relatório de desalinhamento', 'AP_ITENSCA_relatorioDesalinhamento')
+      .addSeparator()
+      .addItem('Fazer backup da aba de itens', 'AP_ITENSCA_backup')
       .addItem('Criar as colunas no fim da aba', 'AP_ITENSCA_criarColunas')
       .addToUi();
   } catch (e) { /* sem interface (execução automática): tudo bem */ }
