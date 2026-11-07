@@ -65134,7 +65134,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 404 · 07/11";
+var ALMOXA_VERSAO = "sistema 405 · 07/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -104827,8 +104827,27 @@ emissao: hoje,
         mandados.forEach(function (sku) {
           var v = depois.mapa[sku];
           if (!v) { perdidos.push({ sku: sku, motivo: "sumiu da lista do Core depois de salvar" }); return; }
-          var caVolta = caK(v.ca);
-          var valVolta = lp(v.caValidade || v.caVencimento || v.validadeCa);
+          /* [COMOESCREVEU] 07/11 — O CABEÇALHO PODE ESTAR EM MAIÚSCULA
+             ------------------------------------------------------------
+             Ele foi acrescentar a coluna na planilha e escreveu "CA", em
+             maiúsculas. Faz sentido: CA é sigla. Mas o Core usa o texto do
+             cabeçalho como nome do campo, então o registro volta com a
+             chave "CA" — e esta conferência, que olhava só "ca", diria
+             "não gravei" em cima de uma gravação que deu certo.
+             Dizer que falhou o que funcionou é tão ruim quanto o
+             contrário: ele ia mexer na planilha de novo atrás de um
+             defeito que não existe. Agora aceito como ele escreveu. */
+          var vCa = "";
+          try {
+            var nomesCa = ["ca", "CA", "Ca", "numeroCa", "numeroCA", "caNumero"];
+            for (var nc = 0; nc < nomesCa.length; nc++) {
+              if (lp(v[nomesCa[nc]])) { vCa = lp(v[nomesCa[nc]]); break; }
+            }
+          } catch (e) { vCa = lp(v.ca); }
+          var caVolta = caK(vCa);
+          var valVolta = lp(v.caValidade || v.caVencimento || v.validadeCa ||
+                             v.CAVALIDADE || v.caValidadeCA || v["CA Validade"] ||
+                             v.validadeCA || v.VALIDADE_CA);
           if (caVolta !== caK(ca)) {
             /* [QUALDASDUAS] 07/11 — DIZER QUAL DAS DUAS CAUSAS É
                ------------------------------------------------------
@@ -104856,7 +104875,7 @@ emissao: hoje,
             var campos = "";
             try { campos = Object.keys(v).slice(0, 14).join(", "); } catch (e) {}
             perdidos.push({ sku: sku, pista: pista, campos: campos, motivo: ca
-              ? 'o Core aceitou mas releu o CA como "' + (lp(v.ca) || "vazio") + '". ' +
+              ? 'o Core aceitou mas releu o CA como "' + (vCa || "vazio") + '". ' +
                 pista + (campos ? " · campos que voltaram: " + campos : "")
               : "o CA continua lá depois de eu mandar apagar" });
             return;
