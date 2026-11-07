@@ -65134,7 +65134,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 406 · 07/11";
+var ALMOXA_VERSAO = "sistema 407 · 07/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -108921,6 +108921,180 @@ emissao: hoje,
     try {
       document.addEventListener("DOMContentLoaded", function () { C.ligar(); });
       setTimeout(function () { C.ligar(); }, 2000);
+    } catch (e) {}
+  }
+})();
+
+/* ============================================================
+   [CAPELOGS]  ·  07/11  ·  busca: [CAPELOGS]
+   ------------------------------------------------------------
+   LIGA O BOTÃO "SALVAR CA" NO ARQUIVO NOVO DO APPS SCRIPT.
+
+   O módulo itens do Core grava a linha POR POSIÇÃO e não conhece
+   o campo do CA — foi o que embaralhou a linha do óculos. O
+   arquivo ALMOXA_ITENS_CA.gs resolve isso gravando PELO NOME da
+   coluna, uma célula por vez.
+
+   Este bloco é só a ponte: quando o ALMOX-PRO está sendo servido
+   pelo /exec, ele chama AP_ITENSCA_pelaTela em vez de depender do
+   itens.salvar para o CA.
+
+   A ORDEM IMPORTA, e é esta:
+
+     1. tenta o arquivo novo. Deu certo, acabou.
+     2. não deu — porque não está instalado, ou porque a página
+        está no GitHub Pages, onde google.script.run não existe —
+        cai no caminho de sempre, o [CAFICA], que continua
+        conferindo e continua avisando quando não grava.
+
+   Ou seja: ninguém fica pior que antes. Sem o arquivo instalado,
+   o sistema se comporta exatamente como hoje.
+
+   O QUE ELE NÃO FAZ:
+   - não diz que gravou sem o Apps Script confirmar. A resposta de
+     lá já vem com a releitura feita;
+   - não cria coluna, não cria item, não apaga nada;
+   - não some com o aviso do [CAFICA]. Se o arquivo novo falhar, o
+     aviso antigo aparece igual, com o motivo de verdade.
+
+   CAPELOGS.restaurar() desfaz.
+   ============================================================ */
+(function () {
+  "use strict";
+
+  if (window.CAPELOGS && window.CAPELOGS.ligado) return;
+
+  var P = {
+    nome: "CAPELOGS",
+    versao: "07/11",
+    ligado: false,
+    antiga: null,
+    peloGs: 0,          /* gravações feitas pelo arquivo novo */
+    peloCore: 0,        /* vezes que caiu no caminho antigo */
+    semGs: 0,           /* vezes que o google.script.run não existia */
+    ultimo: null
+  };
+
+  function lp(v) { return (v === null || v === undefined) ? "" : String(v).trim(); }
+  function lista_(v) { return Object.prototype.toString.call(v) === "[object Array]" ? v : []; }
+
+  P.temGs = function () {
+    try {
+      return !!(typeof google !== "undefined" && google.script && google.script.run);
+    } catch (e) { return false; }
+  };
+
+  /* a chamada ao Apps Script, embrulhada em promessa */
+  P.gs = function (obj) {
+    return new Promise(function (resolve) {
+      if (!P.temGs()) {
+        P.semGs++;
+        resolve({ ok: false, semGs: true,
+          mensagem: "esta página não está sendo servida pelo Apps Script (/exec)" });
+        return;
+      }
+      try {
+        google.script.run
+          .withSuccessHandler(function (t) {
+            var d = t;
+            if (typeof t === "string") { try { d = JSON.parse(t); } catch (e) { d = null; } }
+            resolve(d || { ok: false, mensagem: "o ALMOXA_ITENS_CA respondeu algo que não entendi" });
+          })
+          .withFailureHandler(function (e) {
+            resolve({ ok: false, semModulo: true,
+              mensagem: lp(e && e.message) || "o arquivo ALMOXA_ITENS_CA.gs não está instalado" });
+          })
+          .AP_ITENSCA_pelaTela(JSON.stringify(obj || {}));
+      } catch (e) {
+        resolve({ ok: false, mensagem: lp(e && e.message) || String(e) });
+      }
+    });
+  };
+
+  /* ------------------------------------------------------------
+     A GRAVAÇÃO: arquivo novo primeiro, caminho antigo depois
+     ------------------------------------------------------------ */
+  P.salvar = function (skus, dados) {
+    var lista = lista_(skus).length ? lista_(skus) : (lp(skus) ? [lp(skus)] : []);
+    var d = dados || {};
+    var ca = lp(d.ca);
+    var validade = lp(d.caValidade || d.validade);
+
+    function antigo(porque) {
+      P.peloCore++;
+      P.ultimo = { via: "core", porque: lp(porque) };
+      return Promise.resolve(P.antiga.call(null, skus, dados));
+    }
+
+    if (!lista.length) return antigo("sem SKU");
+    if (!P.temGs()) return antigo("a página não está no /exec");
+
+    return P.gs({ acao: "gravarVarios", skus: lista, ca: ca, validade: validade })
+      .then(function (r) {
+        /* o arquivo não está lá, ou a aba/coluna não existe:
+           deixo o caminho antigo falar, que ele explica melhor */
+        if (!r || r.semGs || r.semModulo) {
+          return antigo(lp(r && r.mensagem) || "o arquivo não respondeu");
+        }
+        if (r.ok === true) {
+          P.peloGs++;
+          P.ultimo = { via: "ALMOXA_ITENS_CA", feitos: lista_(r.feitos) };
+          /* o catálogo da tela tem que refletir o que foi gravado */
+          try {
+            lista_(window.MOCK && MOCK.itens).forEach(function (i) {
+              if (lista.indexOf(lp(i && i.sku)) > -1) {
+                i.ca = ca;
+                if (validade) i.caValidade = validade;
+              }
+            });
+          } catch (e) {}
+          return { ok: true, conferido: true, viaGs: true,
+                   feitos: lista_(r.feitos), falhas: [],
+                   mensagem: lp(r.mensagem) || "CA gravado pelo ALMOXA_ITENS_CA" };
+        }
+        /* respondeu e recusou: a mensagem DELE é a melhor que existe,
+           porque ela sabe de coluna, de SKU repetido, de aba */
+        P.ultimo = { via: "ALMOXA_ITENS_CA", recusou: lp(r.mensagem) };
+        return { ok: false, conferido: true, viaGs: true,
+                 feitos: lista_(r.feitos),
+                 falhas: lista_(r.falhas).length ? r.falhas
+                       : [{ sku: lista[0], motivo: lp(r.mensagem) }],
+                 mensagem: lp(r.mensagem) || "o ALMOXA_ITENS_CA recusou" };
+      }, function (e) {
+        return antigo(lp(e && e.message) || "erro ao falar com o Apps Script");
+      });
+  };
+
+  P.ligar = function () {
+    if (P.ligado) return false;
+    if (!window.CAFICA || typeof CAFICA.salvar !== "function") return false;
+    P.antiga = CAFICA.salvar;
+    CAFICA.salvar = function (skus, dados) { return P.salvar(skus, dados); };
+    P.ligado = true;
+    return true;
+  };
+
+  P.restaurar = function () {
+    if (typeof P.antiga === "function" && window.CAFICA) CAFICA.salvar = P.antiga;
+    P.ligado = false;
+    return true;
+  };
+
+  P.contas = function () {
+    return { peloGs: P.peloGs, peloCore: P.peloCore, semGs: P.semGs,
+             temGs: P.temGs(), ligado: P.ligado, ultimo: P.ultimo };
+  };
+
+  /* um atalho para diagnóstico, do console: CAPELOGS.conferir() */
+  P.conferir = function () { return P.gs({ acao: "conferir" }); };
+  P.criarColunas = function () { return P.gs({ acao: "criarColunas" }); };
+
+  try { window.CAPELOGS = P; } catch (e) {}
+
+  if (!P.ligar()) {
+    try {
+      document.addEventListener("DOMContentLoaded", function () { P.ligar(); });
+      setTimeout(function () { P.ligar(); }, 2500);
     } catch (e) {}
   }
 })();
