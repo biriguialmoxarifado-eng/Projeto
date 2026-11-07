@@ -2048,7 +2048,26 @@ ts: Date.now()
 };
 return new Promise(function(resolve) {
 var respondido = false;
-var ehEscrita = /^(salvar|criar|excluir|movimentar|entrada|saida|ajustar|decidir|retirar|lancar|pedido|precompra|comentar|vincularCredencial|removerCredencial|definirSenha|login)$/.test(acao);
+/* [QUEMESCREVE] 06/11 — A TARJA QUE DIZIA "15 SEGUNDOS" NUMA GRAVACAO
+   ------------------------------------------------------------
+   Ele mandou a foto de uma tarja laranja: "GRAVACAO NAO
+   CONFIRMADA ... TIMEOUT — O Core nao respondeu em 15 segundos."
+   Quinze segundos e o prazo de LEITURA (CONFIG.coreTimeout).
+   Gravacao tem 45 (coreTimeoutEscrita). Uma gravacao que estoura
+   em 15 nao esperou o prazo dela: o nome da acao nao estava
+   nesta lista, entao ela foi tratada como leitura.
+   A lista tinha 16 verbos. O sistema tem muito mais acao que
+   escreve: entregar e devolver EPI, emitir e reemitir cracha,
+   mudar etapa de pedido, aprovar, transferir, publicar, validar
+   pre-cadastro, vincular patrimonio a nota. Todas essas tinham
+   15 segundos para fazer o que leva mais.
+   Acrescentar um verbo aqui NAO muda o que a acao faz: muda so
+   quanto tempo a tela espera antes de desistir. O risco de
+   incluir um verbo de leitura por engano e esperar 45 em vez de
+   15; o risco de faltar um de escrita e dizer que falhou uma
+   gravacao que estava dando certo — e essa e a pior das duas,
+   porque leva a pessoa a lancar de novo e duplicar. */
+var ehEscrita = /^(salvar|criar|excluir|remover|movimentar|entrada|saida|ajustar|decidir|decidirItens|retirar|lancar|pedido|precompra|comentar|vincularCredencial|removerCredencial|definirSenha|login|alterarStatus|emitir|reemitir|revogar|aprovar|aprovarPrecompra|recusar|validar|devolver|entregar|confirmar|transferir|publicar|restaurar|vincular|desvincular|consolidar|criarReserva|cancelarReserva|reagendar|expirarVencidas|paraFicha|assinatura|adicionarFoto|adicionarInfo|removerFoto|removerInfo|criarSerie|gerarFicha|vincularNota|desvincularNota|enviarDocumento|salvarArte|removerArte|salvarLogo|definirPadrao|duplicar|salvarLote|encerrarLote|abastecer|registrar|bloquear|alternar|exportar|importar|gerar|criarLink|lembrete|liberar|manutencao|capturar|registrarBiometria)$/.test(acao);
 var limite = ehEscrita ? CONFIG.coreTimeoutEscrita : CONFIG.coreTimeout;
 /* [v260] quem sabe que a operação demora pode dizer o prazo dela.
    O OCR é o caso: 15s é curto para ler uma imagem grande, e a tela
@@ -2066,8 +2085,15 @@ resolve({
 ok: false,
 erro: "TIMEOUT",
 codigo: "TIMEOUT",
-mensagem: "O Core não respondeu em " + Math.round(limite / 1e3) + " segundos.",
+/* [QUEMESCREVE] 06/11 — a tarja dizia "não respondeu em 15
+   segundos" e não dizia QUEM não respondeu. Sem o nome da ação
+   não dá para saber se o prazo aplicado foi o certo, e foi
+   exatamente isso que me custou tempo para achar esta causa. */
+mensagem: "O Core não respondeu em " + Math.round(limite / 1e3) +
+  " segundos (" + modulo + "." + acao +
+  (ehEscrita ? ", tratada como gravação" : ", tratada como leitura") + ").",
 escrita: ehEscrita,
+acaoQueFalhou: modulo + "." + acao,
 dica: ehEscrita ? "A operação PODE ter sido gravada. Recarregue e confira antes de repetir." : "Tente novamente em instantes."
 });
 }, limite);
@@ -64889,7 +64915,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 394 · 06/11";
+var ALMOXA_VERSAO = "sistema 396 · 06/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -107291,30 +107317,23 @@ emissao: hoje,
   };
 
   /* ============================================================
-     2. O CONTADOR VIVO
+     2. O CONTADOR — SEM TARJA NA TELA
      ------------------------------------------------------------
-     Sem isto, segundo plano é indistinguível de nada acontecendo
-     — e foi justamente "parece que travou" o que ele relatou.
+     06/11 20:06 — eu tinha posto este contador numa caixa escura
+     fixa no canto da tela. A intenção era boa: segundo plano sem
+     sinal nenhum parece travamento, que era a queixa dele.
+     Mas ele passou o dia inteiro levando tarja na cara, e a minha
+     virou mais uma. Aviso que a pessoa não pediu e não pode
+     desligar vira estorvo, por melhor que seja a intenção.
+     O progresso continua existindo, onde já devia bastar: as
+     faixas se preenchendo uma a uma, que é a coisa de verdade.
+     O número fica guardado aqui para diagnóstico — ASSVIVA.lidas,
+     .achadas, .total — e não aparece em lugar nenhum sozinho.
      ============================================================ */
-  A.aviso = function (texto, fim) {
-    try {
-      var cx = document.getElementById("assVivaAviso");
-      if (!texto) { if (cx) cx.parentNode.removeChild(cx); return; }
-      if (!cx) {
-        cx = document.createElement("div");
-        cx.id = "assVivaAviso";
-        cx.style.cssText = "position:fixed;left:12px;bottom:12px;z-index:3500;" +
-          "background:var(--azul-acao,#0B2A55);color:#fff;border-radius:8px;" +
-          "padding:8px 12px;font-size:12px;max-width:340px;line-height:1.35;" +
-          "box-shadow:0 2px 10px rgba(0,0,0,.25)";
-        document.body.appendChild(cx);
-      }
-      cx.innerHTML = esc_(texto);
-      if (fim) setTimeout(function () {
-        var x = document.getElementById("assVivaAviso");
-        if (x && x.parentNode) x.parentNode.removeChild(x);
-      }, 4000);
-    } catch (e) {}
+  A.ultimoAviso = "";
+  A.aviso = function (texto) {
+    A.ultimoAviso = lp(texto);
+    /* de propósito: nada é desenhado. */
   };
 
   /* ============================================================
