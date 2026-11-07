@@ -12905,12 +12905,28 @@ todasAsFichas_.forEach(function(f) { f.__assIncompleta = true; });
 var comEntrega_ = todasAsFichas_.filter(function(f) { return listaSegura(f.itens).length > 0; });
 var semEntrega_ = todasAsFichas_.filter(function(f) { return listaSegura(f.itens).length === 0; });
 var deFila = comEntrega_.concat(semEntrega_).slice(0, 40);
-var carga = (typeof EPIASS !== "undefined" && EPIASS.lerCadastro)
-? Promise.all(deFila.map(function(f) {
-    return EPIASS.lerCadastro(f).then(function(c) { f.__ass = c; f.__assIncompleta = false; return c; },
-      function() { f.__ass = null; return null; });
-  }))
-: Promise.resolve([]);
+/* [ASSVIVA] 06/11 — A TELA DEIXA DE ESPERAR PELA ASSINATURA
+   ------------------------------------------------------------
+   "quando eu coloco para procurar a assinatura ele trava e nao
+   consegue completar os campos."
+   Aqui estava o travamento. Esta linha lia 40 assinaturas ANTES
+   de desenhar, e so entao a tela aparecia. Cada pessoa que nao
+   esta no indice custa uma ida ao Core; o Core recusa em 15
+   segundos; o orcamento inteiro da tela era 12. Resultado: a
+   tela ficava em "Carregando epi's e uniformes" ate o orcamento
+   estourar, e quase ninguem chegava a ser lido.
+   Pior: o indice de assinaturas tem prazo proprio de 30
+   segundos e le o conjunto de 50 em 50 — doze segundos nunca
+   foram suficientes para ele terminar, e era justamente o
+   indice que ACHA a assinatura (o outro caminho adivinha
+   endereco e erra).
+   Agora NADA de assinatura bloqueia o desenho. A tela abre na
+   hora com as fichas que o Core mandou, e o bloco [ASSVIVA]
+   continua procurando em segundo plano, com o prazo inteiro do
+   indice, repintando cada faixa conforme a rubrica chega.
+   Esperar nunca foi necessario: a faixa ja sabe se dizer
+   "ainda nao conferi". */
+var carga = Promise.resolve([]);
 return comPrazo_(carga, sobra_(), "prazo").then(function() {
 try { EPIASS.__fichasNaTela = listaSegura(fichas); } catch (e) {}
 return epiFichasTela(fichas); });
@@ -64873,7 +64889,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 393 · 06/11";
+var ALMOXA_VERSAO = "sistema 394 · 06/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -107168,6 +107184,242 @@ emissao: hoje,
     try {
       document.addEventListener("DOMContentLoaded", function () { T.ligar(); });
       setTimeout(function () { T.ligar(); }, 1600);
+    } catch (e) {}
+  }
+})();
+
+/* ############################################################
+ * A ASSINATURA QUE CHEGA DEPOIS   ·   busca: [ASSVIVA]
+ * 06/11 — "quando eu coloco para procurar a assinatura ele trava
+ * e não consegue completar os campos... ele tem que buscar as
+ * assinaturas dentro do banco de dados porque muitos itens já
+ * têm assinatura. E por que no painel mostra e na ficha não?"
+ *
+ * A RESPOSTA PARA A PERGUNTA DELE, QUE É A CHAVE DE TUDO
+ *   O painel e a impressão leem a assinatura DE UMA PESSOA, na
+ *   hora em que você abre aquela pessoa. Uma ida, sem pressa,
+ *   sem concorrência. Por isso acertam sempre.
+ *   A lista de fichas lia 40 assinaturas DE UMA VEZ, antes de
+ *   desenhar qualquer coisa. Cada pessoa que não está no índice
+ *   custa uma ida ao Core; o Core recusa em 15 segundos; o
+ *   orçamento inteiro da tela era 12. A conta não fecha: a tela
+ *   ficava em "Carregando EPI's e uniformes" até o orçamento
+ *   estourar, e quase ninguém chegava a ser lido.
+ *   E o índice — que é o caminho que ACHA a assinatura, porque
+ *   o outro adivinha endereço e erra — tem prazo próprio de 30
+ *   segundos e lê o conjunto de 50 em 50. Doze segundos nunca
+ *   foram suficientes para ele terminar.
+ *
+ * O QUE ESTE BLOCO FAZ
+ *   A tela abre NA HORA, com as fichas que o Core mandou, todas
+ *   marcadas como "ainda não conferi" — que é verdade.
+ *   Depois, em segundo plano, ele:
+ *     1. deixa o índice carregar com o prazo inteiro dele;
+ *     2. lê as assinaturas de 4 em 4, sem pressa, começando por
+ *        quem tem entrega de verdade;
+ *     3. repinta A FAIXA DAQUELA PESSOA assim que a rubrica
+ *        chega, sem redesenhar a tela toda;
+ *     4. mostra um contador vivo no rodapé, para você ver que
+ *        está andando e quanto falta.
+ *   Se o Core recusar uma, só aquela fica como "não consegui
+ *   conferir". Uma pessoa lenta não segura mais as outras 39.
+ *
+ * O QUE ELE NÃO FAZ
+ *   NÃO inventa assinatura. NÃO põe a assinatura de uma pessoa
+ *   na ficha de outra — a rubrica só entra na faixa da pessoa
+ *   cuja matrícula ou nome casou. NÃO guarda cópia de assinatura
+ *   em lugar nenhum. NÃO redesenha a tela por baixo da sua mão.
+ * ############################################################ */
+(function assinaturaViva() {
+
+  var A = { ligado: false, rodando: false, lidas: 0, achadas: 0, total: 0, geracao: 0 };
+  try { window.ASSVIVA = A; } catch (e) {}
+
+  var LOTE = 4;            /* quantas de cada vez */
+  var PAUSA = 120;         /* respiro entre lotes, em ms */
+
+  function lp(v) { return String(v === undefined || v === null ? "" : v).trim(); }
+  function lista_(v) {
+    return (typeof listaSegura === "function") ? listaSegura(v) : (Array.isArray(v) ? v : []);
+  }
+  function esc_(v) {
+    if (typeof U !== "undefined" && U && U.esc) return U.esc(v);
+    return lp(v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function chaveDoBotao(f) { return lp((f && (f.matricula || f.colaborador)) || ""); }
+
+  /* ============================================================
+     1. REPINTAR SÓ A FAIXA DAQUELA PESSOA
+     ------------------------------------------------------------
+     Acho pelo mesmo atributo que o botão "Procurar de novo" já
+     usa, subo até a faixa e troco só ela. A tela em volta não
+     se mexe: se você estava no meio de um clique, continua.
+     ============================================================ */
+  A.faixaDe = function (f) {
+    var k = chaveDoBotao(f);
+    if (!k) return null;
+    var alvo = null;
+    try {
+      var bts = document.querySelectorAll("[data-reconsultar-ass]");
+      for (var i = 0; i < bts.length; i++) {
+        if (lp(bts[i].getAttribute("data-reconsultar-ass")) === k) { alvo = bts[i]; break; }
+      }
+    } catch (e) { return null; }
+    if (!alvo) return null;
+    var caixa = alvo.closest ? alvo.closest(".epi-ass-faixa") : null;
+    return caixa || null;
+  };
+
+  A.repintar = function (f) {
+    var caixa = A.faixaDe(f);
+    if (!caixa) return false;
+    var novo = "";
+    try { novo = epiFaixaAssinatura(f) || ""; } catch (e) { return false; }
+    if (!novo) {
+      /* achou e a faixa some: a pessoa assinou e a tela desta
+         versão não desenha faixa nenhuma nesse caso */
+      caixa.parentNode.removeChild(caixa);
+      return true;
+    }
+    var molde = document.createElement("div");
+    molde.innerHTML = novo;
+    var pronta = molde.firstElementChild;
+    if (!pronta) return false;
+    caixa.parentNode.replaceChild(pronta, caixa);
+    return true;
+  };
+
+  /* ============================================================
+     2. O CONTADOR VIVO
+     ------------------------------------------------------------
+     Sem isto, segundo plano é indistinguível de nada acontecendo
+     — e foi justamente "parece que travou" o que ele relatou.
+     ============================================================ */
+  A.aviso = function (texto, fim) {
+    try {
+      var cx = document.getElementById("assVivaAviso");
+      if (!texto) { if (cx) cx.parentNode.removeChild(cx); return; }
+      if (!cx) {
+        cx = document.createElement("div");
+        cx.id = "assVivaAviso";
+        cx.style.cssText = "position:fixed;left:12px;bottom:12px;z-index:3500;" +
+          "background:var(--azul-acao,#0B2A55);color:#fff;border-radius:8px;" +
+          "padding:8px 12px;font-size:12px;max-width:340px;line-height:1.35;" +
+          "box-shadow:0 2px 10px rgba(0,0,0,.25)";
+        document.body.appendChild(cx);
+      }
+      cx.innerHTML = esc_(texto);
+      if (fim) setTimeout(function () {
+        var x = document.getElementById("assVivaAviso");
+        if (x && x.parentNode) x.parentNode.removeChild(x);
+      }, 4000);
+    } catch (e) {}
+  };
+
+  /* ============================================================
+     3. A CORRIDA EM SEGUNDO PLANO
+     ------------------------------------------------------------
+     Quem tem entrega vai na frente: a ficha de verdade importa
+     mais que a de quem ainda não recebeu nada.
+     ============================================================ */
+  A.filaDe = function (fichas) {
+    var todas = lista_(fichas).filter(function (f) {
+      return f && !(f.__ass && f.__ass.tem);     /* quem já tem, não releio */
+    });
+    var com = todas.filter(function (f) { return lista_(f.itens).length > 0; });
+    var sem = todas.filter(function (f) { return lista_(f.itens).length === 0; });
+    return com.concat(sem);
+  };
+
+  A.correr = function (fichas) {
+    if (typeof EPIASS === "undefined" || !EPIASS.lerCadastro) return Promise.resolve(null);
+    var minha = ++A.geracao;                  /* trocou de tela? esta corrida morre */
+    var fila = A.filaDe(fichas);
+    A.rodando = true; A.lidas = 0; A.achadas = 0; A.total = fila.length;
+
+    if (!fila.length) { A.rodando = false; return Promise.resolve({ lidas: 0, achadas: 0 }); }
+
+    A.aviso("Procurando as assinaturas no servidor… 0 de " + fila.length +
+            ". A ficha já está aberta; as rubricas vão aparecendo.");
+
+    /* o índice primeiro, com o prazo INTEIRO dele — é ele que acha */
+    var indice = (EPIASS.carregarIndice)
+      ? Promise.resolve(EPIASS.carregarIndice()).then(function () { return true; },
+                                                      function () { return true; })
+      : Promise.resolve(true);
+
+    return indice.then(function () {
+      function lote(i) {
+        if (minha !== A.geracao) { A.rodando = false; return null; }   /* saiu da tela */
+        if (i >= fila.length) {
+          A.rodando = false;
+          A.aviso(A.achadas
+            ? A.achadas + " assinatura(s) encontrada(s) de " + fila.length + " conferida(s)."
+            : "Conferi " + fila.length + " ficha(s); nenhuma tinha assinatura no servidor.", true);
+          return { lidas: A.lidas, achadas: A.achadas };
+        }
+        var pedaco = fila.slice(i, i + LOTE);
+        return Promise.all(pedaco.map(function (f) {
+          return Promise.resolve(EPIASS.lerCadastro(f)).then(function (c) {
+            f.__ass = c || null;
+            f.__assIncompleta = false;
+            A.lidas++;
+            if (c && c.tem) A.achadas++;
+            if (minha === A.geracao) A.repintar(f);
+            return c;
+          }, function () {
+            /* esta falhou: ela continua NAO CONFERIDA, e só ela.
+               Uma pessoa lenta não segura as outras. */
+            f.__assIncompleta = true;
+            A.lidas++;
+            return null;
+          });
+        })).then(function () {
+          if (minha !== A.geracao) { A.rodando = false; return null; }
+          A.aviso("Procurando as assinaturas no servidor… " + A.lidas + " de " + fila.length +
+                  (A.achadas ? " · " + A.achadas + " encontrada(s)" : ""));
+          return new Promise(function (r) { setTimeout(r, PAUSA); }).then(function () {
+            return lote(i + LOTE);
+          });
+        });
+      }
+      return lote(0);
+    });
+  };
+
+  /* ============================================================
+     4. O ENXERTO
+     ============================================================ */
+  A.ligar = function () {
+    if (A.ligado) return false;
+    if (typeof epiFichasTela !== "function") return false;
+    A.telaAntiga = epiFichasTela;
+    window.epiFichasTela = function (fichas) {
+      var html = A.telaAntiga.apply(this, arguments);
+      /* depois que o desenho estiver na tela, e não antes */
+      setTimeout(function () {
+        try {
+          var naTela = (typeof EPIASS !== "undefined" && EPIASS.__fichasNaTela)
+            ? EPIASS.__fichasNaTela : fichas;
+          A.correr(naTela);
+        } catch (e) {}
+      }, 250);
+      return html;
+    };
+    A.ligado = true;
+    return true;
+  };
+  A.restaurar = function () {
+    if (A.telaAntiga) window.epiFichasTela = A.telaAntiga;
+    A.geracao++;                                   /* mata a corrida em curso */
+    A.ligado = false;
+  };
+
+  if (!A.ligar()) {
+    try {
+      document.addEventListener("DOMContentLoaded", function () { A.ligar(); });
+      setTimeout(function () { A.ligar(); }, 1800);
     } catch (e) {}
   }
 })();
