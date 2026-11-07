@@ -26744,10 +26744,40 @@ publicoVersoes: painelCfg.publicoVersoes
     versao: "07/11",
     ligado: false,
 
+    /* ------------------------------------------------------------
+       A JANELA DA CARONA  ·  consertado em 07/11, mesmo dia
+       ------------------------------------------------------------
+       ISTO AQUI FOI UM DEFEITO MEU, E GRAVE.
+
+       Na primeira versão deste bloco a carona não tinha prazo: se
+       uma leitura estava no ar, ela servia de carona, não importa
+       há quanto tempo.
+
+       Num Core lento isso virava uma armadilha. A leitura do boot
+       fica pendurada esperando os 15 segundos do prazo. O usuário
+       entra no sistema. A tela pede o painel de novo — e, em vez
+       de uma pergunta nova, já autenticado, ela era PRESA na
+       leitura do boot, que começou antes do login e que já estava
+       condenada. A tela ficava esperando por uma resposta que não
+       vinha. Era isso que deixava a tela sem aparecer nada.
+
+       O conserto é o prazo. O problema que eu vim resolver eram
+       três chamadas em 28 MILISSEGUNDOS. Uma carona em cima de uma
+       leitura de 8 segundos não ajuda ninguém: só acorrenta quem
+       chegou agora a um pedido velho.
+
+       Então a carona só vale enquanto a leitura é recém-saída.
+       Passou da janela, quem chega abre pedido próprio e limpo —
+       a leitura antiga continua o caminho dela, com os donos dela,
+       e ninguém mais se amarra nela.
+       ------------------------------------------------------------ */
+    JANELA_MS: 2000,
+
     /* o estado da carona */
     voando: null,        /* a promessa que está no ar, ou null */
     voandoDesde: 0,      /* quando ela começou */
     ultimaGravacao: 0,   /* quando a última gravação COMEÇOU */
+    velhas: 0,           /* caronas negadas por a leitura estar velha */
 
     /* números, para provar e para diagnóstico */
     idas: 0,             /* idas de verdade à rede */
@@ -26768,14 +26798,23 @@ publicoVersoes: painelCfg.publicoVersoes
     if (typeof U.antiga !== "function") return Promise.resolve(null);
 
     if (U.voando) {
-      /* a regra dura: a leitura no ar só serve de carona se ela
-         começou DEPOIS da última gravação. Senão ela é velha,
-         e quem está chamando agora pode ser a conferência. */
-      if (U.ultimaGravacao <= U.voandoDesde) {
+      var idade = agora_() - U.voandoDesde;
+
+      /* 1ª regra: a leitura no ar só serve de carona se ela começou
+         DEPOIS da última gravação. Senão quem chama agora pode ser
+         a releitura de conferência, e ela não pode ver o passado. */
+      if (U.ultimaGravacao > U.voandoDesde) {
+        U.recusadas++;
+      }
+      /* 2ª regra: e ela tem que ser RECENTE. Uma leitura pendurada
+         num Core lento não é carona, é corrente. */
+      else if (idade > U.JANELA_MS) {
+        U.velhas++;
+      }
+      else {
         U.caronas++;
         return U.voando;
       }
-      U.recusadas++;
       /* não cancelo a que está no ar — ela tem donos próprios.
          Só não ofereço carona nela. */
     }
@@ -26847,7 +26886,8 @@ publicoVersoes: painelCfg.publicoVersoes
   /* o relatório, para o diagnóstico — nada desenhado na tela */
   U.contas = function () {
     return { idas: U.idas, caronas: U.caronas, recusadas: U.recusadas,
-             erros: U.erros, noAr: !!U.voando };
+             velhas: U.velhas, erros: U.erros, noAr: !!U.voando,
+             idadeNoAr: U.voando ? (agora_() - U.voandoDesde) : 0 };
   };
 
   try { window.UMPAINEL = U; } catch (e) {}
@@ -26863,7 +26903,6 @@ publicoVersoes: painelCfg.publicoVersoes
     } catch (e) {}
   }
 })();
-
 
 /* ============================================================
    [v237] POR QUE A VITRINE VIAJA DENTRO DE "conteudo"
@@ -65095,7 +65134,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 399 · 07/11";
+var ALMOXA_VERSAO = "sistema 400 · 07/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
