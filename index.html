@@ -65134,7 +65134,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 405 · 07/11";
+var ALMOXA_VERSAO = "sistema 406 · 07/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -104867,11 +104867,48 @@ emissao: hoje,
                            Object.prototype.hasOwnProperty.call(v, "CA") ||
                            Object.prototype.hasOwnProperty.call(v, "numeroCa");
             } catch (e) { temChaveCa = false; }
-            var pista = temChaveCa
-              ? "o campo do CA EXISTE no registro e voltou vazio — " +
-                "quem está descartando o valor é o itens.salvar do seu Core"
-              : "o registro voltou SEM o campo do CA — " +
-                "é bem provável que falte a coluna do CA na aba de itens da planilha";
+            /* [COLUNATORTA] 07/11 — A COLUNA ESTÁ DESALINHADA
+               ------------------------------------------------------
+               Ele acrescentou a coluna do CA NO MEIO da aba. O Core
+               LÊ pelo cabeçalho, mas GRAVA por posição, na ordem
+               antiga: o valor de "categoria" caiu na casa do CA, e
+               daí para a frente a linha inteira andou uma coluna.
+               O sintoma na tela foi o CA voltar como "EPI".
+               Isto não é o CA não gravar: é a LINHA estar torta, e
+               é muito mais grave — cada gravação embaralha o
+               registro. Então eu paro de falar de CA e aviso disto,
+               que é o que tem de ser consertado primeiro.
+               A prova: o que voltou no CA é, letra por letra, o
+               valor de outro campo do mesmo registro. */
+            var ecoDe = "";
+            try {
+              var eco = ["categoria", "subcategoria", "unidade", "marca",
+                         "modelo", "ncm", "fornecedor", "localizacao",
+                         "descricao", "descricaoComplementar"];
+              for (var ec = 0; ec < eco.length; ec++) {
+                if (vCa && lp(v[eco[ec]]) &&
+                    lp(v[eco[ec]]).toUpperCase() === vCa.toUpperCase()) {
+                  ecoDe = eco[ec]; break;
+                }
+                /* o eco também aparece quando o campo vizinho FICOU VAZIO
+                   porque o valor dele andou para a casa do CA */
+              }
+              if (!ecoDe && vCa && !/^[0-9.\-\/ ]+$/.test(vCa)) ecoDe = "(outra coluna)";
+            } catch (e) { ecoDe = ""; }
+
+            var pista = ecoDe
+              ? "ATENÇÃO — a coluna do CA está DESALINHADA na planilha. " +
+                "O que voltou no CA (\"" + vCa + "\") é o conteúdo de outra coluna" +
+                (ecoDe !== "(outra coluna)" ? " (" + ecoDe + ")" : "") + ". " +
+                "O seu Core LÊ pelo nome do cabeçalho, mas GRAVA por POSIÇÃO, na ordem " +
+                "antiga — então a coluna nova no MEIO da aba empurrou os valores e esta " +
+                "linha inteira ficou torta. NÃO salve mais itens até mover a coluna do " +
+                "CA para o FIM da aba: cada gravação embaralha o registro."
+              : temChaveCa
+                ? "o campo do CA EXISTE no registro e voltou vazio — " +
+                  "quem está descartando o valor é o itens.salvar do seu Core"
+                : "o registro voltou SEM o campo do CA — " +
+                  "é bem provável que falte a coluna do CA na aba de itens da planilha";
             var campos = "";
             try { campos = Object.keys(v).slice(0, 14).join(", "); } catch (e) {}
             perdidos.push({ sku: sku, pista: pista, campos: campos, motivo: ca
