@@ -65134,7 +65134,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 401 · 07/11";
+var ALMOXA_VERSAO = "sistema 403 · 07/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -108215,7 +108215,34 @@ emissao: hoje,
     telaAntiga: null,
     pedidos: 0,
     achadas: 0,
-    ultima: null
+    ultima: null,
+
+    /* ------------------------------------------------------------
+       A MEMÓRIA DA SESSÃO  ·  07/11, depois do retorno dele
+       ------------------------------------------------------------
+       "está aparecendo, só que demora um pouquinho para processar."
+
+       Demora porque cada pessoa custa UMA viagem ao Core — é o
+       preço de usar a porta da impressão, a que funciona. O que
+       não precisa é pagar essa viagem DUAS vezes pela mesma
+       pessoa: ele abre o Renan, olha, vai no Ademir, volta no
+       Renan. Na segunda vez a rubrica já é conhecida.
+
+       REGRA, e ela é a mesma que eu venho seguindo o tempo todo:
+       guardo o ACHADO, nunca o não-achado.
+
+       Uma rubrica encontrada é um fato estável — ela não some do
+       cadastro. Já "esta pessoa não tem assinatura" é justamente
+       o que muda: ela assina no campo hoje à tarde. Se eu
+       guardasse o não-achado, a tela repetiria "não tem" até
+       recarregar a página — que foi exatamente o defeito que eu
+       arranquei do EPIASS na v318. Não vou reintroduzi-lo aqui.
+
+       Também não guardo "não consegui conferir": dúvida guardada
+       vira mentira na segunda vez que é lida.
+       ------------------------------------------------------------ */
+    lembradas: {},
+    deMemoria: 0
   };
 
   function lp(v) { return (v === null || v === undefined) ? "" : String(v).trim(); }
@@ -108269,7 +108296,11 @@ emissao: hoje,
         '<b style="font-size:12px;display:block">Assinatura cadastrada</b>' +
         '<div class="small" style="color:var(--texto-3);font-size:10.5px">' +
         (dados.origem ? esc(dados.origem) : "cadastro") +
-        (dados.quando ? " · " + esc(dataBr(dados.quando)) : "") + "</div></div>";
+        (dados.quando ? " · " + esc(dataBr(dados.quando)) : "") + "</div>" +
+        '<button data-asspainel-tentar="1" style="all:unset;cursor:pointer;display:block;' +
+        'margin:6px auto 0;font-size:10.5px;color:var(--texto-3);text-decoration:underline">' +
+        (dados.daMemoria ? "lida desta sessão · conferir no servidor" : "conferir de novo") +
+        "</button></div>";
     }
 
     if (estado === "ambiguo") {
@@ -108299,7 +108330,33 @@ emissao: hoje,
   /* ------------------------------------------------------------
      A BUSCA — pela MESMA porta da impressão
      ------------------------------------------------------------ */
-  A.buscar = function (f) {
+  /* a chave da memória: matrícula sempre que houver, porque nome
+     se repete. Sem matrícula, o nome serve — mas aí a própria
+     busca já recusa escolher quando há homônimo, então não corro
+     o risco de guardar a rubrica de outra pessoa. */
+  A.chaveDe = function (f) {
+    var m = lp(f && f.matricula).replace(/\D+/g, "");
+    if (m) return "m:" + m;
+    var n = lp(f && (f.nome || f.colaborador)).toUpperCase().replace(/\s+/g, " ");
+    return n ? "n:" + n : "";
+  };
+
+  A.esquecer = function (f) {
+    var k = A.chaveDe(f);
+    if (k && A.lembradas[k]) delete A.lembradas[k];
+  };
+
+  A.buscar = function (f, deNovo) {
+    var chave = A.chaveDe(f);
+
+    /* a memória só tem ACHADOS — ver a nota lá em cima */
+    if (!deNovo && chave && A.lembradas[chave]) {
+      A.deMemoria++;
+      var g = A.lembradas[chave];
+      return Promise.resolve({ estado: "tem", imagem: g.imagem, origem: g.origem,
+                               quando: g.quando, daMemoria: true });
+    }
+
     A.pedidos++;
     if (typeof EPIASS === "undefined" || !EPIASS || typeof EPIASS.lerCadastro !== "function") {
       return Promise.resolve({ estado: "naoSei",
@@ -108323,7 +108380,11 @@ emissao: hoje,
         }
         A.achadas++;
         var d = (c.dados || {});
-        return { estado: "tem", imagem: img, origem: d.origem, quando: d.cadastradaEm || d.em };
+        var achado = { imagem: img, origem: d.origem, quando: d.cadastradaEm || d.em };
+        /* guardo SÓ isto: o achado. Nunca o contrário. */
+        if (chave) A.lembradas[chave] = achado;
+        return { estado: "tem", imagem: achado.imagem, origem: achado.origem,
+                 quando: achado.quando };
       }
       /* só digo "não tem" quando a busca CHEGOU AO FIM sem erro */
       if (c && c.ok === true) return { estado: "naoTem" };
@@ -108362,27 +108423,30 @@ emissao: hoje,
 
     var caixa = document.createElement("div");
     caixa.setAttribute("data-asspainel", "1");
-    caixa.innerHTML = A.caixa("procurando");
     col.appendChild(caixa);
 
-    A.buscar(f).then(function (r) {
-      /* se ele já trocou de pessoa, não pinto por cima */
-      if (!caixa.parentNode) return;
-      caixa.innerHTML = A.caixa(r.estado, r);
-      var btn = caixa.querySelector("[data-asspainel-tentar]");
-      if (btn) {
-        btn.addEventListener("click", function (ev) {
-          try { ev.preventDefault(); ev.stopPropagation(); } catch (e) {}
-          caixa.innerHTML = A.caixa("procurando");
-          A.buscar(f).then(function (r2) {
-            if (!caixa.parentNode) return;
-            caixa.innerHTML = A.caixa(r2.estado, r2);
-            var b2 = caixa.querySelector("[data-asspainel-tentar]");
-            if (b2) b2.addEventListener("click", function () { A.encaixar(f, 0); });
+    /* uma função só, que se repinta — e que o botão reusa, em vez
+       de eu ir aninhando um tratador dentro do outro */
+    function pintar(deNovo) {
+      var daMemoria = !deNovo && !!(A.chaveDe(f) && A.lembradas[A.chaveDe(f)]);
+      /* se já sei a resposta, não pisco "procurando" na cara dele */
+      if (!daMemoria) caixa.innerHTML = A.caixa("procurando");
+
+      A.buscar(f, deNovo).then(function (r) {
+        /* se ele já trocou de pessoa, não pinto por cima */
+        if (!caixa.parentNode) return;
+        caixa.innerHTML = A.caixa(r.estado, r);
+        var btn = caixa.querySelector("[data-asspainel-tentar]");
+        if (btn) {
+          btn.addEventListener("click", function (ev) {
+            try { ev.preventDefault(); ev.stopPropagation(); } catch (e) {}
+            A.esquecer(f);           /* conferir de novo é ir no servidor mesmo */
+            pintar(true);
           });
-        });
-      }
-    });
+        }
+      });
+    }
+    pintar(false);
   };
 
   /* ------------------------------------------------------------
@@ -108415,7 +108479,9 @@ emissao: hoje,
   };
 
   A.contas = function () {
-    return { pedidos: A.pedidos, achadas: A.achadas, ligado: A.ligado };
+    var n = 0; for (var k in A.lembradas) { if (A.lembradas.hasOwnProperty(k)) n++; }
+    return { pedidos: A.pedidos, achadas: A.achadas, deMemoria: A.deMemoria,
+             lembradas: n, ligado: A.ligado };
   };
 
   try { window.ASSPAINEL = A; } catch (e) {}
@@ -108424,6 +108490,173 @@ emissao: hoje,
     try {
       document.addEventListener("DOMContentLoaded", function () { A.ligar(); });
       setTimeout(function () { A.ligar(); }, 2000);
+    } catch (e) {}
+  }
+})();
+/* ============================================================
+   [RECHONESTO]  ·  07/11  ·  busca: [RECHONESTO]
+   ------------------------------------------------------------
+   A COLUNA "RECEBIMENTO" DA FICHA DE EPI
+
+   Na foto que ele mandou hoje, a ficha do Renan tem seis
+   entregas — 06/11, 03/11, 25/10, 25/10, 25/10, 25/10 — e as
+   seis mostram EXATAMENTE A MESMA RUBRICA.
+
+   É a rubrica do cadastro, colada em toda linha. Quer dizer que
+   uma entrega de 25 de outubro está exibindo a assinatura
+   registrada depois, como se a pessoa tivesse assinado por
+   aquela entrega. Numa auditoria de EPI é justamente essa
+   coluna que vale, e ela estava afirmando uma coisa que não
+   aconteceu.
+
+   A regra é dele, do prompt do motor de assinaturas:
+
+     "Não usar a última assinatura do colaborador como
+      substituta de uma assinatura histórica de outra entrega."
+
+   Perguntei como ele queria resolver. Na coluna ele não teve
+   preferência; sobre o quadro de identificação ele respondeu
+   "aparecendo na parte superior e nos campos também". Ou seja:
+   quer ver rubrica nos dois lugares.
+
+   Então não é apagar — é SEPARAR. As duas coisas aparecem, e
+   cada uma diz o que é:
+
+     1. a entrega foi assinada no campo  → a rubrica DAQUELA
+        entrega, nítida, com "assinada no recebimento" e a data
+     2. não foi, mas a pessoa tem rubrica no cadastro → a
+        rubrica aparece ESMAECIDA e escrito "rubrica do
+        cadastro", que é o que ela é
+     3. não tem nenhuma das duas → segue como era: o crachá, ou
+        "assinar à mão"
+
+   O esmaecido não é enfeite: é o que faz a diferença sobreviver
+   à impressão em preto e branco, que é como essa ficha é
+   arquivada.
+
+   NÃO mexe no quadro de identificação do alto da ficha — lá a
+   rubrica do cadastro está certa, porque ela identifica a
+   pessoa e não afirma recebimento. Era o que ele pediu para
+   manter.
+
+   RECHONESTO.restaurar() desfaz.
+   ============================================================ */
+(function () {
+  "use strict";
+
+  if (window.RECHONESTO && window.RECHONESTO.ligado) return;
+
+  var R = {
+    nome: "RECHONESTO",
+    versao: "07/11",
+    ligado: false,
+    antiga: null,
+    daEntrega: 0,      /* linhas com assinatura da própria entrega */
+    doCadastro: 0,     /* linhas com a rubrica do cadastro, marcada */
+    semNada: 0
+  };
+
+  function lp(v) { return (v === null || v === undefined) ? "" : String(v).trim(); }
+  function esc(v) {
+    return lp(v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  /* a assinatura DA ENTREGA, se a linha tiver uma.
+     Mesmos campos que o MAB procura — uso o dele quando existe,
+     para não manter duas listas que podem divergir. */
+  R.daLinha = function (item) {
+    try {
+      if (window.MAB && typeof MAB.daEntrega === "function") {
+        var r = MAB.daEntrega(item);
+        if (r && r.tem) return { tem: true, imagem: r.imagem, quando: r.quando };
+      }
+    } catch (e) {}
+    var i = item || {};
+    var bruto = lp(i.assinatura || i.assinaturaRecebimento || i.recebimentoAssinatura ||
+                   i.rubrica || (i.recebimento && i.recebimento.assinatura));
+    if (bruto.length < 200) return { tem: false };
+    if (!/^data:image\//i.test(bruto) && !/^https?:\/\//i.test(bruto)) {
+      if (!/^[A-Za-z0-9+/=\s]+$/.test(bruto)) return { tem: false };
+      bruto = "data:image/png;base64," + bruto.replace(/\s+/g, "");
+    }
+    return { tem: true, imagem: bruto, quando: lp(i.assinadaEm || i.entrega || i.data) };
+  };
+
+  R.ligar = function () {
+    if (R.ligado) return false;
+    if (typeof window.epiRubricaDoItem !== "function") return false;
+
+    R.antiga = window.epiRubricaDoItem;
+
+    window.epiRubricaDoItem = function (f, i) {
+      var cracha = "";
+      try {
+        var p = (typeof fichaDadosPessoa_ === "function") ? fichaDadosPessoa_(f) : {};
+        cracha = (p && p.cracha) || "";
+      } catch (e) {}
+
+      var dia = "";
+      try { dia = (i && i.entrega && typeof U !== "undefined" && U.data) ? U.data(i.entrega) : ""; }
+      catch (e) { dia = ""; }
+
+      /* 1 · a assinatura DESTA entrega: é a que vale */
+      var minha = R.daLinha(i);
+      if (minha.tem) {
+        R.daEntrega++;
+        return '<div class="epi-rec">' +
+          '<img class="epi-rec-ass" src="' + esc(minha.imagem) + '" alt="">' +
+          '<small><b>assinada no recebimento</b>' +
+          (cracha ? " · Crachá " + esc(cracha) : "") +
+          (dia ? " · " + esc(dia) : "") + "</small></div>";
+      }
+
+      /* 2 · não tem. Resta a rubrica do cadastro — e ela entra
+             MARCADA, nunca passando por assinatura de entrega. */
+      var c = null;
+      try { c = (typeof epiAssDaFicha_ === "function") ? epiAssDaFicha_(f) : null; }
+      catch (e) { c = null; }
+      var img = "";
+      try { img = lp(c && c.dados && (c.dados.imagem || c.dados.assinatura)); } catch (e) {}
+
+      if (img) {
+        R.doCadastro++;
+        return '<div class="epi-rec" title="Esta entrega não foi assinada no campo. ' +
+          'A imagem é a rubrica cadastrada da pessoa, mostrada apenas para identificação.">' +
+          '<img class="epi-rec-ass" src="' + esc(img) + '" alt="" ' +
+          'style="opacity:.42;filter:grayscale(1)">' +
+          '<small style="font-style:italic">rubrica do cadastro' +
+          (cracha ? " · Crachá " + esc(cracha) : "") + "</small></div>";
+      }
+
+      /* 3 · nada: como sempre foi */
+      R.semNada++;
+      return '<div class="epi-rec">' +
+        '<span class="epi-rec-vazio"></span>' +
+        '<small>' + (cracha ? "Crachá " + esc(cracha) : "assinar à mão") + "</small></div>";
+    };
+
+    R.ligado = true;
+    return true;
+  };
+
+  R.restaurar = function () {
+    if (typeof R.antiga === "function") window.epiRubricaDoItem = R.antiga;
+    R.ligado = false;
+    return true;
+  };
+
+  R.contas = function () {
+    return { daEntrega: R.daEntrega, doCadastro: R.doCadastro,
+             semNada: R.semNada, ligado: R.ligado };
+  };
+
+  try { window.RECHONESTO = R; } catch (e) {}
+
+  if (!R.ligar()) {
+    try {
+      document.addEventListener("DOMContentLoaded", function () { R.ligar(); });
+      setTimeout(function () { R.ligar(); }, 2000);
     } catch (e) {}
   }
 })();
