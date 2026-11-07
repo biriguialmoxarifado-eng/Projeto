@@ -65134,7 +65134,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 403 · 07/11";
+var ALMOXA_VERSAO = "sistema 404 · 07/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -104830,8 +104830,34 @@ emissao: hoje,
           var caVolta = caK(v.ca);
           var valVolta = lp(v.caValidade || v.caVencimento || v.validadeCa);
           if (caVolta !== caK(ca)) {
-            perdidos.push({ sku: sku, motivo: ca
-              ? 'o Core aceitou mas releu o CA como "' + (lp(v.ca) || "vazio") + '"'
+            /* [QUALDASDUAS] 07/11 — DIZER QUAL DAS DUAS CAUSAS É
+               ------------------------------------------------------
+               "o Core aceitou mas releu o CA como vazio" estava certo,
+               mas parava cedo demais: eu ficava dependendo do .gs dele
+               para saber se a culpa era (a) a coluna do CA não existir
+               na planilha, ou (b) o itens.salvar não escrever nela.
+               A releitura já tem a resposta na mão — basta olhar se a
+               CHAVE "ca" sequer voltou no registro:
+                 chave ausente  → o Core nem conhece esse campo
+                 chave vazia    → ele conhece e não gravou o valor
+               São conserto diferente, e agora dá para saber sem o
+               arquivo. */
+            var temChaveCa = false;
+            try {
+              temChaveCa = Object.prototype.hasOwnProperty.call(v, "ca") ||
+                           Object.prototype.hasOwnProperty.call(v, "CA") ||
+                           Object.prototype.hasOwnProperty.call(v, "numeroCa");
+            } catch (e) { temChaveCa = false; }
+            var pista = temChaveCa
+              ? "o campo do CA EXISTE no registro e voltou vazio — " +
+                "quem está descartando o valor é o itens.salvar do seu Core"
+              : "o registro voltou SEM o campo do CA — " +
+                "é bem provável que falte a coluna do CA na aba de itens da planilha";
+            var campos = "";
+            try { campos = Object.keys(v).slice(0, 14).join(", "); } catch (e) {}
+            perdidos.push({ sku: sku, pista: pista, campos: campos, motivo: ca
+              ? 'o Core aceitou mas releu o CA como "' + (lp(v.ca) || "vazio") + '". ' +
+                pista + (campos ? " · campos que voltaram: " + campos : "")
               : "o CA continua lá depois de eu mandar apagar" });
             return;
           }
@@ -108657,6 +108683,188 @@ emissao: hoje,
     try {
       document.addEventListener("DOMContentLoaded", function () { R.ligar(); });
       setTimeout(function () { R.ligar(); }, 2000);
+    } catch (e) {}
+  }
+})();
+
+/* ============================================================
+   [CADOCATALOGO]  ·  07/11  ·  busca: [CADOCATALOGO]
+   ------------------------------------------------------------
+   O PEDIDO DELE, 07/11:
+
+     "depois que salvar, ele vai atualizar automaticamente todas
+      as fichas de EPI que estão vinculadas àquele número de CA,
+      daqueles que deram baixa. Mas não está fazendo."
+
+   Fui ver por que não faz, e achei o buraco.
+
+   A ficha é montada por dois caminhos diferentes, conforme o
+   que o Core devolve:
+
+     agruparFichasEPI        — recebe entregas soltas e agrupa.
+                               ESTE já busca o CA no catálogo:
+                                 ca: e.ca || item.ca || "—"
+     juntarFichasDaMesmaPessoa_ — recebe fichas já montadas pelo
+                               Core. ESTE passa os itens adiante
+                               SEM TOCAR NO CA.
+
+   O Core dele devolve fichas já montadas. Ou seja: cai sempre no
+   segundo caminho, o que não procura. O CA do catálogo nunca
+   chegava na ficha — e a coluna ficava "—" mesmo quando o
+   catálogo tinha o número.
+
+   É o que aparece na foto da ficha do Renan: seis entregas,
+   coluna CA toda com "—".
+
+   O QUE ESTE BLOCO FAZ. Aplica no segundo caminho a mesma regra
+   que o primeiro já tinha, e nada além disso:
+
+     o CA gravado NA ENTREGA manda sempre. Só quando a entrega
+     não tem CA nenhum é que eu procuro o item no catálogo, pelo
+     SKU, e uso o CA de lá.
+
+   Assim, no momento em que o cadastro do CA voltar a gravar, as
+   fichas passam a mostrar o número sozinhas — que é exatamente
+   o automático que ele descreveu. Sem migração, sem mexer em
+   entrega antiga, sem gravar nada.
+
+   O QUE ELE NÃO FAZ:
+   - não sobrescreve um CA que a entrega já tem, nem que seja
+     diferente do catálogo. O que foi gravado na entrega é o que
+     valia naquele dia;
+   - não inventa CA. Catálogo sem o item, ou item sem CA, a
+     coluna continua "—";
+   - não grava nada em lugar nenhum. Só leitura, só na tela.
+
+   ATENÇÃO, E ISTO É O PRINCIPAL: este bloco não conserta o
+   cadastro do CA. Se o catálogo está vazio porque o Core não
+   está gravando o CA, não há de onde buscar. Isto aqui é o cano;
+   a água continua faltando até o .gs de itens ser corrigido.
+
+   CADOCATALOGO.restaurar() desfaz.
+   ============================================================ */
+(function () {
+  "use strict";
+
+  if (window.CADOCATALOGO && window.CADOCATALOGO.ligado) return;
+
+  var C = {
+    nome: "CADOCATALOGO",
+    versao: "07/11",
+    ligado: false,
+    antiga: null,
+    preenchidos: 0,      /* itens que ganharam o CA do catálogo */
+    jaTinham: 0,         /* itens que já traziam CA da entrega */
+    semCatalogo: 0,      /* itens sem CA e sem item no catálogo */
+    catalogoVazio: 0     /* vezes que rodei sem catálogo nenhum */
+  };
+
+  function lp(v) { return (v === null || v === undefined) ? "" : String(v).trim(); }
+  function lista_(v) { return Object.prototype.toString.call(v) === "[object Array]" ? v : []; }
+
+  /* o CA pode estar gravado com nomes diferentes conforme quem gravou */
+  C.caDe = function (o) {
+    if (!o) return "";
+    var v = lp(o.ca || o.CA || o.numeroCa || o.numeroCA || o.caNumero);
+    if (!v || v === "—" || v === "-" || /^n[ãa]o informado$/i.test(v)) return "";
+    return v;
+  };
+  C.validadeDe = function (o) {
+    if (!o) return "";
+    return lp(o.caValidade || o.caVencimento || o.validadeCa || o.validadeCA);
+  };
+
+  /* o catálogo que estiver carregado no navegador */
+  C.catalogo = function () {
+    var a = lista_(window.MOCK && MOCK.itens);
+    if (a.length) return a;
+    return lista_(window.MOCK && MOCK.produtos);
+  };
+
+  C.acharNoCatalogo = function (sku, nome) {
+    var cat = C.catalogo();
+    if (!cat.length) return null;
+    var s = lp(sku).toUpperCase();
+    var i, achado = null;
+    if (s) {
+      for (i = 0; i < cat.length; i++) {
+        if (lp(cat[i] && cat[i].sku).toUpperCase() === s) { achado = cat[i]; break; }
+      }
+    }
+    /* sem SKU, tento pela descrição exata — nunca por semelhança:
+       CA trocado é pior que CA ausente */
+    if (!achado) {
+      var n = lp(nome).toUpperCase();
+      if (!n) return null;
+      for (i = 0; i < cat.length; i++) {
+        if (lp(cat[i] && cat[i].descricao).toUpperCase() === n) { achado = cat[i]; break; }
+      }
+    }
+    return achado;
+  };
+
+  /* enriquece UMA linha de entrega. Devolve a própria linha. */
+  C.completar = function (it) {
+    if (!it) return it;
+
+    /* 1 · o CA da entrega manda. Ponto. */
+    if (C.caDe(it)) { C.jaTinham++; return it; }
+
+    var cat = C.catalogo();
+    if (!cat.length) { C.catalogoVazio++; return it; }
+
+    var doCat = C.acharNoCatalogo(it.sku, it.epi || it.item || it.descricao);
+    var ca = C.caDe(doCat);
+    if (!ca) { C.semCatalogo++; return it; }
+
+    it.ca = ca;
+    it.__caDoCatalogo = true;                 /* de onde veio, para o diagnóstico */
+    var val = C.validadeDe(doCat);
+    if (val && !C.validadeDe(it)) it.caValidade = val;
+    C.preenchidos++;
+    return it;
+  };
+
+  C.ligar = function () {
+    if (C.ligado) return false;
+    if (typeof window.juntarFichasDaMesmaPessoa_ !== "function") return false;
+
+    C.antiga = window.juntarFichasDaMesmaPessoa_;
+
+    window.juntarFichasDaMesmaPessoa_ = function (lista) {
+      var fichas = C.antiga.apply(this, arguments);
+      try {
+        lista_(fichas).forEach(function (f) {
+          lista_(f && f.itens).forEach(C.completar);
+        });
+      } catch (e) {
+        /* enriquecer é um extra: se falhar, a ficha sai como saía */
+      }
+      return fichas;
+    };
+
+    C.ligado = true;
+    return true;
+  };
+
+  C.restaurar = function () {
+    if (typeof C.antiga === "function") window.juntarFichasDaMesmaPessoa_ = C.antiga;
+    C.ligado = false;
+    return true;
+  };
+
+  C.contas = function () {
+    return { preenchidos: C.preenchidos, jaTinham: C.jaTinham,
+             semCatalogo: C.semCatalogo, catalogoVazio: C.catalogoVazio,
+             itensNoCatalogo: C.catalogo().length, ligado: C.ligado };
+  };
+
+  try { window.CADOCATALOGO = C; } catch (e) {}
+
+  if (!C.ligar()) {
+    try {
+      document.addEventListener("DOMContentLoaded", function () { C.ligar(); });
+      setTimeout(function () { C.ligar(); }, 2000);
     } catch (e) {}
   }
 })();
