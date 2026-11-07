@@ -254,14 +254,64 @@ function AP_ITENSCA_backup() {
   var tentativa = nome, n = 2;
   while (pl.getSheetByName(tentativa)) { tentativa = nome + '_' + n; n++; }
 
-  var copia = aba.copyTo(pl);
-  copia.setName(tentativa);
+  /* ------------------------------------------------------------
+     POR QUE AQUI NÃO TEM copyTo  ·  07/11, depois do erro dele
+     ------------------------------------------------------------
+     A primeira versão usava aba.copyTo(pl) e deu, no Apps Script
+     dele:
+
+       "Não foi possível abrir o documento com o ID 1tqz_..."
+
+     O copyTo REABRE a planilha de destino POR ID lá por dentro.
+     Um script preso à planilha costuma ter autorização para mexer
+     na planilha atual e NÃO para abrir planilha por ID — e aí ele
+     falha, mesmo sendo a mesma planilha.
+
+     Então eu copio na mão: crio a aba e escrevo os valores. Tudo
+     dentro da planilha que já está aberta, sem pedir ID nenhum.
+     Perde a formatação; guarda os DADOS, que é o que importa num
+     backup antes de consertar linha torta.
+     ------------------------------------------------------------ */
+  var alt = aba.getLastRow();
+  var larg = aba.getLastColumn();
+  if (alt < 1 || larg < 1) {
+    return { ok: false, mensagem: 'A aba "' + AP_ITENSCA_ABA + '" está vazia: nada a copiar.' };
+  }
+
+  var nova;
+  try {
+    nova = pl.insertSheet(tentativa);
+  } catch (e) {
+    return { ok: false,
+      mensagem: 'Não consegui criar a aba de backup: ' + String(e.message || e) +
+        '. O backup é OPCIONAL — AP_ITENSCA_gravar() funciona sem ele. ' +
+        'Se quiser um backup mesmo assim, faça na mão: clique com o botão direito na ' +
+        'aba ' + AP_ITENSCA_ABA + ' → Duplicar.' };
+  }
+
+  /* em pedaços, para aba grande não estourar o tempo */
+  var PASSO = 2000, copiadas = 0;
+  try {
+    for (var ini = 1; ini <= alt; ini += PASSO) {
+      var quantas = Math.min(PASSO, alt - ini + 1);
+      var vals = aba.getRange(ini, 1, quantas, larg).getValues();
+      nova.getRange(ini, 1, quantas, larg).setValues(vals);
+      copiadas += quantas;
+    }
+  } catch (e) {
+    return { ok: false, backupIncompleto: tentativa, linhasCopiadas: copiadas,
+      mensagem: 'Comecei o backup e parei no meio: ' + String(e.message || e) +
+        '. A aba "' + tentativa + '" ficou PELA METADE — apague-a e faça o backup ' +
+        'na mão (botão direito na aba → Duplicar). A aba original não foi tocada.' };
+  }
+
+  SpreadsheetApp.flush();
 
   var r = { ok: true, backup: tentativa,
-            linhas: Math.max(0, aba.getLastRow() - 1),
-            colunas: aba.getLastColumn(),
-            recado: 'Cópia feita. A aba original não foi tocada. ' +
-                    'Para descartar o backup depois, apague a aba "' + tentativa + '" na mão.' };
+            linhas: Math.max(0, alt - 1),
+            colunas: larg,
+            recado: 'Backup feito em "' + tentativa + '" (só os dados, sem formatação). ' +
+                    'A aba original não foi tocada. Para descartar depois, apague essa aba.' };
   Logger.log(JSON.stringify(r, null, 2));
   return r;
 }
