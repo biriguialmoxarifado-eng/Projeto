@@ -1,0 +1,148 @@
+# ALMOX PRO 3D — implantação
+
+Um módulo, dois ambientes. **Nenhuma linha de lógica muda entre eles** —
+só a forma de servir os arquivos.
+
+## Os arquivos
+
+```
+index.html      a página
+almoxa3d.css    o estilo (responsivo: computador, tablet, celular)
+layout3d.js     a MATEMÁTICA do galpão — não depende de Babylon
+adaptador.js    fala com o Core; descobre sozinho em que ambiente está
+motor3d.js      o Babylon: cena, câmera, luz, sombra, clique
+app.js          a costura e o painel
+```
+
+A separação entre `layout3d.js` e `motor3d.js` é de propósito: a conta de
+onde fica cada montante e cada posição pode ser testada sem placa de
+vídeo, e sobrevive a uma troca futura de motor gráfico.
+
+---
+
+## 1. GitHub Pages
+
+Copie a pasta `ALMOXA_3D/` para o repositório e publique. É só isso: os
+arquivos já estão lado a lado e as referências são relativas.
+
+### Dizer a ele onde está o Core
+
+O endereço do `/exec` **não está escrito no código** — seção 3 do adendo.
+Ele é informado em tempo de execução, de três formas, nesta ordem:
+
+1. na barra de endereço: `...?core=https://script.google.com/macros/s/SEU_ID/exec`
+2. o que ficou guardado no navegador de quem já configurou uma vez
+3. nada: aí a tela desenha um **galpão de demonstração** e avisa no painel
+
+O passo 1 só precisa ser feito **uma vez por navegador** — depois ele
+lembra. Para trocar, basta abrir com outro `?core=`.
+
+### Por que isso não é furo de segurança
+
+A URL do `/exec` é endereço, não senha. Quem decide o que pode ser feito é
+o Core, do lado de lá: identidade, sessão e permissão continuam sendo
+decisão dele. O navegador não carrega chave nenhuma.
+
+---
+
+## 2. Google Apps Script
+
+O `HtmlService` não serve arquivo `.js` solto. Então, ao publicar no
+`/exec`, os quatro scripts entram **dentro** do HTML.
+
+### Jeito manual (rápido)
+
+No `index.html`, troque estas quatro linhas:
+
+```html
+<script src="layout3d.js"></script>
+<script src="adaptador.js"></script>
+<script src="motor3d.js"></script>
+<script src="app.js"></script>
+```
+
+pelo conteúdo de cada arquivo, cada um dentro de `<script> … </script>`.
+A ordem importa e é essa.
+
+### Jeito com template (recomendado)
+
+Crie os quatro como arquivos HTML no projeto (`layout3d.html` etc.), cada
+um com o JavaScript dentro de `<script>`, e no `index.html` use:
+
+```html
+<?!= HtmlService.createHtmlOutputFromFile('layout3d').getContent(); ?>
+<?!= HtmlService.createHtmlOutputFromFile('adaptador').getContent(); ?>
+<?!= HtmlService.createHtmlOutputFromFile('motor3d').getContent(); ?>
+<?!= HtmlService.createHtmlOutputFromFile('app').getContent(); ?>
+```
+
+e sirva com `createTemplateFromFile('index').evaluate()`.
+
+Assim o mesmo código vive nos dois lugares sem cópia divergente.
+
+### A biblioteca Babylon dentro do Apps Script
+
+O `HtmlService` permite carregar script externo, mas se a sua rede
+bloquear o CDN, baixe o `babylon.js`, salve como arquivo HTML no projeto
+e inclua pelo mesmo `<?!= … ?>`.
+
+### Nada a configurar
+
+No Apps Script o adaptador acha o `google.script.run` sozinho. Não
+precisa de `?core=`.
+
+---
+
+## 3. A porta de entrada no Core
+
+O adaptador chama **`APIX_atender_`**, que é o roteador que o ALMOX PRO já
+usa. O envelope é o mesmo de sempre:
+
+```js
+{ ponte:'ALMOXA', chave:'', modulo, acao, payload, sessao, origem:'ALMOXA_3D' }
+```
+
+Ações usadas hoje, todas já existentes no Core (confirmado lendo
+`AP_Modulo_locais` em 08/11):
+
+| módulo | ação | para quê |
+|---|---|---|
+| `locais` | `listar` | desenhar o galpão |
+| `locais` | `vincular` | ligar material a uma posição |
+| `locais` | `criarFaixa` | criar prateleiras × posições de uma vez |
+| `itens` | `obter` | dados do material |
+| `estoque` | `item` | saldo oficial |
+
+**Nenhum endpoint novo foi inventado.**
+
+---
+
+## 4. O que ainda não está ligado
+
+Dito com todas as letras, para ninguém se iludir com a tela bonita:
+
+- a **lista de materiais** de uma posição (o painel avisa que falta)
+- o **construtor de galpão** (seção 4 do prompt)
+- o **inventário** e as rotas internas (seções 9 e 10)
+- a **leitura de QR Code** pela câmera
+
+A chave do QR já está definida e aparece no painel: `ALMOXA:LOC:<codigo>`.
+Ela não leva quantidade — leva endereço, e quem lê consulta o saldo na
+hora. É o que a seção 7 manda.
+
+---
+
+## 5. Testes
+
+```
+node prova_layout3d.js    54 provas · a matemática e o adaptador
+node prova_motor3d.js     30 provas · o motor, com Babylon simulado
+node prova_pagina3d.js    27 provas · a página no navegador
+```
+
+As de `motor3d` e `pagina3d` usam um **Babylon de mentira** que registra
+o que seria criado. Elas provam o instanciamento, o clique, as visões e a
+responsividade — **mas não provam a imagem renderizada**, porque o
+ambiente onde foram escritas não alcança o CDN.
+
+A primeira pessoa a ver o galpão desenhado será você.

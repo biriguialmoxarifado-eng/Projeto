@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ALMOX PRO 3D</title>
+<link rel="stylesheet" href="almoxa3d.css">
+<!--
+  ALMOXA 3D · index.html · 08/11/2026
+
+  Esta página roda nos DOIS ambientes (seção 5 do adendo):
+
+   · GitHub Pages — os arquivos ficam lado a lado, como estão aqui;
+   · Apps Script  — o HtmlService não serve arquivo .js solto, então
+     na hora de publicar no /exec os quatro scripts entram no lugar
+     das quatro linhas marcadas lá embaixo. A documentação em
+     IMPLANTACAO.md explica, e NENHUMA linha de lógica muda.
+
+  O endereço do Core NÃO está escrito aqui. Ele é informado em
+  tempo de execução (ver o bloco de configuração no fim). Seção 3:
+  nada de credencial em código público.
+-->
+</head>
+<body>
+
+<div id="app">
+
+  <div id="cena">
+    <canvas id="tela3d" touch-action="none"></canvas>
+
+    <div id="barra">
+      <div class="marca">ALMOX PRO 3D<small>Mapa do almoxarifado</small></div>
+      <button class="btn" id="v_perspectiva" aria-pressed="true">Perspectiva</button>
+      <button class="btn" id="v_superior" aria-pressed="false">De cima</button>
+      <button class="btn" id="v_frontal" aria-pressed="false">De frente</button>
+      <button class="btn" id="v_lateral" aria-pressed="false">De lado</button>
+      <button class="btn" id="v_recarregar">Atualizar</button>
+    </div>
+
+    <div id="legenda">
+      <div class="leg"><i class="bolinha" style="background:#9AA3AE"></i>vazia</div>
+      <div class="leg"><i class="bolinha" style="background:#2E9E5B"></i>com material</div>
+      <div class="leg"><i class="bolinha" style="background:#E8A33D"></i>lotada</div>
+      <div class="leg"><i class="bolinha" style="background:#D2443B"></i>bloqueada</div>
+      <div class="leg"><i class="bolinha" style="background:#2F7BE8"></i>selecionada</div>
+    </div>
+  </div>
+
+  <aside id="painel">
+    <h2 id="tituloPainel">O galpão</h2>
+    <div id="corpoPainel">
+      <div class="vazio">Carregando o motor 3D…</div>
+    </div>
+  </aside>
+
+</div>
+
+<!-- ===== Babylon.js · versão fixa, nunca "latest" ============
+     Versão travada de propósito: biblioteca que se atualiza
+     sozinha quebra sistema em produção sem ninguém ter mexido.
+     ========================================================= -->
+<script src="https://cdn.jsdelivr.net/npm/babylonjs@7.54.3/babylon.js"></script>
+
+<!-- ===== os quatro arquivos do módulo ======================
+     No Apps Script, estas quatro linhas viram o conteúdo dos
+     arquivos, colado aqui dentro. Nada mais muda.
+     ========================================================= -->
+<script src="layout3d.js"></script>
+<script src="adaptador.js"></script>
+<script src="motor3d.js"></script>
+<script src="app.js"></script>
+
+<script>
+/* ============================================================
+   CONFIGURAÇÃO DE AMBIENTE
+   ------------------------------------------------------------
+   No Apps Script não precisa de nada: o adaptador acha o
+   google.script.run sozinho.
+
+   No GitHub Pages, o endereço do /exec pode vir de três lugares,
+   nesta ordem — e nenhum deles é "escrito no código":
+
+     1. ?core=<url> na barra de endereço
+     2. o que ficou guardado no navegador de quem já configurou
+     3. nada: aí a tela mostra um galpão de DEMONSTRAÇÃO e
+        avisa, em vez de ficar preta
+
+   Guardar no navegador é conveniência de quem usa, não fonte
+   oficial de nada: quem decide o que pode ser feito é o Core.
+   ============================================================ */
+(function () {
+  function acharUrlDoCore() {
+    try {
+      var q = new URLSearchParams(location.search).get('core');
+      if (q) {
+        try { localStorage.setItem('almoxa3d:core', q); } catch (e) {}
+        return q;
+      }
+    } catch (e) {}
+    try { return localStorage.getItem('almoxa3d:core') || ''; } catch (e) { return ''; }
+  }
+
+  function comecar() {
+    if (typeof BABYLON === 'undefined') {
+      document.getElementById('corpoPainel').innerHTML =
+        '<div class="aviso erro"><b>O Babylon.js não carregou.</b><br>' +
+        'Confira a conexão. Se esta página estiver dentro do Apps Script, ' +
+        'veja em IMPLANTACAO.md como embutir a biblioteca.</div>';
+      return;
+    }
+    if (window.API3D) window.API3D.configurar({ url: acharUrlDoCore() });
+    window.APP3D.iniciar({});
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', comecar);
+  } else { comecar(); }
+})();
+</script>
+
+</body>
+</html>
