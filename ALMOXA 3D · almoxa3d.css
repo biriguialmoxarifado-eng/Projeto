@@ -1,0 +1,93 @@
+/* ALMOXA 3D · almoxa3d.css · 08/11/2026
+   Responsivo de verdade (seção 11): no celular o painel vira
+   gaveta de baixo, e a tela 3D fica inteira para o dedo. */
+:root{
+  --fundo:#EEF1F5; --papel:#FFFFFF; --texto:#1B2430; --texto2:#5A6472;
+  --texto3:#8A93A0; --borda:#DDE2E8; --azul:#2F7BE8; --azulEscuro:#1E3A5F;
+  --verde:#2E9E5B; --cinza:#9AA3AE; --amarelo:#E8A33D; --vermelho:#D2443B;
+  --sombra:0 1px 3px rgba(16,24,40,.08),0 8px 24px rgba(16,24,40,.06);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
+  color:var(--texto);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-text-size-adjust:100%}
+#app{display:flex;height:100%;width:100%}
+
+/* ---------- a cena ---------- */
+#cena{position:relative;flex:1;min-width:0}
+#tela3d{width:100%;height:100%;display:block;outline:none;touch-action:none}
+
+#barra{position:absolute;top:0;left:0;right:0;padding:10px 12px;display:flex;
+  gap:8px;align-items:center;flex-wrap:wrap;
+  background:linear-gradient(180deg,rgba(238,241,245,.96),rgba(238,241,245,0));
+  pointer-events:none}
+#barra>*{pointer-events:auto}
+.marca{font-weight:700;letter-spacing:.02em;color:var(--azulEscuro);margin-right:4px}
+.marca small{font-weight:500;color:var(--texto3);display:block;font-size:10.5px;
+  letter-spacing:.06em;text-transform:uppercase}
+
+.btn{border:1px solid var(--borda);background:var(--papel);color:var(--texto2);
+  border-radius:9px;padding:7px 11px;font-size:12.5px;cursor:pointer;
+  box-shadow:var(--sombra);white-space:nowrap}
+.btn:hover{border-color:#C3CBD5;color:var(--texto)}
+.btn[aria-pressed="true"]{background:var(--azul);border-color:var(--azul);color:#fff}
+.btn:active{transform:translateY(1px)}
+
+/* ---------- legenda ---------- */
+#legenda{position:absolute;left:12px;bottom:12px;background:var(--papel);
+  border:1px solid var(--borda);border-radius:11px;padding:9px 11px;
+  box-shadow:var(--sombra);display:flex;gap:12px;flex-wrap:wrap;max-width:calc(100% - 24px)}
+.leg{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--texto2)}
+.bolinha{width:11px;height:11px;border-radius:3px;flex:none;
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
+
+/* ---------- painel ---------- */
+#painel{width:330px;flex:none;background:var(--papel);border-left:1px solid var(--borda);
+  display:flex;flex-direction:column;overflow:hidden}
+#painel h2{margin:0;padding:14px 16px 10px;font-size:13px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--texto3);border-bottom:1px solid var(--borda)}
+#corpoPainel{padding:14px 16px;overflow:auto;flex:1}
+
+.numeros{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
+.cartao{border:1px solid var(--borda);border-radius:10px;padding:9px 11px}
+.cartao b{display:block;font-size:20px;line-height:1.1;font-variant-numeric:tabular-nums}
+.cartao span{font-size:11px;color:var(--texto3)}
+
+.barraOcup{height:8px;border-radius:99px;background:#EDF0F4;overflow:hidden;margin:4px 0 14px}
+.barraOcup i{display:block;height:100%;background:var(--verde);border-radius:99px}
+
+.linha{display:flex;justify-content:space-between;gap:10px;padding:7px 0;
+  border-bottom:1px dashed var(--borda);font-size:13px}
+.linha:last-child{border-bottom:0}
+.linha span{color:var(--texto3)}
+.linha b{font-weight:600;text-align:right;word-break:break-word}
+
+.chip{display:inline-block;padding:3px 9px;border-radius:99px;font-size:11px;
+  font-weight:700;letter-spacing:.03em;color:#fff}
+.vazio{text-align:center;color:var(--texto3);padding:26px 10px;font-size:13px;line-height:1.6}
+.aviso{border:1px solid #F0D8A8;background:#FEF8EC;color:#7A5B18;border-radius:10px;
+  padding:10px 12px;font-size:12.5px;line-height:1.5;margin-bottom:12px}
+.erro{border-color:#F2C3BF;background:#FDF1F0;color:#8A2B23}
+
+/* ---------- celular e tablet (seção 11) ---------- */
+@media (max-width:860px){
+  #app{flex-direction:column}
+  #painel{width:100%;height:46vh;border-left:0;border-top:1px solid var(--borda);
+    border-radius:16px 16px 0 0;margin-top:-16px;box-shadow:0 -6px 24px rgba(16,24,40,.08)}
+  #painel h2{padding:12px 16px 8px}
+  #legenda{bottom:auto;top:56px;left:12px;right:12px;justify-content:center}
+  .numeros{grid-template-columns:repeat(4,1fr)}
+  .cartao b{font-size:16px}
+}
+@media (max-width:420px){
+  .numeros{grid-template-columns:repeat(2,1fr)}
+  #barra{padding:8px}
+  .btn{padding:6px 9px;font-size:12px}
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-tema="claro"]){
+    --fundo:#141922; --papel:#1C222C; --texto:#E8ECF1; --texto2:#AEB7C3;
+    --texto3:#7C8694; --borda:#2B333F; --azulEscuro:#9BC2F5;
+    --sombra:0 1px 3px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
+  }
+}
