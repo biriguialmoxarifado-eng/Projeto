@@ -65157,7 +65157,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 408 · 07/11";
+var ALMOXA_VERSAO = "sistema 409 · 08/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -109118,6 +109118,252 @@ emissao: hoje,
     try {
       document.addEventListener("DOMContentLoaded", function () { P.ligar(); });
       setTimeout(function () { P.ligar(); }, 2500);
+    } catch (e) {}
+  }
+})();
+
+/* ============================================================
+   [MAPA3D]  ·  08/11  ·  busca: [MAPA3D]
+   ------------------------------------------------------------
+   TROCA O MAPEAMENTO 3D ANTIGO PELO NOVO, DO BABYLON.
+
+   O que havia antes, escrito no próprio arquivo na linha 986:
+
+       "MAPA 3D — perspectiva em CSS sobre as localizações reais"
+
+   Era perspectiva de CSS: cartões inclinados fingindo
+   profundidade. O adendo de hoje é explícito contra isso —
+   "não uma representação por cartões ou quadrados".
+
+   O QUE ESTE BLOCO FAZ. Troca o RENDER da tela que já existe,
+   SCREENS["mapa-3d"]. Não cria rota nova, não mexe no menu,
+   não mexe em permissão. Quem já tinha acesso ao Mapeamento 3D
+   continua tendo; quem não tinha, continua sem. O botão é o
+   mesmo, o endereço é o mesmo — muda o que aparece dentro.
+
+   Trocar em vez de criar ao lado evita duas telas de mapa
+   disputando o mesmo assunto, que é como o sistema junta lixo.
+
+   ------------------------------------------------------------
+   VINCULAR O SERVIDOR · o pedido dele de hoje
+
+   O módulo 3D mora numa página própria e precisa saber onde
+   fica o Core. Em vez de o Ismael digitar isso à mão, esta tela
+   passa o endereço SOZINHA, no ?core= do link: ela já está
+   rodando dentro do ALMOX PRO, então já sabe o caminho.
+
+   De onde ela tira:
+     · PONTE.url, quando o sistema é servido pelo GitHub Pages;
+     · o próprio /exec, quando é servido pelo Apps Script.
+
+   Se não achar nenhum dos dois, o mapa abre em demonstração e
+   avisa — não trava.
+
+   ------------------------------------------------------------
+   A tela antiga fica guardada em MAPA3D.telaAntiga e
+   MAPA3D.restaurar() devolve ela, se precisar.
+   ============================================================ */
+(function () {
+  "use strict";
+
+  if (window.MAPA3D && window.MAPA3D.ligado) return;
+
+  var M = {
+    nome: "MAPA3D",
+    versao: "08/11",
+    ligado: false,
+    telaAntiga: null,
+
+    /* onde o módulo 3D foi publicado. Relativo quando o sistema
+       e o mapa estão no mesmo lugar; absoluto quando não estão. */
+    pasta: "ALMOXA_3D/",
+    baseGithub: "https://biriguialmoxarifado-eng.github.io/Projeto/"
+  };
+
+  function lp(v) { return (v === null || v === undefined) ? "" : String(v).trim(); }
+  function esc(v) {
+    return lp(v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  /* ----------------------------------------------------------
+     O ENDEREÇO DO CORE, descoberto sozinho
+     ---------------------------------------------------------- */
+  M.urlDoCore = function () {
+    /* 1 · o sistema no GitHub Pages guarda o /exec na PONTE */
+    try {
+      if (window.PONTE && lp(PONTE.url)) return lp(PONTE.url);
+    } catch (e) {}
+    /* 2 · servido pelo próprio Apps Script: o endereço é este mesmo */
+    try {
+      if (typeof google !== "undefined" && google.script && google.script.run) {
+        var aqui = lp(location.href).split("?")[0].split("#")[0];
+        if (/\/exec$/.test(aqui)) return aqui;
+      }
+    } catch (e) {}
+    /* 3 · o que alguém já configurou no navegador */
+    try { return lp(localStorage.getItem("almoxa3d:core")); } catch (e) {}
+    return "";
+  };
+
+  /* onde está publicado o módulo 3D */
+  M.urlDoMapa = function () {
+    var guardado = "";
+    try { guardado = lp(localStorage.getItem("almoxa3d:pasta")); } catch (e) {}
+    if (guardado) return guardado;
+
+    try {
+      /* mesmo lugar do sistema: caminho relativo, que não quebra
+         se o repositório for renomeado */
+      if (/github\.io$/i.test(location.hostname)) {
+        var dir = location.pathname.replace(/[^/]*$/, "");
+        return location.origin + dir + M.pasta;
+      }
+    } catch (e) {}
+    /* servido pelo Apps Script: o mapa está no GitHub */
+    return M.baseGithub + M.pasta;
+  };
+
+  M.linkCompleto = function () {
+    var base = M.urlDoMapa();
+    var core = M.urlDoCore();
+    return base + (core ? "?core=" + encodeURIComponent(core) : "");
+  };
+
+  /* ----------------------------------------------------------
+     A TELA
+     ---------------------------------------------------------- */
+  M.render = function () {
+    var link = M.linkCompleto();
+    var core = M.urlDoCore();
+    var temCore = !!core;
+
+    var html =
+      '<div class="card">' +
+        '<div class="card-body" style="padding:0;position:relative">' +
+
+          '<div style="display:flex;justify-content:space-between;align-items:center;' +
+            'gap:12px;padding:12px 14px;border-bottom:1px solid var(--borda);flex-wrap:wrap">' +
+            '<div>' +
+              '<b style="font-size:14px">Mapa do almoxarifado</b>' +
+              '<div class="small" style="color:var(--texto-3);margin-top:2px">' +
+                (temCore
+                  ? 'Ligado ao Core &middot; as cores saem das localizações reais'
+                  : 'Sem o endereço do Core &middot; mostrando um galpão de demonstração') +
+              '</div>' +
+            '</div>' +
+            '<div style="display:flex;gap:8px">' +
+              '<button class="btn btn-ghost btn-sm" data-mapa3d-recarregar>Recarregar</button>' +
+              '<a class="btn btn-primary btn-sm" data-mapa3d-abrir href="' + esc(link) + '" ' +
+                'target="_blank" rel="noopener">Abrir em tela cheia</a>' +
+            '</div>' +
+          '</div>' +
+
+          '<div data-mapa3d-caixa style="position:relative;background:#EEF1F5;' +
+            'height:min(72vh,720px)">' +
+            '<iframe data-mapa3d-quadro src="' + esc(link) + '" ' +
+              'style="width:100%;height:100%;border:0;display:block" ' +
+              'title="Mapa 3D do almoxarifado" ' +
+              'allow="fullscreen"></iframe>' +
+            '<div data-mapa3d-socorro style="display:none;position:absolute;inset:0;' +
+              'align-items:center;justify-content:center;padding:28px;text-align:center">' +
+              '<div style="max-width:420px">' +
+                '<b style="display:block;font-size:14px;margin-bottom:6px">' +
+                  'O mapa não abriu aqui dentro</b>' +
+                '<p class="small" style="line-height:1.55;color:var(--texto-2)">' +
+                  'Alguns navegadores não deixam uma página embutir a outra. ' +
+                  'O botão <b>Abrir em tela cheia</b> funciona do mesmo jeito — ' +
+                  'e no celular ele é até melhor.</p>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+
+        '</div>' +
+      '</div>' +
+
+      '<div class="small mt12" style="color:var(--texto-3);line-height:1.6">' +
+        'Endereço do módulo: <code>' + esc(M.urlDoMapa()) + '</code><br>' +
+        (temCore
+          ? 'Core: <code>' + esc(core.slice(0, 64)) + (core.length > 64 ? '…' : '') + '</code>'
+          : '<b>O endereço do Core não foi encontrado.</b> O mapa está desenhando um ' +
+            'galpão de exemplo. Abra o sistema pelo <code>/exec</code>, ou configure a ' +
+            'ponte, para ver as suas localizações de verdade.') +
+      '</div>';
+
+    /* a tela antiga devolvia Promise; mantenho o mesmo contrato */
+    setTimeout(M.ligarBotoes, 0);
+    return Promise.resolve(html);
+  };
+
+  M.ligarBotoes = function () {
+    try {
+      var rec = document.querySelector("[data-mapa3d-recarregar]");
+      if (rec && !rec.__ligado) {
+        rec.__ligado = true;
+        rec.addEventListener("click", function () {
+          var q = document.querySelector("[data-mapa3d-quadro]");
+          if (q) q.src = M.linkCompleto();
+        });
+      }
+      var quadro = document.querySelector("[data-mapa3d-quadro]");
+      if (quadro && !quadro.__ligado) {
+        quadro.__ligado = true;
+        /* se em 6 segundos o quadro não carregar, mostro a saída */
+        var chegou = false;
+        quadro.addEventListener("load", function () { chegou = true; });
+        setTimeout(function () {
+          if (chegou) return;
+          var s = document.querySelector("[data-mapa3d-socorro]");
+          if (s) s.style.display = "flex";
+        }, 6000);
+      }
+    } catch (e) {}
+  };
+
+  /* ----------------------------------------------------------
+     LIGAR
+     ---------------------------------------------------------- */
+  M.ligar = function () {
+    if (M.ligado) return false;
+    if (typeof window.SCREENS !== "object" || !SCREENS || !SCREENS["mapa-3d"]) return false;
+
+    M.telaAntiga = SCREENS["mapa-3d"].render;
+    SCREENS["mapa-3d"].render = function () { return M.render(); };
+    SCREENS["mapa-3d"].titulo = "Mapeamento 3D";
+    M.ligado = true;
+    return true;
+  };
+
+  M.restaurar = function () {
+    if (typeof M.telaAntiga === "function" && window.SCREENS && SCREENS["mapa-3d"]) {
+      SCREENS["mapa-3d"].render = M.telaAntiga;
+    }
+    M.ligado = false;
+    return true;
+  };
+
+  /* para o Ismael trocar o endereço do módulo sem mexer no código:
+     MAPA3D.ondeFica("https://.../ALMOXA_3D/") */
+  M.ondeFica = function (url) {
+    var u = lp(url);
+    if (!u) { try { localStorage.removeItem("almoxa3d:pasta"); } catch (e) {} return M.urlDoMapa(); }
+    if (!/\/$/.test(u)) u += "/";
+    try { localStorage.setItem("almoxa3d:pasta", u); } catch (e) {}
+    return u;
+  };
+
+  M.contas = function () {
+    return { ligado: M.ligado, mapa: M.urlDoMapa(),
+             core: M.urlDoCore() ? "configurado" : "não encontrado",
+             link: M.linkCompleto() };
+  };
+
+  try { window.MAPA3D = M; } catch (e) {}
+
+  if (!M.ligar()) {
+    try {
+      document.addEventListener("DOMContentLoaded", function () { M.ligar(); });
+      setTimeout(function () { M.ligar(); }, 2500);
     } catch (e) {}
   }
 })();
