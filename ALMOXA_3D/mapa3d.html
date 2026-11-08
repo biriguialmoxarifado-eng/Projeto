@@ -516,6 +516,36 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
    não é segredo — ela é endereço, e quem decide o que pode ser
    feito é o Core, do lado de lá. Identidade e permissão
    continuam sendo decisão do Core, nunca do navegador.
+
+   ------------------------------------------------------------
+   A CHAVE DE APLICATIVO · 08/11, à tarde
+
+   O Core do Ismael EXIGE chave. O sistema principal manda a
+   dele e passa; o mapa mandava vazia e levava "não confere".
+
+   Como o mapa passou a conseguir a chave, e o que foi recusado:
+
+     RECUSADO · escrever a chave aqui no arquivo. Isto vai para
+       um GitHub público. Seção 3 proíbe, e com razão.
+     RECUSADO · mandar a chave no endereço (?chave=…). Ficaria
+       na barra, no histórico do navegador e em todo link que
+       alguém copiasse. Endereço é endereço; chave não é.
+     RECUSADO · mexer no Core para ele parar de exigir chave.
+       Afrouxar a tranca para a minha peça caber é o contrário
+       de consertar.
+
+     FEITO · o mapa é servido pelo MESMO endereço do sistema
+       (biriguialmoxarifado-eng.github.io). Mesma origem quer
+       dizer que o mapa pode perguntar ao próprio sistema qual
+       é a chave que ele está usando AGORA — pelo window.parent
+       quando está no quadro, e pelo armazenamento que o próprio
+       ALMOX PRO já mantém quando está em tela cheia.
+
+   A chave fica só na memória, enquanto a página está aberta.
+   Este módulo NÃO cria depósito de chave, NÃO grava a chave em
+   lugar nenhum e NÃO inventa uma segunda fonte: a fonte continua
+   sendo a do sistema. Sem chave, manda vazio e mostra o que o
+   Core responder — nunca finge que deu certo.
    ============================================================ */
 (function (raiz) {
   'use strict';
@@ -524,6 +554,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
     nome: 'API3D',
     versao: '08/11',
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
+    chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
+    origemDaChave: 'nenhuma (fase 1)',
     sessao: null,
     tempoLimite: 20000,
     chamadas: 0,
@@ -555,6 +587,10 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   A.configurar = function (opcoes) {
     opcoes = opcoes || {};
     if (opcoes.url !== undefined) A.url = String(opcoes.url || '').trim();
+    if (opcoes.chave !== undefined) {
+      A.chave = String(opcoes.chave || '').trim();
+      A.origemDaChave = A.chave ? 'informada na configuração' : 'nenhuma (fase 1)';
+    }
     if (opcoes.sessao !== undefined) A.sessao = opcoes.sessao;
     if (opcoes.tempoLimite) A.tempoLimite = Number(opcoes.tempoLimite) || A.tempoLimite;
     return A.estado();
@@ -564,10 +600,58 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
     return {
       ambiente: A.ambiente(),
       temUrl: !!A.url,
+      temChave: !!A.chave,           /* se TEM, não QUAL. */
+      origemDaChave: A.origemDaChave,
       pronto: A.pronto(),
       chamadas: A.chamadas,
       falhas: A.falhas
     };
+  };
+
+  /* ------------------------------------------------------------
+     PERGUNTAR AO SISTEMA QUAL É A CHAVE
+
+     Três lugares, nesta ordem, e todos do MESMO endereço — se o
+     mapa estiver noutro domínio, o navegador barra e a função
+     devolve vazio, que é o certo. Nenhum deles é "escrito no
+     código" e nenhum deles é criado por este módulo: os três
+     pertencem ao ALMOX PRO, que continua sendo o dono da chave.
+     ------------------------------------------------------------ */
+  A.chaveDoSistema = function () {
+    /* 1 · dentro do quadro do sistema: pergunta direto a ele.
+           É o valor VIVO, o mesmo que ele está usando agora. */
+    try {
+      if (window.parent && window.parent !== window &&
+          window.parent.API && window.parent.API.PONTE) {
+        var k = String(window.parent.API.PONTE.chave || '').trim();
+        if (k) return { chave: k, origem: 'o sistema, pelo quadro' };
+      }
+    } catch (e) { /* origem diferente: o navegador barrou, e tudo bem */ }
+
+    /* 2 · aberto em tela cheia a partir do sistema */
+    try {
+      if (window.opener && window.opener.API && window.opener.API.PONTE) {
+        var o = String(window.opener.API.PONTE.chave || '').trim();
+        if (o) return { chave: o, origem: 'o sistema, pela aba de origem' };
+      }
+    } catch (e) {}
+
+    /* 3 · o depósito que o PRÓPRIO ALMOX PRO mantém neste
+           navegador. Só leitura: este módulo nunca escreve aqui. */
+    try {
+      var g = String(localStorage.getItem('almoxa_app_chave_digitada') || '').trim();
+      if (g) return { chave: g, origem: 'a que foi digitada neste navegador' };
+    } catch (e) {}
+
+    return { chave: '', origem: 'nenhuma (fase 1)' };
+  };
+
+  /** pega a chave do sistema e passa a usá-la. Devolve só se achou. */
+  A.herdarChave = function () {
+    var r = A.chaveDoSistema();
+    A.chave = r.chave;
+    A.origemDaChave = r.origem;
+    return !!r.chave;
   };
 
   /** dá para falar com o Core daqui? */
@@ -580,7 +664,9 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   function envelope(modulo, acao, payload) {
     return {
       ponte: 'ALMOXA',
-      chave: '',                    /* nunca vai chave neste arquivo */
+      /* a chave vem do sistema, em tempo de execução. Vazia é
+         fase 1 — e fase 1 não pode bloquear a comunicação. */
+      chave: A.chave || '',
       modulo: modulo,
       acao: acao,
       payload: payload || {},
@@ -1114,8 +1200,26 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
     return pedido.then(function (r) {
       APP.carregando = false;
       if (!r || !r.ok) {
+        /* Quando a recusa é de CHAVE, dizer de onde a chave veio
+           — ou que não veio nenhuma — poupa uma ida e volta.
+           O valor da chave nunca aparece: só a procedência. */
+        var msg = esc((r && r.mensagem) || 'o Core não respondeu');
+        var ehChave = /chave/i.test((r && r.mensagem) || '');
+        var extra = '';
+        if (ehChave && window.API3D) {
+          var e3 = window.API3D.estado();
+          extra = '<div class="small" style="margin-top:8px">' +
+            (e3.temChave
+              ? 'O mapa mandou a chave vinda de: ' + esc(e3.origemDaChave) +
+                '. Se o sistema entra e o mapa não, as duas chaves estão diferentes.'
+              : 'O mapa <b>não achou chave nenhuma</b> para mandar. ' +
+                'Ele pergunta ao próprio ALMOX PRO — abra o mapa pelo botão ' +
+                'Mapeamento 3D de dentro do sistema, no mesmo navegador em que ' +
+                'o sistema já entra.') +
+            '</div>';
+        }
         $('corpoPainel').innerHTML = '<div class="aviso erro"><b>Não consegui carregar.</b><br>' +
-          esc((r && r.mensagem) || 'o Core não respondeu') + '</div>';
+          msg + extra + '</div>';
         return;
       }
       APP.locais = r.dados || [];
@@ -1234,7 +1338,15 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
         'veja em IMPLANTACAO.md como embutir a biblioteca.</div>';
       return;
     }
-    if (window.API3D) window.API3D.configurar({ url: acharUrlDoCore() });
+    if (window.API3D) {
+      window.API3D.configurar({ url: acharUrlDoCore() });
+      /* A chave NÃO está escrita aqui e não vem pelo endereço.
+         Ela é perguntada ao próprio ALMOX PRO, que é servido
+         pelo mesmo endereço que esta página. Se não houver, vai
+         vazia: fase 1 não pode bloquear a comunicação, e se o
+         Core recusar, quem explica é a resposta dele. */
+      window.API3D.herdarChave();
+    }
     window.APP3D.iniciar({});
   }
 
