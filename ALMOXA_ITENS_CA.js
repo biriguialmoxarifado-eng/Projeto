@@ -232,6 +232,107 @@ function AP_ITENSCA_conferirDados_() {
 }
 
 /* ============================================================
+   >>> O BOTÃO QUE CONSERTA  ·  07/11, 21h  <<<
+   ------------------------------------------------------------
+   Chega de diagnóstico. Escolha CA_ARRUMAR_AGORA no menu de
+   funções e clique em Executar. Ele faz, em sequência:
+
+     1. cria as colunas ca e caValidade NO FIM da aba, se
+        faltarem (no fim é onde a gravação por posição do Core
+        não alcança)
+     2. grava o CA e a validade do item abaixo, PELO NOME da
+        coluna, uma célula de cada vez
+     3. relê e confere
+     4. conta o que fez
+
+   Para mudar o item, troque as três linhas aqui embaixo e rode
+   de novo. Para vários de uma vez, ponha os SKUs separados por
+   vírgula em CA_AGORA_SKU.
+   ============================================================ */
+
+var CA_AGORA_SKU       = 'ALM-GER-000036';     /* vários: 'SKU-1, SKU-2' */
+var CA_AGORA_NUMERO    = '39459';
+var CA_AGORA_VALIDADE  = '16/09/2031';
+
+function CA_ARRUMAR_AGORA() {
+  var L = [];
+  function diz(x) { L.push(x === undefined ? '' : String(x)); }
+
+  diz('ARRUMANDO O CA  ·  ' + new Date().toLocaleString('pt-BR'));
+  diz('');
+
+  /* ---- 1 · as colunas ---- */
+  var criou;
+  try { criou = AP_ITENSCA_criarColunas(); }
+  catch (e) {
+    diz('!! parei no primeiro passo: ' + String(e.message || e));
+    Logger.log(L.join('\n')); return L.join('\n');
+  }
+  diz('1 · COLUNAS');
+  if (criou.jaExistiam) diz('    já existiam, não mexi.');
+  else {
+    for (var c = 0; c < criou.criadas.length; c++) {
+      diz('    criei "' + criou.criadas[c].nome + '" na coluna ' + criou.criadas[c].coluna +
+          ' (no fim da aba)');
+    }
+  }
+
+  /* onde elas ficaram */
+  var onde = AP_ITENSCA_conferirDados_();
+  diz('    ca está na coluna ' + onde.colunaCa + ' de ' + onde.totalDeColunas +
+      (onde.caNoFim ? '  — no fim, como tem que ser' : '  — ATENÇÃO: ainda no meio'));
+  if (onde.aviso) diz('    ' + onde.aviso);
+
+  /* ---- 2 · gravar ---- */
+  diz('');
+  diz('2 · GRAVANDO');
+  var skus = String(CA_AGORA_SKU).split(',').map(function (x) { return x.trim(); })
+                .filter(function (x) { return x; });
+  var feitos = 0, falhou = 0;
+  for (var i = 0; i < skus.length; i++) {
+    var r = AP_ITENSCA_gravar(skus[i], CA_AGORA_NUMERO, CA_AGORA_VALIDADE);
+    if (r.ok) {
+      feitos++;
+      diz('    ok   ' + skus[i] + '  →  linha ' + r.linha +
+          (r.antes && r.antes.ca ? '   (antes tinha: "' + r.antes.ca + '")' : '   (antes: vazio)'));
+    } else {
+      falhou++;
+      diz('    NÃO  ' + skus[i] + '  →  ' + r.mensagem);
+    }
+  }
+
+  /* ---- 3 · reler e conferir, que é o que vale ---- */
+  diz('');
+  diz('3 · CONFERINDO NA PLANILHA');
+  for (var j = 0; j < skus.length; j++) {
+    var lido = AP_ITENSCA_ler(skus[j]);
+    if (!lido.ok) { diz('    ' + skus[j] + ': ' + lido.mensagem); continue; }
+    var bate = String(lido.ca).trim() === String(CA_AGORA_NUMERO).trim();
+    diz('    ' + skus[j] + ':  ca="' + lido.ca + '"  validade="' + (lido.validade || '') + '"' +
+        (bate ? '   CONFERE' : '   NÃO CONFERE — esperava "' + CA_AGORA_NUMERO + '"'));
+  }
+
+  /* ---- 4 · o resumo ---- */
+  diz('');
+  diz('==========================================');
+  diz(feitos + ' gravado(s) · ' + falhou + ' com problema');
+  if (feitos && !falhou) {
+    diz('');
+    diz('Agora abra o sistema e veja o item no catálogo.');
+    diz('A partir da versão 408, o número também aparece');
+    diz('sozinho nas fichas de EPI daquele item.');
+  }
+  if (falhou) {
+    diz('');
+    diz('Mande este registro que eu digo o próximo passo.');
+  }
+
+  var t = L.join('\n');
+  Logger.log(t);
+  return t;
+}
+
+/* ============================================================
    2-B. BACKUP — antes de qualquer coisa
    ------------------------------------------------------------
    Copia a aba de itens inteira para uma aba nova, com a data e a
@@ -614,6 +715,8 @@ function onOpen() {
   try {
     SpreadsheetApp.getUi()
       .createMenu('CA dos itens')
+      .addItem('ARRUMAR O CA AGORA', 'CA_ARRUMAR_AGORA')
+      .addSeparator()
       .addItem('Conferir as colunas do CA', 'AP_ITENSCA_conferir')
       .addItem('Relatório de desalinhamento', 'AP_ITENSCA_relatorioDesalinhamento')
       .addSeparator()
