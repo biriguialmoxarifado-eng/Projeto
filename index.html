@@ -65157,7 +65157,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 410 · 08/11";
+var ALMOXA_VERSAO = "sistema 411 · 08/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -109280,8 +109280,14 @@ emissao: hoje,
             '</div>' +
             '<div style="display:flex;gap:8px">' +
               '<button class="btn btn-ghost btn-sm" data-mapa3d-recarregar>Recarregar</button>' +
-              '<a class="btn btn-primary btn-sm" data-mapa3d-abrir href="' + esc(link) + '" ' +
-                'target="_blank" rel="noopener">Abrir em tela cheia</a>' +
+              /* TELA CHEIA SEM PERDER A SESSÃO · 08/11, fim da tarde
+                 Antes isto abria OUTRA ABA. Numa aba nova o mapa fica
+                 sem o sistema do lado, e sem o sistema não há sessão —
+                 o Core recusa, com razão. Agora o próprio quadro cresce
+                 para a tela inteira: o mapa continua dentro do ALMOX
+                 PRO, identificado, e o botão faz o que promete. */
+              '<button class="btn btn-primary btn-sm" data-mapa3d-abrir>' +
+                'Abrir em tela cheia</button>' +
             '</div>' +
           '</div>' +
 
@@ -109298,8 +109304,17 @@ emissao: hoje,
                   'O mapa não abriu aqui dentro</b>' +
                 '<p class="small" style="line-height:1.55;color:var(--texto-2)">' +
                   'Alguns navegadores não deixam uma página embutir a outra. ' +
-                  'O botão <b>Abrir em tela cheia</b> funciona do mesmo jeito — ' +
-                  'e no celular ele é até melhor.</p>' +
+                  'Nesse caso o mapa abre numa aba ao lado — e continua ligado ' +
+                  'a esta, de onde ele tira a sua sessão.</p>' +
+                /* Esta aba PRECISA manter vínculo com a de origem: é
+                   por ela que o mapa usa a porta do sistema, em vez de
+                   ter sessão própria. Por isso NÃO leva rel="noopener"
+                   aqui — o destino é o nosso próprio endereço, não
+                   site de terceiro. Tirar o vínculo seria trocar uma
+                   proteção que não se aplica por uma sessão duplicada,
+                   que é justamente o que a regra dele proíbe. */
+                '<a class="btn btn-primary btn-sm" data-mapa3d-outraaba ' +
+                  'href="' + esc(link) + '" target="_blank">Abrir numa aba</a>' +
               '</div>' +
             '</div>' +
           '</div>' +
@@ -109321,6 +109336,33 @@ emissao: hoje,
     return Promise.resolve(html);
   };
 
+  /* tela cheia no braço, para quando o navegador recusa a de
+     verdade. Sai com Esc ou clicando em Sair. */
+  M.cheiaNaMao = function (caixa) {
+    if (!caixa || caixa.__cheia) return;
+    caixa.__cheia = true;
+    caixa.__estilo = caixa.getAttribute("style") || "";
+    caixa.setAttribute("style",
+      "position:fixed;inset:0;z-index:9999;height:100vh;background:#EEF1F5");
+
+    var sair = document.createElement("button");
+    sair.className = "btn btn-ghost btn-sm";
+    sair.textContent = "Sair da tela cheia";
+    sair.setAttribute("style",
+      "position:absolute;top:12px;right:12px;z-index:10000;background:#fff");
+    caixa.appendChild(sair);
+
+    function voltar() {
+      caixa.setAttribute("style", caixa.__estilo);
+      caixa.__cheia = false;
+      try { caixa.removeChild(sair); } catch (e) {}
+      document.removeEventListener("keydown", aoEsc);
+    }
+    function aoEsc(ev) { if (ev.key === "Escape") voltar(); }
+    sair.addEventListener("click", voltar);
+    document.addEventListener("keydown", aoEsc);
+  };
+
   M.ligarBotoes = function () {
     try {
       var rec = document.querySelector("[data-mapa3d-recarregar]");
@@ -109331,6 +109373,24 @@ emissao: hoje,
           if (q) q.src = M.linkCompleto();
         });
       }
+      /* TELA CHEIA · o quadro cresce, ninguém sai do sistema.
+         Se o navegador não deixar (raro, mas acontece em quiosque),
+         a caixa vira tela cheia por CSS — o mapa continua no mesmo
+         lugar, que é o ponto. Nunca abre aba nova. */
+      var cheia = document.querySelector("[data-mapa3d-abrir]");
+      if (cheia && !cheia.__ligado) {
+        cheia.__ligado = true;
+        cheia.addEventListener("click", function () {
+          var caixa = document.querySelector("[data-mapa3d-caixa]");
+          if (!caixa) return;
+          try {
+            var pedir = caixa.requestFullscreen || caixa.webkitRequestFullscreen;
+            if (pedir) { pedir.call(caixa); return; }
+          } catch (e) {}
+          M.cheiaNaMao(caixa);
+        });
+      }
+
       var quadro = document.querySelector("[data-mapa3d-quadro]");
       if (quadro && !quadro.__ligado) {
         quadro.__ligado = true;

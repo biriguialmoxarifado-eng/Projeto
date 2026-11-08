@@ -556,6 +556,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
     chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
     origemDaChave: 'nenhuma (fase 1)',
+    origemDaPorta: 'própria',
     sessao: null,
     tempoLimite: 20000,
     chamadas: 0,
@@ -602,6 +603,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
       temUrl: !!A.url,
       temChave: !!A.chave,           /* se TEM, não QUAL. */
       origemDaChave: A.origemDaChave,
+      porSistema: A.temPortaDoSistema(),
+      origemDaPorta: A.origemDaPorta,
       pronto: A.pronto(),
       chamadas: A.chamadas,
       falhas: A.falhas
@@ -646,6 +649,41 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
     return { chave: '', origem: 'nenhuma (fase 1)' };
   };
 
+  /* ------------------------------------------------------------
+     A PORTA DO SISTEMA
+
+     Devolve a função de chamada do ALMOX PRO, quando o mapa está
+     rodando dentro dele e no mesmo endereço. Devolve nada quando
+     não está — e aí o mapa usa o caminho próprio, que é o de
+     sempre e continua valendo para o Apps Script.
+
+     Note que NÃO se copia sessão, perfil nem obra para cá. Não
+     se lê token nenhum. Pede-se ao sistema que faça a chamada
+     dele; o que trafega é o resultado.
+     ------------------------------------------------------------ */
+  A.portaDoSistema = function () {
+    var janelas = [];
+    try { if (window.parent && window.parent !== window) janelas.push(window.parent); } catch (e) {}
+    try { if (window.opener) janelas.push(window.opener); } catch (e) {}
+
+    for (var i = 0; i < janelas.length; i++) {
+      try {
+        var j = janelas[i];
+        if (j && j.API && typeof j.API.call === 'function') {
+          A.origemDaPorta = i === 0 ? 'o sistema, pelo quadro' : 'o sistema, pela aba de origem';
+          return function (modulo, acao, payload) {
+            return j.API.call(modulo, acao, payload);
+          };
+        }
+      } catch (e) { /* origem diferente: o navegador barra, e está certo */ }
+    }
+    A.origemDaPorta = 'própria';
+    return null;
+  };
+
+  /** o mapa consegue falar pela porta do sistema? */
+  A.temPortaDoSistema = function () { return !!A.portaDoSistema(); };
+
   /** pega a chave do sistema e passa a usá-la. Devolve só se achou. */
   A.herdarChave = function () {
     var r = A.chaveDoSistema();
@@ -656,6 +694,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   /** dá para falar com o Core daqui? */
   A.pronto = function () {
+    if (A.temPortaDoSistema()) return true;
     var amb = A.ambiente();
     if (amb === 'APPS_SCRIPT') return true;
     return !!A.url;
@@ -689,6 +728,35 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
                    ms: Date.now() - comecou, ok: !!(r && r.ok) };
       if (!r || !r.ok) A.falhas++;
       return r;
+    }
+
+    /* ----------------------------------------------------------
+       PELA PORTA DO SISTEMA · o jeito certo, e o primeiro a tentar
+
+       Eu estava montando um envelope por fora e preenchendo campo
+       por campo: chave, depois sessão, depois perfil, depois obra.
+       Cada recusa do Core me fazia copiar mais um pedaço do
+       sistema para cá. Isso é construir uma SEGUNDA porta de
+       entrada — e a regra dele é clara: não duplicar
+       autenticação, sessão, usuários nem permissões.
+
+       O ALMOX PRO já tem uma porta que funciona, com a sessão do
+       Ismael, o perfil, a obra, a chave e o prazo dele. O mapa é
+       servido pelo mesmo endereço, então pode simplesmente BATER
+       NAQUELA PORTA em vez de abrir uma ao lado.
+
+       Assim não existe segunda sessão para ficar fora de sincronia,
+       e quem continua decidendo tudo é o Core.
+       ---------------------------------------------------------- */
+    var doSistema = A.portaDoSistema();
+    if (doSistema && !opcoes.semSistema) {
+      return Promise.resolve()
+        .then(function () { return doSistema(modulo, acao, payload || {}); })
+        .then(function (r) { return fim(A.entender(r)); })
+        .catch(function (e) {
+          return fim({ ok: false, codigo: 'ERRO_SISTEMA',
+            mensagem: 'A porta do sistema recusou: ' + ((e && e.message) || e) });
+        });
     }
 
     if (amb === 'APPS_SCRIPT') {
@@ -1203,19 +1271,22 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
         /* Quando a recusa é de CHAVE, dizer de onde a chave veio
            — ou que não veio nenhuma — poupa uma ida e volta.
            O valor da chave nunca aparece: só a procedência. */
-        var msg = esc((r && r.mensagem) || 'o Core não respondeu');
-        var ehChave = /chave/i.test((r && r.mensagem) || '');
+        var bruta = (r && r.mensagem) || 'o Core não respondeu';
+        var msg = esc(bruta);
+        var deIdentidade = /chave|sess(ã|a)o|token|permiss|autentic|perfil|login/i.test(bruta);
         var extra = '';
-        if (ehChave && window.API3D) {
+        if (deIdentidade && window.API3D) {
           var e3 = window.API3D.estado();
           extra = '<div class="small" style="margin-top:8px">' +
-            (e3.temChave
-              ? 'O mapa mandou a chave vinda de: ' + esc(e3.origemDaChave) +
-                '. Se o sistema entra e o mapa não, as duas chaves estão diferentes.'
-              : 'O mapa <b>não achou chave nenhuma</b> para mandar. ' +
-                'Ele pergunta ao próprio ALMOX PRO — abra o mapa pelo botão ' +
-                'Mapeamento 3D de dentro do sistema, no mesmo navegador em que ' +
-                'o sistema já entra.') +
+            (e3.porSistema
+              ? 'O mapa falou pela porta do próprio ALMOX PRO (' +
+                esc(e3.origemDaPorta) + '), com a sessão que o sistema está ' +
+                'usando agora. Se o sistema entra e isto não, quem recusou foi ' +
+                'o Core — e o motivo é o texto acima, não o mapa.'
+              : '<b>O mapa não está falando pela porta do sistema.</b> ' +
+                'Sozinho ele não tem sessão, e sessão não se copia nem se ' +
+                'inventa. Abra pelo botão <b>Mapeamento 3D</b> de dentro do ' +
+                'ALMOX PRO, já identificado — é de lá que ele herda a entrada.') +
             '</div>';
         }
         $('corpoPainel').innerHTML = '<div class="aviso erro"><b>Não consegui carregar.</b><br>' +
