@@ -65157,7 +65157,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 409 · 08/11";
+var ALMOXA_VERSAO = "sistema 410 · 08/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -109153,7 +109153,11 @@ emissao: hoje,
    rodando dentro do ALMOX PRO, então já sabe o caminho.
 
    De onde ela tira:
-     · PONTE.url, quando o sistema é servido pelo GitHub Pages;
+     · API.PONTE.url, quando o sistema é servido pelo GitHub
+       Pages — é ali que o ALMOX PRO guarda o /exec. Na 409 eu
+       procurei em window.PONTE, que não existe: a barra de cima
+       dizia "Core conectado" e o mapa dizia que não achou. Erro
+       meu, corrigido aqui;
      · o próprio /exec, quando é servido pelo Apps Script.
 
    Se não achar nenhum dos dois, o mapa abre em demonstração e
@@ -109175,8 +109179,15 @@ emissao: hoje,
     telaAntiga: null,
 
     /* onde o módulo 3D foi publicado. Relativo quando o sistema
-       e o mapa estão no mesmo lugar; absoluto quando não estão. */
-    pasta: "ALMOXA_3D/",
+       e o mapa estão no mesmo lugar; absoluto quando não estão.
+
+       É UM ARQUIVO SÓ, de propósito: mapa3d.html carrega o CSS e
+       os quatro scripts dentro dele. Arquivo que depende de
+       outros cinco com nome exato é arquivo que uma renomeação
+       derruba — e derrubou. Um arquivo não tem como faltar
+       metade. O nome também não é index.html: assim nunca
+       disputa lugar com o index.html do sistema. */
+    pasta: "ALMOXA_3D/mapa3d.html",
     baseGithub: "https://biriguialmoxarifado-eng.github.io/Projeto/"
   };
 
@@ -109190,9 +109201,18 @@ emissao: hoje,
      O ENDEREÇO DO CORE, descoberto sozinho
      ---------------------------------------------------------- */
   M.urlDoCore = function () {
-    /* 1 · o sistema no GitHub Pages guarda o /exec na PONTE */
+    /* 1 · o sistema no GitHub Pages guarda o /exec na PONTE, que
+           mora pendurada no API — e não solta na janela. É o
+           mesmo endereço que a barra de cima usa para dizer
+           "Core conectado". */
+    try {
+      if (window.API && API.PONTE && lp(API.PONTE.url)) return lp(API.PONTE.url);
+    } catch (e) {}
     try {
       if (window.PONTE && lp(PONTE.url)) return lp(PONTE.url);
+    } catch (e) {}
+    try {
+      if (window.ALMOXA_CONFIG && lp(ALMOXA_CONFIG.API_URL)) return lp(ALMOXA_CONFIG.API_URL);
     } catch (e) {}
     /* 2 · servido pelo próprio Apps Script: o endereço é este mesmo */
     try {
@@ -109210,7 +109230,12 @@ emissao: hoje,
   M.urlDoMapa = function () {
     var guardado = "";
     try { guardado = lp(localStorage.getItem("almoxa3d:pasta")); } catch (e) {}
-    if (guardado) return guardado;
+    if (guardado) {
+      /* quem configurou antes da 410 guardou a PASTA. Completa
+         sozinho, para a configuração antiga não virar tela 404. */
+      if (/\/$/.test(guardado)) guardado += "mapa3d.html";
+      return guardado;
+    }
 
     try {
       /* mesmo lugar do sistema: caminho relativo, que não quebra
@@ -109227,7 +109252,8 @@ emissao: hoje,
   M.linkCompleto = function () {
     var base = M.urlDoMapa();
     var core = M.urlDoCore();
-    return base + (core ? "?core=" + encodeURIComponent(core) : "");
+    var junta = base.indexOf("?") > -1 ? "&" : "?";
+    return base + (core ? junta + "core=" + encodeURIComponent(core) : "");
   };
 
   /* ----------------------------------------------------------
@@ -109343,11 +109369,15 @@ emissao: hoje,
   };
 
   /* para o Ismael trocar o endereço do módulo sem mexer no código:
-     MAPA3D.ondeFica("https://.../ALMOXA_3D/") */
+     MAPA3D.ondeFica("https://.../ALMOXA_3D/mapa3d.html")
+
+     Aceita o arquivo ou a pasta: terminando em barra, completa
+     com mapa3d.html sozinho. Ninguém precisa decorar isso. */
   M.ondeFica = function (url) {
     var u = lp(url);
     if (!u) { try { localStorage.removeItem("almoxa3d:pasta"); } catch (e) {} return M.urlDoMapa(); }
-    if (!/\/$/.test(u)) u += "/";
+    if (/\/$/.test(u)) u += "mapa3d.html";
+    else if (!/\.html?(\?|#|$)/i.test(u)) u += "/mapa3d.html";
     try { localStorage.setItem("almoxa3d:pasta", u); } catch (e) {}
     return u;
   };
