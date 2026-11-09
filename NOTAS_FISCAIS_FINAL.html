@@ -225,6 +225,27 @@ td.vazio{text-align:center;color:var(--texto-3);padding:36px}
   .importa{padding:12px}
 }
 
+/* ------------------------------------------------------------
+   O PDF DE CONFERÊNCIA · 09/11
+   Fica à ESQUERDA do painel da nota, para o Ismael comparar
+   item por item sem trocar de tela. É o trabalho dele.
+   ------------------------------------------------------------ */
+#nfPdf{display:none;position:fixed;top:0;bottom:0;right:0;width:min(620px,100%);
+  background:var(--papel);border-left:1px solid var(--borda);
+  box-shadow:-14px 0 40px rgba(10,42,84,.14);z-index:55;
+  flex-direction:column}
+#nfPdf.on{display:flex}
+body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
+.pdf-aviso{background:var(--at-f);border-bottom:1px solid var(--at-b);
+  color:var(--at);padding:9px 14px;font-size:12px;line-height:1.45}
+.pdf-quadro{flex:1;width:100%;border:0;display:block;min-height:0}
+@media (min-width:1960px){
+  body.com-painel.com-pdf .pagina{padding-right:1240px}
+}
+@media (max-width:1320px){
+  #nfPdf, body.com-painel #nfPdf{right:0;width:100%;z-index:65}
+}
+
 </style>
 </head>
 <body>
@@ -243,8 +264,10 @@ td.vazio{text-align:center;color:var(--texto-3);padding:36px}
   <div class="rodape" id="nfRodape"></div>
 </div>
 
+<div id="nfPdf"></div>
 <div id="nfPainel"></div>
 <input type="file" id="nfArquivo" accept=".xml,text/xml,application/xml" style="display:none">
+<input type="file" id="nfPdfArquivo" accept=".pdf,application/pdf" style="display:none">
 
 <script>
 /* ========== nfxml.js ========== */
@@ -1135,7 +1158,7 @@ td.vazio{text-align:center;color:var(--texto-3);padding:36px}
      servindo a página velha. Sem um número visível, nenhum dos
      dois consegue saber. Agora sabe, em um segundo, olhando o
      rodapé. */
-  var CARIMBO = 'módulo NF 4 · 08/11 21:05';
+  var CARIMBO = 'módulo NF 5 · 09/11 08:00';
 
   var A = {
     nome: 'NFAPP', versao: CARIMBO,
@@ -1216,10 +1239,10 @@ td.vazio{text-align:center;color:var(--texto-3);padding:36px}
       '<button class="btn primario" id="nfConsultar">🔍 Consultar NF-e</button>' +
       '<button class="btn coluna" id="nfImportar">' +
         '<span class="i">⤒</span>Importar XML</button>' +
-      '<button class="btn coluna" id="nfAnexar" disabled ' +
-        'title="Anexar PDF grava arquivo no Drive — e nenhuma ação de gravação foi ' +
-        'encontrada no Core">' +
-        '<span class="i">📎</span>Anexar PDF</button>' +
+      '<button class="btn coluna" id="nfAnexar" ' +
+        'title="Abre a DANFE em PDF ao lado dos itens, para conferir. ' +
+        'Guardar o arquivo no Drive é outra coisa, e essa depende do Core.">' +
+        '<span class="i">📎</span>Abrir PDF</button>' +
     '</div>' +
     '<div id="nfChaveAviso"></div>';
   };
@@ -1508,6 +1531,10 @@ td.vazio{text-align:center;color:var(--texto-3);padding:36px}
     if (imp) imp.addEventListener('click', function () {
       var c = $('nfArquivo'); if (c) c.click();
     });
+    var pdf = $('nfAnexar');
+    if (pdf) pdf.addEventListener('click', function () {
+      var c = $('nfPdfArquivo'); if (c) c.click();
+    });
     var cons = $('nfConsultar');
     if (cons) cons.addEventListener('click', A.consultarChave);
     var ch = $('nfChave');
@@ -1747,11 +1774,13 @@ td.vazio{text-align:center;color:var(--texto-3);padding:36px}
           '</td>' +
           '<td class="num"><input class="celula" value="' +
             esc(i.qtd !== undefined ? i.qtd : (i.quantidade || '')) + '" readonly ' +
-            'title="Editar grava, e gravação é a etapa 2"></td>' +
+            'title="Para o que o senhor digitar aqui ser salvo, o Core precisa da ' +
+            'ação nf.salvar — que não existe. Campo liberado sem ela faria o senhor ' +
+            'digitar e perder."></td>' +
           '<td class="num"><input class="celula" value="' +
             esc(D.moeda(i.valorUnitario !== undefined ? i.valorUnitario : i.preco)
               .replace('R$ ', '')) + '" readonly ' +
-            'title="Editar grava, e gravação é a etapa 2"></td>' +
+            'title="Mesma coisa: falta nf.salvar no Core."></td>' +
           '<td class="num"><b>' +
             D.moeda(i.valorTotal !== undefined ? i.valorTotal : i.total)
               .replace('R$ ', '') + '</b></td>' +
@@ -1855,6 +1884,71 @@ td.vazio{text-align:center;color:var(--texto-3);padding:36px}
       'e na varredura de hoje eu não encontrei a ação que devolve o histórico de uma ' +
       'nota. Preencher esta aba com o que eu adivinhar seria pior do que deixá-la vazia.' +
       '<br><br>Assim que eu tiver a lista de funções do Core, isto aqui é meia hora.</div>';
+  };
+
+  /* ------------------------------------------------------------
+     O PDF · conferir, que é diferente de anexar · 09/11
+
+     Ele pediu para exportar o PDF da máquina dele para dentro do
+     módulo. Tem duas coisas dentro desse pedido, e elas não são
+     iguais:
+
+       CONFERIR  · abrir a DANFE do lado dos itens e comparar.
+                   Isso é leitura. Não grava nada, não precisa do
+                   Core, e é o que resolve o trabalho dele hoje.
+
+       ANEXAR    · guardar o arquivo preso à nota, para quem abrir
+                   amanhã encontrar. Isso é gravação no Drive, e
+                   depende de uma ação que o Core não tem.
+
+     O que entra agora é o CONFERIR, com esse nome. Chamar de
+     "anexar" uma coisa que não guarda nada seria enganar o
+     usuário no dia em que ele mais precisa do arquivo.
+
+     O navegador já sabe desenhar PDF — não entra biblioteca
+     nenhuma, e o arquivo não sai do computador dele.
+     ------------------------------------------------------------ */
+  A.abrirPdf = function (arquivo) {
+    try { if (A.pdfUrl) URL.revokeObjectURL(A.pdfUrl); } catch (e) {}
+    A.pdfUrl = URL.createObjectURL(arquivo);
+    A.pdfNome = arquivo.name;
+    A.pdfTamanho = arquivo.size;
+    A.pintarPdf();
+    return A.pdfUrl;
+  };
+
+  A.fecharPdf = function () {
+    try { if (A.pdfUrl) URL.revokeObjectURL(A.pdfUrl); } catch (e) {}
+    A.pdfUrl = null; A.pdfNome = null;
+    var cx = $('nfPdf');
+    if (cx) { cx.classList.remove('on'); cx.innerHTML = ''; }
+    document.body.classList.remove('com-pdf');
+  };
+
+  A.pintarPdf = function () {
+    var cx = $('nfPdf');
+    if (!cx || !A.pdfUrl) return;
+    cx.classList.add('on');
+    document.body.classList.add('com-pdf');
+    var kb = Math.round((A.pdfTamanho || 0) / 1024);
+    cx.innerHTML =
+      '<div class="painel-topo">' +
+        '<b>📄 ' + esc(A.pdfNome || 'documento') + '</b>' +
+        '<button class="x" id="nfPdfFechar" title="Fechar">✕</button>' +
+      '</div>' +
+      '<div class="pdf-aviso">' +
+        'Conferência apenas. O arquivo está aberto do seu computador e ' +
+        '<b>não foi guardado</b> no sistema — guardar depende de uma ação ' +
+        'que o Core ainda não tem. ' + kb + ' KB.' +
+      '</div>' +
+      '<object data="' + esc(A.pdfUrl) + '" type="application/pdf" class="pdf-quadro">' +
+        '<div class="painel-corpo"><div class="aviso">' +
+          'Este navegador não desenha PDF aqui dentro. ' +
+          '<a href="' + esc(A.pdfUrl) + '" target="_blank" rel="noopener">' +
+          'Abrir numa aba</a>.</div></div>' +
+      '</object>';
+    var f = $('nfPdfFechar');
+    if (f) f.addEventListener('click', A.fecharPdf);
   };
 
   /* ------------------------------------------------------------
@@ -1991,6 +2085,12 @@ td.vazio{text-align:center;color:var(--texto-3);padding:36px}
     if (campo) campo.addEventListener('change', function () {
       if (campo.files && campo.files[0]) A.importarArquivo(campo.files[0]);
       campo.value = '';
+    });
+
+    var campoPdf = $('nfPdfArquivo');
+    if (campoPdf) campoPdf.addEventListener('change', function () {
+      if (campoPdf.files && campoPdf.files[0]) A.abrirPdf(campoPdf.files[0]);
+      campoPdf.value = '';
     });
     A.pintarRodape();
     A.carregar();
