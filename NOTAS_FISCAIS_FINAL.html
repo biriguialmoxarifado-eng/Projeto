@@ -270,6 +270,253 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
 <input type="file" id="nfPdfArquivo" accept=".pdf,application/pdf" style="display:none">
 
 <script>
+/* ========== nfauto.js ========== */
+/* ============================================================
+   NOTAS_FISCAIS · nfauto.js · 09/11/2026
+   ------------------------------------------------------------
+   A PONTE DAS AUTOMAÇÕES.
+
+   O Ismael pediu: "pega as funções da versão antiga, dá um pente
+   fino, traz todas as automações para cá". O pente fino achou
+   33 funções NF_* e 11 janelas no sistema principal.
+
+   E a resposta certa NÃO é trazer: é CHAMAR.
+
+   Por quê. Dentro daquelas funções mora conhecimento que custou
+   caro. O NF_SALVAR_EDICAO, por exemplo, tem este aviso escrito
+   no corpo, datado de v163:
+
+     "AQUI HAVIA UM PLANO B QUE ESTRAGAVA A NOTA. Ele tentava
+      gravar a correção com nf.salvar. Esse módulo ACRESCENTA
+      linha — nunca substitui. Resultado: a correção entrava
+      como um segundo lançamento inteiro e a nota dobrava de
+      valor e de itens. Foi o que aconteceu com a 53072."
+
+   Uma cópia minha não teria essa cicatriz. Teria o código, não
+   a lição — e repetiria a 53072 no primeiro caso de borda que
+   eu não previsse. Eu mesmo quase propus isso ontem à noite.
+
+   Então o módulo roda no mesmo endereço do sistema, enxerga o
+   window.parent, e usa AS FUNÇÕES DELE. Uma versão só de cada
+   cálculo. Quando o Ismael melhorar o NF_SALDO lá, o módulo
+   melhora junto, sem eu encostar aqui.
+
+   Sem o sistema do lado, nada disso existe — e aí cada função
+   devolve "não disponível" em vez de um número inventado.
+   ============================================================ */
+(function (raiz) {
+  'use strict';
+
+  var A = { nome: 'NFAUTO', versao: '09/11' };
+
+  /* as automações do sistema que este módulo usa, com o que cada
+     uma faz. Nome que não estiver nesta lista, o módulo não chama:
+     a regra dele é não inventar função. */
+  A.CATALOGO = {
+    NF_AGRUPAR:        'junta os lançamentos da mesma nota num registro só',
+    NF_SALDO:          'declarado × lançado: o "falta lançar R$ X"',
+    NF_VALE:           'a nota conta, ou foi excluída',
+    NF_SOMA_ITENS:     'soma dos itens com arredondamento fiscal',
+    NF_IDENTIDADE:     'a identidade de uma nota',
+    NF_IDENTIDADES:    'as identidades possíveis, com e sem CNPJ',
+    NF_MESMA_NOTA:     'duas notas são a mesma?',
+    NF_JA_EXISTE:      'esta nota já foi lançada?',
+    NF_DAS_ENTRADAS:   'entradas de estoque sem nota lançada',
+    NF_FORNECEDOR_LIMPO: 'tira "não informado" e o nome da própria empresa',
+    NF_EH_MINHA_EMPRESA: 'o fornecedor é a própria COESA?',
+    NF_ITENS_REPETIDOS:  'itens repetidos dentro da nota',
+    NF_PISTAS_DA_DIFERENCA: 'por que a soma não fecha',
+    NF_SO_NUMEROS:     'deixa só os dígitos',
+    NF_NORMAL:         'normaliza texto para comparar',
+    NF_NUMERO_DO_DOC:  'o número do documento, limpo',
+    NF_LINHAS_DA_NOTA: 'quantas linhas a nota ocupa na planilha',
+    NF_QUEM_ESTA:      'quem está operando agora',
+    quantosItensNaNota: 'conta os itens, em qualquer formato',
+    avisoDeFornecedorSuspeito: 'fornecedor estranho para esta nota'
+  };
+
+  /* as janelas do sistema. Abrem no DOM do ALMOX PRO, por cima de
+     tudo — que é melhor do que espremidas dentro do quadro. */
+  A.JANELAS = {
+    modalDetalheNF:      'o detalhe completo da nota',
+    modalEditarNota:     'a edição, com gravação conferida',
+    modalExcluirNota:    'excluir com registro',
+    modalConferenciaNF:  'a conferência item a item',
+    modalItensNovosNF:   'itens que não estão no catálogo',
+    modalFornecedorDaNota: 'acertar o fornecedor',
+    modalRestaurarNota:  'trazer de volta uma excluída',
+    modalPatrimonioDaNota: 'patrimônio a partir da nota',
+    modalNotaLancada:    'o recibo do lançamento',
+    modalItemAvulsoNF:   'item fora da nota',
+    modalLimparNotas:    'recomeçar do zero'
+  };
+
+  /* ------------------------------------------------------------
+     ONDE MORA O SISTEMA
+     ------------------------------------------------------------ */
+  A.sistema = function () {
+    var janelas = [];
+    try { if (raiz.parent && raiz.parent !== raiz) janelas.push(raiz.parent); } catch (e) {}
+    try { if (raiz.opener) janelas.push(raiz.opener); } catch (e) {}
+    for (var i = 0; i < janelas.length; i++) {
+      try {
+        var j = janelas[i];
+        /* o NF_IDENTIDADE é a impressão digital: se ele está lá,
+           é o ALMOX PRO e não outra página qualquer */
+        if (j && typeof j.NF_IDENTIDADE === 'function') return j;
+      } catch (e) {}
+    }
+    return null;
+  };
+
+  A.tem = function (nome) {
+    var s = A.sistema();
+    if (!s) return false;
+    try { return typeof s[nome] === 'function'; } catch (e) { return false; }
+  };
+
+  /**
+   * chama uma automação do sistema.
+   * Devolve { ok, valor } ou { ok:false, motivo } — nunca um
+   * número inventado quando a função não está lá.
+   */
+  A.usar = function (nome) {
+    if (!A.CATALOGO[nome] && !A.JANELAS[nome]) {
+      return { ok: false, motivo: 'A função "' + nome + '" não está no catálogo ' +
+        'deste módulo. Não chamo função que eu não conferi.' };
+    }
+    var s = A.sistema();
+    if (!s) {
+      return { ok: false, motivo: 'Sem o ALMOX PRO do lado. Abra o módulo pelo ' +
+        'menu Notas Fiscais, de dentro do sistema.' };
+    }
+    if (typeof s[nome] !== 'function') {
+      return { ok: false, motivo: 'A automação "' + nome + '" não existe nesta ' +
+        'versão do sistema.' };
+    }
+    var args = Array.prototype.slice.call(arguments, 1);
+    try {
+      return { ok: true, valor: s[nome].apply(s, args) };
+    } catch (e) {
+      return { ok: false, motivo: 'A automação "' + nome + '" estourou: ' +
+        ((e && e.message) || e) };
+    }
+  };
+
+  /** o mesmo, devolvendo só o valor — para uso em conta.
+      O padrão entra quando a automação não está disponível, e
+      quem chamou SABE que entrou, porque pergunta com A.tem(). */
+  A.valor = function (nome, padrao) {
+    var r = A.usar.apply(A, arguments.length > 2
+      ? [nome].concat(Array.prototype.slice.call(arguments, 2))
+      : [nome]);
+    return r.ok ? r.valor : padrao;
+  };
+
+  /* ------------------------------------------------------------
+     AS QUE O MÓDULO USA DIRETO
+     ------------------------------------------------------------ */
+
+  /** declarado × lançado. Devolve null quando não dá para saber. */
+  A.saldoDaNota = function (nota) {
+    var r = A.usar('NF_SALDO', nota);
+    return r.ok ? r.valor : null;
+  };
+
+  /** o fornecedor como o sistema o mostra.
+      ATENÇÃO ao vazio: o NF_FORNECEDOR_LIMPO devolve "" DE PROPÓSITO
+      para "não informado" e para o nome da própria COESA. Na primeira
+      versão eu tratei esse "" como falha e devolvia o original — ou
+      seja, desfazia a limpeza que ele tinha acabado de fazer. Vazio
+      dele é resposta, não ausência de resposta. */
+  A.fornecedor = function (nota) {
+    var r = A.usar('NF_FORNECEDOR_LIMPO', nota && nota.fornecedor, nota && nota.cnpj);
+    if (r.ok) return r.valor || '';
+    return (nota && nota.fornecedor) || '';
+  };
+
+  /** quantos itens, em qualquer formato que o Core devolva */
+  A.quantosItens = function (nota) {
+    var r = A.usar('quantosItensNaNota', nota);
+    if (r.ok) return r.valor;
+    var l = nota && (nota.listaItens || nota.itens);
+    return Object.prototype.toString.call(l) === '[object Array]' ? l.length : 0;
+  };
+
+  /** fornecedor estranho para esta nota */
+  A.avisoFornecedor = function (nota) {
+    var r = A.usar('avisoDeFornecedorSuspeito', nota);
+    return r.ok ? r.valor : null;
+  };
+
+  /** esta nota já foi lançada? */
+  A.jaExiste = function (nota, lista) {
+    var r = A.usar('NF_JA_EXISTE', nota, lista);
+    return r.ok ? r.valor : null;
+  };
+
+  /** entradas de estoque sem nota lançada */
+  A.entradasSemNota = function (notas) {
+    var r = A.usar('NF_DAS_ENTRADAS', notas);
+    return r.ok ? r.valor : null;
+  };
+
+  /* ------------------------------------------------------------
+     ABRIR UMA JANELA DO SISTEMA
+
+     O lápis do módulo passa a abrir a janela de edição DO SISTEMA.
+     Ela sabe exigir o crachá, gravar pelo caminho certo e conferir
+     depois se a nota não duplicou. Nada disso eu reescrevo.
+     ------------------------------------------------------------ */
+  A.abrirJanela = function (nome, arg, aoTerminar) {
+    if (!A.JANELAS[nome]) {
+      return { ok: false, motivo: 'Janela "' + nome + '" fora do catálogo.' };
+    }
+    var s = A.sistema();
+    if (!s) {
+      return { ok: false, motivo: 'Sem o ALMOX PRO do lado. Abra o módulo pelo ' +
+        'menu Notas Fiscais, de dentro do sistema — a edição mora lá.' };
+    }
+    if (typeof s[nome] !== 'function') {
+      return { ok: false, motivo: 'A janela "' + nome + '" não existe nesta versão ' +
+        'do sistema.' };
+    }
+    try {
+      s[nome](arg, aoTerminar);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, motivo: 'A janela estourou: ' + ((e && e.message) || e) };
+    }
+  };
+
+  /* ------------------------------------------------------------
+     O QUE ESTÁ E O QUE NÃO ESTÁ · para a tela poder dizer
+     ------------------------------------------------------------ */
+  A.inventario = function () {
+    var s = A.sistema();
+    var fora = { comSistema: !!s, automacoes: [], janelas: [],
+                 faltando: [], total: 0, achadas: 0 };
+    function olhar(mapa, onde) {
+      for (var nome in mapa) {
+        if (!Object.prototype.hasOwnProperty.call(mapa, nome)) continue;
+        fora.total++;
+        var tem = A.tem(nome);
+        if (tem) fora.achadas++; else fora.faltando.push(nome);
+        fora[onde].push({ nome: nome, oQueFaz: mapa[nome], tem: tem });
+      }
+    }
+    olhar(A.CATALOGO, 'automacoes');
+    olhar(A.JANELAS, 'janelas');
+    return fora;
+  };
+
+  raiz.NFAUTO = A;
+  if (typeof module !== 'undefined' && module.exports) module.exports = A;
+
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
 /* ========== nfxml.js ========== */
 /* ============================================================
    NOTAS_FISCAIS · nfxml.js · 08/11/2026
@@ -1158,7 +1405,7 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
      servindo a página velha. Sem um número visível, nenhum dos
      dois consegue saber. Agora sabe, em um segundo, olhando o
      rodapé. */
-  var CARIMBO = 'módulo NF 5 · 09/11 08:00';
+  var CARIMBO = 'módulo NF 6 · 09/11 10:10';
 
   var A = {
     nome: 'NFAPP', versao: CARIMBO,
@@ -1335,7 +1582,8 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
           '<td style="white-space:nowrap;width:92px">' +
             '<button class="btn-ic" data-ver="' + i + '" title="Ver a nota">👁</button>' +
             '<button class="btn-ic" data-lapis="' + i + '" ' +
-              'title="Abrir para conferir — a edição grava, e grava é etapa 2">✎</button>' +
+              'title="Abre a janela de edição do ALMOX PRO — a mesma da tela antiga, ' +
+              'que exige crachá e confere se a nota não duplicou">✎</button>' +
             '<button class="btn-ic" disabled title="Mais ações entram com a gravação">⋯</button>' +
           '</td>' +
         '</tr>';
@@ -1554,7 +1802,8 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
           var v = b.getAttribute('data-' + chaveAttr);
           if (chaveAttr === 'aba') { A.filtro.situacao = v; A.pagina = 1; A.pintar(); }
           else if (chaveAttr === 'pg') { A.pagina = Number(v); A.pintar(); }
-          else { A.abrir(A.visiveis()[Number(v)], chaveAttr === 'lapis'); }
+          else if (chaveAttr === 'lapis') { A.editar(A.visiveis()[Number(v)]); }
+          else { A.abrir(A.visiveis()[Number(v)]); }   /* o olho fica no painel daqui */
         });
       });
     });
@@ -1626,6 +1875,56 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
       A.recado = r.ok ? null : r.mensagem;
       A.pintarPainel();
     });
+  };
+
+  /* ------------------------------------------------------------
+     EDITAR · chama a janela do sistema, não reescreve nada
+
+     Eu quase construí uma edição própria aqui. Teria sido o erro
+     mais caro do projeto: a janela do ALMOX PRO exige crachá,
+     grava pelo caminho de alteração (e não pelo que ACRESCENTA
+     linha, que dobrou a nota 53072) e confere depois se a nota
+     continua com os itens certos. Nada disso eu teria de graça
+     numa versão minha.
+     ------------------------------------------------------------ */
+  A.editar = function (nota) {
+    if (!nota) return;
+    var r = raiz.NFAUTO.abrirJanela('modalEditarNota', nota, function () {
+      /* terminou a edição lá: relê aqui, para a lista não mentir */
+      A.carregar();
+    });
+    if (!r.ok) A.recadoDeJanela(r.motivo, 'editar esta nota');
+    return r;
+  };
+
+  A.verDetalhe = function (nota) {
+    if (!nota) return;
+    var id = raiz.NFAUTO.valor('NF_IDENTIDADE', null, nota);
+    var r = raiz.NFAUTO.abrirJanela('modalDetalheNF', id || nota);
+    if (!r.ok) { A.abrir(nota); return r; }   /* sem sistema: o painel daqui serve */
+    return r;
+  };
+
+  /** quando a janela do sistema não está ao alcance, dizer por quê */
+  A.recadoDeJanela = function (motivo, oQue) {
+    var cx = $('nfPainel');
+    if (!cx) return;
+    cx.classList.add('on');
+    document.body.classList.add('com-painel');
+    cx.innerHTML =
+      '<div class="painel-topo"><b>Não consegui abrir</b>' +
+        '<button class="x" id="nfFechar">✕</button></div>' +
+      '<div class="painel-corpo"><div class="aviso">' +
+        '<b>Para ' + esc(oQue) + ', este módulo usa a janela do ALMOX PRO.</b><br>' +
+        esc(motivo) +
+      '</div>' +
+      '<div class="peq mudo" style="line-height:1.5">' +
+        'Isso é de propósito. A janela do sistema exige crachá, grava pelo caminho ' +
+        'de alteração e confere depois se a nota não duplicou — ela já apanhou de ' +
+        'verdade, na nota 53072. Uma edição escrita só para este módulo não teria ' +
+        'nada disso.</div></div>';
+    var f = $('nfFechar');
+    if (f) f.addEventListener('click', A.fechar);
   };
 
   A.fechar = function () {
