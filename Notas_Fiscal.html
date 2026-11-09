@@ -1,0 +1,1855 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Notas Fiscais — ALMOX PRO</title>
+<style>
+/* ============================================================
+   NOTAS_FISCAIS · nf.css · 08/11/2026 · terceira versão
+   ------------------------------------------------------------
+   Agora com a referência visual na mão. O que mudou em relação
+   à segunda: saiu a barra lateral do módulo, saíram os sete
+   quadros de número (seção 3C: "não exagerar nos indicadores"),
+   e a contagem passou para dentro das abas.
+
+   A tabela é a área de trabalho. Tudo o mais é moldura.
+   ============================================================ */
+:root{
+  --marinho:#0B2545; --marinho-2:#143A66; --azul:#1565D8; --azul-2:#0F4FB0;
+  --azul-f:#EAF2FE; --azul-b:#C3DBFB;
+  --fundo:#F2F5F9; --papel:#FFF; --borda:#DCE3EC; --borda-2:#EBEFF4;
+  --texto:#13202E; --texto-2:#56657A; --texto-3:#8794A6;
+  --bom:#157A44; --bom-f:#E7F6ED; --bom-b:#B7E2C8;
+  --at:#8A5A14; --at-f:#FFF6E4; --at-b:#EFCE91;
+  --erro:#A32820; --erro-f:#FDECEA; --erro-b:#EDB4AC;
+  --sombra:0 1px 2px rgba(11,37,69,.05),0 1px 3px rgba(11,37,69,.04);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;min-height:100%}
+body{background:var(--fundo);color:var(--texto);
+  font:13px/1.45 system-ui,"Segoe UI",Roboto,Arial,sans-serif}
+
+/* ---------- cabeçalho LOCAL (o global é do ALMOX PRO) ---------- */
+.trilha{padding:9px 20px;background:var(--papel);border-bottom:1px solid var(--borda);
+  font-size:12px;color:var(--texto-3)}
+.trilha b{color:var(--texto);font-weight:600}
+.cab{padding:16px 20px 0;display:flex;gap:13px;align-items:flex-start}
+.cab .fig{width:40px;height:40px;border-radius:9px;background:var(--azul-f);
+  color:var(--azul);display:grid;place-items:center;font-size:19px;flex-shrink:0}
+.cab h1{margin:0;font-size:21px;font-weight:700;color:var(--marinho);letter-spacing:-.2px}
+.cab p{margin:3px 0 0;font-size:12.5px;color:var(--texto-2)}
+.area{padding:14px 20px 0}
+
+/* ---------- importação por chave ---------- */
+.importa{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.chave-caixa{flex:1;min-width:280px;position:relative;display:flex;align-items:center}
+.chave-caixa .ico{position:absolute;left:11px;color:var(--texto-3);font-size:14px}
+#nfChave{width:100%;padding:10px 12px 10px 33px;border:1px solid var(--borda);
+  border-radius:8px;font:inherit;font-size:13.5px;background:var(--papel);
+  font-family:ui-monospace,Consolas,monospace;letter-spacing:.3px}
+#nfChave:focus{outline:none;border-color:var(--azul);box-shadow:0 0 0 3px rgba(21,101,216,.13)}
+#nfChave.ruim{border-color:var(--at)}
+#nfChave.boa{border-color:var(--bom)}
+
+/* ---------- botões ---------- */
+.btn{background:var(--papel);border:1px solid var(--borda);border-radius:8px;
+  padding:9px 14px;font:inherit;font-size:13px;color:var(--texto);cursor:pointer;
+  display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.btn:hover{border-color:var(--azul);color:var(--azul)}
+.btn.primario{background:var(--azul);border-color:var(--azul);color:#fff}
+.btn.primario:hover{background:var(--azul-2);color:#fff}
+.btn.peq{padding:6px 11px;font-size:12.5px;border-radius:7px}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.btn[disabled]:hover{border-color:var(--borda);color:var(--texto)}
+.btn[disabled].primario:hover{background:var(--azul);color:#fff}
+.btn-ic{background:transparent;border:0;padding:4px 6px;cursor:pointer;
+  color:var(--texto-3);font-size:14px;border-radius:5px;line-height:1}
+.btn-ic:hover{background:var(--azul-f);color:var(--azul)}
+.btn-ic[disabled]{opacity:.35;cursor:not-allowed}
+.btn-ic[disabled]:hover{background:transparent;color:var(--texto-3)}
+
+/* ---------- abas com contagem ---------- */
+.abas{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.aba{background:var(--papel);border:1px solid var(--borda);border-radius:8px;
+  padding:9px 14px;font:inherit;font-size:13px;color:var(--texto-2);cursor:pointer;
+  display:inline-flex;align-items:center;gap:9px;box-shadow:var(--sombra)}
+.aba:hover{border-color:var(--azul-b)}
+.aba.on{border-color:var(--azul);color:var(--marinho);font-weight:600;
+  box-shadow:0 0 0 3px rgba(21,101,216,.10)}
+.aba .q{font-weight:700;color:var(--marinho);font-size:13.5px}
+.aba.on .q{color:var(--azul)}
+.aba.alerta{border-color:var(--at-b);color:var(--at)}
+.aba.alerta .q{color:var(--at)}
+
+/* ---------- filtros ---------- */
+.filtros{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.campo{padding:8px 11px;border:1px solid var(--borda);border-radius:8px;
+  font:inherit;font-size:12.5px;background:var(--papel);color:var(--texto)}
+.campo.cresce{flex:1;min-width:240px}
+.campo:focus{outline:none;border-color:var(--azul);box-shadow:0 0 0 3px rgba(21,101,216,.13)}
+.grupo-data{display:flex;align-items:center;gap:6px;background:var(--papel);
+  border:1px solid var(--borda);border-radius:8px;padding:3px 9px;font-size:12.5px}
+.grupo-data input{border:0;padding:4px 2px;font:inherit;font-size:12.5px;background:transparent}
+.grupo-data input:focus{outline:none}
+.grupo-data span{color:var(--texto-3)}
+
+/* ---------- tabela ---------- */
+.cartao{background:var(--papel);border:1px solid var(--borda);border-radius:10px;
+  box-shadow:var(--sombra);overflow:hidden}
+.tabela{width:100%;border-collapse:collapse;font-size:13px}
+.tabela th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.4px;
+  color:var(--texto-3);font-weight:600;padding:10px 13px;
+  border-bottom:1px solid var(--borda);background:#F8FAFC;white-space:nowrap}
+.tabela td{padding:11px 13px;border-bottom:1px solid var(--borda-2);vertical-align:middle}
+.tabela tbody tr:hover{background:#F7FAFE}
+.tabela tbody tr.escolhida{background:var(--azul-f)}
+.tabela tbody tr.escolhida td:first-child{box-shadow:inset 3px 0 0 var(--azul)}
+.tabela .num{text-align:right;white-space:nowrap}
+.tabela.densa td,.tabela.densa th{padding:7px 9px;font-size:12.5px}
+td.vazio{text-align:center;color:var(--texto-3);padding:34px}
+.rodape-tab{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 13px;border-top:1px solid var(--borda-2);background:#FBFCFE;font-size:12.5px}
+.paginas{display:flex;gap:3px;margin-left:auto}
+.paginas button{min-width:28px;height:28px;border:1px solid var(--borda);background:var(--papel);
+  border-radius:6px;font:inherit;font-size:12px;color:var(--texto-2);cursor:pointer}
+.paginas button:hover{border-color:var(--azul);color:var(--azul)}
+.paginas button.on{background:var(--azul);border-color:var(--azul);color:#fff;font-weight:600}
+.paginas button[disabled]{opacity:.4;cursor:not-allowed}
+.mono{font-family:ui-monospace,Consolas,"Courier New",monospace}
+.mudo{color:var(--texto-3)}
+.peq{font-size:11.5px}
+.faltando{color:var(--at);font-weight:600}
+
+/* ---------- selos e vínculos ---------- */
+.selo{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;
+  padding:3px 9px;border-radius:6px;border:1px solid;white-space:nowrap;font-weight:500}
+.selo-confirmada{color:var(--bom);background:var(--bom-f);border-color:var(--bom-b)}
+.selo-conferencia{color:var(--at);background:var(--at-f);border-color:var(--at-b)}
+.selo-rascunho{color:var(--texto-2);background:#F2F5F8;border-color:var(--borda)}
+.selo-cancelada{color:var(--erro);background:var(--erro-f);border-color:var(--erro-b)}
+.selo-outra{color:var(--at);background:var(--at-f);border-color:var(--at-b)}
+.elo{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--azul);
+  font-family:ui-monospace,Consolas,monospace;text-decoration:none}
+.elo:hover{text-decoration:underline}
+
+/* ---------- painel lateral ---------- */
+#nfPainel{display:none;position:fixed;top:0;right:0;bottom:0;width:min(640px,100%);
+  background:var(--papel);border-left:1px solid var(--borda);
+  box-shadow:-12px 0 36px rgba(11,37,69,.13);overflow:auto;z-index:60}
+#nfPainel.on{display:block}
+@media (min-width:1280px){
+  body.com-painel .pagina{padding-right:640px}
+  body.com-painel #nfPainel{box-shadow:none}
+}
+.painel-topo{position:sticky;top:0;z-index:2;background:var(--marinho);color:#fff;
+  padding:13px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.painel-topo b{font-size:15px;font-weight:600}
+.painel-topo .x{background:transparent;border:0;color:#A7BFDB;font-size:19px;
+  cursor:pointer;line-height:1;padding:2px 7px;border-radius:5px}
+.painel-topo .x:hover{background:#17406E;color:#fff}
+.painel-abas{display:flex;gap:0;border-bottom:1px solid var(--borda);background:#F8FAFC}
+.painel-abas button{flex:1;background:transparent;border:0;border-bottom:2px solid transparent;
+  padding:11px 8px;font:inherit;font-size:12.5px;color:var(--texto-2);cursor:pointer}
+.painel-abas button:hover{background:var(--azul-f)}
+.painel-abas button.on{background:var(--papel);color:var(--marinho);font-weight:600;
+  border-bottom-color:var(--azul)}
+.painel-corpo{padding:14px 16px}
+.linhas .linha{display:flex;justify-content:space-between;gap:12px;
+  padding:6px 0;border-bottom:1px solid var(--borda-2);font-size:12.5px}
+.linhas .linha span{color:var(--texto-2)}
+.linhas .linha b{text-align:right}
+.bloco{border:1px solid var(--borda);border-radius:9px;padding:12px;margin:13px 0}
+.bloco-tit{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;
+  color:var(--marinho);margin-bottom:9px}
+.celula{width:76px;padding:4px 7px;border:1px solid var(--borda);border-radius:5px;
+  font:inherit;font-size:12.5px;text-align:right;background:#FBFCFE;color:var(--texto-2)}
+.totais{display:flex;gap:12px;align-items:stretch;flex-wrap:wrap;margin-top:12px}
+.totais .lista{flex:1;min-width:190px;font-size:12.5px}
+.totais .lista .linha{display:flex;justify-content:space-between;padding:4px 0}
+.total-grande{background:var(--azul-f);border:1px solid var(--azul-b);border-radius:9px;
+  padding:12px 18px;text-align:center;min-width:190px;display:grid;align-content:center}
+.total-grande span{font-size:11.5px;color:var(--azul-2);font-weight:600;
+  text-transform:uppercase;letter-spacing:.4px}
+.total-grande b{font-size:23px;color:var(--marinho);letter-spacing:-.4px}
+.rodape-painel{position:sticky;bottom:0;background:var(--papel);
+  border-top:1px solid var(--borda);padding:12px 16px;display:flex;gap:9px;flex-wrap:wrap}
+
+/* ---------- avisos ---------- */
+.aviso{background:var(--at-f);border:1px solid var(--at-b);color:var(--at);
+  border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.5;margin:11px 0}
+.aviso.bom{background:var(--bom-f);border-color:var(--bom-b);color:var(--bom)}
+.aviso.erro{background:var(--erro-f);border-color:var(--erro-b);color:var(--erro)}
+.aviso.leve{background:var(--azul-f);border-color:var(--azul-b);color:var(--marinho-2)}
+
+/* ---------- rodapé de integração ---------- */
+.rodape{margin-top:16px;background:var(--papel);border-top:1px solid var(--borda);
+  padding:11px 20px;display:flex;align-items:center;gap:18px;flex-wrap:wrap;font-size:12.5px}
+.rodape b{color:var(--marinho);display:flex;align-items:center;gap:8px}
+.rodape .sep{width:1px;height:16px;background:var(--borda)}
+.rodape .item{display:flex;align-items:center;gap:7px;color:var(--texto-2)}
+.pt{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.pt.v{background:#22A75A}.pt.a{background:#E0A32E}.pt.c{background:#C9CFD8}
+
+@media (max-width:860px){
+  .cab h1{font-size:18px}
+  .tabela th:nth-child(3),.tabela td:nth-child(3){display:none}
+  #nfPainel{width:100%}
+  .totais .lista{min-width:100%}
+}
+
+/* ------------------------------------------------------------
+   AJUSTE DE LARGURA · 08/11, depois da primeira foto
+
+   Com o painel aberto, "Coesa Mat. Construção" quebrava em duas
+   linhas e o "RES-00125" em outras duas. Tabela com linha
+   quebrando é tabela que cansa de ler — e esta é a área de
+   trabalho do dia inteiro.
+   ------------------------------------------------------------ */
+#nfPainel{width:min(600px,100%)}
+@media (min-width:1280px){ body.com-painel .pagina{padding-right:600px} }
+.tabela td:nth-child(2),
+.tabela td:nth-child(4),
+.tabela td:nth-child(5),
+.tabela td:nth-child(7){white-space:nowrap}
+.tabela td:nth-child(3){max-width:240px}
+.tabela td:nth-child(3) .mono{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  display:block;max-width:100%}
+.tabela .serie{color:var(--texto-3);font-size:11px;font-weight:400}
+
+</style>
+</head>
+<body>
+<!-- Sem cabeçalho global e sem menu lateral: os dois são do ALMOX
+     PRO, e a seção 2 manda não repetir o que já é do sistema. -->
+<div class="pagina">
+  <div class="trilha" id="nfTrilha">ALMOX PRO / Operações / <b>Notas Fiscais</b></div>
+  <div class="cab">
+    <div class="fig">🧾</div>
+    <div>
+      <h1>Notas Fiscais</h1>
+      <p>Lançamento, conferência e gerenciamento de NF-e.</p>
+    </div>
+  </div>
+  <div class="area"><div id="nfCorpo"></div></div>
+  <div class="rodape" id="nfRodape"></div>
+</div>
+
+<div id="nfPainel"></div>
+<input type="file" id="nfArquivo" accept=".xml,text/xml,application/xml" style="display:none">
+
+<script>
+/* ========== nfxml.js ========== */
+/* ============================================================
+   NOTAS_FISCAIS · nfxml.js · 08/11/2026
+   ------------------------------------------------------------
+   Este arquivo É o XMLEXATO, que já roda no ALMOX PRO desde a
+   412 e tem 44 provas. Não é cópia: é o mesmo código, servindo
+   os dois lugares. Duas leituras de XML no mesmo sistema seria
+   exatamente o que a regra dele proíbe.
+
+   O QUE MUDOU NESTA VERSÃO, pela seção 5 do documento:
+
+     "A leitura do XML deverá respeitar namespaces e estruturas
+      oficiais, evitando depender exclusivamente de expressões
+      regulares."
+
+   Ele está certo, e o motivo é concreto. A NF-e vem com
+   namespace (xmlns="http://www.portalfiscal.inf.br/nfe") e
+   alguns emissores mandam com prefixo: <nfe:det>, <ns2:vProd>.
+   Expressão regular que procura "<vProd>" não acha "<nfe:vProd>"
+   — e o item sai sem total, calado.
+
+   Então agora a leitura é por DOMParser, que entende namespace
+   de verdade. A expressão regular CONTINUA aqui, como reserva:
+   se o XML vier quebrado e o DOMParser recusar, a regex ainda
+   tira o que der. Documento fiscal pela metade é melhor que
+   documento fiscal nenhum — desde que a tela diga qual dos dois
+   caminhos leu, e ela diz.
+   ============================================================ */
+(function (raiz) {
+  'use strict';
+
+  var X = { nome: 'XMLEXATO', versao: '08/11', ligado: false };
+
+  /* ------------------------------------------------------------
+     DECODIFICAR · UTF-8 primeiro, Latin-1 depois
+     ------------------------------------------------------------ */
+  X.decodificar = function (dataURL) {
+    var b64 = String(dataURL || '');
+    var corte = b64.indexOf(',');
+    if (corte > -1) b64 = b64.slice(corte + 1);
+    if (!b64) return { ok: false, texto: '', como: 'vazio' };
+
+    var cru;
+    try { cru = atob(b64); }
+    catch (e) { return { ok: false, texto: '', como: 'base64 inválido' }; }
+
+    /* 1 · UTF-8, que é o que a NF-e manda por norma */
+    try {
+      var utf8 = decodeURIComponent(escape(cru));
+      if (utf8) return { ok: true, texto: utf8, como: 'UTF-8' };
+    } catch (e) { /* não era UTF-8; segue */ }
+
+    /* 2 · Latin-1. O atob já entrega byte a byte, então o texto
+           cru JÁ é a leitura ISO-8859-1 — só precisa ser aceito
+           em vez de descartado. */
+    if (cru) {
+      var temAcentoQuebrado = /[\u0080-ÿ]/.test(cru);
+      return { ok: true, texto: cru,
+               como: temAcentoQuebrado ? 'ISO-8859-1' : 'ASCII' };
+    }
+    return { ok: false, texto: '', como: 'vazio' };
+  };
+
+  /* ------------------------------------------------------------
+     NÚMERO FISCAL · ponto decimal, sem chute
+     ------------------------------------------------------------ */
+  X.numero = function (v) {
+    if (v === null || v === undefined) return null;
+    var s = String(v).trim();
+    if (!s) return null;
+    var n = Number(s);
+    return isFinite(n) ? n : null;
+  };
+
+  function centavos(n) { return Math.round((Number(n) || 0) * 100); }
+
+  /* ------------------------------------------------------------
+     OS ITENS · cada <det> vira uma linha, e nenhuma some
+     ------------------------------------------------------------ */
+  X.itensDe = function (texto) {
+    var t = String(texto || '');
+    /* <detPag> também começa com "<det", mas fecha em </detPag>,
+       então não é apanhado por este fecho exato. */
+    var blocos = t.match(/<det[\s>][\s\S]*?<\/det>/g) || [];
+    var itens = [], recusados = [];
+
+    for (var i = 0; i < blocos.length; i++) {
+      var b = blocos[i];
+      var campo = function (n) {
+        var m = b.match(new RegExp('<' + n + '[^>]*>([^<]*)</' + n + '>'));
+        return m ? m[1] : null;
+      };
+
+      var qtd   = X.numero(campo('qCom'));
+      var unit  = X.numero(campo('vUnCom'));
+      var vProd = X.numero(campo('vProd'));     /* o total DA NOTA */
+      var vDesc = X.numero(campo('vDesc'));
+      var nome  = campo('xProd');
+
+      /* linha sem nada que a identifique não é item — mas também
+         NÃO some calada: entra na lista de recusadas, com o
+         motivo, para aparecer na tela. */
+      if (!nome && vProd === null && qtd === null) {
+        recusados.push({ posicao: i + 1, motivo: 'bloco <det> sem xProd, vProd nem qCom' });
+        continue;
+      }
+
+      var ean = campo('cEAN');
+      itens.push({
+        codigo: campo('cProd') || '',
+        nome: nome || '',
+        unidade: String(campo('uCom') || campo('uTrib') || 'un').trim(),
+        ncm: campo('NCM') || '',
+        cfop: campo('CFOP') || '',
+        codigoBarras: (ean && ean !== 'SEM GTIN') ? ean : '',
+        qtd: qtd === null ? 0 : qtd,
+        preco: unit === null ? 0 : unit,
+        desconto: vDesc === null ? 0 : vDesc,
+        /* o valor que VALE: o da nota. A multiplicação é o
+           último recurso, e fica marcada como tal. */
+        valorTotal: vProd !== null ? vProd
+                    : Math.round((qtd || 0) * (unit || 0) * 100) / 100,
+        totalVeioDaNota: vProd !== null
+      });
+    }
+
+    return { itens: itens, blocos: blocos.length, recusados: recusados };
+  };
+
+  /* ------------------------------------------------------------
+     CONFERIR A SOMA · dizer, nunca ajustar
+     ------------------------------------------------------------ */
+  X.conferirSoma = function (itens, vNF, vDescTotal) {
+    var soma = 0;
+    for (var i = 0; i < (itens || []).length; i++) soma += centavos(itens[i].valorTotal);
+
+    var total = centavos(vNF);
+    var desc = centavos(vDescTotal);
+
+    if (!total) {
+      return { confere: null, motivo: 'a nota não trouxe o valor total (vNF)',
+               somaItens: soma / 100, total: 0, diferenca: 0 };
+    }
+
+    /* o total da nota é a soma dos produtos menos o desconto, mais
+       frete/seguro/outros/IPI quando houver. Por isso a diferença é
+       APRESENTADA, não julgada: só a igualdade exata é afirmada. */
+    var dif = soma - desc - total;
+    return {
+      confere: dif === 0,
+      somaItens: soma / 100,
+      descontos: desc / 100,
+      total: total / 100,
+      diferenca: dif / 100,
+      motivo: dif === 0 ? 'a soma dos itens fecha com o total da nota'
+        : 'a soma dos itens dá ' + (soma / 100).toFixed(2) +
+          (desc ? ' menos ' + (desc / 100).toFixed(2) + ' de desconto' : '') +
+          ' e a nota diz ' + (total / 100).toFixed(2) +
+          '. A diferença pode ser frete, seguro, IPI ou ST — confira na DANFE. ' +
+          'Nenhum valor foi alterado.'
+    };
+  };
+
+
+  /* ------------------------------------------------------------
+     LER POR DOMParser · o caminho oficial
+
+     getElementsByTagNameNS('*', nome) acha a tag em qualquer
+     namespace e com qualquer prefixo. É o que resolve o
+     <nfe:vProd> que a regex deixava passar.
+     ------------------------------------------------------------ */
+  X.temDOM = function () {
+    try { return typeof DOMParser === 'function'; } catch (e) { return false; }
+  };
+
+  function textoDe(no, nome) {
+    if (!no) return null;
+    var achados = no.getElementsByTagNameNS ? no.getElementsByTagNameNS('*', nome)
+                                            : no.getElementsByTagName(nome);
+    if (!achados || !achados.length) return null;
+    var t = achados[0].textContent;
+    return t === null || t === undefined ? null : String(t).trim();
+  }
+
+  /** o <vProd> do ITEM, não o do total: procura só dentro do det */
+  function textoDireto(det, nome) { return textoDe(det, nome); }
+
+  X.lerPorDOM = function (texto) {
+    if (!X.temDOM()) return null;
+    var doc;
+    try { doc = new DOMParser().parseFromString(String(texto || ''), 'text/xml'); }
+    catch (e) { return null; }
+    if (!doc || !doc.documentElement) return null;
+    /* parsererror é como o DOMParser avisa que o XML está quebrado */
+    try {
+      if (doc.getElementsByTagName('parsererror').length) return null;
+      if (/parsererror/i.test(doc.documentElement.nodeName)) return null;
+    } catch (e) {}
+
+    var dets = doc.getElementsByTagNameNS
+      ? doc.getElementsByTagNameNS('*', 'det') : doc.getElementsByTagName('det');
+    var itens = [], recusados = [];
+
+    for (var i = 0; i < dets.length; i++) {
+      var det = dets[i];
+      /* <detPag> é pagamento, não item da nota */
+      var nome = String(det.localName || det.nodeName || '').replace(/^.*:/, '');
+      if (nome !== 'det') continue;
+
+      var xProd = textoDireto(det, 'xProd');
+      var qCom = X.numero(textoDireto(det, 'qCom'));
+      var vUn = X.numero(textoDireto(det, 'vUnCom'));
+      var vProd = X.numero(textoDireto(det, 'vProd'));
+      var vDesc = X.numero(textoDireto(det, 'vDesc'));
+
+      if (!xProd && vProd === null && qCom === null) {
+        recusados.push({ posicao: itens.length + recusados.length + 1,
+                         motivo: 'bloco <det> sem xProd, vProd nem qCom' });
+        continue;
+      }
+      var ean = textoDireto(det, 'cEAN');
+      itens.push({
+        codigo: textoDireto(det, 'cProd') || '',
+        nome: xProd || '',
+        unidade: String(textoDireto(det, 'uCom') || textoDireto(det, 'uTrib') || 'un').trim(),
+        ncm: textoDireto(det, 'NCM') || '',
+        cfop: textoDireto(det, 'CFOP') || '',
+        codigoBarras: (ean && ean !== 'SEM GTIN') ? ean : '',
+        qtd: qCom === null ? 0 : qCom,
+        preco: vUn === null ? 0 : vUn,
+        desconto: vDesc === null ? 0 : vDesc,
+        valorTotal: vProd !== null ? vProd
+                    : Math.round((qCom || 0) * (vUn || 0) * 100) / 100,
+        totalVeioDaNota: vProd !== null
+      });
+    }
+
+    /* os totais, só de dentro do ICMSTot */
+    var tots = doc.getElementsByTagNameNS
+      ? doc.getElementsByTagNameNS('*', 'ICMSTot') : doc.getElementsByTagName('ICMSTot');
+    var tot = tots && tots.length ? tots[0] : null;
+    var vNF = tot ? textoDe(tot, 'vNF') : textoDe(doc, 'vNF');
+    var vDescTotal = tot ? textoDe(tot, 'vDesc') : null;
+
+    /* a chave mora no atributo Id do infNFe */
+    var chave = '';
+    try {
+      var inf = doc.getElementsByTagNameNS
+        ? doc.getElementsByTagNameNS('*', 'infNFe') : doc.getElementsByTagName('infNFe');
+      if (inf && inf.length) {
+        var id = inf[0].getAttribute('Id') || inf[0].getAttribute('id') || '';
+        chave = (String(id).match(/(\d{44})/) || [])[1] || '';
+      }
+    } catch (e) {}
+
+    var ide = doc.getElementsByTagNameNS
+      ? doc.getElementsByTagNameNS('*', 'ide') : doc.getElementsByTagName('ide');
+    var noIde = ide && ide.length ? ide[0] : doc;
+
+    var emit = doc.getElementsByTagNameNS
+      ? doc.getElementsByTagNameNS('*', 'emit') : doc.getElementsByTagName('emit');
+    var noEmit = emit && emit.length ? emit[0] : null;
+
+    return {
+      ok: !!(textoDe(noIde, 'nNF') || itens.length),
+      como: 'DOMParser',
+      chave: chave,
+      numero: textoDe(noIde, 'nNF') || '',
+      serie: textoDe(noIde, 'serie') || '',
+      emissao: textoDe(noIde, 'dhEmi') || textoDe(noIde, 'dEmi') || '',
+      fornecedor: noEmit ? (textoDe(noEmit, 'xNome') || '') : '',
+      cnpj: noEmit ? (textoDe(noEmit, 'CNPJ') || '') : '',
+      valor: vNF || '',
+      itens: itens,
+      blocosEncontrados: dets.length,
+      recusados: recusados,
+      soma: X.conferirSoma(itens, vNF, vDescTotal)
+    };
+  };
+
+  /* ------------------------------------------------------------
+     A LEITURA INTEIRA (reserva: expressão regular)
+     ------------------------------------------------------------ */
+  X.lerTexto = function (texto) {
+    var t = String(texto || '');
+
+    /* 1 · o caminho oficial. Entende namespace e prefixo, que é
+           o que a seção 5 pede e o que a regex não dava conta. */
+    var pelo = X.lerPorDOM(t);
+    if (pelo && pelo.ok) return pelo;
+
+    /* 2 · reserva: XML quebrado, recortado, ou sem DOMParser.
+           Tira o que der, e DIZ que foi por aqui. */
+    function tag(n) {
+      var m = t.match(new RegExp('<' + n + '[^>]*>([^<]*)</' + n + '>'));
+      return m ? m[1] : null;
+    }
+
+    var r = X.itensDe(t);
+
+    /* OS TOTAIS SÃO LIDOS DE DENTRO DO <ICMSTot>, e só de lá.
+       <vDesc> e <vProd> existem nos dois lugares: no item e no
+       total. Na primeira versão eu peguei "o primeiro do
+       arquivo" e peguei o do item — a prova apanhou. Posição no
+       arquivo não é critério; o bloco é. */
+    var totBloco = (t.match(/<ICMSTot[\s>][\s\S]*?<\/ICMSTot>/) || [])[0] || '';
+    function doTotal(n) {
+      if (!totBloco) return null;
+      var m = totBloco.match(new RegExp('<' + n + '[^>]*>([^<]*)</' + n + '>'));
+      return m ? m[1] : null;
+    }
+
+    /* sem <ICMSTot> (NFC-e antiga, XML recortado), o vNF solto
+       ainda serve — mas o desconto, não: desconto de item somado
+       como se fosse o da nota erra para baixo. */
+    var vNF = doTotal('vNF') || tag('vNF');
+    var vDescTotal = doTotal('vDesc');
+
+    var soma = X.conferirSoma(r.itens, vNF, vDescTotal);
+
+    return {
+      ok: !!(tag('nNF') || r.itens.length),
+      como: 'expressão regular (o XML não abriu como documento)',
+      chave: (t.match(/Id="NFe(\d{44})"/) || [])[1] || '',
+      numero: tag('nNF') || '',
+      serie: tag('serie') || '',
+      emissao: tag('dhEmi') || tag('dEmi') || '',
+      valor: vNF || '',
+      itens: r.itens,
+      blocosEncontrados: r.blocos,
+      recusados: r.recusados,
+      soma: soma
+    };
+  };
+
+  /* ------------------------------------------------------------
+     LIGAR · marca presença. As trocas no lerXml são no lugar,
+     porque ele é função interna do modalOCR e não há como
+     envolvê-la de fora. A regra dele manda alterar só o bloco
+     responsável, e foi o que se fez.
+     ------------------------------------------------------------ */
+  X.ligar = function () { X.ligado = true; return true; };
+  X.ligar();
+
+  raiz.XMLEXATO = X;
+  if (typeof module !== 'undefined' && module.exports) module.exports = X;
+
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* ========== nfdados.js ========== */
+/* ============================================================
+   NOTAS_FISCAIS · nfdados.js · 08/11/2026
+   ------------------------------------------------------------
+   As contas da Central de Notas. Matemática e texto, nenhuma
+   linha de tela e nenhuma chamada ao Core — para ter prova
+   rodando sem navegador, que é a parte que eu consigo garantir.
+
+   O formato da nota NÃO foi inventado: saiu da auditoria de
+   08/11, lendo o que o próprio ALMOX PRO já usa da resposta do
+   nf.listar:
+
+     numero · serie · chave · fornecedor · cnpj
+     emissao · valor · status · origem · itens
+
+   Campo que o Core não devolver fica vazio na tela. Não se
+   preenche buraco com chute.
+   ============================================================ */
+(function (raiz) {
+  'use strict';
+
+  var D = { nome: 'NFDADOS', versao: '08/11' };
+
+  function texto(v) { return String(v === null || v === undefined ? '' : v).trim(); }
+  function semAcento(s) {
+    return texto(s).toLowerCase()
+      .replace(/[áàâã]/g, 'a').replace(/[éê]/g, 'e').replace(/í/g, 'i')
+      .replace(/[óôõ]/g, 'o').replace(/ú/g, 'u').replace(/ç/g, 'c');
+  }
+  D.semAcento = semAcento;
+
+  /* ------------------------------------------------------------
+     SITUAÇÃO · as cinco abas da seção 5A
+     ------------------------------------------------------------ */
+  D.SITUACOES = [
+    { id: 'todas',       nome: 'Todas' },
+    { id: 'rascunho',    nome: 'Rascunhos' },
+    { id: 'conferencia', nome: 'Em conferência' },
+    { id: 'confirmada',  nome: 'Confirmadas' },
+    { id: 'cancelada',   nome: 'Canceladas' }
+  ];
+
+  /** o status que o Core mandou, traduzido para uma das abas.
+      O que não se reconhece vira 'outra' e APARECE — nunca some. */
+  D.situacaoDe = function (nota) {
+    var s = semAcento((nota && (nota.status || nota.situacao)) || '');
+    if (!s) return 'outra';
+    if (/rascunho|digitando|aberta/.test(s)) return 'rascunho';
+    if (/conferenc|pendente|aguardand|divergenc/.test(s)) return 'conferencia';
+    if (/confirmad|lancad|finalizad|recebid|concluid/.test(s)) return 'confirmada';
+    if (/cancelad|estornad|anulad/.test(s)) return 'cancelada';
+    return 'outra';
+  };
+
+  /* ------------------------------------------------------------
+     PROCURAR · número, chave, fornecedor, CNPJ
+     ------------------------------------------------------------ */
+  D.combina = function (nota, procura) {
+    var q = semAcento(procura);
+    if (!q) return true;
+    var n = nota || {};
+    /* a chave e o CNPJ a pessoa digita só com números */
+    var soNumeros = q.replace(/\D/g, '');
+    var alvos = [n.numero, n.serie, n.fornecedor, n.cnpj, n.chave, n.origem];
+    for (var i = 0; i < alvos.length; i++) {
+      if (semAcento(alvos[i]).indexOf(q) > -1) return true;
+    }
+    if (soNumeros.length >= 3) {
+      var chave = texto(n.chave).replace(/\D/g, '');
+      var cnpj = texto(n.cnpj).replace(/\D/g, '');
+      if (chave.indexOf(soNumeros) > -1) return true;
+      if (cnpj.indexOf(soNumeros) > -1) return true;
+      if (texto(n.numero).replace(/\D/g, '') === soNumeros) return true;
+    }
+    return false;
+  };
+
+  /* ------------------------------------------------------------
+     DATA · do jeito que a nota vier
+     ------------------------------------------------------------ */
+  D.dataISO = function (v) {
+    var s = texto(v);
+    if (!s) return '';
+    var br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (br) return br[3] + '-' + br[2] + '-' + br[1];
+    var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) return iso[1] + '-' + iso[2] + '-' + iso[3];
+    return '';
+  };
+
+  D.dataBR = function (v) {
+    var i = D.dataISO(v);
+    if (!i) return texto(v);
+    var p = i.split('-');
+    return p[2] + '/' + p[1] + '/' + p[0];
+  };
+
+  D.noPeriodo = function (nota, de, ate) {
+    if (!de && !ate) return true;
+    var d = D.dataISO(nota && nota.emissao);
+    /* nota sem data NÃO é escondida por um filtro de data: ela
+       aparece e fica visível que a data está faltando. Sumir
+       com registro é como se perde nota no almoxarifado. */
+    if (!d) return true;
+    if (de && d < de) return false;
+    if (ate && d > ate) return false;
+    return true;
+  };
+
+  /* ------------------------------------------------------------
+     DINHEIRO · centavos inteiros, sempre
+     ------------------------------------------------------------ */
+  D.valorDe = function (v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v === 'number') return isFinite(v) ? v : null;
+    var s = String(v).trim().replace(/[R$\s]/g, '');
+    /* 1.234,56 (brasileiro) x 1234.56 (do XML) */
+    if (/,\d{1,2}$/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
+    var n = Number(s);
+    return isFinite(n) ? n : null;
+  };
+
+  D.moeda = function (v) {
+    var n = D.valorDe(v);
+    if (n === null) return '—';
+    var s = Math.abs(n).toFixed(2).split('.');
+    var i = s[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return (n < 0 ? '-' : '') + 'R$ ' + i + ',' + s[1];
+  };
+
+  /* ------------------------------------------------------------
+     FILTRAR E CONTAR
+     ------------------------------------------------------------ */
+  D.filtrar = function (notas, filtro) {
+    var lista = Object.prototype.toString.call(notas) === '[object Array]' ? notas : [];
+    var f = filtro || {};
+    return lista.filter(function (n) {
+      if (!n) return false;
+      if (f.situacao && f.situacao !== 'todas' && D.situacaoDe(n) !== f.situacao) return false;
+      if (!D.noPeriodo(n, f.de, f.ate)) return false;
+      if (!D.combina(n, f.procura)) return false;
+      return true;
+    });
+  };
+
+  D.contarPorSituacao = function (notas) {
+    var lista = Object.prototype.toString.call(notas) === '[object Array]' ? notas : [];
+    var c = { todas: lista.length, rascunho: 0, conferencia: 0,
+              confirmada: 0, cancelada: 0, outra: 0 };
+    for (var i = 0; i < lista.length; i++) {
+      var s = D.situacaoDe(lista[i]);
+      c[s] = (c[s] || 0) + 1;
+    }
+    return c;
+  };
+
+  D.somar = function (notas) {
+    var lista = Object.prototype.toString.call(notas) === '[object Array]' ? notas : [];
+    var cent = 0, semValor = 0;
+    for (var i = 0; i < lista.length; i++) {
+      var v = D.valorDe(lista[i] && lista[i].valor);
+      if (v === null) { semValor++; continue; }
+      cent += Math.round(v * 100);
+    }
+    /* quantas notas NÃO entraram na soma é dito junto com o total.
+       Total que esconde omissão é total errado com cara de certo. */
+    return { total: cent / 100, notas: lista.length - semValor, semValor: semValor };
+  };
+
+  /* ------------------------------------------------------------
+     ORDENAR · a mais nova primeiro, sem data por último
+     ------------------------------------------------------------ */
+  D.ordenar = function (notas) {
+    var lista = (Object.prototype.toString.call(notas) === '[object Array]' ? notas : []).slice();
+    return lista.sort(function (a, b) {
+      var da = D.dataISO(a && a.emissao), db = D.dataISO(b && b.emissao);
+      if (da && db && da !== db) return da < db ? 1 : -1;
+      if (da && !db) return -1;
+      if (!da && db) return 1;
+      var na = Number(texto(a && a.numero).replace(/\D/g, '')) || 0;
+      var nb = Number(texto(b && b.numero).replace(/\D/g, '')) || 0;
+      return nb - na;
+    });
+  };
+
+  /* ------------------------------------------------------------
+     A CHAVE · 44 dígitos, e o que dá para ler deles
+     ------------------------------------------------------------ */
+  D.chaveValida = function (v) {
+    return texto(v).replace(/\D/g, '').length === 44;
+  };
+
+  /** a chave carrega o CNPJ do emitente, o modelo, a série e o
+      número. Ler isso é conferência, não consulta: não vai à
+      SEFAZ, não promete nada, só lê o que já está na mão. */
+  D.lerChave = function (v) {
+    var c = texto(v).replace(/\D/g, '');
+    if (c.length !== 44) return null;
+    return {
+      uf: c.slice(0, 2),
+      anoMes: c.slice(4, 6) + '/' + c.slice(2, 4),
+      cnpj: c.slice(6, 20),
+      modelo: c.slice(20, 22),
+      serie: String(Number(c.slice(22, 25))),
+      numero: String(Number(c.slice(25, 34)))
+    };
+  };
+
+  D.cnpjBonito = function (v) {
+    var c = texto(v).replace(/\D/g, '');
+    if (c.length !== 14) return texto(v);
+    return c.slice(0, 2) + '.' + c.slice(2, 5) + '.' + c.slice(5, 8) +
+           '/' + c.slice(8, 12) + '-' + c.slice(12);
+  };
+
+  D.chaveBonita = function (v) {
+    var c = texto(v).replace(/\D/g, '');
+    if (c.length !== 44) return texto(v);
+    return c.match(/.{1,4}/g).join(' ');
+  };
+
+
+  /* ------------------------------------------------------------
+     O MÊS · para o quadro "Valor de Entradas (Mês)"
+
+     O desenho dele traz esse número. O número é real: sai das
+     notas que o Core devolveu, no mês pedido. Quando não há
+     nota no mês, é zero — e zero se mostra como zero, não se
+     enfeita com o total do ano.
+     ------------------------------------------------------------ */
+  D.mesDeHoje = function (agora) {
+    var d = agora || new Date();
+    var m = String(d.getMonth() + 1);
+    if (m.length < 2) m = '0' + m;
+    return d.getFullYear() + '-' + m;
+  };
+
+  D.doMes = function (notas, anoMes) {
+    var lista = Object.prototype.toString.call(notas) === '[object Array]' ? notas : [];
+    var alvo = texto(anoMes) || D.mesDeHoje();
+    var dentro = lista.filter(function (n) {
+      var i = D.dataISO(n && n.emissao);
+      return i && i.slice(0, 7) === alvo;
+    });
+    var s = D.somar(dentro);
+    return { mes: alvo, notas: dentro.length, total: s.total, semValor: s.semValor };
+  };
+
+  /* o que a nota traz de vínculo com reserva ou compra. Campo que
+     o Core não devolver fica nulo — não se inventa RES-00125. */
+  D.vinculoDe = function (nota) {
+    var n = nota || {};
+    var cands = [
+      ['reserva', n.reserva], ['reserva', n.reservaVinculada], ['reserva', n.res],
+      ['compra', n.pedido], ['compra', n.pedidoCompra], ['compra', n.compra],
+      ['requisicao', n.requisicao]
+    ];
+    for (var i = 0; i < cands.length; i++) {
+      var v = texto(cands[i][1]);
+      if (v) return { tipo: cands[i][0], codigo: v };
+    }
+    return null;
+  };
+
+
+  /* ------------------------------------------------------------
+     O DÍGITO VERIFICADOR DA CHAVE · seção 5.1
+
+     Os 44 dígitos terminam num dígito calculado sobre os 43
+     primeiros (módulo 11, pesos de 2 a 9). Conferir isso pega
+     chave digitada errada ANTES de alguém sair procurando nota
+     que não existe.
+
+     E tem um limite que precisa estar escrito: conferir o
+     dígito NÃO é consultar a nota. A chave pode estar
+     perfeitamente formada e a nota não existir, ou estar
+     cancelada. A seção 5 proíbe afirmar que a chave foi
+     consultada quando o sistema só leu os dígitos — então esta
+     função devolve "o número é bem formado", e nada além.
+     ------------------------------------------------------------ */
+  D.digitoDaChave = function (quarentaETres) {
+    var c = texto(quarentaETres).replace(/\D/g, '').slice(0, 43);
+    if (c.length !== 43) return null;
+    var peso = 2, soma = 0;
+    for (var i = 42; i >= 0; i--) {
+      soma += Number(c.charAt(i)) * peso;
+      peso = peso === 9 ? 2 : peso + 1;
+    }
+    var r = soma % 11;
+    return (r === 0 || r === 1) ? 0 : 11 - r;
+  };
+
+  D.conferirChave = function (v) {
+    var c = texto(v).replace(/\D/g, '');
+    if (!c) return { ok: false, motivo: 'vazia', texto: 'Digite ou cole a chave de acesso.' };
+    if (c.length < 44) return { ok: false, motivo: 'curta', faltam: 44 - c.length,
+      texto: 'Faltam ' + (44 - c.length) + ' dígito(s) — a chave tem 44.' };
+    if (c.length > 44) return { ok: false, motivo: 'longa', sobram: c.length - 44,
+      texto: 'Sobram ' + (c.length - 44) + ' dígito(s) — a chave tem 44.' };
+
+    var esperado = D.digitoDaChave(c);
+    var veio = Number(c.charAt(43));
+    if (esperado !== veio) {
+      return { ok: false, motivo: 'digito', esperado: esperado, veio: veio,
+        texto: 'Os 44 dígitos estão aí, mas o dígito verificador não bate ' +
+               '(a conta dá ' + esperado + ' e veio ' + veio + '). ' +
+               'Quase sempre é erro de digitação em algum dígito do meio.' };
+    }
+    var l = D.lerChave(c);
+    return { ok: true, chave: c, partes: l,
+      texto: 'Chave bem formada. Isto é conferência dos dígitos, ' +
+             'não consulta: não foi perguntado a ninguém se a nota existe.' };
+  };
+
+  raiz.NFDADOS = D;
+  if (typeof module !== 'undefined' && module.exports) module.exports = D;
+
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* ========== nfporta.js ========== */
+/* ============================================================
+   NOTAS_FISCAIS · nfporta.js · 08/11/2026
+   ------------------------------------------------------------
+   A PORTA. Como este módulo fala com o Core.
+
+   Isto é cópia de arquitetura, não de código: é o mesmo caminho
+   que o módulo 3D usou hoje, depois de três recusas seguidas do
+   Core — chave, sessão, e o que viria depois.
+
+   A lição daquelas três recusas: montar envelope por fora é
+   construir uma SEGUNDA porta de entrada, e a regra dele é não
+   duplicar autenticação, sessão, usuários nem permissões. O
+   ALMOX PRO já tem uma porta que funciona, com a sessão dele,
+   o perfil, a obra, a chave e o prazo. Este módulo bate NAQUELA
+   porta.
+
+   Resultado prático: aqui não há login, não há token, não há
+   chave, não há nada guardado. Se a porta não estiver ao
+   alcance, ele DIZ, e não finge ter dados.
+   ============================================================ */
+(function (raiz) {
+  'use strict';
+
+  var P = {
+    nome: 'NFPORTA',
+    versao: '08/11',
+    chamadas: 0,
+    falhas: 0,
+    origemDaPorta: 'nenhuma',
+    ultima: null
+  };
+
+  /* as ações que o frontend do ALMOX PRO JÁ chama hoje. Nenhuma
+     foi inventada: saíram da auditoria de 08/11, lendo o próprio
+     v23. Ação que não está nesta lista, este módulo não chama. */
+  P.ACOES = {
+    listar:              ['nf', 'listar'],
+    obter:               ['nf', 'obter'],
+    itens:               ['nf', 'itens'],
+    pendentes:           ['nf', 'pendentes'],
+    divergencias:        ['nf', 'divergencias'],
+    registrarDivergencia:['nf', 'registrarDivergencia'],
+    decidirDivergencia:  ['nf', 'decidirDivergencia']
+  };
+
+  /* ------------------------------------------------------------
+     ACHAR A PORTA · só no mesmo endereço, e só do sistema
+     ------------------------------------------------------------ */
+  P.portaDoSistema = function () {
+    var janelas = [];
+    try { if (raiz.parent && raiz.parent !== raiz) janelas.push(raiz.parent); } catch (e) {}
+    try { if (raiz.opener) janelas.push(raiz.opener); } catch (e) {}
+
+    for (var i = 0; i < janelas.length; i++) {
+      try {
+        var j = janelas[i];
+        if (j && j.API && typeof j.API.call === 'function') {
+          P.origemDaPorta = i === 0 ? 'o sistema, pelo quadro' : 'o sistema, pela aba de origem';
+          return function (modulo, acao, payload) { return j.API.call(modulo, acao, payload); };
+        }
+      } catch (e) { /* outra origem: o navegador barra, e está certo */ }
+    }
+    P.origemDaPorta = 'nenhuma';
+    return null;
+  };
+
+  P.temPorta = function () { return !!P.portaDoSistema(); };
+
+  /* dentro do /exec, o caminho é o do próprio Apps Script */
+  P.ambiente = function () {
+    if (P.temPorta()) return 'PELO_SISTEMA';
+    try {
+      if (typeof google !== 'undefined' && google.script && google.script.run) return 'APPS_SCRIPT';
+    } catch (e) {}
+    return 'SOZINHO';
+  };
+
+  /* ------------------------------------------------------------
+     CHAMAR
+     ------------------------------------------------------------ */
+  P.chamar = function (nomeDaAcao, payload) {
+    var par = P.ACOES[nomeDaAcao];
+    if (!par) {
+      /* a regra dele: "não invente endpoints, nomes de ações,
+         campos ou respostas que não estejam implementados". */
+      return Promise.resolve({ ok: false, codigo: 'ACAO_DESCONHECIDA',
+        mensagem: 'A ação "' + nomeDaAcao + '" não está na lista verificada deste módulo.' });
+    }
+
+    P.chamadas++;
+    var comecou = Date.now();
+    var porta = P.portaDoSistema();
+
+    function fim(r) {
+      P.ultima = { acao: nomeDaAcao, ms: Date.now() - comecou, ok: !!(r && r.ok) };
+      if (!r || !r.ok) P.falhas++;
+      return r;
+    }
+
+    if (porta) {
+      return Promise.resolve()
+        .then(function () { return porta(par[0], par[1], payload || {}); })
+        .then(function (r) { return fim(P.entender(r)); })
+        .catch(function (e) {
+          return fim({ ok: false, codigo: 'ERRO_SISTEMA',
+            mensagem: 'A porta do sistema recusou: ' + ((e && e.message) || e) });
+        });
+    }
+
+    if (P.ambiente() === 'APPS_SCRIPT') {
+      return new Promise(function (resolve) {
+        try {
+          google.script.run
+            .withSuccessHandler(function (r) { resolve(fim(P.entender(r))); })
+            .withFailureHandler(function (e) {
+              resolve(fim({ ok: false, codigo: 'ERRO_GAS',
+                mensagem: (e && e.message) || String(e) }));
+            })
+            .APIX_atender_({ ponte: 'ALMOXA', modulo: par[0], acao: par[1],
+                             payload: payload || {}, origem: 'NOTAS_FISCAIS' });
+        } catch (e) {
+          resolve(fim({ ok: false, codigo: 'ERRO_GAS', mensagem: String(e) }));
+        }
+      });
+    }
+
+    /* Sozinho não há sessão, e sessão não se copia nem se inventa. */
+    return Promise.resolve(fim({ ok: false, codigo: 'SEM_PORTA',
+      mensagem: 'Este módulo não está falando pela porta do ALMOX PRO. ' +
+        'Abra pelo menu Notas Fiscais, de dentro do sistema e já identificado.' }));
+  };
+
+  /* ------------------------------------------------------------
+     ENTENDER A RESPOSTA · sem adivinhar formato
+     ------------------------------------------------------------ */
+  P.entender = function (r) {
+    if (!r) return { ok: false, codigo: 'VAZIO', mensagem: 'O Core não respondeu nada.' };
+    if (typeof r === 'string') {
+      try { r = JSON.parse(r); }
+      catch (e) { return { ok: false, codigo: 'RESPOSTA_ESTRANHA',
+        mensagem: 'O Core respondeu algo que não é JSON.' }; }
+    }
+    if (r.ok === false) {
+      return { ok: false, codigo: r.codigo || 'RECUSADO',
+               mensagem: r.mensagem || 'O Core recusou, sem dizer o motivo.' };
+    }
+    var dados = r.dados;
+    if (dados === undefined) dados = r.lista !== undefined ? r.lista : r;
+    return { ok: true, dados: dados, bruto: r };
+  };
+
+  P.estado = function () {
+    return { ambiente: P.ambiente(), porSistema: P.temPorta(),
+             origemDaPorta: P.origemDaPorta,
+             chamadas: P.chamadas, falhas: P.falhas, ultima: P.ultima };
+  };
+
+  raiz.NFPORTA = P;
+  if (typeof module !== 'undefined' && module.exports) module.exports = P;
+
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* ========== nfapp.js ========== */
+/* ============================================================
+   NOTAS_FISCAIS · nfapp.js · 08/11/2026 · terceira versão
+   ------------------------------------------------------------
+   Agora com a referência visual e o documento de reformulação.
+
+   O QUE SAIU, e por quê (seção 2 e 3C):
+     · a barra lateral do módulo — o menu é do ALMOX PRO
+     · os sete quadros de número — "não exagerar nos indicadores"
+     · o painel "Integrações e estado" do meio da página —
+       virou uma faixa fina no rodapé
+     · o cabeçalho global — o sistema já tem o dele
+
+   O QUE ENTROU:
+     · cabeçalho local, campo de chave em destaque, contagem
+       dentro das abas, paginação, e o painel de edição com
+       as quatro abas compactas
+
+   O QUE NÃO ENTROU, e está dito na tela:
+     · consulta da chave na SEFAZ. O botão existe e confere os
+       44 dígitos e o dígito verificador — e diz, com todas as
+       letras, que CONFERIR NÃO É CONSULTAR. A seção 5 proíbe
+       afirmar consulta que não houve, e é a proibição certa.
+     · gravação. Nenhuma ação de escrita foi encontrada no Core
+       na auditoria de hoje. A seção 8 manda apresentar a lacuna
+       e pedir a operação central, não simular.
+   ============================================================ */
+(function (raiz) {
+  'use strict';
+
+  var A = {
+    nome: 'NFAPP', versao: '08/11c',
+    notas: [], carregando: false, erro: null,
+    filtro: { situacao: 'todas', procura: '', de: '', ate: '' },
+    pagina: 1, porPagina: 15,
+    selecionada: null, itens: null, abaPainel: 'dados',
+    importada: null, chaveConferida: null
+  };
+
+  var D, P;
+  function $(id) { return document.getElementById(id); }
+  function esc(v) {
+    return String(v === null || v === undefined ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function plural(n, um, muitos) { return n === 1 ? um : muitos; }
+
+  /* ------------------------------------------------------------ */
+  A.carregar = function () {
+    A.carregando = true; A.erro = null; A.pintar();
+    return P.chamar('listar', {}).then(function (r) {
+      A.carregando = false;
+      if (!r.ok) { A.erro = r; A.notas = []; }
+      else {
+        var d = r.dados;
+        A.notas = Object.prototype.toString.call(d) === '[object Array]' ? d : [];
+      }
+      A.pintar(); A.pintarRodape();
+      return r;
+    });
+  };
+
+  A.visiveis = function () { return D.ordenar(D.filtrar(A.notas, A.filtro)); };
+  A.daPagina = function () {
+    var v = A.visiveis();
+    var i = (A.pagina - 1) * A.porPagina;
+    return v.slice(i, i + A.porPagina);
+  };
+
+  /* ------------------------------------------------------------
+     A ÁREA DE IMPORTAÇÃO · seção 3B
+     ------------------------------------------------------------ */
+  A.htmlImporta = function () {
+    return '<div class="importa">' +
+      '<div class="chave-caixa"><span class="ico">🔗</span>' +
+        '<input id="nfChave" type="text" inputmode="numeric" maxlength="60" ' +
+          'placeholder="Digite ou cole a chave de acesso (44 dígitos)"></div>' +
+      '<button class="btn primario" id="nfConsultar">🔍 Consultar NF-e</button>' +
+      '<button class="btn" id="nfImportar">⤒ Importar XML</button>' +
+      '<button class="btn" id="nfAnexar" disabled ' +
+        'title="Anexar documento grava arquivo, e gravação é a etapa 2">📎 Anexar</button>' +
+    '</div>' +
+    '<div id="nfChaveAviso"></div>';
+  };
+
+  /* ------------------------------------------------------------
+     ABAS COM CONTAGEM DENTRO
+     ------------------------------------------------------------ */
+  A.htmlAbas = function () {
+    var c = D.contarPorSituacao(A.notas);
+    var fig = { todas: '▦', conferencia: '◷', rascunho: '✎',
+                confirmada: '✓', cancelada: '✕' };
+    var ordem = ['todas', 'conferencia', 'rascunho', 'confirmada', 'cancelada'];
+    var nomes = {};
+    D.SITUACOES.forEach(function (s) { nomes[s.id] = s.nome; });
+
+    var h = ordem.map(function (id) {
+      return '<button class="aba' + (A.filtro.situacao === id ? ' on' : '') + '" ' +
+        'data-aba="' + id + '">' + fig[id] + ' ' + esc(nomes[id]) +
+        '<span class="q">' + (c[id] || 0) + '</span></button>';
+    }).join('');
+
+    if (c.outra) h += '<button class="aba alerta' +
+      (A.filtro.situacao === 'outra' ? ' on' : '') + '" data-aba="outra">' +
+      '! Não reconhecidas<span class="q">' + c.outra + '</span></button>';
+
+    return '<div class="abas">' + h + '</div>';
+  };
+
+  A.htmlFiltros = function () {
+    return '<div class="filtros">' +
+      '<input id="nfProcura" class="campo cresce" type="search" ' +
+        'placeholder="Buscar por NF, fornecedor, CNPJ ou chave…" ' +
+        'value="' + esc(A.filtro.procura) + '">' +
+      '<div class="grupo-data"><span>📅</span>' +
+        '<input id="nfDe" type="date" value="' + esc(A.filtro.de) + '">' +
+        '<span>–</span>' +
+        '<input id="nfAte" type="date" value="' + esc(A.filtro.ate) + '"></div>' +
+      '<button class="btn" id="nfLimpar">Limpar filtros</button>' +
+      '<button class="btn primario" id="nfNova" disabled ' +
+        'title="Criar nota grava, e gravação é a etapa 2">+ Nova Nota</button>' +
+    '</div>';
+  };
+
+  /* ------------------------------------------------------------
+     A TABELA · a área de trabalho
+     ------------------------------------------------------------ */
+  A.htmlTabela = function () {
+    var todas = A.visiveis();
+    var lista = A.daPagina();
+    var corpo;
+
+    if (!lista.length) {
+      corpo = '<tr><td colspan="8" class="vazio">' +
+        (A.notas.length
+          ? 'Nenhuma nota com esse filtro. As outras ' + A.notas.length + ' continuam aí.'
+          : 'O Core não devolveu nenhuma nota.') + '</td></tr>';
+    } else {
+      var base = (A.pagina - 1) * A.porPagina;
+      corpo = lista.map(function (n, k) {
+        var i = base + k;
+        var sit = D.situacaoDe(n);
+        var semData = !D.dataISO(n.emissao);
+        var v = D.vinculoDe(n);
+        return '<tr data-linha="' + i + '"' +
+            (A.selecionada === n ? ' class="escolhida"' : '') + '>' +
+          '<td style="width:30px"><input type="checkbox" disabled ' +
+            'title="Ação em lote grava, e gravação é a etapa 2"></td>' +
+          '<td><b>' + esc(n.numero || '—') + '</b>' +
+            (n.serie ? '<span class="serie"> /' + esc(n.serie) + '</span>' : '') +
+          '</td>' +
+          '<td>' + esc(n.fornecedor || '—') +
+            (n.cnpj ? '<div class="mono mudo peq">' + esc(D.cnpjBonito(n.cnpj)) + '</div>' : '') +
+          '</td>' +
+          '<td>' + (semData ? '<span class="faltando">sem data</span>'
+                            : esc(D.dataBR(n.emissao))) + '</td>' +
+          '<td class="num">' + D.moeda(n.valor) + '</td>' +
+          '<td><span class="selo selo-' + sit + '">' + esc(A.nomeSituacao(sit)) + '</span></td>' +
+          '<td>' + (v ? '<span class="elo">🔗 ' + esc(v.codigo) + '</span>'
+                      : '<span class="mudo">—</span>') + '</td>' +
+          '<td style="white-space:nowrap;width:92px">' +
+            '<button class="btn-ic" data-ver="' + i + '" title="Ver a nota">👁</button>' +
+            '<button class="btn-ic" data-lapis="' + i + '" ' +
+              'title="Abrir para conferir — a edição grava, e grava é etapa 2">✎</button>' +
+            '<button class="btn-ic" disabled title="Mais ações entram com a gravação">⋯</button>' +
+          '</td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    var s = D.somar(todas);
+    return '<div class="cartao">' +
+      '<table class="tabela"><thead><tr>' +
+        '<th></th><th>NF nº</th><th>Fornecedor</th><th>Emissão</th>' +
+        '<th class="num">Valor (R$)</th><th>Situação</th>' +
+        '<th>Vínculo</th><th>Ações</th>' +
+      '</tr></thead><tbody>' + corpo + '</tbody></table>' +
+      A.htmlRodapeTabela(todas, s) +
+    '</div>';
+  };
+
+  A.htmlRodapeTabela = function (todas, s) {
+    var total = todas.length;
+    var paginas = Math.max(1, Math.ceil(total / A.porPagina));
+    if (A.pagina > paginas) A.pagina = paginas;
+    var de = total ? (A.pagina - 1) * A.porPagina + 1 : 0;
+    var ate = Math.min(A.pagina * A.porPagina, total);
+
+    var bts = '';
+    if (paginas > 1) {
+      bts += '<button data-pg="1"' + (A.pagina === 1 ? ' disabled' : '') + '>«</button>';
+      bts += '<button data-pg="' + (A.pagina - 1) + '"' +
+        (A.pagina === 1 ? ' disabled' : '') + '>‹</button>';
+      var ini = Math.max(1, A.pagina - 2), fim = Math.min(paginas, ini + 4);
+      for (var i = ini; i <= fim; i++) {
+        bts += '<button data-pg="' + i + '"' + (i === A.pagina ? ' class="on"' : '') +
+          '>' + i + '</button>';
+      }
+      if (fim < paginas) bts += '<button disabled>…</button>' +
+        '<button data-pg="' + paginas + '">' + paginas + '</button>';
+      bts += '<button data-pg="' + (A.pagina + 1) + '"' +
+        (A.pagina === paginas ? ' disabled' : '') + '>›</button>';
+      bts += '<button data-pg="' + paginas + '"' +
+        (A.pagina === paginas ? ' disabled' : '') + '>»</button>';
+    }
+
+    return '<div class="rodape-tab">' +
+      '<span class="mudo">Exibindo ' + de + ' a ' + ate + ' de ' + total +
+        ' ' + plural(total, 'registro', 'registros') + '</span>' +
+      '<span class="sep"></span>' +
+      '<span class="mudo">Somam</span>&nbsp;<b>' + D.moeda(s.total) + '</b>' +
+      (s.semValor ? '&nbsp;<span class="faltando peq">(' + s.semValor +
+        ' sem valor, fora da soma)</span>' : '') +
+      (bts ? '<div class="paginas">' + bts + '</div>' : '') +
+    '</div>';
+  };
+
+  A.nomeSituacao = function (s) {
+    return { rascunho: 'Rascunho', conferencia: 'Em conferência',
+             confirmada: 'Confirmada', cancelada: 'Cancelada',
+             outra: 'Não reconhecida' }[s] || s;
+  };
+
+  /* ------------------------------------------------------------ */
+  A.pintar = function () {
+    var alvo = $('nfCorpo');
+    if (!alvo) return;
+
+    if (A.carregando) {
+      alvo.innerHTML = A.htmlImporta() +
+        '<div class="cartao"><div class="painel-corpo">' +
+        '<div class="aviso leve">Procurando as notas no Core…</div></div></div>';
+      A.ligar(); return;
+    }
+
+    if (A.erro) {
+      var est = P.estado();
+      alvo.innerHTML = A.htmlImporta() +
+        '<div class="cartao"><div class="painel-corpo">' +
+        '<div class="aviso erro"><b>Não consegui trazer as notas.</b><br>' +
+          esc(A.erro.mensagem) + '</div>' +
+        '<div class="peq mudo" style="line-height:1.5">' +
+          (est.porSistema
+            ? 'O módulo falou pela porta do ALMOX PRO (' + esc(est.origemDaPorta) +
+              '), com a sessão que o sistema está usando. Quem recusou foi o Core.'
+            : '<b>Este módulo não está falando pela porta do sistema.</b> ' +
+              'Sozinho ele não tem sessão, e sessão não se copia nem se inventa. ' +
+              'Abra pelo menu <b>Notas Fiscais → Central (novo)</b>, de dentro do ALMOX PRO.') +
+        '</div></div></div>';
+      A.ligar(); return;
+    }
+
+    alvo.innerHTML = A.htmlImporta() + A.htmlAbas() + A.htmlFiltros() + A.htmlTabela();
+    A.ligar();
+  };
+
+  A.pintarRodape = function () {
+    var r = $('nfRodape');
+    if (!r) return;
+    var est = P.estado();
+    function item(cor, texto) {
+      return '<span class="item"><span class="pt ' + cor + '"></span>' + texto + '</span>';
+    }
+    var agora = new Date();
+    var hh = ('0' + agora.getHours()).slice(-2) + ':' + ('0' + agora.getMinutes()).slice(-2);
+    r.innerHTML =
+      '<b>📦 Integração ALMOX PRO</b><span class="sep"></span>' +
+      item(est.porSistema ? 'v' : 'a', est.porSistema ? 'Core conectado' : 'Core não alcançado') +
+      item(A.notas.length ? 'v' : 'c', 'Notas: ' + A.notas.length + ' ' +
+        plural(A.notas.length, 'lida', 'lidas')) +
+      item('c', 'Estoque: só leitura (etapa 1)') +
+      item('c', 'Consulta SEFAZ: sem integração') +
+      '<span class="sep"></span>' +
+      '<span class="mudo">Última leitura às ' + hh + '</span>';
+  };
+
+  /* ------------------------------------------------------------
+     LIGAR OS CONTROLES
+     ------------------------------------------------------------ */
+  A.ligar = function () {
+    var p = $('nfProcura');
+    if (p) p.addEventListener('input', function () {
+      A.filtro.procura = p.value; A.pagina = 1; A.pintar();
+      var novo = $('nfProcura');
+      if (novo) { novo.focus(); novo.setSelectionRange(novo.value.length, novo.value.length); }
+    });
+    ['nfDe', 'nfAte'].forEach(function (id) {
+      var el = $(id);
+      if (el) el.addEventListener('change', function () {
+        A.filtro[id === 'nfDe' ? 'de' : 'ate'] = el.value; A.pagina = 1; A.pintar();
+      });
+    });
+    var lim = $('nfLimpar');
+    if (lim) lim.addEventListener('click', function () {
+      A.filtro = { situacao: 'todas', procura: '', de: '', ate: '' };
+      A.pagina = 1; A.pintar();
+    });
+    var imp = $('nfImportar');
+    if (imp) imp.addEventListener('click', function () {
+      var c = $('nfArquivo'); if (c) c.click();
+    });
+    var cons = $('nfConsultar');
+    if (cons) cons.addEventListener('click', A.consultarChave);
+    var ch = $('nfChave');
+    if (ch) {
+      ch.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter') A.consultarChave();
+      });
+      ch.addEventListener('input', function () {
+        if (A.chaveConferida) { A.chaveConferida = null; A.pintarChave(); }
+      });
+      if (A.chaveConferida) A.pintarChave();
+    }
+    ['aba', 'pg', 'ver', 'lapis'].forEach(function (chaveAttr) {
+      Array.prototype.forEach.call(
+        document.querySelectorAll('[data-' + chaveAttr + ']'), function (b) {
+        b.addEventListener('click', function () {
+          var v = b.getAttribute('data-' + chaveAttr);
+          if (chaveAttr === 'aba') { A.filtro.situacao = v; A.pagina = 1; A.pintar(); }
+          else if (chaveAttr === 'pg') { A.pagina = Number(v); A.pintar(); }
+          else { A.abrir(A.visiveis()[Number(v)], chaveAttr === 'lapis'); }
+        });
+      });
+    });
+  };
+
+  /* ------------------------------------------------------------
+     CONSULTAR A CHAVE · confere os dígitos, e diz que é só isso
+     ------------------------------------------------------------ */
+  A.consultarChave = function () {
+    var ch = $('nfChave');
+    if (!ch) return;
+    A.chaveConferida = D.conferirChave(ch.value);
+    A.pintarChave();
+    return A.chaveConferida;
+  };
+
+  A.pintarChave = function () {
+    var cx = $('nfChaveAviso'), ch = $('nfChave'), r = A.chaveConferida;
+    if (!cx) return;
+    if (!r) { cx.innerHTML = ''; if (ch) ch.className = ''; return; }
+    if (ch) ch.className = r.ok ? 'boa' : 'ruim';
+
+    if (!r.ok) {
+      cx.innerHTML = '<div class="aviso"><b>' + esc(r.texto) + '</b></div>';
+      return;
+    }
+    var k = r.partes;
+    cx.innerHTML = '<div class="aviso leve">' +
+      '<b>Chave bem formada — e isto não é consulta.</b><br>' +
+      'Os 44 dígitos conferem, inclusive o dígito verificador. Mas conferir ' +
+      'o número <b>não é perguntar à SEFAZ se a nota existe</b>: ' +
+      'este sistema não tem integração de consulta, porque ela exige ' +
+      'certificado digital, que o Apps Script não consegue enviar.' +
+      '<div class="linhas peq" style="margin-top:8px">' +
+        '<div class="linha"><span>CNPJ do emitente</span><b class="mono">' +
+          esc(D.cnpjBonito(k.cnpj)) + '</b></div>' +
+        '<div class="linha"><span>Número da nota</span><b>' + esc(k.numero) + '</b></div>' +
+        '<div class="linha"><span>Série</span><b>' + esc(k.serie) + '</b></div>' +
+        '<div class="linha"><span>Modelo</span><b>' +
+          (k.modelo === '55' ? '55 (NF-e)' : esc(k.modelo)) + '</b></div>' +
+        '<div class="linha"><span>Emissão</span><b>' + esc(k.anoMes) + '</b></div>' +
+      '</div>' +
+      '<div style="margin-top:9px">Com esses dados o senhor já pode procurar a nota ' +
+      'na lista abaixo, ou pedir o XML ao fornecedor e usar o <b>Importar XML</b>.</div>' +
+    '</div>';
+
+    /* usar o que a chave diz para achar a nota na lista: isso é
+       trabalho de verdade, feito com o que já está na mão */
+    var proc = $('nfProcura');
+    if (proc) { A.filtro.procura = k.numero; A.pagina = 1; }
+  };
+
+  /* ------------------------------------------------------------
+     ABRIR / FECHAR O PAINEL
+     ------------------------------------------------------------ */
+  A.abrir = function (nota, peloLapis) {
+    if (!nota) return;
+    A.selecionada = nota; A.itens = null; A.importada = null; A.recado = null;
+    A.abaPainel = peloLapis ? 'itens' : 'dados';
+    A.pintarPainel(); A.pintar();
+
+    var jaTem = nota.itens || nota.listaItens;
+    if (Object.prototype.toString.call(jaTem) === '[object Array]' && jaTem.length) {
+      A.itens = jaTem; return A.pintarPainel();
+    }
+    P.chamar('itens', { numero: nota.numero, chave: nota.chave }).then(function (r) {
+      A.itens = (r.ok && Object.prototype.toString.call(r.dados) === '[object Array]')
+        ? r.dados : [];
+      A.recado = r.ok ? null : r.mensagem;
+      A.pintarPainel();
+    });
+  };
+
+  A.fechar = function () {
+    A.selecionada = null; A.itens = null; A.importada = null; A.recado = null;
+    A.pintarPainel(); A.pintar();
+  };
+
+  A.pintarPainel = function () {
+    var cx = $('nfPainel');
+    if (!cx) return;
+    var n = A.selecionada;
+    if (!n && !A.importada) {
+      cx.classList.remove('on'); cx.innerHTML = '';
+      document.body.classList.remove('com-painel');
+      return;
+    }
+    cx.classList.add('on');
+    document.body.classList.add('com-painel');
+    if (A.importada) return A.pintarImportada();
+
+    var qtdItens = A.itens === null ? '' : ' (' + A.itens.length + ')';
+    var abas = [['dados', 'Dados'], ['itens', 'Itens' + qtdItens],
+                ['vinculos', 'Vínculos'], ['historico', 'Histórico']];
+
+    cx.innerHTML =
+      '<div class="painel-topo">' +
+        '<b>🧾 Nota Fiscal Nº ' + esc(n.numero || '—') + '</b>' +
+        '<button class="x" id="nfFechar" title="Fechar">✕</button>' +
+      '</div>' +
+      '<div class="painel-abas">' + abas.map(function (a) {
+        return '<button data-pab="' + a[0] + '"' +
+          (A.abaPainel === a[0] ? ' class="on"' : '') + '>' + a[1] + '</button>';
+      }).join('') + '</div>' +
+      '<div class="painel-corpo">' + A.htmlAbaPainel(n) + '</div>' +
+      '<div class="rodape-painel">' +
+        '<button class="btn" id="nfCancelarPainel">Fechar</button>' +
+        '<button class="btn" disabled title="Gravação é a etapa 2">💾 Salvar alterações</button>' +
+        '<button class="btn primario" disabled title="Gravação é a etapa 2">' +
+          '✓ Confirmar entrada</button>' +
+      '</div>' +
+      '<div class="painel-corpo peq mudo" style="padding-top:0;line-height:1.5">' +
+        'Salvar e confirmar gravam no Core. A auditoria de hoje encontrou apenas ' +
+        'ações de leitura no módulo <span class="mono">nf</span> — ' +
+        'nenhuma de escrita. Pela seção 8, a lacuna é apresentada em vez de simulada: ' +
+        'os botões ligam quando as operações existirem no Core e o senhor autorizar.' +
+      '</div>';
+
+    var f = $('nfFechar'); if (f) f.addEventListener('click', A.fechar);
+    var c = $('nfCancelarPainel'); if (c) c.addEventListener('click', A.fechar);
+    Array.prototype.forEach.call(cx.querySelectorAll('[data-pab]'), function (b) {
+      b.addEventListener('click', function () {
+        A.abaPainel = b.getAttribute('data-pab'); A.pintarPainel();
+      });
+    });
+  };
+
+  A.htmlAbaPainel = function (n) {
+    if (A.abaPainel === 'itens') return A.htmlItens(n);
+    if (A.abaPainel === 'vinculos') return A.htmlVinculos(n);
+    if (A.abaPainel === 'historico') return A.htmlHistorico(n);
+    return A.htmlDados(n);
+  };
+
+  function linha(r, v) {
+    return '<div class="linha"><span>' + r + '</span><b>' + v + '</b></div>';
+  }
+
+  A.htmlDados = function (n) {
+    var k = n.chave ? D.lerChave(n.chave) : null;
+    var h = '<div class="linhas">' +
+      linha('Número', esc(n.numero || '—')) +
+      linha('Série', esc(n.serie || '—')) +
+      linha('Emissão', D.dataISO(n.emissao) ? esc(D.dataBR(n.emissao))
+        : '<span class="faltando">não informada</span>') +
+      linha('Valor da nota', D.moeda(n.valor)) +
+      linha('Situação', '<span class="selo selo-' + D.situacaoDe(n) + '">' +
+        esc(A.nomeSituacao(D.situacaoDe(n))) + '</span>') +
+      linha('Origem', esc(n.origem || '—')) +
+      linha('Fornecedor', esc(n.fornecedor || '—')) +
+      (n.cnpj ? linha('CNPJ', '<span class="mono">' + esc(D.cnpjBonito(n.cnpj)) + '</span>') : '') +
+    '</div>';
+
+    if (n.chave) {
+      var conf = D.conferirChave(n.chave);
+      h += '<div class="bloco"><div class="bloco-tit">🔗 Chave de acesso</div>' +
+        '<div class="mono peq" style="word-break:break-all">' +
+          esc(D.chaveBonita(n.chave)) + '</div>' +
+        (conf.ok
+          ? '<div class="aviso bom" style="margin-bottom:0">Os 44 dígitos conferem, ' +
+            'inclusive o verificador. Conferência dos dígitos — não consulta.</div>'
+          : '<div class="aviso" style="margin-bottom:0">' + esc(conf.texto) + '</div>') +
+      '</div>';
+      if (k) {
+        var cnpjBate = !n.cnpj || n.cnpj.replace(/\D/g, '') === k.cnpj;
+        var numBate = !n.numero ||
+          String(Number(String(n.numero).replace(/\D/g, ''))) === k.numero;
+        h += '<div class="linhas peq">' +
+          linha('CNPJ dentro da chave', '<span class="mono">' + esc(D.cnpjBonito(k.cnpj)) +
+            '</span>' + (cnpjBate ? '' : ' <span class="faltando">≠ do cadastro</span>')) +
+          linha('Número dentro da chave', esc(k.numero) +
+            (numBate ? '' : ' <span class="faltando">≠ do cadastro</span>')) +
+        '</div>';
+      }
+    }
+    return h;
+  };
+
+  A.htmlItens = function (n) {
+    var itens = A.itens;
+    if (itens === null) return '<div class="aviso leve">Procurando os itens…</div>';
+    if (!itens.length) return '<div class="aviso">' +
+      (A.recado ? esc(A.recado) : 'Esta nota não trouxe itens.') + '</div>';
+
+    var soma = 0, semTotal = 0, desc = 0;
+    itens.forEach(function (i) {
+      var v = D.valorDe(i.valorTotal !== undefined ? i.valorTotal : i.total);
+      if (v === null) semTotal++; else soma += Math.round(v * 100);
+      desc += Math.round((D.valorDe(i.desconto) || 0) * 100);
+    });
+
+    var h = '<div style="display:flex;gap:8px;margin-bottom:11px">' +
+      '<button class="btn peq" disabled title="Gravação é a etapa 2" ' +
+        'style="flex:1">+ Adicionar item</button>' +
+      '<button class="btn peq" disabled title="Gravação é a etapa 2" ' +
+        'style="flex:1">▥ Leitura por código</button></div>' +
+
+      '<table class="tabela densa"><thead><tr><th>#</th><th>Código</th><th>Descrição</th>' +
+      '<th class="num">Qtd.</th><th class="num">V. unit.</th><th class="num">Total</th>' +
+      '<th></th></tr></thead><tbody>' +
+      itens.map(function (i, k) {
+        var d = i.descricao || i.nome || i.xProd || '—';
+        var cod = i.codigo || i.cProd || '';
+        return '<tr><td class="mudo">' + (k + 1) + '</td>' +
+          '<td class="mono peq">' + (cod ? esc(cod) : '—') + '</td>' +
+          '<td>' + esc(d) +
+            ((i.ncm || i.cfop || D.valorDe(i.desconto) || i.totalVeioDaNota === false)
+              ? '<div class="mono mudo peq">' +
+                (i.ncm ? 'NCM ' + esc(i.ncm) : '') +
+                (i.cfop ? ' · CFOP ' + esc(i.cfop) : '') +
+                (D.valorDe(i.desconto) ? ' · desc. ' + D.moeda(i.desconto) : '') +
+                (i.totalVeioDaNota === false ? ' · <b>total calculado</b>' : '') +
+                '</div>' : '') +
+          '</td>' +
+          '<td class="num"><input class="celula" value="' +
+            esc(i.qtd !== undefined ? i.qtd : (i.quantidade || '')) + '" readonly ' +
+            'title="Editar grava, e gravação é a etapa 2"></td>' +
+          '<td class="num"><input class="celula" value="' +
+            esc(D.moeda(i.valorUnitario !== undefined ? i.valorUnitario : i.preco)
+              .replace('R$ ', '')) + '" readonly ' +
+            'title="Editar grava, e gravação é a etapa 2"></td>' +
+          '<td class="num"><b>' +
+            D.moeda(i.valorTotal !== undefined ? i.valorTotal : i.total)
+              .replace('R$ ', '') + '</b></td>' +
+          '<td style="white-space:nowrap">' +
+            '<button class="btn-ic" disabled title="Editar item é etapa 2">✎</button>' +
+            '<button class="btn-ic" disabled title="Excluir item é etapa 2">🗑</button>' +
+          '</td></tr>';
+      }).join('') + '</tbody></table>';
+
+    var vNota = D.valorDe(n.valor);
+    h += '<div class="totais">' +
+      '<div class="lista">' +
+        '<div class="linha"><span>Total de itens</span><b>' + itens.length + '</b></div>' +
+        '<div class="linha"><span>Subtotal</span><b>' + D.moeda(soma / 100) + '</b></div>' +
+        '<div class="linha"><span>Desconto</span><b>' +
+          (desc ? '− ' + D.moeda(desc / 100) : D.moeda(0)) + '</b></div>' +
+        (semTotal ? '<div class="linha"><span>Sem total</span>' +
+          '<b class="faltando">' + semTotal + ' fora da soma</b></div>' : '') +
+      '</div>' +
+      '<div class="total-grande"><span>Valor total da nota</span><b>' +
+        (vNota === null ? '—' : D.moeda(vNota)) + '</b></div>' +
+    '</div>';
+
+    if (vNota !== null) {
+      var dif = soma - Math.round(vNota * 100);
+      h += dif === 0
+        ? '<div class="aviso bom">A soma dos itens fecha com o valor da nota.</div>'
+        : '<div class="aviso"><b>A soma dos itens não fecha com o valor da nota.</b><br>' +
+          'Diferença de <b>' + D.moeda(Math.abs(dif) / 100) + '</b>. ' +
+          'Pode ser frete, seguro, IPI ou ST — confira na DANFE. ' +
+          'Nenhum valor foi alterado.</div>';
+    } else {
+      h += '<div class="aviso leve">A nota não trouxe valor total, então não há ' +
+        'com o que comparar a soma dos itens.</div>';
+    }
+    return h;
+  };
+
+  A.htmlVinculos = function (n) {
+    var v = D.vinculoDe(n);
+    var busca = '<div class="bloco"><div class="bloco-tit">🔗 Vincular reserva ou compra</div>' +
+      '<input class="campo" style="width:100%" disabled ' +
+        'placeholder="Buscar reserva (RES-), pedido (PED-) ou requisição (RC-)" ' +
+        'title="A busca consome o módulo de Reservas: é chamada de escrita e leitura ' +
+        'que ainda não conferi no Core">' +
+      '<div class="peq mudo" style="margin-top:7px;line-height:1.5">' +
+        'A seção 6 manda consumir o serviço do módulo de Reservas que já existe, ' +
+        'sem criar outro cadastro. Concordo — e por isso o campo está desligado: ' +
+        'eu ainda não sei qual ação do Core devolve a busca de reservas. ' +
+        'Inventar o nome dela seria pior que deixar desligado.</div>' +
+    '</div>';
+
+    if (!v) {
+      return '<div class="aviso">Esta nota não veio com vínculo de reserva nem de ' +
+        'pedido de compra.</div>' +
+        '<div class="peq mudo" style="line-height:1.5">O Core devolveu a nota sem ' +
+        'campo de reserva, pedido ou requisição. Pode ser que ela realmente não tenha ' +
+        'vínculo, ou que o <span class="mono">nf.listar</span> não devolva esse campo — ' +
+        'e enquanto eu não puder conferir no Core, não dá para afirmar qual dos dois é.' +
+        '</div>' + busca;
+    }
+    return '<div class="linhas">' +
+      linha(v.tipo === 'reserva' ? 'Reserva' : 'Pedido de compra',
+        '<span class="elo">🔗 ' + esc(v.codigo) + '</span>') +
+      (n.obra ? linha('Obra', esc(n.obra)) : '') +
+    '</div>' +
+    '<div class="aviso leve">O atendimento da reserva — solicitado, recebido e saldo ' +
+      'pendente — vem do motor de Reservas. Buscar isso é chamada nova ao Core, e eu ' +
+      'ainda não conferi qual ação devolve esse detalhe.</div>' + busca;
+  };
+
+  A.htmlHistorico = function () {
+    return '<div class="aviso">O histórico desta nota ainda não aparece aqui.</div>' +
+      '<div class="peq mudo" style="line-height:1.5">A seção 13 pede quem cadastrou, ' +
+      'quem editou, quem confirmou, o antes e o depois. Isso mora na auditoria do Core, ' +
+      'e na varredura de hoje eu não encontrei a ação que devolve o histórico de uma ' +
+      'nota. Preencher esta aba com o que eu adivinhar seria pior do que deixá-la vazia.' +
+      '<br><br>Assim que eu tiver a lista de funções do Core, isto aqui é meia hora.</div>';
+  };
+
+  /* ------------------------------------------------------------
+     IMPORTAR XML
+     ------------------------------------------------------------ */
+  A.importarArquivo = function (arquivo) {
+    return new Promise(function (resolve) {
+      var fr = new FileReader();
+      fr.onload = function () {
+        var r = raiz.XMLEXATO.decodificar(String(fr.result));
+        if (!r.ok) {
+          A.selecionada = null;
+          A.importada = { erro: 'Não consegui abrir o arquivo (' + r.como + ').' };
+          A.pintarPainel(); return resolve(A.importada);
+        }
+        var nota = raiz.XMLEXATO.lerTexto(r.texto);
+        nota.codificacao = r.como;
+        nota.arquivo = arquivo.name;
+        if (!nota.ok) nota.erro = 'Este arquivo não parece ser o XML de uma NF-e: ' +
+          'não achei nem o número da nota nem os itens. ' +
+          'Confira se não é o recibo de entrega.';
+        A.selecionada = null;
+        A.importada = nota;
+        A.pintarPainel();
+        resolve(nota);
+      };
+      fr.onerror = function () {
+        A.selecionada = null;
+        A.importada = { erro: 'O navegador não conseguiu ler o arquivo.' };
+        A.pintarPainel(); resolve(A.importada);
+      };
+      fr.readAsDataURL(arquivo);
+    });
+  };
+
+  A.pintarImportada = function () {
+    var cx = $('nfPainel'), n = A.importada;
+    cx.classList.add('on');
+    document.body.classList.add('com-painel');
+
+    function topo(t) {
+      return '<div class="painel-topo"><b>' + t + '</b>' +
+        '<button class="x" id="nfFechar" title="Fechar">✕</button></div>';
+    }
+    function ligarFechar() {
+      var f = $('nfFechar'); if (f) f.addEventListener('click', A.fechar);
+    }
+
+    if (n.erro) {
+      cx.innerHTML = topo('⤒ Importar XML') +
+        '<div class="painel-corpo"><div class="aviso erro">' + esc(n.erro) + '</div></div>';
+      return ligarFechar();
+    }
+
+    var s = n.soma;
+    cx.innerHTML = topo('⤒ XML lido · nota ' + esc(n.numero || '—')) +
+      '<div class="painel-corpo">' +
+      '<div class="peq mudo" style="margin-bottom:10px">' + esc(n.arquivo || '') +
+        ' · arquivo em ' + esc(n.codificacao) +
+        ' · lido por <b>' + esc(n.como || 'leitura direta') + '</b></div>' +
+
+      '<div class="linhas">' +
+        linha('Número', esc(n.numero || '—')) +
+        linha('Série', esc(n.serie || '—')) +
+        linha('Emissão', esc(n.emissao ? D.dataBR(n.emissao.slice(0, 10)) : '—')) +
+        (n.fornecedor ? linha('Fornecedor', esc(n.fornecedor)) : '') +
+        (n.cnpj ? linha('CNPJ', '<span class="mono">' + esc(D.cnpjBonito(n.cnpj)) +
+          '</span>') : '') +
+      '</div>' +
+
+      (n.chave ? '<div class="bloco"><div class="bloco-tit">🔗 Chave</div>' +
+        '<div class="mono peq" style="word-break:break-all">' +
+        esc(D.chaveBonita(n.chave)) + '</div></div>' : '') +
+
+      (n.recusados && n.recusados.length
+        ? '<div class="aviso"><b>' + n.recusados.length +
+          ' bloco(s) do XML não viraram item.</b><br>' +
+          n.recusados.map(function (x) {
+            return 'posição ' + x.posicao + ': ' + esc(x.motivo); }).join('<br>') +
+          '<br>Estão aqui para o senhor saber que existiam. ' +
+          'Nada foi descartado em silêncio.</div>' : '') +
+
+      '<table class="tabela densa"><thead><tr><th>#</th><th>Código</th><th>Descrição</th>' +
+        '<th class="num">Qtd.</th><th class="num">V. unit.</th>' +
+        '<th class="num">Total</th></tr></thead><tbody>' +
+      n.itens.map(function (i, k) {
+        return '<tr><td class="mudo">' + (k + 1) + '</td>' +
+          '<td class="mono peq">' + (i.codigo ? esc(i.codigo) : '—') + '</td>' +
+          '<td>' + esc(i.nome || '—') +
+            '<div class="mono mudo peq">' +
+              (i.ncm ? 'NCM ' + esc(i.ncm) : '') +
+              (i.cfop ? ' · CFOP ' + esc(i.cfop) : '') +
+              (i.desconto ? ' · desc. ' + D.moeda(i.desconto) : '') +
+              (i.totalVeioDaNota ? '' : ' · <b>total calculado, a nota não trouxe</b>') +
+            '</div></td>' +
+          '<td class="num">' + esc(i.qtd) + ' ' + esc(i.unidade) + '</td>' +
+          '<td class="num">' + D.moeda(i.preco).replace('R$ ', '') + '</td>' +
+          '<td class="num"><b>' + D.moeda(i.valorTotal).replace('R$ ', '') + '</b></td></tr>';
+      }).join('') + '</tbody></table>' +
+
+      '<div class="totais"><div class="lista">' +
+        '<div class="linha"><span>Total de itens</span><b>' + n.itens.length + '</b></div>' +
+        '<div class="linha"><span>Soma dos itens</span><b>' +
+          D.moeda(s.somaItens) + '</b></div>' +
+        (s.descontos ? '<div class="linha"><span>Desconto</span><b>− ' +
+          D.moeda(s.descontos) + '</b></div>' : '') +
+      '</div>' +
+      '<div class="total-grande"><span>Valor total da nota</span><b>' +
+        (s.total ? D.moeda(s.total) : '—') + '</b></div></div>' +
+
+      (s.confere === true ? '<div class="aviso bom">' + esc(s.motivo) + '</div>'
+        : s.confere === null ? '<div class="aviso leve">' + esc(s.motivo) + '</div>'
+        : '<div class="aviso"><b>A soma não fecha.</b><br>' + esc(s.motivo) + '</div>') +
+      '</div>' +
+
+      '<div class="rodape-painel">' +
+        '<button class="btn" id="nfCancelarPainel">Fechar</button>' +
+        '<button class="btn primario" disabled title="Gravação é a etapa 2">' +
+          '✓ Lançar esta nota</button>' +
+      '</div>' +
+      '<div class="painel-corpo peq mudo" style="padding-top:0;line-height:1.5">' +
+        'Lançar grava no Core, e a auditoria de hoje não encontrou ação de escrita ' +
+        'no módulo <span class="mono">nf</span>. Pela seção 8, a lacuna é apresentada, ' +
+        'não simulada.</div>';
+
+    ligarFechar();
+    var c = $('nfCancelarPainel'); if (c) c.addEventListener('click', A.fechar);
+  };
+
+  /* ------------------------------------------------------------ */
+  A.iniciar = function () {
+    D = raiz.NFDADOS; P = raiz.NFPORTA;
+    var campo = $('nfArquivo');
+    if (campo) campo.addEventListener('change', function () {
+      if (campo.files && campo.files[0]) A.importarArquivo(campo.files[0]);
+      campo.value = '';
+    });
+    A.pintarRodape();
+    A.carregar();
+  };
+
+  raiz.NFAPP = A;
+  if (typeof module !== 'undefined' && module.exports) module.exports = A;
+
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+  (function comecar() {
+    if (document.readyState === 'loading')
+      return document.addEventListener('DOMContentLoaded', comecar);
+    window.NFAPP.iniciar();
+  })();
+</script>
+</body>
+</html>
