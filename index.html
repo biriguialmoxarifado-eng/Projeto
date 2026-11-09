@@ -65199,7 +65199,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 413 · 08/11";
+var ALMOXA_VERSAO = "sistema 414 · 08/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -110005,6 +110005,330 @@ emissao: hoje,
   };
 
   window.NFCENTRAL = N;
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () { N.ligar(); });
+  } else {
+    N.ligar();
+  }
+})();
+
+</script>
+
+<script>
+/* ============================================================
+   [NFROTA] — a rota #/nf passa a abrir o módulo novo
+   ALMOX PRO · 08/11/2026
+   ------------------------------------------------------------
+   A CAUSA, provada no código antes de qualquer conserto:
+
+     menu "Notas Fiscais"  →  rota: "#/nf"
+     "#/nf"                →  SCREENS["nf"]
+     SCREENS["nf"]         →  a tela ANTIGA (linha 11834)
+
+   O bloco anterior criou SCREENS["nf-central"] e acrescentou uma
+   aba no submenu, mas nunca encostou no "#/nf". Então clicar em
+   Notas Fiscais no menu principal abria a tela antiga, sempre.
+   Não era cache, não era a pasta, não era o push: era isto.
+
+   O QUE ESTE BLOCO FAZ
+
+     1. GUARDA a tela antiga em SCREENS["nf-antigo"], inteira,
+        com rota própria e uma aba no submenu. A seção 8.3
+        proíbe apagar o antigo antes de validar o novo — então
+        ele não é apagado, é mudado de lugar e continua a um
+        clique de distância.
+
+     2. Põe o módulo novo em SCREENS["nf"], que é onde o menu
+        principal bate.
+
+     3. Mantém "#/nf-central" funcionando, como apelido, para
+        não quebrar link que alguém já tenha guardado.
+
+     4. Acha o arquivo do módulo SOZINHO: tenta na raiz do
+        Projeto e, se não estiver lá, dentro da pasta
+        NOTAS_FISCAIS/. Hoje esse tropeço custou duas horas,
+        entre o mapa 3D e este. Não custa mais.
+
+     5. Acrescenta um número de versão no endereço, para o
+        navegador não servir a cópia velha do arquivo.
+
+   DÁ PARA VOLTAR ATRÁS com NFROTA.restaurar(): o antigo volta
+   para "#/nf" e o módulo sai. Nada é destruído.
+   ============================================================ */
+(function () {
+  "use strict";
+
+  var N = {
+    nome: "NFROTA",
+    versao: "08/11",
+    ligado: false,
+    telaAntiga: null,
+    submenuAntigo: null,
+    /* muda quando o módulo muda: é o que derruba o cache */
+    selo: "nf4-0811",
+    arquivos: ["NOTAS_FISCAIS_FINAL.html", "NOTAS_FISCAIS.html"],
+    pastas: ["", "NOTAS_FISCAIS/", "NF/"],
+    achado: null
+  };
+
+  function lp(v) { return String(v === null || v === undefined ? "" : v).trim(); }
+  function esc(v) {
+    return lp(v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  /* ------------------------------------------------------------
+     ONDE ESTÁ O ARQUIVO · procura, não adivinha
+     ------------------------------------------------------------ */
+  N.pastaDoSistema = function () {
+    try {
+      var aqui = lp(location.href).split("?")[0].split("#")[0];
+      return aqui.replace(/[^/]*$/, "");
+    } catch (e) { return ""; }
+  };
+
+  N.candidatos = function () {
+    var guardado = "";
+    try { guardado = lp(localStorage.getItem("almoxa:nf:url")); } catch (e) {}
+    var fora = [];
+    if (guardado) fora.push(guardado);
+    var base = N.pastaDoSistema();
+    for (var p = 0; p < N.pastas.length; p++) {
+      for (var a = 0; a < N.arquivos.length; a++) {
+        fora.push(base + N.pastas[p] + N.arquivos[a]);
+      }
+    }
+    return fora;
+  };
+
+  /** pergunta ao servidor qual dos endereços existe de verdade.
+      Mesma origem, então o fetch funciona e a resposta é honesta. */
+  N.procurar = function () {
+    if (N.achado) return Promise.resolve(N.achado);
+    var lista = N.candidatos();
+
+    function tentar(i) {
+      if (i >= lista.length) return Promise.resolve(null);
+      var url = lista[i];
+      return fetch(url + "?v=" + N.selo, { method: "GET", cache: "no-store" })
+        .then(function (r) {
+          if (r && r.ok) { N.achado = url; return url; }
+          return tentar(i + 1);
+        })
+        .catch(function () { return tentar(i + 1); });
+    }
+    return tentar(0);
+  };
+
+  N.urlCompleta = function (url) {
+    return url + "?v=" + N.selo;
+  };
+
+  /** fixa o endereço na mão, se um dia o arquivo for para outro lugar */
+  N.ondeFica = function (url) {
+    var u = lp(url);
+    if (!u) {
+      try { localStorage.removeItem("almoxa:nf:url"); } catch (e) {}
+      N.achado = null; return "";
+    }
+    if (!/\.html?(\?|#|$)/i.test(u)) u = u.replace(/\/?$/, "/") + N.arquivos[0];
+    try { localStorage.setItem("almoxa:nf:url", u); } catch (e) {}
+    N.achado = null;
+    return u;
+  };
+
+  /* ------------------------------------------------------------
+     A TELA
+     ------------------------------------------------------------ */
+  N.render = function () {
+    return UI.cabecalho({
+      trilha: ["Operações", "Notas Fiscais"],
+      titulo: "Notas Fiscais",
+      sub: "Entrada e conferência de NF-e, importação por chave, XML ou PDF, " +
+           "com integração ao estoque, compras e reservas.",
+      acoes:
+        '<button class="btn btn-ghost btn-sm" data-nfr-recarregar>Recarregar</button>' +
+        '<button class="btn btn-ghost btn-sm" data-nfr-antiga>Tela antiga</button>' +
+        '<button class="btn btn-primary btn-sm" data-nfr-cheia>Tela cheia</button>'
+    }) +
+    '<div data-nfr-caixa style="position:relative;background:#F1F4F9;' +
+      'border:1px solid var(--borda);border-radius:12px;overflow:hidden;' +
+      'height:78vh;min-height:520px">' +
+      '<div data-nfr-espera style="position:absolute;inset:0;display:grid;' +
+        'place-items:center;color:var(--texto-3);font-size:13px">' +
+        'Procurando o módulo de notas fiscais…</div>' +
+      '<iframe data-nfr-quadro src="about:blank" ' +
+        'style="width:100%;height:100%;border:0;display:block" ' +
+        'title="Módulo de Notas Fiscais"></iframe>' +
+    '</div>' +
+    '<p class="small mt8" data-nfr-rodape style="color:var(--texto-3);line-height:1.5"></p>';
+  };
+
+  N.mount = function () {
+    var quadro = document.querySelector("[data-nfr-quadro]");
+    var espera = document.querySelector("[data-nfr-espera]");
+    var rodape = document.querySelector("[data-nfr-rodape]");
+
+    N.procurar().then(function (url) {
+      if (!url) {
+        if (espera) espera.innerHTML =
+          '<div style="max-width:520px;text-align:center;padding:20px">' +
+          '<b style="display:block;font-size:14px;color:var(--texto-1);margin-bottom:8px">' +
+            'Não achei o arquivo do módulo</b>' +
+          '<p class="small" style="line-height:1.55">Procurei nestes endereços, ' +
+            'nesta ordem, e nenhum respondeu:</p>' +
+          '<p class="small mono" style="text-align:left;line-height:1.7;color:var(--texto-3)">' +
+            N.candidatos().map(esc).join("<br>") + '</p>' +
+          '<p class="small" style="line-height:1.55">Suba o ' +
+            '<b>NOTAS_FISCAIS_FINAL.html</b> para a raiz do Projeto, do lado do ' +
+            'index.html, e recarregue. A tela antiga continua no botão ' +
+            '<b>Tela antiga</b>, aqui em cima.</p></div>';
+        if (rodape) rodape.textContent = "";
+        return;
+      }
+      if (espera) espera.style.display = "none";
+      if (quadro) quadro.src = N.urlCompleta(url);
+      if (rodape) rodape.innerHTML =
+        'Módulo carregado de <span class="mono">' + esc(url) + '</span>. ' +
+        'A tela antiga de notas não foi apagada — está em ' +
+        '<span class="mono">#/nf-antigo</span> e no botão <b>Tela antiga</b>.';
+    });
+
+    var rec = document.querySelector("[data-nfr-recarregar]");
+    if (rec) rec.addEventListener("click", function () {
+      N.achado = null;
+      N.selo = "nf4-" + Date.now();      /* força busca nova, sem cache */
+      N.mount();
+    });
+
+    var ant = document.querySelector("[data-nfr-antiga]");
+    if (ant) ant.addEventListener("click", function () {
+      location.hash = "#/nf-antigo";
+    });
+
+    var cheia = document.querySelector("[data-nfr-cheia]");
+    if (cheia) cheia.addEventListener("click", function () {
+      var caixa = document.querySelector("[data-nfr-caixa]");
+      if (!caixa) return;
+      try {
+        var pedir = caixa.requestFullscreen || caixa.webkitRequestFullscreen;
+        if (pedir) { pedir.call(caixa); return; }
+      } catch (e) {}
+      N.cheiaNaMao(caixa);
+    });
+  };
+
+  N.cheiaNaMao = function (caixa) {
+    if (!caixa || caixa.__cheia) return;
+    caixa.__cheia = true;
+    caixa.__estilo = caixa.getAttribute("style") || "";
+    caixa.setAttribute("style",
+      "position:fixed;inset:0;z-index:9999;height:100vh;background:#F1F4F9");
+    var sair = document.createElement("button");
+    sair.className = "btn btn-ghost btn-sm";
+    sair.textContent = "Sair da tela cheia";
+    sair.setAttribute("style",
+      "position:absolute;top:12px;right:12px;z-index:10000;background:#fff");
+    caixa.appendChild(sair);
+    function voltar() {
+      caixa.setAttribute("style", caixa.__estilo);
+      caixa.__cheia = false;
+      try { caixa.removeChild(sair); } catch (e) {}
+      document.removeEventListener("keydown", aoEsc);
+    }
+    function aoEsc(ev) { if (ev.key === "Escape") voltar(); }
+    sair.addEventListener("click", voltar);
+    document.addEventListener("keydown", aoEsc);
+  };
+
+  /* ------------------------------------------------------------
+     LIGAR · troca a rota, guardando o que estava lá
+     ------------------------------------------------------------ */
+  N.ligar = function () {
+    if (N.ligado) return false;
+    if (typeof window.SCREENS !== "object" || !window.SCREENS) return false;
+    if (!SCREENS["nf"]) return false;
+
+    /* O NFCENTRAL fez o mesmo trabalho pela metade: criou uma aba
+       ao lado em vez de trocar a rota. Ele é DESLIGADO aqui, de
+       propósito e na ordem certa — não apagado. Continua no
+       arquivo, e NFCENTRAL.ligar() o traz de volta se este bloco
+       der problema. Apagar código que ainda pode salvar a noite
+       de alguém não é limpeza, é pressa. */
+    try {
+      if (window.NFCENTRAL && NFCENTRAL.ligado) NFCENTRAL.restaurar();
+      window.NFCENTRAL_DISPONIVEL = true;
+    } catch (e) {}
+
+    /* 1 · a tela antiga sai de "#/nf" e ganha rota própria.
+           NÃO É APAGADA. É o que a seção 8.3 exige. */
+    N.telaAntiga = SCREENS["nf"];
+    SCREENS["nf-antigo"] = {
+      titulo: "Notas Fiscais (tela antiga)",
+      modulo: N.telaAntiga.modulo || "nf",
+      render: N.telaAntiga.render,
+      mount: N.telaAntiga.mount
+    };
+
+    /* 2 · o módulo novo assume "#/nf", que é onde o menu bate */
+    SCREENS["nf"] = {
+      titulo: "Notas Fiscais",
+      modulo: N.telaAntiga.modulo || "nf",
+      render: function () { return N.render(); },
+      mount: function () { return N.mount(); }
+    };
+
+    /* 3 · "#/nf-central" continua valendo, como apelido */
+    SCREENS["nf-central"] = SCREENS["nf"];
+
+    /* 4 · o submenu: a aba "Notas" agora leva ao módulo novo, e
+           a antiga ganha a última posição, para conferência */
+    try {
+      if (window.SUBNAVS && SUBNAVS.nf) {
+        N.submenuAntigo = SUBNAVS.nf.slice();
+        SUBNAVS.nf = SUBNAVS.nf.filter(function (x) {
+          return !(x && x.rota === "#/nf-central");
+        });
+        var temAntiga = SUBNAVS.nf.some(function (x) {
+          return x && x.rota === "#/nf-antigo";
+        });
+        if (!temAntiga) SUBNAVS.nf.push({ rotulo: "Tela antiga", rota: "#/nf-antigo" });
+      }
+      if (window.FAMILIA_ROTA) {
+        FAMILIA_ROTA["nf-antigo"] = "nf";
+        FAMILIA_ROTA["nf-central"] = "nf";
+      }
+    } catch (e) {}
+
+    N.ligado = true;
+    return true;
+  };
+
+  N.restaurar = function () {
+    if (!N.ligado) return false;
+    if (N.telaAntiga) SCREENS["nf"] = N.telaAntiga;
+    try { delete SCREENS["nf-antigo"]; } catch (e) { SCREENS["nf-antigo"] = undefined; }
+    try { delete SCREENS["nf-central"]; } catch (e) { SCREENS["nf-central"] = undefined; }
+    if (N.submenuAntigo && window.SUBNAVS) SUBNAVS.nf = N.submenuAntigo;
+    N.ligado = false;
+    return true;
+  };
+
+  N.diagnostico = function () {
+    return {
+      ligado: N.ligado,
+      rotaNfEhOModulo: !!(window.SCREENS && SCREENS["nf"] &&
+        String(SCREENS["nf"].render).indexOf("N.render") > -1),
+      antigaPreservada: !!(window.SCREENS && SCREENS["nf-antigo"]),
+      apelidoCentral: !!(window.SCREENS && SCREENS["nf-central"]),
+      candidatos: N.candidatos(),
+      achado: N.achado,
+      abasDoMenu: (window.SUBNAVS && SUBNAVS.nf || []).map(function (x) { return x.rota; })
+    };
+  };
+
+  window.NFROTA = N;
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", function () { N.ligar(); });
