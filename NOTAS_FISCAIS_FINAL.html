@@ -486,6 +486,73 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
     return r.ok ? r.valor : null;
   };
 
+  /* ------------------------------------------------------------
+     A NOTA NO FORMATO QUE O SISTEMA ESPERA · 09/11, 11h
+
+     ISTO AQUI QUASE APAGOU UMA NOTA.
+
+     O lápis mandava para a janela de edição o registro que veio
+     do nf.listar — que NÃO traz os itens dentro. A janela abriu
+     com "A nota ficou sem nenhum item" e "Soma dos itens R$ 0,00".
+     Um clique em salvar teria gravado a 10410 com zero itens.
+
+     O erro foi meu e foi de desatenção: no módulo eu carrego os
+     itens numa chamada separada (nf.itens) e guardo em A.itens.
+     Na hora de abrir a janela, mandei só a casca.
+
+     Agora a nota é montada do jeito do sistema — pelo NF_AGRUPAR,
+     que é o que a tela antiga usa — e, se mesmo assim ela chegar
+     sem item enquanto o módulo TEM itens na mão, a janela NÃO
+     ABRE. Melhor o Ismael reclamar que não abriu do que descobrir
+     na semana que vem que a nota ficou vazia.
+     ------------------------------------------------------------ */
+  A.notaInteira = function (nota, itensCarregados, listaDoCore) {
+    if (!nota) return { ok: false, motivo: 'Sem nota.' };
+
+    var temLista = Object.prototype.toString.call(listaDoCore) === '[object Array]';
+    var itens = Object.prototype.toString.call(itensCarregados) === '[object Array]'
+      ? itensCarregados : null;
+
+    /* 1 · o caminho do sistema: agrupar a lista e achar esta nota */
+    if (temLista && A.tem('NF_AGRUPAR') && A.tem('NF_MESMA_NOTA')) {
+      var g = A.usar('NF_AGRUPAR', listaDoCore);
+      if (g.ok && Object.prototype.toString.call(g.valor) === '[object Array]') {
+        for (var i = 0; i < g.valor.length; i++) {
+          var cand = g.valor[i];
+          var igual = A.usar('NF_MESMA_NOTA', cand, nota);
+          if (igual.ok && igual.valor) {
+            var quantos = (cand.listaItens || []).length;
+            if (quantos > 0) return { ok: true, nota: cand, de: 'NF_AGRUPAR' };
+            /* agrupou mas veio vazia: só vale se o módulo também
+               não tiver item, senão é a casca de novo */
+            if (!itens || !itens.length) {
+              return { ok: true, nota: cand, de: 'NF_AGRUPAR (nota sem itens mesmo)' };
+            }
+          }
+        }
+      }
+    }
+
+    /* 2 · sem o agrupador: anexa os itens que o módulo carregou */
+    if (itens && itens.length) {
+      var copia = {};
+      for (var k in nota) if (Object.prototype.hasOwnProperty.call(nota, k)) copia[k] = nota[k];
+      copia.listaItens = itens;
+      return { ok: true, nota: copia, de: 'itens de nf.itens' };
+    }
+
+    /* 3 · o módulo tem itens na tela mas não conseguiu montar a
+           nota com eles: NÃO ABRE. */
+    if (itens === null) {
+      return { ok: false, motivo: 'Os itens desta nota ainda não terminaram de ' +
+        'carregar. Espere um instante e clique de novo — abrir a edição agora ' +
+        'mostraria a nota sem itens, e salvar assim apagaria os que existem.' };
+    }
+
+    /* 4 · a nota realmente não tem item */
+    return { ok: true, nota: nota, de: 'nota sem itens' };
+  };
+
   /** entradas de estoque sem nota lançada */
   A.entradasSemNota = function (notas) {
     var r = A.usar('NF_DAS_ENTRADAS', notas);
@@ -1436,7 +1503,7 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
      servindo a página velha. Sem um número visível, nenhum dos
      dois consegue saber. Agora sabe, em um segundo, olhando o
      rodapé. */
-  var CARIMBO = 'módulo NF 8 · 09/11 11:00';
+  var CARIMBO = 'módulo NF 9 · 09/11 11:20';
 
   var A = {
     nome: 'NFAPP', versao: CARIMBO,
@@ -2000,7 +2067,24 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
      ------------------------------------------------------------ */
   A.editar = function (nota) {
     if (!nota) return;
-    var r = raiz.NFAUTO.abrirJanela('modalEditarNota', nota, function () {
+
+    /* A NOTA VAI INTEIRA, COM OS ITENS. Mandar a casca abriu a
+       janela com "a nota ficou sem nenhum item" e um clique em
+       salvar teria zerado a 10410. Agora, se não der para montar
+       a nota com os itens, a janela não abre. */
+    var m = raiz.NFAUTO.notaInteira(nota, A.itens, A.notas);
+    if (!m.ok) { A.recadoDeJanela(m.motivo, 'editar esta nota com segurança'); return m; }
+
+    var quantosAqui = (A.itens || []).length;
+    var quantosLa = ((m.nota && m.nota.listaItens) || []).length;
+    if (quantosAqui > 0 && quantosLa === 0) {
+      A.recadoDeJanela('Esta tela mostra ' + quantosAqui + ' item(ns), mas a nota ' +
+        'montada para a edição veio sem nenhum. Não vou abrir: salvar assim ' +
+        'apagaria os itens que existem.', 'editar esta nota com segurança');
+      return { ok: false, motivo: 'itens sumiriam' };
+    }
+
+    var r = raiz.NFAUTO.abrirJanela('modalEditarNota', m.nota, function () {
       /* terminou a edição lá: relê aqui, para a lista não mentir */
       A.carregar();
     });
