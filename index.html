@@ -27629,12 +27629,30 @@ lerXml(w, arq, alvo);
 }, 200);
 }
 function lerXml(w, arq, alvo) {
+/* [XMLEXATO 08/11] Antes era só decodeURIComponent(escape(atob)),
+   que só sabe UTF-8. XML em ISO-8859-1 estourava aqui, o texto
+   ficava vazio e a tela acusava o arquivo de "não ser uma NF-e
+   válida". A nota era válida; quem não sabia ler era o sistema.
+   Agora tenta UTF-8, cai para Latin-1, e só desiste depois. */
 var texto = "";
-try {
-var base64 = String(arq.dataURL).split(",")[1] || "";
-texto = decodeURIComponent(escape(atob(base64)));
-} catch (e) {
-texto = "";
+var _leitura = (window.XMLEXATO && XMLEXATO.decodificar)
+  ? XMLEXATO.decodificar(arq.dataURL) : null;
+if (_leitura) { texto = _leitura.texto || ""; }
+else {
+  try {
+    var base64 = String(arq.dataURL).split(",")[1] || "";
+    texto = decodeURIComponent(escape(atob(base64)));
+  } catch (e) { texto = ""; }
+}
+/* [XMLEXATO 08/11] qtd × unitário − desconto bate com o vProd
+   que a nota declarou? A folga é a mesma do leitor de pedido
+   (2 centavos + 0,01%), porque qCom tem 4 casas e vUnCom tem
+   10, e o arredondamento legítimo cabe aí dentro. */
+function xmlNaoFecha(i) {
+  if (!i || i.vProd === null || i.vProd === undefined) return false;
+  var esperado = (Number(i.qtd) || 0) * (Number(i.preco) || 0) - (Number(i.vDesc) || 0);
+  var vt = Number(i.vProd) || 0;
+  return Math.abs(esperado - vt) > 0.02 + Math.abs(vt) * 0.0001;
 }
 function tag(nome) {
 var m2 = texto.match(new RegExp("<" + nome + "[^>]*>([^<]*)</" + nome + ">"));
@@ -27663,7 +27681,14 @@ unidade: (t2("uCom") || t2("uTrib") || "un").trim(),
 ncm: t2("NCM") || "",
 codigoBarras: t2("cEAN") && t2("cEAN") !== "SEM GTIN" ? t2("cEAN") : "",
 qtd: Number(t2("qCom") || 0),
-preco: Number(t2("vUnCom") || 0)
+preco: Number(t2("vUnCom") || 0),
+/* [XMLEXATO 08/11] o total do item e o desconto, como a NOTA
+   declarou. Antes só vinham qtd e preço, e o total era
+   recalculado mais abaixo — perdendo o desconto e divergindo
+   em centavos, porque qCom tem 4 casas e vUnCom tem 10. */
+vProd: t2("vProd") === null ? null : Number(t2("vProd")),
+vDesc: t2("vDesc") === null ? 0 : Number(t2("vDesc")),
+cfop: t2("CFOP") || ""
 });
 });
 if (!numero && !itens.length) {
@@ -27690,12 +27715,29 @@ ncm: i.ncm || "",
 codigoBarras: i.codigoBarras || "",
 qtd: Number(i.qtd) || 0,
 valorUnitario: Number(i.preco) || 0,
-valorTotal: Math.round((Number(i.qtd) || 0) * (Number(i.preco) || 0) * 100) / 100,
+/* [XMLEXATO 08/11] vale o que está na nota. A multiplicação
+   só entra quando o XML não trouxer o vProd. */
+valorTotal: (i.vProd !== null && i.vProd !== undefined) ? i.vProd
+  : Math.round((Number(i.qtd) || 0) * (Number(i.preco) || 0) * 100) / 100,
+totalVeioDaNota: (i.vProd !== null && i.vProd !== undefined),
+desconto: Number(i.vDesc) || 0,
+cfop: i.cfop || "",
 sku: null,
 vinculo: "NOVO",
 score: 0,
 confianca: 1,
-somaConfere: true
+/* [XMLEXATO 08/11] isto era "true" escrito na mão, em todo
+   item, sem nenhuma comparação acontecer. A regra é não
+   ajustar valor fiscal para a soma fechar — e jurar que
+   fechou sem olhar é pior, porque ninguém vai conferir.
+
+   A conferência agora é de verdade, e usa o MESMO mecanismo
+   que o leitor de pedido já tinha: contaNaoFecha, que pinta a
+   linha e entra no filtro "precisa de atenção". Nenhum aviso
+   novo foi inventado — o que faltava era o XML usar o que já
+   existia. Nada é ajustado: a diferença é mostrada. */
+contaNaoFecha: xmlNaoFecha(i),
+somaConfere: !xmlNaoFecha(i)
 };
 }),
 catalogo: []
@@ -65157,7 +65199,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 411 · 08/11";
+var ALMOXA_VERSAO = "sistema 413 · 08/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -109460,5 +109502,517 @@ emissao: hoje,
 
 </script>
 
+
+<script>
+/* ============================================================
+   [XMLEXATO] — o XML da NF-e lido pelo que ele diz, 08/11/2026
+   ------------------------------------------------------------
+   O leitor de XML do ALMOX PRO funciona. Eu disse hoje que ele
+   não lia XML e estava errado: ele lê, por expressão regular,
+   dentro do modalOCR. Procurei DOMParser, não achei, e concluí
+   demais. Fica registrado.
+
+   Lendo o código de verdade, apareceram três defeitos. Os três
+   são de VALOR FISCAL, que é onde errar custa dinheiro.
+
+   ------------------------------------------------------------
+   1. O TOTAL DO ITEM ERA RECALCULADO, NÃO LIDO
+
+      valorTotal: Math.round(qtd * preco * 100) / 100
+
+      O XML traz <vProd>, que é o total do item como o emitente
+      declarou e a SEFAZ autorizou. Recalcular qtd × preço parece
+      igual, e não é:
+
+        · qCom tem até 4 casas, vUnCom até 10. O produto das duas
+          arredonda diferente do que está na nota.
+        · o desconto do item (<vDesc>) não entrava na conta, e
+          nem era lido.
+
+      Agora vale o que está escrito na nota. A multiplicação só
+      entra quando o XML não trouxer o vProd.
+
+   ------------------------------------------------------------
+   2. ELE AFIRMAVA QUE A SOMA FECHAVA, SEM CONFERIR
+
+      somaConfere: true          ← escrito na mão, em todo item
+
+      Nenhuma comparação acontecia. A regra dele é "não alterar
+      automaticamente um valor fiscal apenas para fazer a soma
+      fechar" — e declarar que fechou sem olhar é pior do que
+      ajustar, porque ninguém vai conferir o que o sistema jurou
+      estar certo.
+
+      Agora a soma é CONFERIDA e o resultado é dito. Nada é
+      ajustado: quando não fecha, aparece a diferença em reais
+      e o motivo fica para a pessoa decidir.
+
+   ------------------------------------------------------------
+   3. XML EM ISO-8859-1 ERA ACUSADO DE NÃO SER NOTA FISCAL
+
+      decodeURIComponent(escape(atob(base64)))
+
+      Isso só funciona em UTF-8. Num XML Latin-1 — que vários
+      emissores ainda mandam — a linha estoura, o texto fica
+      vazio, e a tela diz "não parece ser uma NF-e válida".
+
+      A nota era válida. Quem não sabia ler era o sistema, e a
+      mensagem culpava o arquivo. Agora tenta UTF-8, cai para
+      Latin-1 e só desiste depois disso.
+
+   ------------------------------------------------------------
+   NADA DE NOVO FOI INVENTADO. Não há tela nova, não há endpoint
+   novo, não há banco novo. As funções daqui são puras — entra
+   texto, sai dado — justamente para terem prova rodando sem
+   navegador.
+   ============================================================ */
+(function (raiz) {
+  'use strict';
+
+  var X = { nome: 'XMLEXATO', versao: '08/11', ligado: false };
+
+  /* ------------------------------------------------------------
+     DECODIFICAR · UTF-8 primeiro, Latin-1 depois
+     ------------------------------------------------------------ */
+  X.decodificar = function (dataURL) {
+    var b64 = String(dataURL || '');
+    var corte = b64.indexOf(',');
+    if (corte > -1) b64 = b64.slice(corte + 1);
+    if (!b64) return { ok: false, texto: '', como: 'vazio' };
+
+    var cru;
+    try { cru = atob(b64); }
+    catch (e) { return { ok: false, texto: '', como: 'base64 inválido' }; }
+
+    /* 1 · UTF-8, que é o que a NF-e manda por norma */
+    try {
+      var utf8 = decodeURIComponent(escape(cru));
+      if (utf8) return { ok: true, texto: utf8, como: 'UTF-8' };
+    } catch (e) { /* não era UTF-8; segue */ }
+
+    /* 2 · Latin-1. O atob já entrega byte a byte, então o texto
+           cru JÁ é a leitura ISO-8859-1 — só precisa ser aceito
+           em vez de descartado. */
+    if (cru) {
+      var temAcentoQuebrado = /[\u0080-ÿ]/.test(cru);
+      return { ok: true, texto: cru,
+               como: temAcentoQuebrado ? 'ISO-8859-1' : 'ASCII' };
+    }
+    return { ok: false, texto: '', como: 'vazio' };
+  };
+
+  /* ------------------------------------------------------------
+     NÚMERO FISCAL · ponto decimal, sem chute
+     ------------------------------------------------------------ */
+  X.numero = function (v) {
+    if (v === null || v === undefined) return null;
+    var s = String(v).trim();
+    if (!s) return null;
+    var n = Number(s);
+    return isFinite(n) ? n : null;
+  };
+
+  function centavos(n) { return Math.round((Number(n) || 0) * 100); }
+
+  /* ------------------------------------------------------------
+     OS ITENS · cada <det> vira uma linha, e nenhuma some
+     ------------------------------------------------------------ */
+  X.itensDe = function (texto) {
+    var t = String(texto || '');
+    /* <detPag> também começa com "<det", mas fecha em </detPag>,
+       então não é apanhado por este fecho exato. */
+    var blocos = t.match(/<det[\s>][\s\S]*?<\/det>/g) || [];
+    var itens = [], recusados = [];
+
+    for (var i = 0; i < blocos.length; i++) {
+      var b = blocos[i];
+      var campo = function (n) {
+        var m = b.match(new RegExp('<' + n + '[^>]*>([^<]*)</' + n + '>'));
+        return m ? m[1] : null;
+      };
+
+      var qtd   = X.numero(campo('qCom'));
+      var unit  = X.numero(campo('vUnCom'));
+      var vProd = X.numero(campo('vProd'));     /* o total DA NOTA */
+      var vDesc = X.numero(campo('vDesc'));
+      var nome  = campo('xProd');
+
+      /* linha sem nada que a identifique não é item — mas também
+         NÃO some calada: entra na lista de recusadas, com o
+         motivo, para aparecer na tela. */
+      if (!nome && vProd === null && qtd === null) {
+        recusados.push({ posicao: i + 1, motivo: 'bloco <det> sem xProd, vProd nem qCom' });
+        continue;
+      }
+
+      var ean = campo('cEAN');
+      itens.push({
+        codigo: campo('cProd') || '',
+        nome: nome || '',
+        unidade: String(campo('uCom') || campo('uTrib') || 'un').trim(),
+        ncm: campo('NCM') || '',
+        cfop: campo('CFOP') || '',
+        codigoBarras: (ean && ean !== 'SEM GTIN') ? ean : '',
+        qtd: qtd === null ? 0 : qtd,
+        preco: unit === null ? 0 : unit,
+        desconto: vDesc === null ? 0 : vDesc,
+        /* o valor que VALE: o da nota. A multiplicação é o
+           último recurso, e fica marcada como tal. */
+        valorTotal: vProd !== null ? vProd
+                    : Math.round((qtd || 0) * (unit || 0) * 100) / 100,
+        totalVeioDaNota: vProd !== null
+      });
+    }
+
+    return { itens: itens, blocos: blocos.length, recusados: recusados };
+  };
+
+  /* ------------------------------------------------------------
+     CONFERIR A SOMA · dizer, nunca ajustar
+     ------------------------------------------------------------ */
+  X.conferirSoma = function (itens, vNF, vDescTotal) {
+    var soma = 0;
+    for (var i = 0; i < (itens || []).length; i++) soma += centavos(itens[i].valorTotal);
+
+    var total = centavos(vNF);
+    var desc = centavos(vDescTotal);
+
+    if (!total) {
+      return { confere: null, motivo: 'a nota não trouxe o valor total (vNF)',
+               somaItens: soma / 100, total: 0, diferenca: 0 };
+    }
+
+    /* o total da nota é a soma dos produtos menos o desconto, mais
+       frete/seguro/outros/IPI quando houver. Por isso a diferença é
+       APRESENTADA, não julgada: só a igualdade exata é afirmada. */
+    var dif = soma - desc - total;
+    return {
+      confere: dif === 0,
+      somaItens: soma / 100,
+      descontos: desc / 100,
+      total: total / 100,
+      diferenca: dif / 100,
+      motivo: dif === 0 ? 'a soma dos itens fecha com o total da nota'
+        : 'a soma dos itens dá ' + (soma / 100).toFixed(2) +
+          (desc ? ' menos ' + (desc / 100).toFixed(2) + ' de desconto' : '') +
+          ' e a nota diz ' + (total / 100).toFixed(2) +
+          '. A diferença pode ser frete, seguro, IPI ou ST — confira na DANFE. ' +
+          'Nenhum valor foi alterado.'
+    };
+  };
+
+  /* ------------------------------------------------------------
+     A LEITURA INTEIRA
+     ------------------------------------------------------------ */
+  X.lerTexto = function (texto) {
+    var t = String(texto || '');
+    function tag(n) {
+      var m = t.match(new RegExp('<' + n + '[^>]*>([^<]*)</' + n + '>'));
+      return m ? m[1] : null;
+    }
+
+    var r = X.itensDe(t);
+
+    /* OS TOTAIS SÃO LIDOS DE DENTRO DO <ICMSTot>, e só de lá.
+       <vDesc> e <vProd> existem nos dois lugares: no item e no
+       total. Na primeira versão eu peguei "o primeiro do
+       arquivo" e peguei o do item — a prova apanhou. Posição no
+       arquivo não é critério; o bloco é. */
+    var totBloco = (t.match(/<ICMSTot[\s>][\s\S]*?<\/ICMSTot>/) || [])[0] || '';
+    function doTotal(n) {
+      if (!totBloco) return null;
+      var m = totBloco.match(new RegExp('<' + n + '[^>]*>([^<]*)</' + n + '>'));
+      return m ? m[1] : null;
+    }
+
+    /* sem <ICMSTot> (NFC-e antiga, XML recortado), o vNF solto
+       ainda serve — mas o desconto, não: desconto de item somado
+       como se fosse o da nota erra para baixo. */
+    var vNF = doTotal('vNF') || tag('vNF');
+    var vDescTotal = doTotal('vDesc');
+
+    var soma = X.conferirSoma(r.itens, vNF, vDescTotal);
+
+    return {
+      ok: !!(tag('nNF') || r.itens.length),
+      chave: (t.match(/Id="NFe(\d{44})"/) || [])[1] || '',
+      numero: tag('nNF') || '',
+      serie: tag('serie') || '',
+      emissao: tag('dhEmi') || tag('dEmi') || '',
+      valor: vNF || '',
+      itens: r.itens,
+      blocosEncontrados: r.blocos,
+      recusados: r.recusados,
+      soma: soma
+    };
+  };
+
+  /* ------------------------------------------------------------
+     LIGAR · marca presença. As trocas no lerXml são no lugar,
+     porque ele é função interna do modalOCR e não há como
+     envolvê-la de fora. A regra dele manda alterar só o bloco
+     responsável, e foi o que se fez.
+     ------------------------------------------------------------ */
+  X.ligar = function () { X.ligado = true; return true; };
+  X.ligar();
+
+  raiz.XMLEXATO = X;
+  if (typeof module !== 'undefined' && module.exports) module.exports = X;
+
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+
+<script>
+/* ============================================================
+   [NFCENTRAL] — o módulo NOTAS_FISCAIS ligado ao menu, 08/11/2026
+   ------------------------------------------------------------
+   Põe a Central de Notas Fiscais dentro do ALMOX PRO, como uma
+   aba a mais da área de Notas Fiscais.
+
+   A SEÇÃO 15 MANDA NÃO APAGAR O ANTIGO, e aqui ela é seguida à
+   risca: as nove telas de nota que já existem continuam todas
+   no lugar, com as mesmas rotas e os mesmos menus. O módulo
+   novo entra AO LADO, numa aba nova, para o senhor comparar os
+   dois com dados de verdade antes de decidir qualquer coisa.
+
+   Nada é removido. Nada é redirecionado. Quando o senhor
+   aprovar, aí sim o menu principal aponta para cá — e isso é
+   uma linha de código, não uma migração.
+
+   A sessão vem pela mesma porta provada hoje no mapa 3D: o
+   módulo roda num quadro dentro do sistema e usa o API.call
+   dele. Sem segunda autenticação, sem token copiado.
+   ============================================================ */
+(function () {
+  "use strict";
+
+  var N = {
+    nome: "NFCENTRAL",
+    versao: "08/11",
+    ligado: false,
+    telaAntiga: null,
+
+    /* um arquivo só, na raiz do Projeto, com nome que não
+       disputa com nada. A lição do mapa 3D de hoje: seis
+       arquivos com nome exato é um arranjo que uma renomeação
+       derruba — e derrubou. */
+    arquivo: "NOTAS_FISCAIS.html"
+  };
+
+  function lp(v) { return String(v === null || v === undefined ? "" : v).trim(); }
+  function esc(v) {
+    return lp(v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  /* ------------------------------------------------------------
+     ONDE O MÓDULO ESTÁ PUBLICADO
+     ------------------------------------------------------------ */
+  N.urlDoModulo = function () {
+    var guardado = "";
+    try { guardado = lp(localStorage.getItem("almoxa:nf:url")); } catch (e) {}
+    if (guardado) return guardado;
+
+    try {
+      var aqui = lp(location.href).split("?")[0].split("#")[0];
+      /* servido junto com o sistema: caminho relativo, que
+         funciona no GitHub Pages e em qualquer pasta */
+      if (/github\.io/i.test(location.hostname)) {
+        var pasta = aqui.replace(/[^/]*$/, "");
+        return pasta + N.arquivo;
+      }
+    } catch (e) {}
+    return "https://biriguialmoxarifado-eng.github.io/Projeto/" + N.arquivo;
+  };
+
+  /** troca o endereço sem mexer no código, se um dia mudar de lugar */
+  N.ondeFica = function (url) {
+    var u = lp(url);
+    if (!u) { try { localStorage.removeItem("almoxa:nf:url"); } catch (e) {} return N.urlDoModulo(); }
+    if (!/\.html?(\?|#|$)/i.test(u)) u = u.replace(/\/?$/, "/") + N.arquivo;
+    try { localStorage.setItem("almoxa:nf:url", u); } catch (e) {}
+    return u;
+  };
+
+  /* ------------------------------------------------------------
+     A TELA · um quadro, e a verdade escrita embaixo
+     ------------------------------------------------------------ */
+  N.render = function () {
+    var url = N.urlDoModulo();
+
+    return UI.cabecalho({
+      trilha: ["Notas Fiscais", "Central (novo módulo)"],
+      titulo: "Central de Notas Fiscais",
+      sub: "Módulo novo, em etapa 1: lê e confere. As telas antigas continuam " +
+           "no menu, intactas, para o senhor comparar antes de decidir.",
+      acoes:
+        '<button class="btn btn-ghost btn-sm" data-nfc-recarregar>Recarregar</button>' +
+        '<button class="btn btn-primary btn-sm" data-nfc-cheia>Abrir em tela cheia</button>'
+    }) +
+    '<div data-nfc-caixa style="position:relative;background:#F4F6F9;' +
+      'border:1px solid var(--borda);border-radius:10px;overflow:hidden;height:72vh;min-height:460px">' +
+
+      '<iframe data-nfc-quadro src="' + esc(url) + '" ' +
+        'style="width:100%;height:100%;border:0;display:block" ' +
+        'title="Central de Notas Fiscais"></iframe>' +
+
+      '<div data-nfc-socorro style="display:none;position:absolute;inset:0;' +
+        'background:#fff;padding:22px;display:none;place-items:center;text-align:center">' +
+        '<div style="max-width:440px">' +
+          '<b style="display:block;font-size:14px;margin-bottom:6px">' +
+            'O módulo não abriu aqui dentro</b>' +
+          '<p class="small" style="line-height:1.55;color:var(--texto-2)">' +
+            'Alguns navegadores não deixam uma página embutir a outra. ' +
+            'Nesse caso ele abre numa aba ao lado — e continua ligado a esta, ' +
+            'de onde tira a sua sessão.</p>' +
+          /* sem rel="noopener" de propósito: é por esse vínculo que o
+             módulo usa a porta do sistema em vez de ter sessão própria.
+             O destino é o nosso próprio endereço, não site de terceiro. */
+          '<a class="btn btn-primary btn-sm" data-nfc-aba href="' + esc(url) + '" ' +
+            'target="_blank">Abrir numa aba</a>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+
+    '<p class="small mt8" style="color:var(--texto-3);line-height:1.5">' +
+      'Endereço do módulo: <span class="mono">' + esc(url) + '</span><br>' +
+      'Etapa 1: a Central lê as notas pelo <span class="mono">nf.listar</span> e ' +
+      'confere a soma dos itens. <b>Não grava nada.</b> O lançamento entra na etapa 2, ' +
+      'com a sua autorização.' +
+    '</p>';
+  };
+
+  N.mount = function () {
+    var quadro = document.querySelector("[data-nfc-quadro]");
+    var socorro = document.querySelector("[data-nfc-socorro]");
+    var abriu = false;
+
+    if (quadro) {
+      quadro.addEventListener("load", function () { abriu = true; });
+      /* se em 6 segundos não carregou, o navegador barrou a página
+         embutida — e aí a saída é a aba, dita com todas as letras */
+      setTimeout(function () {
+        if (!abriu && socorro) socorro.style.display = "grid";
+      }, 6000);
+    }
+
+    var rec = document.querySelector("[data-nfc-recarregar]");
+    if (rec) rec.addEventListener("click", function () {
+      if (quadro) quadro.src = quadro.src;
+    });
+
+    /* tela cheia SEM abrir aba: em aba nova o módulo perde o
+       sistema do lado, e sem o sistema não há sessão. */
+    var cheia = document.querySelector("[data-nfc-cheia]");
+    if (cheia) cheia.addEventListener("click", function () {
+      var caixa = document.querySelector("[data-nfc-caixa]");
+      if (!caixa) return;
+      try {
+        var pedir = caixa.requestFullscreen || caixa.webkitRequestFullscreen;
+        if (pedir) { pedir.call(caixa); return; }
+      } catch (e) {}
+      N.cheiaNaMao(caixa);
+    });
+  };
+
+  N.cheiaNaMao = function (caixa) {
+    if (!caixa || caixa.__cheia) return;
+    caixa.__cheia = true;
+    caixa.__estilo = caixa.getAttribute("style") || "";
+    caixa.setAttribute("style",
+      "position:fixed;inset:0;z-index:9999;height:100vh;background:#F4F6F9");
+
+    var sair = document.createElement("button");
+    sair.className = "btn btn-ghost btn-sm";
+    sair.textContent = "Sair da tela cheia";
+    sair.setAttribute("style",
+      "position:absolute;top:12px;right:12px;z-index:10000;background:#fff");
+    caixa.appendChild(sair);
+
+    function voltar() {
+      caixa.setAttribute("style", caixa.__estilo);
+      caixa.__cheia = false;
+      try { caixa.removeChild(sair); } catch (e) {}
+      document.removeEventListener("keydown", aoEsc);
+    }
+    function aoEsc(ev) { if (ev.key === "Escape") voltar(); }
+    sair.addEventListener("click", voltar);
+    document.addEventListener("keydown", aoEsc);
+  };
+
+  /* ------------------------------------------------------------
+     LIGAR · acrescenta, nunca substitui
+     ------------------------------------------------------------ */
+  N.ligar = function () {
+    if (N.ligado) return false;
+    if (typeof window.SCREENS !== "object" || !window.SCREENS) return false;
+
+    /* 1 · a tela nova. Se já existir alguma com este nome, guarda
+           antes — nada é perdido sem poder voltar. */
+    N.telaAntiga = SCREENS["nf-central"] || null;
+    SCREENS["nf-central"] = {
+      titulo: "Central de Notas Fiscais",
+      modulo: "nf",                       /* a MESMA permissão das outras */
+      render: function () { return N.render(); },
+      mount: function () { return N.mount(); }
+    };
+
+    /* 2 · a aba no submenu de Notas Fiscais, no fim da fila.
+           As cinco que já existem ficam exatamente onde estavam. */
+    try {
+      if (window.SUBNAVS && SUBNAVS.nf && SUBNAVS.nf.push) {
+        var jaTem = SUBNAVS.nf.some(function (x) { return x && x.rota === "#/nf-central"; });
+        if (!jaTem) SUBNAVS.nf.push({ rotulo: "Central (novo)", rota: "#/nf-central" });
+      }
+    } catch (e) {}
+
+    /* 3 · a rota pertence à família "nf", igual às outras */
+    try {
+      if (window.FAMILIA_ROTA) FAMILIA_ROTA["nf-central"] = "nf";
+    } catch (e) {}
+
+    N.ligado = true;
+    return true;
+  };
+
+  N.restaurar = function () {
+    if (!N.ligado) return false;
+    if (N.telaAntiga) SCREENS["nf-central"] = N.telaAntiga;
+    else { try { delete SCREENS["nf-central"]; } catch (e) { SCREENS["nf-central"] = undefined; } }
+    try {
+      if (window.SUBNAVS && SUBNAVS.nf) {
+        window.SUBNAVS.nf = SUBNAVS.nf.filter(function (x) {
+          return !(x && x.rota === "#/nf-central");
+        });
+      }
+    } catch (e) {}
+    N.ligado = false;
+    return true;
+  };
+
+  N.diagnostico = function () {
+    return {
+      ligado: N.ligado,
+      url: N.urlDoModulo(),
+      telaExiste: !!(window.SCREENS && SCREENS["nf-central"]),
+      noMenu: !!(window.SUBNAVS && SUBNAVS.nf &&
+        SUBNAVS.nf.some(function (x) { return x && x.rota === "#/nf-central"; })),
+      telasAntigasIntactas: ["nf", "nf-nova", "nf-importar", "nf-leitor", "nf-conferencia",
+        "nf-divergencias", "nf-historico", "nf-confronte"]
+        .filter(function (t) { return !!(window.SCREENS && SCREENS[t]); }).length
+    };
+  };
+
+  window.NFCENTRAL = N;
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () { N.ligar(); });
+  } else {
+    N.ligar();
+  }
+})();
+
+</script>
 </body>
 </html>
