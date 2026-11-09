@@ -348,7 +348,38 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
     modalPatrimonioDaNota: 'patrimônio a partir da nota',
     modalNotaLancada:    'o recibo do lançamento',
     modalItemAvulsoNF:   'item fora da nota',
-    modalLimparNotas:    'recomeçar do zero'
+    modalLimparNotas:    'recomeçar do zero',
+    modalOCR:            'lê PDF ou foto da nota e preenche os campos',
+    modalXML:            'lê o XML e preenche os campos'
+  };
+
+  /* ------------------------------------------------------------
+     IR PARA UMA TELA DO SISTEMA
+
+     O lançamento manual mora na aba "Importar" do ALMOX PRO, com
+     formulário e tudo. Em vez de eu desenhar outro formulário
+     aqui — que seria um segundo jeito de lançar a mesma nota —
+     o módulo leva o Ismael até lá.
+     ------------------------------------------------------------ */
+  A.ROTAS = {
+    'nf-importar':   'lançar manual, por XML ou por OCR',
+    'nf-conferencia':'conferência item a item',
+    'nf-divergencias':'as divergências',
+    'nf-historico':  'o histórico',
+    'nf-confronte':  'o confronte com o pedido'
+  };
+
+  A.irPara = function (rota) {
+    if (!A.ROTAS[rota]) {
+      return { ok: false, motivo: 'Rota "' + rota + '" fora do catálogo.' };
+    }
+    var s = A.sistema();
+    if (!s) {
+      return { ok: false, motivo: 'Sem o ALMOX PRO do lado. Abra o módulo pelo ' +
+        'menu Notas Fiscais, de dentro do sistema.' };
+    }
+    try { s.location.hash = '#/' + rota; return { ok: true }; }
+    catch (e) { return { ok: false, motivo: (e && e.message) || String(e) }; }
   };
 
   /* ------------------------------------------------------------
@@ -1405,7 +1436,7 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
      servindo a página velha. Sem um número visível, nenhum dos
      dois consegue saber. Agora sabe, em um segundo, olhando o
      rodapé. */
-  var CARIMBO = 'módulo NF 6 · 09/11 10:10';
+  var CARIMBO = 'módulo NF 8 · 09/11 11:00';
 
   var A = {
     nome: 'NFAPP', versao: CARIMBO,
@@ -1486,6 +1517,10 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
       '<button class="btn primario" id="nfConsultar">🔍 Consultar NF-e</button>' +
       '<button class="btn coluna" id="nfImportar">' +
         '<span class="i">⤒</span>Importar XML</button>' +
+      '<button class="btn coluna" id="nfOcr" ' +
+        'title="Abre o leitor do ALMOX PRO: ele lê o PDF ou a foto da nota ' +
+        'e preenche os campos sozinho">' +
+        '<span class="i">⎙</span>Ler por OCR</button>' +
       '<button class="btn coluna" id="nfAnexar" ' +
         'title="Abre a DANFE em PDF ao lado dos itens, para conferir. ' +
         'Guardar o arquivo no Drive é outra coisa, e essa depende do Core.">' +
@@ -1537,8 +1572,9 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
         '<span>–</span>' +
         '<input id="nfAte" type="date" value="' + esc(A.filtro.ate) + '"></div>' +
       '<button class="btn" id="nfLimpar">⌫ Limpar</button>' +
-      '<button class="btn primario" id="nfNova" disabled ' +
-        'title="Criar nota grava, e nenhuma ação de gravação foi encontrada no Core">' +
+      '<button class="btn primario" id="nfNova" ' +
+        'title="Leva para a aba Importar do ALMOX PRO, onde fica o formulário de ' +
+        'lançamento manual, o XML e o OCR">' +
         '+ Nova Nota</button>' +
     '</div>';
   };
@@ -1779,6 +1815,16 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
     if (imp) imp.addEventListener('click', function () {
       var c = $('nfArquivo'); if (c) c.click();
     });
+    var ocr = $('nfOcr');
+    if (ocr) ocr.addEventListener('click', function () {
+      var r = raiz.NFAUTO.abrirJanela('modalOCR');
+      if (!r.ok) A.recadoDeJanela(r.motivo, 'ler a nota por OCR');
+    });
+    var nova = $('nfNova');
+    if (nova) nova.addEventListener('click', function () {
+      var r = raiz.NFAUTO.irPara('nf-importar');
+      if (!r.ok) A.recadoDeJanela(r.motivo, 'lançar uma nota nova');
+    });
     var pdf = $('nfAnexar');
     if (pdf) pdf.addEventListener('click', function () {
       var c = $('nfPdfArquivo'); if (c) c.click();
@@ -1846,14 +1892,79 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
           (k.modelo === '55' ? '55 (NF-e)' : esc(k.modelo)) + '</b></div>' +
         '<div class="linha"><span>Emissão</span><b>' + esc(k.anoMes) + '</b></div>' +
       '</div>' +
-      '<div style="margin-top:9px">Com esses dados o senhor já pode procurar a nota ' +
-      'na lista abaixo, ou pedir o XML ao fornecedor e usar o <b>Importar XML</b>.</div>' +
+      '<div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:11px">' +
+        '<button class="btn peq primario" id="nfIrSite">🔎 Procurar no consultadanfe</button>' +
+        '<button class="btn peq" id="nfCopiarChave">⎘ Copiar a chave</button>' +
+        '<span class="peq" id="nfSiteRecado"></span>' +
+      '</div>' +
+      '<div style="margin-top:9px">O botão abre o site <b>numa aba nova</b> e deixa a ' +
+      'chave copiada — é só colar lá. Baixando o PDF ou o XML, volte aqui e use ' +
+      '<b>Ler por OCR</b> ou <b>Importar XML</b>.</div>' +
     '</div>';
+
+    var irSite = $('nfIrSite');
+    if (irSite) irSite.addEventListener('click', function () { A.irAoSite(r.chave); });
+    var copiar = $('nfCopiarChave');
+    if (copiar) copiar.addEventListener('click', function () { A.copiarChave(r.chave); });
 
     /* usar o que a chave diz para achar a nota na lista: isso é
        trabalho de verdade, feito com o que já está na mão */
     var proc = $('nfProcura');
     if (proc) { A.filtro.procura = k.numero; A.pagina = 1; }
+  };
+
+  /* ------------------------------------------------------------
+     O SITE DE CONSULTA · 09/11
+
+     Ele usa o consultadanfe.com. Eu NÃO sei como aquele site
+     recebe a chave pelo endereço, e chutar um formato que não
+     funciona seria pior do que não ter botão: ele clicaria,
+     cairia numa página errada e perderia a viagem.
+
+     Então o botão faz o que é certo sem adivinhar: abre o site
+     numa aba nova e deixa a chave na área de transferência.
+     Ele cola e pronto. O pior pedaço — digitar 44 dígitos sem
+     errar — fica resolvido de qualquer jeito.
+     ------------------------------------------------------------ */
+  A.SITE = 'https://consultadanfe.com/';
+
+  A.copiarChave = function (chave) {
+    var txt = String(chave || '').replace(/\D/g, '');
+    var recado = $('nfSiteRecado');
+    function avisar(bom, oQue) {
+      if (!recado) return;
+      recado.innerHTML = bom
+        ? '<b style="color:var(--bom)">✓ chave copiada</b>'
+        : '<b class="faltando">' + esc(oQue) + '</b>';
+    }
+    if (!txt) { avisar(false, 'sem chave para copiar'); return false; }
+
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt)
+          .then(function () { avisar(true); })
+          .catch(function () { avisar(false, 'o navegador não deixou copiar — ' +
+            'selecione a chave no campo acima'); });
+        return true;
+      }
+    } catch (e) {}
+    /* navegador antigo: seleciona o campo, que dá no mesmo */
+    try {
+      var c = $('nfChave');
+      if (c) { c.focus(); c.select(); avisar(true); return true; }
+    } catch (e) {}
+    avisar(false, 'não consegui copiar');
+    return false;
+  };
+
+  A.irAoSite = function (chave) {
+    A.copiarChave(chave);
+    try { window.open(A.SITE, '_blank', 'noopener'); }
+    catch (e) {
+      var recado = $('nfSiteRecado');
+      if (recado) recado.innerHTML = '<b class="faltando">o navegador bloqueou a ' +
+        'aba nova — libere o bloqueio de pop-up</b>';
+    }
   };
 
   /* ------------------------------------------------------------
@@ -1961,19 +2072,37 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
       '<div class="painel-corpo">' + A.htmlAbaPainel(n) + '</div>' +
       '<div class="rodape-painel">' +
         '<button class="btn" id="nfCancelarPainel">Fechar</button>' +
-        '<button class="btn" disabled title="Gravação é a etapa 2">💾 Salvar alterações</button>' +
-        '<button class="btn primario" disabled title="Gravação é a etapa 2">' +
-          '✓ Confirmar entrada</button>' +
+        '<button class="btn" data-item-edit title="Abre a janela de edição do ' +
+          'ALMOX PRO, que grava e confere depois">💾 Editar e salvar</button>' +
+        '<button class="btn primario" data-conferir ' +
+          'title="Abre a conferência item a item do ALMOX PRO">' +
+          '✓ Conferir e confirmar</button>' +
       '</div>' +
       '<div class="painel-corpo peq mudo" style="padding-top:0;line-height:1.5">' +
-        'Salvar e confirmar gravam no Core. A auditoria de hoje encontrou apenas ' +
-        'ações de leitura no módulo <span class="mono">nf</span> — ' +
-        'nenhuma de escrita. Pela seção 8, a lacuna é apresentada em vez de simulada: ' +
-        'os botões ligam quando as operações existirem no Core e o senhor autorizar.' +
+        'Editar, excluir item e confirmar entrada acontecem nas janelas do ' +
+        '<b>próprio ALMOX PRO</b> — as mesmas da tela antiga. Elas exigem crachá, ' +
+        'gravam pelo caminho de alteração e conferem depois se a nota não duplicou. ' +
+        'Não reescrevi nenhuma delas aqui.' +
       '</div>';
 
     var f = $('nfFechar'); if (f) f.addEventListener('click', A.fechar);
     var c = $('nfCancelarPainel'); if (c) c.addEventListener('click', A.fechar);
+
+    /* todo botão de mexer em item leva à MESMA janela: a do sistema.
+       É lá que se muda quantidade, se exclui linha e se acrescenta —
+       e é lá que a gravação é conferida depois. */
+    Array.prototype.forEach.call(
+      cx.querySelectorAll('[data-item-edit],[data-item-add]'), function (b) {
+      b.addEventListener('click', function () { A.editar(A.selecionada); });
+    });
+    var conf = cx.querySelector('[data-conferir]');
+    if (conf) conf.addEventListener('click', function () {
+      var n = A.selecionada;
+      var id = raiz.NFAUTO.valor('NF_IDENTIDADE', null, n);
+      var r = raiz.NFAUTO.abrirJanela('modalConferenciaNF', id || (n && n.numero));
+      if (!r.ok) A.recadoDeJanela(r.motivo, 'conferir esta nota');
+    });
+
     Array.prototype.forEach.call(cx.querySelectorAll('[data-pab]'), function (b) {
       b.addEventListener('click', function () {
         A.abaPainel = b.getAttribute('data-pab'); A.pintarPainel();
@@ -2046,12 +2175,13 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
     });
 
     var h = '<div style="display:flex;gap:8px;margin-bottom:11px">' +
-      '<button class="btn primario peq" disabled style="flex:1" ' +
-        'title="Adicionar item grava, e nenhuma ação de gravação foi encontrada no Core">' +
+      '<button class="btn primario peq" data-item-add style="flex:1" ' +
+        'title="Abre a janela de edição do ALMOX PRO, onde se acrescenta item">' +
         '+ Adicionar Item</button>' +
-      '<button class="btn peq" disabled style="flex:1" ' +
-        'title="Leitura por código grava o item lido">' +
-        '▌▌▌ Leitura por Código</button></div>' +
+      '<button class="btn peq" data-item-edit style="flex:1" ' +
+        'title="Abre a janela de edição do ALMOX PRO: é lá que se muda ' +
+        'quantidade, valor, e se exclui linha">' +
+        '✎ Editar itens</button></div>' +
 
       '<table class="tabela densa"><thead><tr><th>#</th><th>Código</th><th>Descrição</th>' +
       '<th class="num">Qtd.</th><th class="num">V. unit.</th><th class="num">Total</th>' +
@@ -2084,8 +2214,10 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
             D.moeda(i.valorTotal !== undefined ? i.valorTotal : i.total)
               .replace('R$ ', '') + '</b></td>' +
           '<td style="white-space:nowrap">' +
-            '<button class="btn-ic" disabled title="Editar item é etapa 2">✎</button>' +
-            '<button class="btn-ic" disabled title="Excluir item é etapa 2">🗑</button>' +
+            '<button class="btn-ic" data-item-edit title="Mudar quantidade ou valor ' +
+              'na janela de edição do ALMOX PRO">✎</button>' +
+            '<button class="btn-ic lixo" data-item-edit title="Excluir esta linha, ' +
+              'na janela de edição do ALMOX PRO">🗑</button>' +
           '</td></tr>';
       }).join('') + '</tbody></table>';
 
@@ -2236,9 +2368,14 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
         '<button class="x" id="nfPdfFechar" title="Fechar">✕</button>' +
       '</div>' +
       '<div class="pdf-aviso">' +
-        'Conferência apenas. O arquivo está aberto do seu computador e ' +
-        '<b>não foi guardado</b> no sistema — guardar depende de uma ação ' +
-        'que o Core ainda não tem. ' + kb + ' KB.' +
+        '<div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap">' +
+          '<button class="btn peq primario" id="nfPdfLer">⎙ Ler esta nota</button>' +
+          '<span>Puxa os dados do PDF e preenche os campos, pelo leitor do ' +
+            'ALMOX PRO.</span>' +
+        '</div>' +
+        '<div style="margin-top:7px">Por enquanto o arquivo está só aberto do seu ' +
+          'computador e <b>não foi guardado</b> no sistema — guardar depende de uma ' +
+          'ação que o Core ainda não tem. ' + kb + ' KB.</div>' +
       '</div>' +
       '<object data="' + esc(A.pdfUrl) + '" type="application/pdf" class="pdf-quadro">' +
         '<div class="painel-corpo"><div class="aviso">' +
@@ -2248,6 +2385,11 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
       '</object>';
     var f = $('nfPdfFechar');
     if (f) f.addEventListener('click', A.fecharPdf);
+    var ler = $('nfPdfLer');
+    if (ler) ler.addEventListener('click', function () {
+      var r = raiz.NFAUTO.abrirJanela('modalOCR');
+      if (!r.ok) A.recadoDeJanela(r.motivo, 'ler este PDF');
+    });
   };
 
   /* ------------------------------------------------------------
