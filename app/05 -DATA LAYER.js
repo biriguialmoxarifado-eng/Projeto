@@ -160,7 +160,8 @@ var AP_Data = {
   findFirstBy: function (sheetName, campo, valor) { return AP_Data_findFirstBy(sheetName, campo, valor); },
   listPage: function (sheetName, pagina, porPagina) { return AP_Data_listPage(sheetName, pagina, porPagina); },
   updateByRow: function (sheetName, rowIndex, patch) { return AP_Data_updateByRow(sheetName, rowIndex, patch); },
-  validateColumn: function (sheetName, columnName) { return AP_Data_validateColumn(sheetName, columnName); }
+  validateColumn: function (sheetName, columnName) { return AP_Data_validateColumn(sheetName, columnName); },
+  conferirCabecalho: function (sheetName) { return AP_Data_conferirCabecalho(sheetName); }
 };
 
 /* ============================================================
@@ -297,10 +298,32 @@ function AP_Data_append(sheetName, record) {
   var headers = AP_Data_headers(sheetName);
 
   if (!headers.length) {
+    /* [gravar.v2] aba SEM cabeçalho mas COM linhas é aba quebrada:
+       escrever os nomes dos campos ali passaria por cima de dados
+       de verdade. É assim que um cabeçalho vira lixo. */
+    if (sheet.getLastRow() > 0) {
+      return AP_Utils_fail('CABECALHO_AUSENTE',
+        'A aba ' + sheetName + ' tem ' + sheet.getLastRow() +
+        ' linha(s) mas a primeira está vazia. Não vou escrever cabeçalho' +
+        ' por cima de dados. Corrija a linha 1 antes de gravar.');
+    }
     headers = Object.keys(record);
     sheet.appendRow(headers);
     sheet.setFrozenRows(1);
     AP_Data_exec_.cabecalhos[sheetName] = headers;
+  }
+
+  var confA = AP_Data_conferirCabecalho_(headers);
+  if (confA.vazios.length === headers.length && headers.length > 0) {
+    return AP_Utils_fail('CABECALHO_AUSENTE',
+      'A linha 1 da aba ' + sheetName + ' está em branco — não há cabeçalho. ' +
+      'Não vou escrever cabeçalho por cima de dados. Corrija a linha 1 antes de gravar.');
+  }
+  if (!confA.ok) {
+    return AP_Utils_fail('CABECALHO_INVALIDO',
+      'A aba ' + sheetName + ' não pode receber gravação: ' +
+      (confA.duplicados.length ? 'cabeçalho repetido em ' + confA.duplicados.join(', ') + '. ' : '') +
+      (confA.vazios.length ? 'coluna sem nome na posição ' + confA.vazios.join(', ') + '. ' : ''));
   }
 
   var row = headers.map(function (h) { return (h in record) ? record[h] : ''; });
@@ -342,6 +365,129 @@ function AP_Data_appendBatch(sheetName, records) {
   return AP_Utils_ok(records, records.length + ' registros inseridos em ' + sheetName);
 }
 
+/* ============================================================
+   [gravar.v2] 10/11/2026 — POR QUE GRAVAR ESTRAGAVA
+   ------------------------------------------------------------
+   AP_Data_update montava a linha inteira a partir de "target",
+   que é o objeto lido e convertido em memória, e escrevia as
+   24 colunas de uma vez. Para gravar UM campo — a senha — ele
+   regravava nome, e-mail, perfil, status, matrícula e datas.
+
+   Três consequências, todas vistas na planilha de produção:
+
+   1. Qualquer valor que mudou de tipo na leitura voltava
+      estragado. Matrícula com zero à esquerda, data, número
+      guardado como texto.
+   2. Se dois cabeçalhos tiverem o mesmo nome, duas colunas
+      viram uma chave só e TODO o resto da linha anda de lugar.
+   3. Cabeçalho vazio no meio vira a chave "", e a coluna
+      seguinte é gravada por cima.
+
+   É assim que o nome da coluna 8 da aba USUARIOS virou um
+   número de telefone.
+
+   A correção não muda assinatura nenhuma:
+
+   · a linha é relida CRUA da planilha no instante da escrita,
+     e só as colunas do patch são trocadas — o resto volta
+     exatamente como estava, sem passar por conversão;
+   · o cabeçalho é conferido antes; se estiver duplicado ou
+     furado, a gravação é RECUSADA com erro claro em vez de
+     embaralhar a linha;
+   · a chave é reconferida na linha antes de escrever, porque
+     entre a leitura e a escrita a linha pode ter andado;
+   · depois de escrever, lê de volta e confere. Só responde
+     "ok" se o dado estiver lá — a regra dele: não informar
+     que salvou sem confirmação real;
+   · a escrita acontece dentro de uma trava, para duas
+     gravações ao mesmo tempo não se perderem.
+   ============================================================ */
+
+/** Cabeçalho utilizável? Duplicado ou furado embaralha a linha. */
+function AP_Data_conferirCabecalho_(headers) {
+  var vistos = {}, duplicados = [], vazios = [];
+  for (var i = 0; i < headers.length; i++) {
+    var nome = String(headers[i] === null || headers[i] === undefined ? '' : headers[i]).trim();
+    if (nome === '') { vazios.push(i + 1); continue; }
+    if (Object.prototype.hasOwnProperty.call(vistos, nome)) {
+      duplicados.push(nome + ' (colunas ' + vistos[nome] + ' e ' + (i + 1) + ')');
+    } else {
+      vistos[nome] = i + 1;
+    }
+  }
+  return {
+    ok: (duplicados.length === 0 && vazios.length === 0),
+    duplicados: duplicados,
+    vazios: vazios
+  };
+}
+
+/** Quais colunas o patch realmente altera, em ordem. */
+function AP_Data_colunasDoPatch_(headers, patch) {
+  var alvos = [];
+  for (var i = 0; i < headers.length; i++) {
+    if (Object.prototype.hasOwnProperty.call(patch, String(headers[i]))) alvos.push(i);
+  }
+  return alvos;
+}
+
+/** Junta colunas vizinhas num bloco só, para escrever de uma vez. */
+function AP_Data_blocos_(alvos) {
+  var blocos = [];
+  for (var i = 0; i < alvos.length; i++) {
+    var ultimo = blocos[blocos.length - 1];
+    if (ultimo && alvos[i] === ultimo.inicio + ultimo.quantas) { ultimo.quantas++; continue; }
+    blocos.push({ inicio: alvos[i], quantas: 1 });
+  }
+  return blocos;
+}
+
+/** A trava da gravação. Documento quando há; senão, do script. */
+function AP_Data_travar_() {
+  var ms = 10000;
+  try { ms = Number(AP_Config_get('LOCK_TIMEOUT_MS', 10000)) || 10000; } catch (e) {}
+  var trava = null;
+  try { trava = LockService.getDocumentLock(); } catch (e) { trava = null; }
+  if (!trava) { try { trava = LockService.getScriptLock(); } catch (e2) { trava = null; } }
+  if (!trava) return null;
+  try { trava.waitLock(ms); } catch (e3) { return false; }
+  return trava;
+}
+
+/** O que foi gravado é o que se pediu? Compara sem implicância. */
+function AP_Data_gravouIgual_(naPlanilha, pedido) {
+  if (AP_Data_mesmoValor_(naPlanilha, pedido)) return true;
+  /* a planilha converte: '99' vira 99, '2026-11-10' vira Date */
+  var a = Number(naPlanilha), b = Number(pedido);
+  if (!isNaN(a) && !isNaN(b) && String(naPlanilha).trim() !== '' &&
+      String(pedido).trim() !== '' && a === b) return true;
+  try {
+    if (naPlanilha instanceof Date && pedido instanceof Date) {
+      return naPlanilha.getTime() === pedido.getTime();
+    }
+    if (naPlanilha instanceof Date && pedido) {
+      var d = new Date(pedido);
+      if (!isNaN(d.getTime())) return naPlanilha.getTime() === d.getTime();
+    }
+  } catch (e) {}
+  return false;
+}
+
+/**
+ * Conferência de cabeçalho para quem precisa olhar sem gravar.
+ * Não altera nada. Use quando uma aba começar a gravar torto.
+ */
+function AP_Data_conferirCabecalho(sheetName) {
+  var headers = AP_Data_headers(sheetName);
+  var r = AP_Data_conferirCabecalho_(headers);
+  r.aba = sheetName;
+  r.colunas = headers.length;
+  r.cabecalho = headers.map(function (h) { return String(h); });
+  r.suspeitos = r.cabecalho.filter(function (n) { return /^[0-9]+$/.test(n.trim()); });
+  try { Logger.log(JSON.stringify(r, null, 2)); } catch (e) {}
+  return r;
+}
+
 /**
  * Atualiza um registro.
  *
@@ -371,41 +517,130 @@ function AP_Data_update(sheetName, matchValue, patch, matchField) {
     return AP_Utils_fail('CAMPO_INEXISTENTE', 'Campo "' + field + '" não existe em ' + sheetName);
   }
 
-  var rows = AP_Data_rows(sheetName);
-  var target = null;
-  for (var i = 0; i < rows.length; i++) {
-    if (AP_Data_mesmoValor_(rows[i][field], matchValue)) { target = rows[i]; break; }
+  /* [gravar.v2] cabeçalho furado embaralha a linha inteira na
+     escrita. Recusar é melhor que gravar torto. */
+  var conf = AP_Data_conferirCabecalho_(headers);
+  if (conf.vazios.length === headers.length && headers.length > 0) {
+    return AP_Utils_fail('CABECALHO_AUSENTE',
+      'A linha 1 da aba ' + sheetName + ' está em branco — não há cabeçalho. ' +
+      'Não vou escrever cabeçalho por cima de dados. Corrija a linha 1 antes de gravar.');
+  }
+  if (!conf.ok) {
+    return AP_Utils_fail('CABECALHO_INVALIDO',
+      'A aba ' + sheetName + ' não pode receber gravação: ' +
+      (conf.duplicados.length ? 'cabeçalho repetido em ' + conf.duplicados.join(', ') + '. ' : '') +
+      (conf.vazios.length ? 'coluna sem nome na posição ' + conf.vazios.join(', ') + '. ' : '') +
+      'Corrija o cabeçalho antes de gravar — gravar assim embaralharia a linha.');
   }
 
-  if (!target) {
-    /* a mensagem diz o que foi procurado e de que tipo. Antes dizia
-       só "não encontrado", e quem lia o log não tinha como saber
-       que o problema era texto contra número. */
-    return AP_Utils_fail('REGISTRO_NAO_ENCONTRADO',
-      'Nenhum registro com ' + field + '=' + matchValue +
-      ' (' + (typeof matchValue) + ') em ' + sheetName + '. ' +
-      'A aba tem ' + rows.length + ' registro(s).');
+  /* [gravar.v2] a trava: duas gravações ao mesmo tempo na mesma
+     linha faziam a segunda apagar a primeira sem ninguém ver. */
+  var trava = AP_Data_travar_();
+  if (trava === false) {
+    return AP_Utils_fail('OCUPADO',
+      'Outra gravação está em andamento em ' + sheetName + '. Tente de novo em instantes.');
   }
 
-  /* monta a linha completa com os valores atuais e aplica o patch */
-  var linha = headers.map(function (h) {
-    var nome = String(h);
-    return Object.prototype.hasOwnProperty.call(patch, nome) ? patch[nome] : target[nome];
-  });
+  try {
+    var rows = AP_Data_rows(sheetName);
+    var target = null;
+    for (var i = 0; i < rows.length; i++) {
+      if (AP_Data_mesmoValor_(rows[i][field], matchValue)) { target = rows[i]; break; }
+    }
 
-  var quantosCampos = Object.keys(patch).filter(function (k) {
-    return headers.indexOf(k) > -1;
-  }).length;
+    if (!target) {
+      /* a mensagem diz o que foi procurado e de que tipo. Antes dizia
+         só "não encontrado", e quem lia o log não tinha como saber
+         que o problema era texto contra número. */
+      return AP_Utils_fail('REGISTRO_NAO_ENCONTRADO',
+        'Nenhum registro com ' + field + '=' + matchValue +
+        ' (' + (typeof matchValue) + ') em ' + sheetName + '. ' +
+        'A aba tem ' + rows.length + ' registro(s).');
+    }
 
-  var t0 = new Date().getTime();
-  sheet.getRange(target.__rowIndex, 1, 1, headers.length).setValues([linha]);
-  AP_Data_exec_.perf.escritas++;
-  AP_Data_exec_.perf.celulasEvitadas += Math.max(0, quantosCampos - 1);
-  AP_Data_exec_.perf.msEscrita += (new Date().getTime() - t0);
+    var linhaNaPlanilha = target.__rowIndex;
 
-  /* a mesma mudança é aplicada no que já foi lido */
-  AP_Data_cacheAtualizar_(sheetName, field, matchValue, patch);
-  return AP_Utils_ok(Object.assign({}, target, patch), 'Registro atualizado em ' + sheetName);
+    /* [gravar.v2] A MUDANÇA QUE IMPORTA.
+       A linha é relida CRUA da planilha agora, no instante da
+       escrita. As colunas que o patch não cita voltam exatamente
+       como estavam — sem passar pela conversão da leitura, que é
+       onde matrícula com zero à esquerda, data e número guardado
+       como texto se perdiam. */
+    var cruas = sheet.getRange(linhaNaPlanilha, 1, 1, headers.length).getValues()[0];
+
+    /* entre a leitura e a escrita a linha pode ter andado: alguém
+       removeu um registro acima, ou a aba foi ordenada. Gravar sem
+       conferir escreveria por cima de outra pessoa. */
+    if (!AP_Data_mesmoValor_(cruas[fieldIndex], matchValue)) {
+      AP_Data_invalidar_(sheetName);
+      return AP_Utils_fail('LINHA_MUDOU',
+        'A linha ' + linhaNaPlanilha + ' de ' + sheetName + ' não é mais a do ' +
+        field + '=' + matchValue + '. Nada foi gravado. Tente de novo.');
+    }
+
+    /* [gravar.v2] SÓ AS COLUNAS DO PATCH SÃO ESCRITAS.
+       Reescrever a linha inteira não tinha como dar certo: ao
+       devolver uma matrícula "0408215" para a célula, a planilha
+       converte de novo para o número 408215. O zero à esquerda,
+       a data e o número guardado como texto se perdiam SEM
+       ninguém ter pedido para mudá-los.
+
+       Agora as colunas que o patch não cita nunca são tocadas —
+       e o que não é escrito não tem como estragar.
+
+       As colunas vizinhas vão juntas numa escrita só, para não
+       perder o ganho de desempenho: um patch de um campo é UMA
+       escrita, menos que a linha inteira de antes. */
+    var alvos = AP_Data_colunasDoPatch_(headers, patch);
+
+    if (!alvos.length) {
+      return AP_Utils_fail('PATCH_SEM_CAMPO_CONHECIDO',
+        'Nenhum campo do patch existe em ' + sheetName + '. ' +
+        'Enviados: ' + Object.keys(patch).join(', ') + '. ' +
+        'A aba tem: ' + headers.map(function (h) { return String(h); }).join(', ') + '.');
+    }
+
+    var t0 = new Date().getTime();
+    var blocos = AP_Data_blocos_(alvos);
+    for (var b = 0; b < blocos.length; b++) {
+      var bl = blocos[b];
+      var valores = [];
+      for (var k = 0; k < bl.quantas; k++) {
+        var nomeCol = String(headers[bl.inicio + k]);
+        valores.push(Object.prototype.hasOwnProperty.call(patch, nomeCol)
+          ? patch[nomeCol] : cruas[bl.inicio + k]);
+      }
+      sheet.getRange(linhaNaPlanilha, bl.inicio + 1, 1, bl.quantas).setValues([valores]);
+    }
+    try { SpreadsheetApp.flush(); } catch (eF) {}
+
+    /* [gravar.v2] lê de volta e confere. "Não informar que salvou
+       sem confirmação real" é regra da casa. */
+    var depois = sheet.getRange(linhaNaPlanilha, 1, 1, headers.length).getValues()[0];
+    var naoGravou = [];
+    for (var c = 0; c < alvos.length; c++) {
+      var campo = String(headers[alvos[c]]);
+      if (!AP_Data_gravouIgual_(depois[alvos[c]], patch[campo])) naoGravou.push(campo);
+    }
+    if (naoGravou.length) {
+      AP_Data_invalidar_(sheetName);
+      return AP_Utils_fail('GRAVACAO_NAO_CONFIRMADA',
+        'Escrevi em ' + sheetName + ' linha ' + linhaNaPlanilha +
+        ' mas ao reler o campo não bateu: ' + naoGravou.join(', ') + '. ' +
+        'Nada foi dado como salvo.');
+    }
+
+    AP_Data_exec_.perf.escritas += blocos.length;
+    AP_Data_exec_.perf.celulasEvitadas += Math.max(0, headers.length - alvos.length);
+    AP_Data_exec_.perf.msEscrita += (new Date().getTime() - t0);
+
+    /* a mesma mudança é aplicada no que já foi lido */
+    AP_Data_cacheAtualizar_(sheetName, field, matchValue, patch);
+    return AP_Utils_ok(Object.assign({}, target, patch), 'Registro atualizado em ' + sheetName);
+
+  } finally {
+    try { if (trava) trava.releaseLock(); } catch (eL) {}
+  }
 }
 
 function AP_Data_remove(sheetName, matchValue, matchField) {
@@ -609,17 +844,78 @@ function AP_Data_updateByRow(sheetName, rowIndex, patch) {
   var sheet = AP_Data_getSheet(sheetName);
   var headers = AP_Data_headers(sheetName);
 
-  var atual = sheet.getRange(rowIndex, 1, 1, headers.length).getValues()[0];
-  var linha = headers.map(function (h, i) {
-    var nome = String(h);
-    return Object.prototype.hasOwnProperty.call(patch, nome) ? patch[nome] : atual[i];
-  });
+  /* [gravar.v2] as mesmas proteções do AP_Data_update. Esta função
+     grava pela POSIÇÃO, que é ainda mais arriscado: se a linha
+     andou, ela escreve na pessoa errada sem nem perceber. */
+  var conf = AP_Data_conferirCabecalho_(headers);
+  if (!conf.ok) {
+    return AP_Utils_fail('CABECALHO_INVALIDO',
+      'A aba ' + sheetName + ' não pode receber gravação: ' +
+      (conf.duplicados.length ? 'cabeçalho repetido em ' + conf.duplicados.join(', ') + '. ' : '') +
+      (conf.vazios.length ? 'coluna sem nome na posição ' + conf.vazios.join(', ') + '. ' : ''));
+  }
 
-  sheet.getRange(rowIndex, 1, 1, headers.length).setValues([linha]);
-  AP_Data_exec_.perf.escritas++;
-  AP_Data_invalidar_(sheetName);
+  var linhaNum = Number(rowIndex);
+  if (!linhaNum || linhaNum < 2) {
+    return AP_Utils_fail('LINHA_INVALIDA',
+      'Linha ' + rowIndex + ' não é uma linha de dados de ' + sheetName +
+      ' (a 1 é o cabeçalho).');
+  }
+  if (linhaNum > sheet.getLastRow()) {
+    return AP_Utils_fail('LINHA_INVALIDA',
+      'A aba ' + sheetName + ' tem ' + sheet.getLastRow() +
+      ' linha(s); pediram para gravar na ' + linhaNum + '.');
+  }
 
-  return AP_Utils_ok({ rowIndex: rowIndex }, 'Registro atualizado.');
+  var trava = AP_Data_travar_();
+  if (trava === false) {
+    return AP_Utils_fail('OCUPADO',
+      'Outra gravação está em andamento em ' + sheetName + '. Tente de novo em instantes.');
+  }
+
+  try {
+    var atual = sheet.getRange(linhaNum, 1, 1, headers.length).getValues()[0];
+
+    var alvos = AP_Data_colunasDoPatch_(headers, patch);
+    if (!alvos.length) {
+      return AP_Utils_fail('PATCH_SEM_CAMPO_CONHECIDO',
+        'Nenhum campo do patch existe em ' + sheetName + '. ' +
+        'Enviados: ' + Object.keys(patch).join(', ') + '.');
+    }
+
+    /* [gravar.v2] só as colunas do patch, como no AP_Data_update */
+    var blocos = AP_Data_blocos_(alvos);
+    for (var b = 0; b < blocos.length; b++) {
+      var bl = blocos[b];
+      var valores = [];
+      for (var k = 0; k < bl.quantas; k++) {
+        var nomeCol = String(headers[bl.inicio + k]);
+        valores.push(Object.prototype.hasOwnProperty.call(patch, nomeCol)
+          ? patch[nomeCol] : atual[bl.inicio + k]);
+      }
+      sheet.getRange(linhaNum, bl.inicio + 1, 1, bl.quantas).setValues([valores]);
+    }
+    try { SpreadsheetApp.flush(); } catch (eF) {}
+
+    var depois = sheet.getRange(linhaNum, 1, 1, headers.length).getValues()[0];
+    var naoGravou = [];
+    for (var c = 0; c < alvos.length; c++) {
+      var campo = String(headers[alvos[c]]);
+      if (!AP_Data_gravouIgual_(depois[alvos[c]], patch[campo])) naoGravou.push(campo);
+    }
+    AP_Data_invalidar_(sheetName);
+    if (naoGravou.length) {
+      return AP_Utils_fail('GRAVACAO_NAO_CONFIRMADA',
+        'Escrevi em ' + sheetName + ' linha ' + linhaNum +
+        ' mas ao reler o campo não bateu: ' + naoGravou.join(', ') + '.');
+    }
+
+    AP_Data_exec_.perf.escritas++;
+    return AP_Utils_ok({ rowIndex: linhaNum }, 'Registro atualizado.');
+
+  } finally {
+    try { if (trava) trava.releaseLock(); } catch (eL) {}
+  }
 }
 
 /* ============================================================

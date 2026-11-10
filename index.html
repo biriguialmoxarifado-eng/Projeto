@@ -65199,7 +65199,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 414 · 08/11";
+var ALMOXA_VERSAO = "sistema 416 · 10/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -110067,8 +110067,17 @@ emissao: hoje,
     submenuAntigo: null,
     /* muda quando o módulo muda: é o que derruba o cache */
     selo: "nf4-0811",
-    arquivos: ["NOTAS_FISCAIS_FINAL.html", "NOTAS_FISCAIS.html"],
-    pastas: ["", "NOTAS_FISCAIS/", "NF/"],
+    /* Em uma noite, três nomes diferentes custaram horas. A culpa
+       é do projeto: eu exigi que o nome batesse letra por letra,
+       num servidor que diferencia maiúscula de minúscula. Agora a
+       lista é larga, e se mesmo assim não achar, a tela pergunta. */
+    arquivos: [
+      "NOTAS_FISCAIS_FINAL.html", "NOTAS_FISCAIS.html",
+      "Notas_Fiscal.html", "Notas_Fiscais.html", "NotasFiscais.html",
+      "notas_fiscais.html", "notas_fiscal.html", "notasfiscais.html",
+      "NOTAS_FISCAL.html", "nf.html", "NF.html"
+    ],
+    pastas: ["", "NOTAS_FISCAIS/", "NOTAS_FISCAIS_FINAL/", "NF/", "notas/", "modulos/"],
     achado: null
   };
 
@@ -110180,10 +110189,48 @@ emissao: hoje,
             'nesta ordem, e nenhum respondeu:</p>' +
           '<p class="small mono" style="text-align:left;line-height:1.7;color:var(--texto-3)">' +
             N.candidatos().map(esc).join("<br>") + '</p>' +
-          '<p class="small" style="line-height:1.55">Suba o ' +
-            '<b>NOTAS_FISCAIS_FINAL.html</b> para a raiz do Projeto, do lado do ' +
-            'index.html, e recarregue. A tela antiga continua no botão ' +
-            '<b>Tela antiga</b>, aqui em cima.</p></div>';
+          '<p class="small" style="line-height:1.55">Se o arquivo está aí com ' +
+            'outro nome, <b>escreva o nome dele abaixo</b> — eu procuro e guardo, ' +
+            'e não pergunto de novo.</p>' +
+          '<div style="display:flex;gap:8px;justify-content:center;margin:10px 0">' +
+            '<input id="nfrNome" class="input" style="max-width:300px" ' +
+              'placeholder="ex.: Notas_Fiscal.html" autocomplete="off">' +
+            '<button class="btn btn-primary btn-sm" data-nfr-usar>Procurar este</button>' +
+          '</div>' +
+          '<p class="small" style="line-height:1.55;color:var(--texto-3)">' +
+            'Pode ser só o nome, ou o endereço inteiro. ' +
+            'A tela antiga continua no botão <b>Tela antiga</b>, aqui em cima.</p></div>';
+
+        var usar = document.querySelector("[data-nfr-usar]");
+        var campo = document.getElementById("nfrNome");
+        if (usar && campo) {
+          function tentarEste() {
+            var v = lp(campo.value);
+            if (!v) return;
+            /* nome solto vira endereço completo, na pasta do sistema */
+            var url = /^https?:/i.test(v) ? v : N.pastaDoSistema() + v.replace(/^\/+/, "");
+            fetch(url + "?v=" + N.selo, { cache: "no-store" }).then(function (r) {
+              if (r && r.ok) {
+                N.ondeFica(url);
+                N.achado = url;
+                N.mount();
+              } else {
+                campo.style.borderColor = "#D2443B";
+                var aviso = document.createElement("div");
+                aviso.className = "small";
+                aviso.style.cssText = "color:#A32820;margin-top:6px";
+                aviso.textContent = "Esse endereço também não respondeu: " + url;
+                campo.parentNode.parentNode.appendChild(aviso);
+              }
+            }).catch(function () {
+              campo.style.borderColor = "#D2443B";
+            });
+          }
+          usar.addEventListener("click", tentarEste);
+          campo.addEventListener("keydown", function (ev) {
+            if (ev.key === "Enter") tentarEste();
+          });
+        }
         if (rodape) rodape.textContent = "";
         return;
       }
@@ -110335,6 +110382,311 @@ emissao: hoje,
   } else {
     N.ligar();
   }
+})();
+
+
+/* ############################################################
+ * QUEM ESTÁ RECEBENDO O EPI                 busca: [EPIFOTO]
+ * 10/11/2026
+ * ------------------------------------------------------------
+ * O QUE FAZ  Na janela de ENTREGA de EPI, mostra quem vai
+ *            receber: foto, nome completo, matrícula, obra,
+ *            setor e cargo — ao lado do nome, como pedido.
+ * ENTRADA    o colaborador escolhido no <select id="epColab">
+ *            e o cadastro que já está em MOCK.usuarios.
+ * SAÍDA      um cartão desenhado logo acima do seletor.
+ * NÃO FAZ    não chama o Core, não cria rota, não grava nada,
+ *            não exige foto para entregar e não impede entrega
+ *            nenhuma. É só o que se vê.
+ * ------------------------------------------------------------
+ * POR QUE ELE EXISTE
+ *
+ * A ficha do colaborador já mostra foto (linha 44456). A janela
+ * de ENTREGA não mostrava nada: só "NOME — matrícula" numa
+ * lista. Quem entrega não tinha como conferir se está dando a
+ * bota para a pessoa certa antes de confirmar.
+ *
+ * ------------------------------------------------------------
+ * SEM FOTO NÃO TRAVA NADA
+ *
+ * "Não exigir foto para permitir a entrega." Sem foto aparece
+ * um círculo com as iniciais. A entrega segue igual.
+ *
+ * ------------------------------------------------------------
+ * E QUANDO A PESSOA NÃO ESTÁ NO CADASTRO
+ *
+ * Aí o cartão DIZ isso, em amarelo, em vez de aparecer vazio.
+ * É o caso da matrícula provisória: ela está no seletor mas não
+ * no cadastro central, então não há foto, cargo nem setor para
+ * mostrar. Antes isso era silêncio — campos em branco e ninguém
+ * sabia por quê. Agora está escrito na tela.
+ *
+ * A entrega continua liberada: quem decide é quem está lá.
+ * ############################################################ */
+
+(function () {
+  if (typeof window === "undefined") return;
+  if (window.EPIFOTO && window.EPIFOTO.ligado) return;
+
+  var F = {};
+  F.ligado = true;
+  F.selo = "EPIFOTO 10/11";
+
+  function lp(v) { return String(v === null || v === undefined ? "" : v).trim(); }
+
+  function esc(s) {
+    s = lp(s);
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+  }
+
+  /* matrícula comparável: sem zero à esquerda, sem pontuação */
+  F.chaveMat = function (v) {
+    return lp(v).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+  };
+
+  F.lista = function () {
+    try {
+      if (typeof MOCK === "object" && MOCK && MOCK.usuarios &&
+          Object.prototype.toString.call(MOCK.usuarios) === "[object Array]") {
+        return MOCK.usuarios;
+      }
+    } catch (e) {}
+    return [];
+  };
+
+  /* acha pela matrícula; nunca só pelo nome, que é regra dele */
+  F.achar = function (matricula) {
+    var m = F.chaveMat(matricula);
+    if (!m) return null;
+    var todos = F.lista();
+    for (var i = 0; i < todos.length; i++) {
+      var u = todos[i];
+      if (!u) continue;
+      if (F.chaveMat(u.matricula) === m) return u;
+    }
+    /* matrículas anteriores declaradas, quando o cadastro traz */
+    for (var j = 0; j < todos.length; j++) {
+      var v = todos[j];
+      if (!v) continue;
+      var outras = [].concat(v.matriculaAnterior || [],
+        Object.prototype.toString.call(v.matriculasAnteriores) === "[object Array]"
+          ? v.matriculasAnteriores : []);
+      for (var k = 0; k < outras.length; k++) {
+        if (F.chaveMat(outras[k]) === m) return v;
+      }
+    }
+    return null;
+  };
+
+  /* a obra pode vir como id; o cadastro de obras resolve o nome */
+  F.nomeDaObra = function (valor) {
+    var v = lp(valor);
+    if (!v) return "";
+    try {
+      var obras = (typeof MOCK === "object" && MOCK && MOCK.obras) ? MOCK.obras : [];
+      for (var i = 0; i < obras.length; i++) {
+        var o = obras[i];
+        if (!o) continue;
+        if (lp(o.id) === v || lp(o.nome) === v) return lp(o.nome) || v;
+      }
+    } catch (e) {}
+    return v;
+  };
+
+  F.dados = function (matricula) {
+    var u = F.achar(matricula);
+    if (!u) {
+      return { achou: false, matricula: lp(matricula), nome: "", foto: "",
+               cargo: "", setor: "", obra: "" };
+    }
+    return {
+      achou: true,
+      matricula: lp(u.matricula) || lp(matricula),
+      nome: lp(u.nome) || lp(u.colaborador),
+      foto: lp(u.foto) || lp(u.crachaFotoUrl),
+      cargo: lp(u.cargo) || lp(u.funcao),
+      setor: lp(u.setor),
+      obra: F.nomeDaObra(u.obra),
+      status: lp(u.status).toUpperCase()
+    };
+  };
+
+  /* iniciais para o avatar padrão: no máximo duas letras */
+  F.iniciais = function (nome) {
+    var partes = lp(nome).split(/\s+/).filter(function (p) { return p.length > 1; });
+    if (!partes.length) return "?";
+    var a = partes[0].charAt(0);
+    var b = partes.length > 1 ? partes[partes.length - 1].charAt(0) : "";
+    return (a + b).toUpperCase();
+  };
+
+  F.html = function (matricula, nomeDoSelect) {
+    var d = F.dados(matricula);
+    var nome = d.nome || lp(nomeDoSelect);
+
+    if (!lp(matricula)) {
+      return '<div class="card mb12" data-epifoto><div class="card-body" ' +
+        'style="padding:10px 12px;color:var(--texto-3);font-size:12.5px">' +
+        'Escolha o colaborador para ver os dados dele.</div></div>';
+    }
+
+    var retrato = d.foto
+      ? '<img src="' + esc(d.foto) + '" alt="" ' +
+        'style="width:64px;height:64px;border-radius:50%;object-fit:cover;flex:0 0 auto">'
+      : '<span style="width:64px;height:64px;border-radius:50%;flex:0 0 auto;' +
+        'display:flex;align-items:center;justify-content:center;font-weight:700;' +
+        'font-size:20px;background:var(--fundo-3,#E8EDF3);color:var(--texto-3,#667)">' +
+        esc(F.iniciais(nome)) + '</span>';
+
+    function campo(rot, val) {
+      return '<div style="min-width:92px">' +
+        '<div style="font-size:11px;color:var(--texto-3)">' + esc(rot) + '</div>' +
+        '<b style="font-size:12.5px">' + esc(val || "—") + '</b></div>';
+    }
+
+    var aviso = "";
+    if (!d.achou) {
+      aviso = '<div style="margin-top:8px;padding:7px 10px;border-radius:5px;' +
+        'background:rgba(201,146,46,.14);border:1px solid rgba(201,146,46,.45);' +
+        'font-size:12px;line-height:1.45">' +
+        '<b>Este colaborador não está no cadastro central.</b> ' +
+        'Por isso não há foto, cargo nem setor para mostrar. ' +
+        'A entrega continua liberada.</div>';
+    } else if (d.status && d.status.indexOf("ATIV") !== 0) {
+      aviso = '<div style="margin-top:8px;padding:7px 10px;border-radius:5px;' +
+        'background:rgba(201,146,46,.14);border:1px solid rgba(201,146,46,.45);' +
+        'font-size:12px">Situação no cadastro: <b>' + esc(d.status) + '</b></div>';
+    }
+
+    return '<div class="card mb12" data-epifoto><div class="card-body" ' +
+      'style="padding:12px;display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">' +
+      retrato +
+      '<div style="flex:1 1 220px;min-width:0">' +
+      '<div style="font-weight:700;font-size:14px;margin-bottom:6px">' +
+      esc(nome || "(sem nome)") + '</div>' +
+      '<div style="display:flex;gap:16px;flex-wrap:wrap">' +
+      campo("Matrícula", d.matricula) +
+      campo("Obra", d.obra) +
+      campo("Setor", d.setor) +
+      campo("Cargo", d.cargo) +
+      '</div>' + aviso +
+      '</div></div></div>';
+  };
+
+  /* ---------- desenhar e manter desenhado ---------- */
+
+  F.selecionado = function (sel) {
+    if (!sel) return { mat: "", nome: "" };
+    var op = sel.options && sel.options[sel.selectedIndex];
+    var texto = op ? lp(op.textContent) : "";
+    /* o rótulo é "NOME — matrícula"; fico só com o nome */
+    var nome = texto.split("—")[0];
+    return { mat: lp(sel.value), nome: lp(nome) };
+  };
+
+  F.pintar = function (raiz) {
+    var doc = raiz || document;
+    var sel = doc.querySelector("#epColab");
+    if (!sel) return false;
+
+    /* o cartão vai acima do campo do colaborador */
+    var campo = sel.closest ? sel.closest(".field") : null;
+    var ancora = campo || sel;
+    var pai = ancora.parentNode;
+    if (!pai) return false;
+
+    var escolhido = F.selecionado(sel);
+    var novo = F.html(escolhido.mat, escolhido.nome);
+
+    var atual = pai.querySelector(":scope > [data-epifoto]") ||
+                (pai.parentNode && pai.parentNode.querySelector("[data-epifoto]"));
+
+    if (atual) {
+      if (atual.getAttribute("data-epifoto-chave") === escolhido.mat) return true;
+      var tmp0 = document.createElement("div");
+      tmp0.innerHTML = novo;
+      var el0 = tmp0.firstChild;
+      el0.setAttribute("data-epifoto-chave", escolhido.mat);
+      atual.parentNode.replaceChild(el0, atual);
+      return true;
+    }
+
+    var tmp = document.createElement("div");
+    tmp.innerHTML = novo;
+    var el = tmp.firstChild;
+    el.setAttribute("data-epifoto-chave", escolhido.mat);
+    pai.insertBefore(el, ancora);
+    return true;
+  };
+
+  /* o corpo da janela é redesenhado inteiro em várias ações; em
+     vez de adivinhar quando, eu observo e redesenho junto. */
+  F.observador = null;
+
+  F.observar = function () {
+    if (F.observador || typeof MutationObserver === "undefined") return;
+    F.observador = new MutationObserver(function () {
+      try { F.pintar(); } catch (e) {}
+    });
+    F.observador.observe(document.body, { childList: true, subtree: true });
+  };
+
+  F.ouvir = function () {
+    document.addEventListener("change", function (ev) {
+      var alvo = ev && ev.target;
+      if (!alvo || alvo.id !== "epColab") return;
+      try { F.pintar(); } catch (e) {}
+    }, true);
+  };
+
+  /* ---------- enxerto na janela de entrega ---------- */
+  F.enxertar = function () {
+    if (typeof window.modalEntregarEPI !== "function") return false;
+    if (window.modalEntregarEPI.__epifoto) return true;
+
+    var antiga = window.modalEntregarEPI;
+    F.antigaEntrega = antiga;
+
+    var nova = function () {
+      var r = antiga.apply(this, arguments);
+      try {
+        F.pintar();
+        setTimeout(function () { try { F.pintar(); } catch (e) {} }, 60);
+      } catch (e) {}
+      return r;
+    };
+    nova.__epifoto = true;
+    window.modalEntregarEPI = nova;
+    return true;
+  };
+
+  F.restaurar = function () {
+    if (F.antigaEntrega) window.modalEntregarEPI = F.antigaEntrega;
+    if (F.observador) { F.observador.disconnect(); F.observador = null; }
+    F.ligado = false;
+  };
+
+  F.iniciar = function () {
+    F.enxertar();
+    F.ouvir();
+    F.observar();
+  };
+
+  window.EPIFOTO = F;
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () { F.iniciar(); });
+  } else {
+    F.iniciar();
+  }
+
+  /* a janela pode ser definida depois deste bloco; tento de novo */
+  var tentativas = 0;
+  var relogio = setInterval(function () {
+    tentativas++;
+    if (F.enxertar() || tentativas > 40) clearInterval(relogio);
+  }, 250);
 })();
 
 </script>
