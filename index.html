@@ -65199,7 +65199,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 416 · 10/11";
+var ALMOXA_VERSAO = "sistema 417 · 10/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -110686,6 +110686,232 @@ emissao: hoje,
   var relogio = setInterval(function () {
     tentativas++;
     if (F.enxertar() || tentativas > 40) clearInterval(relogio);
+  }, 250);
+})();
+
+
+/* ############################################################
+ * A BUSCA QUE NÃO PERDE O LUGAR            busca: [BUSCAVIVA]
+ * 10/11/2026
+ * ------------------------------------------------------------
+ * O QUE FAZ  Ao digitar num campo de busca, a tela continua
+ *            onde estava: mesma rolagem, mesmo foco, mesmo
+ *            cursor dentro da palavra.
+ * ENTRADA    nada. Ele observa o próprio sistema.
+ * SAÍDA      nada. Só devolve o lugar depois do redesenho.
+ * NÃO FAZ    não chama o Core, não mexe em filtro, não muda o
+ *            que a busca encontra, não toca nos 73 campos que
+ *            já atualizam só a lista.
+ * ------------------------------------------------------------
+ * O QUE ESTAVA ACONTECENDO
+ *
+ * A auditoria de 10/11 mediu, no arquivo:
+ *
+ *   90 campos de busca com ouvinte de tecla
+ *   73 atualizam só a lista          — corretos, intocados
+ *   17 chamam ROUTER.render()        — redesenham a TELA INTEIRA
+ *
+ * E o desenho da tela, na linha 48746, faz duas coisas:
+ *
+ *   main.innerHTML = ...                 destrói tudo e refaz
+ *   window.scrollTo({ top: 0 })          volta para o topo
+ *
+ * Daí o que se vê: a página pisca, pula para cima, e o campo
+ * onde se está digitando é destruído junto. Cinco dos dezessete
+ * já tentavam remendar isso chamando .focus() e devolvendo o
+ * cursor na mão — prova de que o problema é conhecido e de que
+ * o remendo é por campo, não de uma vez.
+ *
+ * NENHUM dos dezessete chama o Core ao digitar. A auditoria
+ * confirmou: dos 90 ouvintes de tecla, zero fazem API.call. O
+ * carregamento que aparece é o redesenho, não uma consulta.
+ *
+ * ------------------------------------------------------------
+ * O QUE ESTE BLOCO RESOLVE, E O QUE NÃO RESOLVE
+ *
+ * RESOLVE  a rolagem perdida, o foco perdido, o cursor que
+ *          pulava para o fim da palavra, e o salto para o topo.
+ *          Em todos os dezessete, de uma vez, sem mexer em
+ *          nenhum deles.
+ *
+ * NÃO RESOLVE  o redesenho em si. Para a tela atualizar SÓ a
+ *          lista de resultados é preciso mudar cada tela, uma
+ *          por uma, com teste de cada uma. Isso é trabalho de
+ *          verdade e deve ser feito pela tela mais pesada
+ *          primeiro — não de uma vez, que é o que estraga
+ *          sistema grande.
+ *
+ * Está escrito aqui para ninguém achar que acabou.
+ * ############################################################ */
+
+(function () {
+  if (typeof window === "undefined") return;
+  if (window.BUSCAVIVA && window.BUSCAVIVA.ligado) return;
+
+  var B = {};
+  B.ligado = true;
+  B.selo = "BUSCAVIVA 10/11";
+
+  /* um campo é de busca pelo id, pelo tipo ou pelo que ele diz */
+  B.ehCampoDeBusca = function (el) {
+    if (!el || el.tagName !== "INPUT") return false;
+    var tipo = String(el.type || "").toLowerCase();
+    if (tipo && tipo !== "text" && tipo !== "search") return false;
+    var id = String(el.id || "");
+    if (/busc|pesquis|filtr|procur/i.test(id)) return true;
+    var ph = String(el.getAttribute("placeholder") || "");
+    if (/busc|pesquis|procur|filtr/i.test(ph)) return true;
+    return false;
+  };
+
+  /* onde a página está agora */
+  B.lembrar = function () {
+    var ativo = document.activeElement;
+    if (!B.ehCampoDeBusca(ativo)) return null;
+
+    var estado = {
+      id: ativo.id || null,
+      valor: ativo.value,
+      inicio: null,
+      fim: null,
+      janelaY: window.pageYOffset || document.documentElement.scrollTop || 0,
+      rolagens: []
+    };
+    try {
+      estado.inicio = ativo.selectionStart;
+      estado.fim = ativo.selectionEnd;
+    } catch (e) { /* input de tipo que não tem seleção */ }
+
+    /* caixas que rolam por dentro, não só a janela */
+    try {
+      var todos = document.querySelectorAll("*");
+      for (var i = 0; i < todos.length; i++) {
+        var el = todos[i];
+        if (!el.scrollTop) continue;
+        if (el === document.body || el === document.documentElement) continue;
+        var marca = el.id || el.getAttribute("data-rolagem");
+        if (!marca) continue;
+        estado.rolagens.push({ marca: marca, topo: el.scrollTop });
+      }
+    } catch (e) {}
+
+    return estado;
+  };
+
+  /* devolve o lugar depois que a tela foi refeita */
+  B.devolver = function (estado) {
+    if (!estado) return false;
+
+    var campo = estado.id ? document.getElementById(estado.id) : null;
+
+    /* o campo pode ter sido destruído e recriado: procuro pelo id */
+    if (campo) {
+      var jaEsta = (document.activeElement === campo);
+      if (!jaEsta) {
+        try { campo.focus({ preventScroll: true }); } catch (e) { try { campo.focus(); } catch (e2) {} }
+      }
+      /* o valor pode ter voltado vazio no redesenho */
+      if (campo.value !== estado.valor && estado.valor !== undefined) {
+        try { campo.value = estado.valor; } catch (e) {}
+      }
+      if (estado.inicio !== null && estado.inicio !== undefined) {
+        try { campo.setSelectionRange(estado.inicio, estado.fim); } catch (e) {}
+      }
+    }
+
+    /* a rolagem das caixas internas */
+    for (var i = 0; i < estado.rolagens.length; i++) {
+      var r = estado.rolagens[i];
+      var el = document.getElementById(r.marca) ||
+               document.querySelector('[data-rolagem="' + r.marca + '"]');
+      if (el) { try { el.scrollTop = r.topo; } catch (e) {} }
+    }
+
+    /* e a da janela, que o pintar() zerava */
+    if (estado.janelaY > 0) {
+      try { window.scrollTo(0, estado.janelaY); } catch (e) {}
+    }
+    return true;
+  };
+
+  /* ---------- o enxerto ---------- */
+  B.enxertar = function () {
+    if (!window.ROUTER || typeof window.ROUTER.render !== "function") return false;
+    if (window.ROUTER.render.__buscaviva) return true;
+
+    var antiga = window.ROUTER.render;
+    B.antigaRender = antiga;
+
+    var nova = function () {
+      var estado = null;
+      try { estado = B.lembrar(); } catch (e) { estado = null; }
+
+      var r;
+      try {
+        r = antiga.apply(this, arguments);
+      } catch (erro) {
+        /* o render é do sistema; se ele falhar, o erro é dele e sobe
+           igual. Eu não engulo erro de ninguém. */
+        throw erro;
+      }
+
+      if (!estado) return r;
+
+      function depois() {
+        try { B.devolver(estado); } catch (e) {}
+        /* o desenho pode terminar num quadro seguinte */
+        if (typeof requestAnimationFrame === "function") {
+          requestAnimationFrame(function () { try { B.devolver(estado); } catch (e) {} });
+        }
+        setTimeout(function () { try { B.devolver(estado); } catch (e) {} }, 40);
+      }
+
+      if (r && typeof r.then === "function") {
+        return r.then(function (v) { depois(); return v; },
+                      function (e) { depois(); throw e; });
+      }
+      depois();
+      return r;
+    };
+
+    nova.__buscaviva = true;
+    window.ROUTER.render = nova;
+    return true;
+  };
+
+  B.restaurar = function () {
+    if (B.antigaRender && window.ROUTER) window.ROUTER.render = B.antigaRender;
+    B.ligado = false;
+  };
+
+  /* quantos campos de busca existem na tela agora — serve para o
+     relatório, não para o funcionamento */
+  B.camposNaTela = function () {
+    var fora = [];
+    try {
+      var todos = document.querySelectorAll("input");
+      for (var i = 0; i < todos.length; i++) {
+        if (B.ehCampoDeBusca(todos[i])) fora.push(todos[i].id || "(sem id)");
+      }
+    } catch (e) {}
+    return fora;
+  };
+
+  B.iniciar = function () { B.enxertar(); };
+
+  window.BUSCAVIVA = B;
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () { B.iniciar(); });
+  } else {
+    B.iniciar();
+  }
+
+  /* o ROUTER pode nascer depois deste bloco */
+  var tentativas = 0;
+  var relogio = setInterval(function () {
+    tentativas++;
+    if (B.enxertar() || tentativas > 40) clearInterval(relogio);
   }, 250);
 })();
 
