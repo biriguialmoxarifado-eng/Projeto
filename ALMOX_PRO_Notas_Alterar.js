@@ -46,6 +46,11 @@
 /* nomes de aba que costumam guardar as notas; se nenhum existir,
    o arquivo procura pelo CABEÇALHO, que é mais confiável que o nome */
 var NFED_ABAS_PROVAVEIS = [
+  /* [1.5] os nomes desta planilha vinham faltando. Sem eles,
+     nenhum dos oito nomes batia e a escolha caía na busca por
+     cabeçalho — que elegia a aba dos ITENS, porque ela também
+     tem "nf" e "fornecedor". */
+  'ALMOXA_NOTAS', 'ALMOXA_NF', 'ALMOXA_NOTAS_FISCAIS',
   'NOTAS', 'NOTAS_FISCAIS', 'NOTAS FISCAIS', 'NF', 'NFE',
   'ENTRADAS', 'NOTAS_ENTRADA', 'LANCAMENTOS'
 ];
@@ -92,28 +97,74 @@ function nfedIdentidade_(n) {
 
 /* ---------- achar a aba e entender as colunas ---------- */
 
-function nfedAcharAba_() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var i, aba;
+/* [1.5] A ESCOLHA DA ABA, POR PONTOS EM VEZ DE PELA PRIMEIRA.
+   ------------------------------------------------------------
+   Antes: a primeira aba com "nf" e "fornecedor" no cabeçalho
+   vencia. Na planilha real isso elegeu ALMOXA_NF_ITENS — a aba
+   dos ITENS, que tem as duas colunas e vem antes da
+   ALMOXA_NOTAS na ordem da planilha.
 
-  for (i = 0; i < NFED_ABAS_PROVAVEIS.length; i++) {
-    aba = ss.getSheetByName(NFED_ABAS_PROVAVEIS[i]);
-    if (aba) return aba;
+   Consequência: o diagnóstico procurava a coluna listaItens na
+   aba errada, não achava, e "podeAlterar" ficava false. A tela
+   de edição respondia ok e nada mudava.
+
+   Agora cada aba candidata ganha pontos, e a aba de ITENS leva
+   desconto justamente pelo que a identifica: descrição ou sku
+   junto com quantidade. Quem tem o nome esperado vence de longe. */
+function nfedPontosDeAba_(nome, cab) {
+  var pontos = 0;
+
+  for (var i = 0; i < NFED_ABAS_PROVAVEIS.length; i++) {
+    if (nfedChaveCol_(nome) === nfedChaveCol_(NFED_ABAS_PROVAVEIS[i])) {
+      pontos += 1000 - i;                       /* o primeiro da lista vence */
+      break;
+    }
   }
-  /* nome não bateu: procura pelo cabeçalho. Uma aba de notas tem
-     número da nota e, quase sempre, fornecedor ou a lista de itens. */
+
+  var temLista = cab.indexOf('listaitens') > -1 || cab.indexOf('itensjson') > -1 ||
+                 cab.indexOf('produtos') > -1;
+  if (temLista) pontos += 120;                  /* é a aba que guarda a LISTA */
+  if (cab.indexOf('chave') > -1) pontos += 30;
+  if (cab.indexOf('status') > -1 || cab.indexOf('situacao') > -1) pontos += 20;
+  if (cab.indexOf('idlanc') > -1) pontos += 10;
+
+  /* cara de aba de ITENS: uma linha por produto */
+  var temProduto = cab.indexOf('descricao') > -1 || cab.indexOf('sku') > -1;
+  var temQtd = cab.indexOf('quantidade') > -1 || cab.indexOf('qtd') > -1;
+  if (temProduto && temQtd && !temLista) pontos -= 200;
+
+  return pontos;
+}
+
+/* todas as abas que poderiam ser a das notas, da melhor para a pior */
+function nfedCandidatasDeAba_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
   var todas = ss.getSheets();
-  for (i = 0; i < todas.length; i++) {
+  var fora = [];
+  for (var i = 0; i < todas.length; i++) {
     var larg = todas[i].getLastColumn();
     if (larg < 2) continue;
+    var nome = todas[i].getName();
+    if (/^BKP_/i.test(nome)) continue;
     var cab = todas[i].getRange(1, 1, 1, larg).getValues()[0].map(nfedChaveCol_);
     var temNum = cab.indexOf('numero') > -1 || cab.indexOf('numeronota') > -1 ||
                  cab.indexOf('numeronf') > -1 || cab.indexOf('nf') > -1;
     var temPista = cab.indexOf('fornecedor') > -1 || cab.indexOf('itens') > -1 ||
                    cab.indexOf('listaitens') > -1 || cab.indexOf('chave') > -1;
-    if (temNum && temPista) return todas[i];
+    if (!temNum || !temPista) continue;
+    fora.push({
+      aba: todas[i], nome: nome, cabecalho: cab,
+      linhas: Math.max(0, todas[i].getLastRow() - 1),
+      pontos: nfedPontosDeAba_(nome, cab)
+    });
   }
-  return null;
+  fora.sort(function (a, b) { return b.pontos - a.pontos; });
+  return fora;
+}
+
+function nfedAcharAba_() {
+  var c = nfedCandidatasDeAba_();
+  return c.length ? c[0].aba : null;
 }
 
 /* apelidos aceitos para cada campo; o primeiro que existir vence */
@@ -326,6 +377,32 @@ function nfedDiagnostico_() {
         cabecalho: mi.__cabecalho
       };
     })(),
+    /* [1.5] TODAS as abas que poderiam ser a das notas, com a nota
+       que cada uma tirou. Sem isto, quando a escolha errava, não
+       havia como saber o que existia nas outras — e a correção
+       seria feita no escuro. */
+    abasCandidatas: (function () {
+      try {
+        return nfedCandidatasDeAba_().map(function (c) {
+          return {
+            aba: c.nome, pontos: c.pontos, linhas: c.linhas,
+            escolhida: (c.nome === aba.getName()),
+            temColunaDeLista: (c.cabecalho.indexOf('listaitens') > -1 ||
+                               c.cabecalho.indexOf('itensjson') > -1 ||
+                               c.cabecalho.indexOf('produtos') > -1),
+            cabecalho: c.cabecalho
+          };
+        });
+      } catch (e) { return 'erro ao listar: ' + (e && e.message); }
+    })(),
+    comoOsItensEstaoGuardados: (function () {
+      var m = nfedMapa_(aba);
+      if (m.itens) return 'em COLUNA, como lista dentro da linha da nota';
+      var ai = nfedAcharAbaDeItens_();
+      if (ai) return 'em LINHAS, uma por item, na aba ' + ai.getName() +
+                     ' — esta versão ainda não GRAVA assim, só lê';
+      return 'não identificado';
+    })(),
     moduloDeNotasOriginal: (function () {
       for (var i = 0; i < NFED_NOMES_DO_MODULO_DE_NOTAS.length; i++) {
         if (nfedGlobal_(NFED_NOMES_DO_MODULO_DE_NOTAS[i])) {
@@ -335,7 +412,7 @@ function nfedDiagnostico_() {
       return 'NAO ENCONTRADO — se a tela de notas parar de carregar, ' +
              'confira se o arquivo do módulo de notas ainda existe no projeto';
     })(),
-    versaoDoArquivo: 'nfed 1.4'
+    versaoDoArquivo: 'nfed 1.5'
   });
 }
 
