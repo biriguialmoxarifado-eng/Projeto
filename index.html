@@ -65199,7 +65199,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 417 · 10/11";
+var ALMOXA_VERSAO = "sistema 419 · 10/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -110912,6 +110912,467 @@ emissao: hoje,
   var relogio = setInterval(function () {
     tentativas++;
     if (B.enxertar() || tentativas > 40) clearInterval(relogio);
+  }, 250);
+})();
+
+
+/* ############################################################
+ * A FOTO DENTRO DO CADASTRO                 busca: [FOTOCAD]
+ * 10/11/2026 · v2 com envio de foto
+ * ------------------------------------------------------------
+ * O QUE FAZ  Mostra a fotografia do colaborador dentro da
+ *            janela de cadastro de usuário, com nome, matrícula
+ *            e de onde a foto veio. Sem foto, iniciais.
+ * ENTRADA    o cadastro aberto na janela e a foto que o
+ *            FOTOCRACHA já carregou do fichário de crachás.
+ * SAÍDA      um retrato no topo da janela.
+ * TAMBÉM FAZ  deixa escolher uma fotografia do computador ou
+ *            tirar pela câmera, e manda ela junto com o
+ *            cadastro quando se clica em Salvar.
+ * NÃO FAZ    não cria rota nova, não altera matrícula, não
+ *            altera vínculo e não grava nada por conta própria.
+ * ------------------------------------------------------------
+ * POR QUE ELE EXISTE
+ *
+ * A janela modalUsuario (linha 15437) não tinha NENHUM campo de
+ * foto — conferido: zero menções a foto, câmera ou imagem no
+ * corpo dela. Quem cadastra não via o rosto de quem cadastrava,
+ * nem sabia se a pessoa já tinha retrato no crachá.
+ *
+ * ------------------------------------------------------------
+ * DE ONDE VEM A FOTO, E POR QUE ISSO IMPORTA
+ *
+ * Do cadastro central, que é a fonte oficial. O FOTOCRACHA já
+ * traz a foto do fichário de crachás junto com usuarios.listar,
+ * então aqui não há segunda consulta a fazer: a imagem já está
+ * na memória quando a janela abre.
+ *
+ * O vínculo é pelo ID do cadastro. Só quando não há id é que a
+ * matrícula serve, e o retrato então vem marcado como vínculo
+ * fraco — porque a tela mostra "162 cadastros · 4 repetidos", e
+ * com cadastro repetido ligar foto por matrícula pode colocar o
+ * rosto de uma pessoa no cadastro de outra.
+ *
+ * Nome NUNCA liga foto. Homônimo existe, e a regra da casa é
+ * clara: não vincular só pelo nome.
+ *
+ * ------------------------------------------------------------
+ * COMO A FOTO É ENVIADA, SEM ROTA NOVA
+ *
+ * O crachá já fazia isso, e eu reuso o caminho dele inteiro:
+ *
+ *   pcEncolherImagem(arquivo)   encolhe e devolve a imagem
+ *                               pronta — é o que o pré-cadastro
+ *                               usa desde sempre
+ *   salvarUsuarioNoCore(dados)  o mesmo envio que já grava o
+ *                               cadastro; a foto entra no campo
+ *                               "foto", que já é coluna da aba
+ *                               USUARIOS
+ *
+ * Nenhuma ação nova foi inventada. A foto viaja junto com o
+ * resto do cadastro, no clique de Salvar que já existia.
+ *
+ * ------------------------------------------------------------
+ * POR QUE A FOTO APARECE NOS OUTROS MÓDULOS SOZINHA
+ *
+ * Porque o cadastro central é a fonte. Gravada ali, o
+ * FOTOCRACHA a entrega em usuarios.listar, e as telas que já
+ * leem dali — usuários, ficha de EPI, entrega de EPI — passam a
+ * mostrá-la sem nenhuma mudança. É a regra de sincronização do
+ * pedido: uma referência só, consumida por todos.
+ *
+ * ------------------------------------------------------------
+ * O QUE ELE NÃO PROMETE
+ *
+ * Se o módulo de usuários do Core ignorar o campo "foto", a
+ * imagem não fica. Este bloco não tem como saber de antemão —
+ * então ele NÃO diz que salvou: quem diz é a resposta do Core,
+ * e a tela recarrega mostrando o resultado de verdade.
+ * ############################################################ */
+
+(function () {
+  if (typeof window === "undefined") return;
+  if (window.FOTOCAD && window.FOTOCAD.ligado) return;
+
+  var F = {};
+  F.ligado = true;
+  F.selo = "FOTOCAD 10/11";
+
+  function lp(v) { return String(v === null || v === undefined ? "" : v).trim(); }
+  function esc(s) {
+    return lp(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  F.chaveMat = function (v) {
+    return lp(v).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+  };
+
+  F.cadastros = function () {
+    var fora = [];
+    try {
+      if (window.USUARIOS_TELA && window.USUARIOS_TELA.length) {
+        fora = fora.concat(window.USUARIOS_TELA);
+      }
+    } catch (e) {}
+    try {
+      if (typeof MOCK === "object" && MOCK && MOCK.usuarios && MOCK.usuarios.length) {
+        fora = fora.concat(MOCK.usuarios);
+      }
+    } catch (e) {}
+    return fora;
+  };
+
+  /* O ID manda. A matrícula só quando não há id, e aí o vínculo
+     é declarado fraco. O nome nunca liga nada. */
+  F.achar = function (id, matricula) {
+    var todos = F.cadastros();
+    var i, u;
+
+    var alvoId = lp(id);
+    if (alvoId) {
+      for (i = 0; i < todos.length; i++) {
+        u = todos[i];
+        if (u && lp(u.id) === alvoId) return { pessoa: u, vinculo: "id" };
+      }
+    }
+
+    var m = F.chaveMat(matricula);
+    if (m) {
+      var achados = [];
+      for (i = 0; i < todos.length; i++) {
+        u = todos[i];
+        if (u && F.chaveMat(u.matricula) === m) achados.push(u);
+      }
+      if (achados.length === 1) return { pessoa: achados[0], vinculo: "matricula" };
+      if (achados.length > 1) {
+        return { pessoa: achados[0], vinculo: "matricula-repetida", quantos: achados.length };
+      }
+    }
+    return { pessoa: null, vinculo: "nenhum" };
+  };
+
+  F.fotoDe = function (u) {
+    if (!u) return "";
+    return lp(u.foto) || lp(u.fotoUrl) || lp(u.crachaFotoUrl);
+  };
+
+  F.iniciais = function (nome) {
+    var p = lp(nome).split(/\s+/).filter(function (x) { return x.length > 1; });
+    if (!p.length) return "?";
+    return (p[0].charAt(0) + (p.length > 1 ? p[p.length - 1].charAt(0) : "")).toUpperCase();
+  };
+
+  F.html = function (nome, matricula, achado) {
+    var u = achado.pessoa;
+    var foto = F.fotoDe(u);
+    var nomeFinal = lp(nome) || (u ? lp(u.nome) : "");
+
+    var retrato = foto
+      ? '<img src="' + esc(foto) + '" alt="" style="width:72px;height:72px;' +
+        'border-radius:50%;object-fit:cover;flex:0 0 auto">'
+      : '<span style="width:72px;height:72px;border-radius:50%;flex:0 0 auto;' +
+        'display:flex;align-items:center;justify-content:center;font-weight:700;' +
+        'font-size:23px;background:var(--fundo-3,#E8EDF3);color:var(--texto-3,#667)">' +
+        esc(F.iniciais(nomeFinal)) + '</span>';
+
+    var origem, aviso = "";
+    if (!foto) {
+      origem = "Sem fotografia. As iniciais aparecem no lugar — e isso não " +
+               "impede cadastrar, entregar EPI nem emitir crachá.";
+    } else if (achado.vinculo === "id") {
+      origem = "Fotografia do cadastro central, ligada pelo identificador deste cadastro.";
+    } else if (achado.vinculo === "matricula") {
+      origem = "Fotografia ligada pela matrícula " + esc(lp(matricula)) + ".";
+    } else {
+      origem = "Fotografia ligada pela matrícula.";
+    }
+
+    if (achado.vinculo === "matricula-repetida") {
+      aviso = '<div style="margin-top:8px;padding:7px 10px;border-radius:5px;' +
+        'background:rgba(201,146,46,.14);border:1px solid rgba(201,146,46,.45);' +
+        'font-size:12px;line-height:1.45">' +
+        '<b>Atenção: há ' + achado.quantos + ' cadastros com esta mesma matrícula.</b> ' +
+        'A fotografia acima pode ser de outro deles. Confira antes de usar este ' +
+        'retrato em crachá ou ficha.</div>';
+    }
+
+    /* a foto que a pessoa acabou de escolher vence a do cadastro,
+       para ela ver o resultado antes de salvar */
+    if (F.escolhida) {
+      retrato = '<img src="' + esc(F.escolhida) + '" alt="" style="width:72px;' +
+        'height:72px;border-radius:50%;object-fit:cover;flex:0 0 auto;' +
+        'outline:2px solid var(--primaria,#3d7fc1);outline-offset:2px">';
+      origem = 'Fotografia nova, escolhida agora. <b>Ela só será gravada quando ' +
+               'o senhor clicar em Salvar</b> nesta janela.';
+      aviso = '';
+    }
+
+    var rotulo = (foto || F.escolhida) ? 'Trocar fotografia' : 'Adicionar fotografia';
+
+    var botoes =
+      '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' +
+      '<button type="button" class="btn btn-ghost" data-fotocad-arquivo ' +
+      'style="font-size:12.5px">' + esc(rotulo) + '</button>' +
+      '<button type="button" class="btn btn-ghost" data-fotocad-camera ' +
+      'style="font-size:12.5px">Usar a câmera</button>' +
+      (F.escolhida ? '<button type="button" class="btn btn-ghost" ' +
+        'data-fotocad-desfazer style="font-size:12.5px">Desfazer</button>' : '') +
+      '</div>' +
+      '<input type="file" accept="image/*" data-fotocad-entrada ' +
+      'style="display:none">' +
+      '<input type="file" accept="image/*" capture="user" ' +
+      'data-fotocad-entrada-camera style="display:none">' +
+      '<div data-fotocad-erro></div>';
+
+    return '<div class="card mb12" data-fotocad><div class="card-body" ' +
+      'style="padding:12px;display:flex;gap:14px;align-items:flex-start">' +
+      retrato +
+      '<div style="flex:1 1 auto;min-width:0">' +
+      '<div style="font-weight:700;font-size:14px">' +
+      esc(nomeFinal || "(sem nome)") + '</div>' +
+      '<div style="font-size:12px;color:var(--texto-3);margin-top:2px">' +
+      (lp(matricula) ? 'Matrícula ' + esc(lp(matricula)) : 'Sem matrícula') + '</div>' +
+      '<div style="font-size:12px;margin-top:6px;line-height:1.45">' + origem + '</div>' +
+      aviso + botoes +
+      '</div></div></div>';
+  };
+
+  /* ---------- escolher a foto ---------- */
+
+  F.escolhida = "";          /* data URL da foto nova, antes de salvar */
+
+  F.dizerErro = function (texto) {
+    var caixa = document.querySelector("[data-fotocad-erro]");
+    if (!caixa) return;
+    caixa.innerHTML = texto
+      ? '<div style="margin-top:8px;padding:7px 10px;border-radius:5px;' +
+        'background:rgba(181,71,60,.14);border:1px solid rgba(181,71,60,.45);' +
+        'font-size:12px">' + esc(texto) + '</div>'
+      : '';
+  };
+
+  /* o MESMO encolhedor que o crachá usa. Se ele não existir neste
+     sistema, eu não invento outro: aviso e paro. */
+  F.prepararImagem = function (arquivo) {
+    if (typeof window.pcEncolherImagem === "function") {
+      return window.pcEncolherImagem(arquivo);
+    }
+    return Promise.reject(new Error(
+      "O preparador de imagens do sistema não está disponível nesta tela."));
+  };
+
+  F.receber = function (arquivo) {
+    if (!arquivo) return;
+    if (!/^image\//.test(String(arquivo.type || ""))) {
+      F.dizerErro("Esse arquivo não é uma imagem.");
+      return;
+    }
+    F.dizerErro("");
+    F.prepararImagem(arquivo).then(function (url) {
+      F.escolhida = String(url || "");
+      F.forcar = true;
+      F.pintar();
+    }, function (e) {
+      F.dizerErro((e && e.message) || "Não consegui preparar a foto.");
+    });
+  };
+
+  F.ligarBotoes = function (cartao) {
+    if (!cartao || cartao.__ligado) return;
+    cartao.__ligado = true;
+
+    var entrada = cartao.querySelector("[data-fotocad-entrada]");
+    var camera = cartao.querySelector("[data-fotocad-entrada-camera]");
+
+    var bArq = cartao.querySelector("[data-fotocad-arquivo]");
+    if (bArq && entrada) bArq.addEventListener("click", function (ev) {
+      ev.preventDefault(); entrada.click();
+    });
+
+    var bCam = cartao.querySelector("[data-fotocad-camera]");
+    if (bCam && camera) bCam.addEventListener("click", function (ev) {
+      ev.preventDefault(); camera.click();
+    });
+
+    var bDes = cartao.querySelector("[data-fotocad-desfazer]");
+    if (bDes) bDes.addEventListener("click", function (ev) {
+      ev.preventDefault();
+      F.escolhida = ""; F.forcar = true; F.pintar();
+    });
+
+    [entrada, camera].forEach(function (el) {
+      if (!el) return;
+      el.addEventListener("change", function () {
+        F.receber(el.files && el.files[0]);
+      });
+    });
+  };
+
+  /* ---------- desenhar dentro da janela ---------- */
+  F.pintar = function () {
+    var campoNome = document.getElementById("usNome");
+    if (!campoNome) return false;
+
+    /* a janela do cadastro: subo até o corpo dela */
+    var corpo = campoNome.closest ? campoNome.closest(".modal-body, .card-body, form") : null;
+    var grade = campoNome.closest ? campoNome.closest(".grid") : null;
+    var ancora = grade || (campoNome.closest ? campoNome.closest(".field") : null) || campoNome;
+    var pai = ancora.parentNode;
+    if (!pai) return false;
+
+    var campoMat = document.getElementById("usMat");
+    var matricula = campoMat ? campoMat.value : "";
+    var nome = campoNome.value;
+
+    /* o id do cadastro, quando a janela guarda */
+    var id = "";
+    try {
+      var guardado = (corpo || document).querySelector("[data-usuario-id]");
+      if (guardado) id = guardado.getAttribute("data-usuario-id");
+      if (!id && window.FOTOCAD_ID) id = window.FOTOCAD_ID;
+    } catch (e) {}
+
+    var achado = F.achar(id, matricula);
+    var chave = lp(id) + "|" + F.chaveMat(matricula) + "|" + lp(nome);
+
+    var atual = pai.querySelector("[data-fotocad]");
+    if (atual && !F.forcar &&
+        atual.getAttribute("data-fotocad-chave") === chave) return true;
+    F.forcar = false;
+
+    var tmp = document.createElement("div");
+    tmp.innerHTML = F.html(nome, matricula, achado);
+    var el = tmp.firstChild;
+    el.setAttribute("data-fotocad-chave", chave);
+
+    if (atual) atual.parentNode.replaceChild(el, atual);
+    else pai.insertBefore(el, ancora);
+    F.ligarBotoes(el);
+    return true;
+  };
+
+  F.observador = null;
+  F.observar = function () {
+    if (F.observador || typeof MutationObserver === "undefined") return;
+    F.observador = new MutationObserver(function () {
+      try { if (document.getElementById("usNome")) F.pintar(); } catch (e) {}
+    });
+    F.observador.observe(document.body, { childList: true, subtree: true });
+  };
+
+  F.ouvir = function () {
+    document.addEventListener("input", function (ev) {
+      var a = ev && ev.target;
+      if (!a || (a.id !== "usNome" && a.id !== "usMat")) return;
+      try { F.pintar(); } catch (e) {}
+    }, true);
+  };
+
+  /* ---------- a foto viaja junto com o cadastro ----------
+     Sem rota nova: o mesmo salvarUsuarioNoCore que a janela já
+     chamava, com o campo "foto" acrescentado ao que ela envia.
+     "foto" já é coluna da aba USUARIOS. */
+  F.enxertarSalvar = function () {
+    if (typeof window.salvarUsuarioNoCore !== "function") return false;
+    if (window.salvarUsuarioNoCore.__fotocad) return true;
+
+    var antigo = window.salvarUsuarioNoCore;
+    F.antigoSalvar = antigo;
+
+    var novo = function (dados) {
+      try {
+        if (F.escolhida && dados && typeof dados === "object") {
+          dados.foto = F.escolhida;
+          F.enviada = F.escolhida;
+        }
+      } catch (e) {}
+
+      var r = antigo.apply(this, arguments);
+
+      /* só limpo depois que o Core responde ok. Se falhar, a foto
+         continua escolhida e a pessoa pode tentar de novo sem
+         procurar o arquivo outra vez. */
+      if (r && typeof r.then === "function") {
+        return r.then(function (resp) {
+          try {
+            if (resp && resp.ok && F.enviada) {
+              F.guardarNaMemoria(dados, F.enviada);
+              F.escolhida = ""; F.enviada = "";
+            }
+          } catch (e) {}
+          return resp;
+        });
+      }
+      return r;
+    };
+    novo.__fotocad = true;
+    window.salvarUsuarioNoCore = novo;
+    return true;
+  };
+
+  /* o cadastro em memória recebe a foto nova, para as outras telas
+     já a mostrarem sem esperar o próximo carregamento */
+  F.guardarNaMemoria = function (dados, url) {
+    var id = lp(dados && dados.id);
+    var mat = F.chaveMat(dados && dados.matricula);
+    var listas = [];
+    try { if (window.USUARIOS_TELA) listas.push(window.USUARIOS_TELA); } catch (e) {}
+    try { if (typeof MOCK === "object" && MOCK && MOCK.usuarios) listas.push(MOCK.usuarios); } catch (e) {}
+    for (var l = 0; l < listas.length; l++) {
+      for (var i = 0; i < listas[l].length; i++) {
+        var u = listas[l][i];
+        if (!u) continue;
+        var bate = (id && lp(u.id) === id) ||
+                   (!id && mat && F.chaveMat(u.matricula) === mat);
+        if (bate) u.foto = url;
+      }
+    }
+  };
+
+  F.enxertar = function () {
+    F.enxertarSalvar();
+    if (typeof window.modalUsuario !== "function") return false;
+    if (window.modalUsuario.__fotocad) return true;
+
+    var antiga = window.modalUsuario;
+    F.antigaJanela = antiga;
+
+    var nova = function (id) {
+      try { window.FOTOCAD_ID = (id === undefined || id === null) ? "" : String(id); } catch (e) {}
+      /* janela nova, escolha zerada: foto de um não vai para outro */
+      F.escolhida = ""; F.enviada = ""; F.forcar = true;
+      var r = antiga.apply(this, arguments);
+      try {
+        F.pintar();
+        setTimeout(function () { try { F.pintar(); } catch (e) {} }, 60);
+      } catch (e) {}
+      return r;
+    };
+    nova.__fotocad = true;
+    window.modalUsuario = nova;
+    return true;
+  };
+
+  F.restaurar = function () {
+    if (F.antigoSalvar) window.salvarUsuarioNoCore = F.antigoSalvar;
+    if (F.antigaJanela) window.modalUsuario = F.antigaJanela;
+    if (F.observador) { F.observador.disconnect(); F.observador = null; }
+    F.ligado = false;
+  };
+
+  F.iniciar = function () { F.enxertar(); F.ouvir(); F.observar(); };
+
+  window.FOTOCAD = F;
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function () { F.iniciar(); });
+  } else { F.iniciar(); }
+
+  var t = 0;
+  var relogio = setInterval(function () {
+    t++;
+    if (F.enxertar() || t > 40) clearInterval(relogio);
   }, 250);
 })();
 
