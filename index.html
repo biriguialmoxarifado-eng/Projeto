@@ -65199,7 +65199,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 419 · 10/11";
+var ALMOXA_VERSAO = "sistema 427 · 13/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -111249,6 +111249,7 @@ emissao: hoje,
     if (atual) atual.parentNode.replaceChild(el, atual);
     else pai.insertBefore(el, ancora);
     F.ligarBotoes(el);
+    if (F.recado) F.avisar(F.recado);
     return true;
   };
 
@@ -111281,34 +111282,98 @@ emissao: hoje,
     F.antigoSalvar = antigo;
 
     var novo = function (dados) {
+      var comFoto = false;
       try {
         if (F.escolhida && dados && typeof dados === "object") {
           dados.foto = F.escolhida;
           F.enviada = F.escolhida;
+          comFoto = true;
         }
       } catch (e) {}
 
-      var r = antigo.apply(this, arguments);
+      var dono = this;
+      var r = antigo.apply(dono, arguments);
 
-      /* só limpo depois que o Core responde ok. Se falhar, a foto
-         continua escolhida e a pessoa pode tentar de novo sem
-         procurar o arquivo outra vez. */
-      if (r && typeof r.then === "function") {
-        return r.then(function (resp) {
+      if (!r || typeof r.then !== "function") return r;
+
+      return r.then(function (resp) {
+        /* deu certo: a foto é dada como gravada e o cadastro em
+           memória recebe ela */
+        if (resp && resp.ok) {
           try {
-            if (resp && resp.ok && F.enviada) {
+            if (F.enviada) {
               F.guardarNaMemoria(dados, F.enviada);
               F.escolhida = ""; F.enviada = "";
             }
+            F.avisar("");
           } catch (e) {}
           return resp;
-        });
-      }
-      return r;
+        }
+
+        /* falhou sem foto anexada: o problema não é meu, devolvo */
+        if (!comFoto) return resp;
+
+        /* falhou COM foto. Só vale tentar de novo quando o servidor
+           recusou o CONTEÚDO do envio. Se ele gravou e não confirmou,
+           repetir seria gravar duas vezes — e isso eu não faço. */
+        if (!F.recusouOConteudo(resp)) return resp;
+
+        var semFoto = {};
+        try {
+          Object.keys(dados).forEach(function (k) {
+            if (k !== "foto") semFoto[k] = dados[k];
+          });
+        } catch (e) { return resp; }
+
+        return Promise.resolve(antigo.call(dono, semFoto)).then(function (r2) {
+          if (r2 && r2.ok) {
+            /* ACHAMOS: o cadastro passa, a foto não. O campo "foto"
+               é o que o servidor não aceita. */
+            F.fotoRecusada = true;
+            F.avisar("O cadastro foi salvo, mas o servidor NÃO aceitou a " +
+              "fotografia. O resto das alterações está gravado. A foto " +
+              "continua escolhida aqui — ela precisa que o módulo de " +
+              "usuários do Core passe a aceitar o campo \"foto\".");
+            try { r2.fotoRecusada = true; } catch (e) {}
+            return r2;
+          }
+          /* falhou dos dois jeitos: a rota de gravação é que está
+             quebrada, e a foto não tem nada com isso */
+          F.avisar("O servidor recusou o cadastro mesmo SEM a fotografia. " +
+            "Então o problema não é a foto: é a rota de gravação de " +
+            "usuários do Core.");
+          return resp;
+        }, function () { return resp; });
+      });
     };
     novo.__fotocad = true;
     window.salvarUsuarioNoCore = novo;
     return true;
+  };
+
+  /* O servidor recusou o CONTEÚDO, ou gravou e não confirmou?
+     Só no primeiro caso vale tentar de novo — no segundo, repetir
+     gravaria duas vezes. */
+  F.recusouOConteudo = function (resp) {
+    if (!resp) return false;
+    var codigo = lp(resp.codigo).toUpperCase();
+    var msg = lp(resp.mensagem);
+    /* gravou e não confirmou, ou linha mudou: NÃO repetir */
+    if (/NAO_CONFIRMADA|NÃO_CONFIRMADA|LINHA_MUDOU|OCUPADO/.test(codigo)) return false;
+    if (/CAMPOS_OBRIGATORIOS|OBRIGATORIO|CAMPO/.test(codigo)) return true;
+    if (/obrigat[óo]rio|campo/i.test(msg)) return true;
+    return false;
+  };
+
+  F.avisar = function (texto) {
+    F.recado = texto || "";
+    var caixa = document.querySelector("[data-fotocad-erro]");
+    if (!caixa) return;
+    caixa.innerHTML = texto
+      ? '<div style="margin-top:8px;padding:8px 10px;border-radius:5px;' +
+        'background:rgba(201,146,46,.14);border:1px solid rgba(201,146,46,.45);' +
+        'font-size:12px;line-height:1.45">' + esc(texto) + '</div>'
+      : '';
   };
 
   /* o cadastro em memória recebe a foto nova, para as outras telas
@@ -111342,6 +111407,7 @@ emissao: hoje,
       try { window.FOTOCAD_ID = (id === undefined || id === null) ? "" : String(id); } catch (e) {}
       /* janela nova, escolha zerada: foto de um não vai para outro */
       F.escolhida = ""; F.enviada = ""; F.forcar = true;
+      F.recado = ""; F.fotoRecusada = false;
       var r = antiga.apply(this, arguments);
       try {
         F.pintar();
@@ -111376,6 +111442,1963 @@ emissao: hoje,
   }, 250);
 })();
 
+
+/* ############################################################
+ * CENTRAL DE CRACHÁS PENDENTES          busca: [CENTRALCRACHA]
+ * 11/11/2026
+ * ------------------------------------------------------------
+ * O QUE FAZ  Mostra quem do cadastro de Usuários ainda não tem
+ *            crachá, com foto, nome, matrícula, cargo e o que
+ *            falta no cadastro de cada um. Gera o crachá de um
+ *            ou de todos os pendentes.
+ * ENTRADA    usuarios.listar e cracha.listar — as duas que o
+ *            sistema já chama. Nenhum cadastro novo.
+ * SAÍDA      cracha.emitir, a mesma ação que a tela de crachá
+ *            já usava.
+ * NÃO FAZ    não cria cadastro, não cria tabela, não cria rota,
+ *            não inventa dado, não muda o modelo do crachá e
+ *            não mexe em quem já tem crachá.
+ * ------------------------------------------------------------
+ * O QUE ELE REUSA, INTEIRO
+ *
+ *   crachaPar(d, true)     o modelo visual de frente e verso
+ *                          que já existe (linha 58359). Não
+ *                          desenhei crachá nenhum.
+ *   cracha.emitir          a gravação que a tela de crachá já
+ *                          fazia. Campos: colaborador,
+ *                          matricula, cpf, funcao, setor, obra,
+ *                          unidade.
+ *   usuarios.listar        o cadastro central, com as fotos que
+ *                          o [FOTOCRACHA] já junta.
+ *
+ * ------------------------------------------------------------
+ * COMO ELE SABE QUEM NÃO TEM CRACHÁ
+ *
+ * Pelo ID permanente primeiro. Depois pela matrícula. E pelo
+ * NOME só quando aquele nome aparece uma vez de cada lado —
+ * homônimo nunca casa sozinho, vai para "conferir à mão".
+ *
+ * É a mesma regra do [CONFCAD] e do [FOTOCRACHA]. Não invento
+ * uma terceira: três regras diferentes para a mesma pergunta é
+ * como se produz cadastro duplicado.
+ *
+ * ------------------------------------------------------------
+ * O QR CODE
+ *
+ * Quem gera o código é o Core, na emissão, e ele volta em
+ * res.dados.codigo. Este arquivo NÃO monta QR e NÃO manda
+ * código nenhum — então trocar a matrícula de alguém não mexe
+ * no QR, que é o que o pedido exige.
+ *
+ * ------------------------------------------------------------
+ * MATRÍCULA PROVISÓRIA
+ *
+ * Não impede gerar. O crachá sai com a matrícula que existe
+ * hoje e a pessoa aparece marcada como provisória, para quem
+ * emite saber que aquele número ainda vai mudar.
+ * ############################################################ */
+
+(function () {
+  if (typeof window === "undefined") return;
+  if (window.CENTRALCRACHA && window.CENTRALCRACHA.ligado) return;
+
+  var C = {};
+  C.ligado = true;
+  C.selo = "CENTRALCRACHA 11/11 · envelope + motor";
+  C.dados = null;
+  C.carregando = false;
+  C.erro = "";
+
+  function lp(v) { return String(v === null || v === undefined ? "" : v).trim(); }
+  function esc(s) {
+    return (typeof U !== "undefined" && U.esc) ? U.esc(s)
+      : lp(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function arranjo_(v) {
+    return Object.prototype.toString.call(v) === "[object Array]" ? v : null;
+  }
+
+  /* ============================================================
+     DE ONDE SAI A LISTA DENTRO DA RESPOSTA
+
+     [11/11 noite] AQUI ESTAVA O ERRO QUE FEZ 157 PESSOAS
+     APARECEREM SEM CRACHÁ.
+
+     A rota cracha.listar não devolve uma lista: devolve
+     { crachas: [...], totais: {...} }. Eu tratava "dados" como
+     se fosse o array, pegava zero crachás, e com zero crachás
+     ninguém casava — todo mundo virava pendente. A tela de
+     Crachás e Acesso sempre leu certo (r.dados.crachas); era eu
+     que lia errado.
+
+     Agora eu desembrulho: se não for array, procuro a lista
+     dentro, pelos nomes que o sistema usa de verdade.
+     ============================================================ */
+  function lista_(v) {
+    var direto = arranjo_(v);
+    if (direto) return direto;
+    if (v && typeof v === "object") {
+      var portas = ["crachas", "usuarios", "lista", "itens", "registros", "dados", "linhas"];
+      for (var i = 0; i < portas.length; i++) {
+        var dentro = arranjo_(v[portas[i]]);
+        if (dentro) return dentro;
+      }
+    }
+    if (typeof listaSegura === "function") {
+      var ls = arranjo_(listaSegura(v));
+      if (ls) return ls;
+    }
+    return [];
+  }
+
+  C.chave = function (v) {
+    return lp(v).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/^0+/, "");
+  };
+  C.chaveNome = function (v) {
+    return lp(v).toUpperCase()
+      .replace(/[ÁÀÂÃÄ]/g, "A").replace(/[ÉÈÊË]/g, "E").replace(/[ÍÌÎÏ]/g, "I")
+      .replace(/[ÓÒÔÕÖ]/g, "O").replace(/[ÚÙÛÜ]/g, "U").replace(/Ç/g, "C")
+      .replace(/[^A-Z ]/g, "").replace(/\s+/g, " ").trim();
+  };
+
+  C.excluido = function (u) {
+    return /^EXCLU/.test(lp(u && u.status).toUpperCase());
+  };
+
+  C.fotoDe = function (u) {
+    return lp(u && (u.foto || u.fotoUrl || u.crachaFotoUrl));
+  };
+
+  /* matrícula que ainda vai mudar: curta demais ou marcada */
+  C.provisoria = function (u) {
+    if (!u) return false;
+    if (u.matriculaProvisoria === true) return true;
+    if (/provis/i.test(lp(u.tipoMatricula) + " " + lp(u.origem))) return true;
+    var m = lp(u.matricula);
+    if (!m) return false;
+    /* só dígitos e curta: 35, 539, 6051 ao lado de 408215 */
+    if (/^\d{1,4}$/.test(m)) return true;
+    /* com letra no meio: MP-0590, MP-0539 — o padrão definitivo
+       da casa é só número (408214). Isto é rótulo de tela; o
+       casamento continua sendo por id, matrícula e CPF. */
+    if (/[A-Za-z]/.test(m)) return true;
+    return false;
+  };
+
+  /* ============================================================
+     DE ONDE VEM CADA COISA NO REGISTRO DO CRACHÁ
+
+     O fichário pode chamar as colunas de vários jeitos. Procuro
+     por todos os nomes conhecidos — e NUNCA uso c.id como dono,
+     porque esse costuma ser o id DO CRACHÁ, não o da pessoa:
+     usar ele casaria gente errada.
+     ============================================================ */
+  C.idDoDono = function (c) {
+    if (!c) return "";
+    return lp(c.usuarioId || c.idUsuario || c.usuario_id ||
+              c.idColaborador || c.colaboradorId || c.colaborador_id ||
+              c.idPessoa || c.pessoaId);
+  };
+
+  C.matriculaDoCracha = function (c) {
+    if (!c) return "";
+    return lp(c.matricula || c.matricula_colaborador || c.matriculaColaborador ||
+              c.mat || c.registro || c.cracha_matricula);
+  };
+
+  C.nomeDoCracha = function (c) {
+    if (!c) return "";
+    return lp(c.colaborador || c.nome || c.funcionario || c.nomeColaborador ||
+              c.pessoa || c.titular);
+  };
+
+  /* um retrato do registro para o relatório, sem despejar tudo */
+  C.amostra = function (c) {
+    var fora = {};
+    try {
+      Object.keys(c).slice(0, 14).forEach(function (k) {
+        var v = c[k];
+        if (v === null || v === undefined) { fora[k] = ""; return; }
+        var t = String(v);
+        fora[k] = t.length > 28 ? t.slice(0, 28) + "…" : t;
+      });
+    } catch (e) {}
+    return fora;
+  };
+
+  /* ============================================================
+     FONTE 1 — O CRACHÁ ESCRITO NO PRÓPRIO CADASTRO
+
+     A coluna "cracha" do cadastro nem sempre traz número. Às
+     vezes traz texto — "A DISPOSIÇÃO SMS", "TOU INTEGRAÇÃO
+     21/09". Isso NÃO é ausência de crachá: é um recado de que o
+     número ainda vai sair. A mesma leitura que o sistema já faz
+     na linha 64477; não invento outra.
+     ============================================================ */
+  C.crachaNoCadastro = function (u) {
+    var t = lp(u && (u.cracha || u.crachaNumero || u.numeroCracha));
+    if (!t) return { numero: "", pendente: false, observacao: "" };
+    if (/^\d[\d.\-\/ ]*$/.test(t)) {
+      return { numero: t.replace(/[^\d]/g, ""), pendente: false, observacao: "" };
+    }
+    return { numero: "", pendente: true, observacao: t };
+  };
+
+  /* ============================================================
+     DEDUPLICAÇÃO — uma pessoa aparece UMA vez
+
+     Pelo ID permanente. Depois pela matrícula. Depois pelo CPF.
+     O NOME nunca junta ninguém sozinho: dois homônimos viram
+     dois casos de revisão, não um cadastro só.
+     ============================================================ */
+  C.cpfChave = function (v) {
+    var d = lp(v).replace(/\D/g, "");
+    return d.length === 11 ? d : "";
+  };
+
+  C.deduplicar = function (usuarios) {
+    /* O id identifica o REGISTRO, não a pessoa: dois cadastros da
+       mesma pessoa têm ids diferentes. Então eu não escolho "a
+       chave mais forte" — eu olho TODAS as chaves que a pessoa
+       tem (id, CPF, matrícula) e, se qualquer uma delas já foi
+       vista, é a mesma pessoa. O nome fica fora desta conta. */
+    var mapa = {}, grupos = [], revisao = [], duplicados = [];
+
+    usuarios.forEach(function (u) {
+      var chaves = [];
+      var id = lp(u.id); if (id) chaves.push({ k: "ID:" + id, por: "id" });
+      var cpf = C.cpfChave(u.cpf); if (cpf) chaves.push({ k: "CPF:" + cpf, por: "CPF" });
+      var m = C.chave(u.matricula); if (m) chaves.push({ k: "MAT:" + m, por: "matrícula" });
+
+      if (!chaves.length) {
+        revisao.push({ usuario: u, motivo: "sem id, sem CPF e sem matrícula — " +
+          "não há como provar que é uma pessoa diferente de outra" });
+        return;
+      }
+
+      var g = null, por = "";
+      for (var i = 0; i < chaves.length; i++) {
+        if (mapa[chaves[i].k]) { g = mapa[chaves[i].k]; por = chaves[i].por; break; }
+      }
+      if (!g) {
+        g = { usuario: u, membros: [u], por: "" };
+        grupos.push(g);
+      } else {
+        g.membros.push(u);
+        if (!g.por) g.por = por;
+      }
+      chaves.forEach(function (c) { if (!mapa[c.k]) mapa[c.k] = g; });
+    });
+
+    grupos.forEach(function (g) {
+      if (g.membros.length < 2) return;
+
+      var nomes = {};
+      g.membros.forEach(function (x) {
+        var n = C.chaveNome(x.nome || x.colaborador);
+        if (n) nomes[n] = 1;
+      });
+      var batem = Object.keys(nomes).length <= 1;
+
+      duplicados.push({
+        quantos: g.membros.length,
+        por: g.por || "id",
+        ids: g.membros.map(function (x) { return lp(x.id); }).filter(Boolean),
+        matriculas: g.membros.map(function (x) { return lp(x.matricula); }).filter(Boolean),
+        nomes: g.membros.map(function (x) { return lp(x.nome) || lp(x.colaborador); }),
+        nomesBatem: batem
+      });
+
+      /* mesma chave forte, nomes diferentes: isso não é duplicidade
+         resolvida, é conflito de identidade. Não escolho entre os
+         dois — nem gero crachá para nenhum deles. */
+      if (!batem) {
+        g.conflito = true;
+        revisao.push({ usuario: g.usuario,
+          motivo: "dois cadastros com a mesma " + (g.por || "chave") +
+                  " e nomes diferentes: " +
+                  g.membros.map(function (x) { return lp(x.nome); }).join(" / ") });
+      }
+    });
+
+    return {
+      pessoas: grupos.filter(function (g) { return !g.conflito; })
+                     .map(function (g) { return g.usuario; }),
+      duplicados: duplicados,
+      revisao: revisao
+    };
+  };
+
+  /* ============================================================
+     FONTE 3 — a própria conferência do sistema
+
+     O [CONFCAD] já calcula "SEM CRACHÁ" e publica a função em
+     window.CONFCAD.cruzar. Eu NÃO reescrevo aquela regra: eu
+     chamo a dele e uso o resultado. Se ela não estiver nesta
+     página, digo que a terceira fonte faltou — não finjo que
+     confirmei.
+     ------------------------------------------------------------ */
+  C.conferencia = function (usuarios, crachas) {
+    try {
+      if (typeof window === "undefined" || !window.CONFCAD ||
+          typeof window.CONFCAD.cruzar !== "function") {
+        return { disponivel: false, chaves: {}, quantos: 0 };
+      }
+      var r = window.CONFCAD.cruzar(usuarios, crachas);
+      var lista = (r && r.semCracha) || [];
+      var ch = {};
+      lista.forEach(function (reg) {
+        var u = reg && reg.u;
+        if (!u) return;
+        var id = lp(u.id), m = C.chave(u.matricula), n = C.chaveNome(u.nome);
+        if (id) ch["ID:" + id] = 1;
+        if (m) ch["MAT:" + m] = 1;
+        if (n) ch["NOME:" + n] = 1;
+      });
+      return { disponivel: true, chaves: ch, quantos: lista.length };
+    } catch (e) {
+      return { disponivel: false, chaves: {}, quantos: 0, erro: lp(e && e.message) };
+    }
+  };
+
+  C.naConferencia = function (conf, u) {
+    if (!conf.disponivel) return false;
+    var id = lp(u.id), m = C.chave(u.matricula), n = C.chaveNome(u.nome || u.colaborador);
+    if (id && conf.chaves["ID:" + id]) return true;
+    if (m && conf.chaves["MAT:" + m]) return true;
+    if (n && conf.chaves["NOME:" + n]) return true;
+    return false;
+  };
+
+  /* o crachá do fichário está completo? */
+  C.faltasNoCracha = function (c) {
+    var f = [];
+    if (!lp(c.foto || c.imagem || c.fotoUrl) && !c.temFoto) f.push("sem fotografia");
+    if (!lp(c.funcao) && !lp(c.cargo)) f.push("sem cargo");
+    if (!C.matriculaDoCracha(c)) f.push("sem matrícula");
+    return f;
+  };
+
+  /* ============================================================
+     O MOTOR DE APROXIMAÇÃO
+
+     Para quem não casou por nenhuma chave forte. Ele NÃO decide
+     nada: junta as pistas e me devolve "possíveis", com o motivo
+     escrito, para o Ismael conferir. Nenhuma delas gera crachá
+     nem regulariza sozinha.
+
+     As pistas são as que ele mesmo listou: nome parecido, nome
+     contido no outro, mesmo primeiro e último sobrenome, e
+     matrícula com os mesmos dígitos (provisória × definitiva).
+     ============================================================ */
+  C.pedacos = function (nome) {
+    return C.chaveNome(nome).split(" ").filter(function (x) { return x.length > 2; });
+  };
+
+  C.soDigitos = function (v) { return lp(v).replace(/\D/g, "").replace(/^0+/, ""); };
+
+  C.pista = function (u, c) {
+    var nu = C.chaveNome(u.nome || u.colaborador);
+    var nc = C.chaveNome(C.nomeDoCracha(c));
+    if (!nu || !nc) return null;
+
+    var mu = C.soDigitos(u.matricula);
+    var mc = C.soDigitos(C.matriculaDoCracha(c));
+
+    /* mesmos dígitos de matrícula: MP-0590 e 0590 */
+    if (mu && mc && mu === mc) {
+      return { forca: 4, motivo: "a matrícula tem os mesmos dígitos (" + mu + ")" };
+    }
+
+    if (nu === nc) return { forca: 5, motivo: "o nome é igual" };
+
+    /* um nome dentro do outro: MICHELE × MICHELE ZULEIDE */
+    if (nu.indexOf(nc) === 0 || nc.indexOf(nu) === 0) {
+      return { forca: 3, motivo: "um nome começa com o outro" };
+    }
+
+    var pu = C.pedacos(nu), pc = C.pedacos(nc);
+    if (!pu.length || !pc.length) return null;
+
+    /* primeiro e último sobrenome iguais */
+    if (pu.length > 1 && pc.length > 1 &&
+        pu[0] === pc[0] && pu[pu.length - 1] === pc[pc.length - 1]) {
+      return { forca: 3, motivo: "mesmo primeiro nome e mesmo último sobrenome" };
+    }
+
+    /* quantos pedaços de nome coincidem */
+    var juntos = 0;
+    pu.forEach(function (x) { if (pc.indexOf(x) >= 0) juntos++; });
+    if (juntos >= 2) {
+      return { forca: 2, motivo: juntos + " partes do nome coincidem" };
+    }
+    if (juntos === 1 && pu[0] === pc[0]) {
+      return { forca: 1, motivo: "só o primeiro nome coincide — pista fraca" };
+    }
+    return null;
+  };
+
+  C.possiveisDe = function (u, fichario) {
+    var achados = [];
+    fichario.forEach(function (c) {
+      var p = C.pista(u, c);
+      if (p) achados.push({ cracha: c, forca: p.forca, motivo: p.motivo });
+    });
+    achados.sort(function (a, b) { return b.forca - a.forca; });
+    return achados.slice(0, 4);
+  };
+
+  /* ============================================================
+     O CRUZAMENTO DAS TRÊS FONTES
+     ------------------------------------------------------------
+     A regra é a do §2 do pedido, nesta ordem:
+
+       tem crachá emitido ................. não é pendente
+       sem crachá + está na conferência ... PENDENTE CONFIRMADO
+       sem crachá + não está ............... investigar
+       crachá existe mas incompleto ........ cadastro incompleto
+       na conferência mas já tem crachá .... divergência
+
+     E o campo "cracha" do cadastro com texto em vez de número
+     não é ausência: é recado de que o número ainda vai sair.
+     ============================================================ */
+  C.cruzar = function (usuarios, crachas) {
+    var us = lista_(usuarios).filter(function (u) {
+      return u && !C.excluido(u) && (lp(u.nome) || lp(u.colaborador));
+    });
+    var cr = lista_(crachas).filter(function (c) {
+      return c && !/^(REVOGAD|CANCELAD|EXCLU)/.test(lp(c.status).toUpperCase());
+    });
+
+    var conf = C.conferencia(usuarios, crachas);
+
+    /* [11/11] OS NOMES DOS CAMPOS NÃO SÃO SUPOSTOS. */
+    var porId = {}, porMat = {}, nomeConta = {}, porNome = {};
+    cr.forEach(function (c) {
+      var id = C.idDoDono(c);
+      if (id) porId[id] = c;
+      var m = C.chave(C.matriculaDoCracha(c));
+      if (m) porMat[m] = c;
+      var n = C.chaveNome(C.nomeDoCracha(c));
+      if (n) { nomeConta[n] = (nomeConta[n] || 0) + 1; porNome[n] = c; }
+    });
+
+    var nomeUsuario = {};
+    us.forEach(function (u) {
+      var n = C.chaveNome(u.nome || u.colaborador);
+      if (n) nomeUsuario[n] = (nomeUsuario[n] || 0) + 1;
+    });
+
+    var com = [], candidatos = [], duvidosos = [], investigar = [];
+    var anotados = [], incompletos = [], divergencias = [], nomesDivergentes = [];
+    var porCaminho = { id: 0, matricula: 0, nome: 0, cadastro: 0 };
+
+    us.forEach(function (u) {
+      var id = lp(u.id);
+      var m = C.chave(u.matricula);
+      var n = C.chaveNome(u.nome || u.colaborador);
+      var naConf = C.naConferencia(conf, u);
+
+      /* --- fonte 2: o fichário --- */
+      var c = null, por = "";
+      if (id && porId[id]) { c = porId[id]; por = "id"; }
+      else if (m && porMat[m]) { c = porMat[m]; por = "matricula"; }
+      else if (n && nomeConta[n] === 1 && nomeUsuario[n] === 1 && porNome[n]) {
+        c = porNome[n]; por = "nome-unico";
+      }
+
+      if (c) {
+        porCaminho[por === "nome-unico" ? "nome" : por]++;
+        com.push({ usuario: u, cracha: c, por: por });
+
+        /* [11/11 noite] O CASO DA MICHELE / ZULEIDE.
+           Mesma matrícula, nome diferente no crachá. Isso CASA —
+           a matrícula é a prova, não o nome — mas eu não engulo
+           calado: mostro a divergência para ele conferir. */
+        var nCr = C.chaveNome(C.nomeDoCracha(c));
+        if (por !== "nome-unico" && n && nCr && n !== nCr) {
+          nomesDivergentes.push({ usuario: u, cracha: c, por: por,
+            motivo: "o crachá está no nome de " + lp(C.nomeDoCracha(c)) +
+                    ", e o cadastro diz " + (lp(u.nome) || lp(u.colaborador)) +
+                    " — casaram pela " + por });
+        }
+        var fc = C.faltasNoCracha(c);
+        if (fc.length) incompletos.push({ usuario: u, cracha: c, faltas: fc, por: por });
+        /* §2: na conferência mas já tem crachá = divergência */
+        if (naConf) {
+          divergencias.push({ usuario: u, cracha: c, por: por,
+            motivo: "a conferência aponta como sem crachá, mas o fichário tem " +
+                    "crachá para esta pessoa (casou por " + por + ")" });
+        }
+        return;
+      }
+
+      /* --- fonte 1: o número escrito no próprio cadastro --- */
+      var noCad = C.crachaNoCadastro(u);
+      if (noCad.numero) {
+        porCaminho.cadastro++;
+        com.push({ usuario: u, cracha: null, por: "cadastro", numero: noCad.numero });
+        incompletos.push({ usuario: u, cracha: null, por: "cadastro",
+          faltas: ["o número " + noCad.numero + " está no cadastro, mas não achei " +
+                   "o crachá no fichário"] });
+        return;
+      }
+      if (noCad.pendente) {
+        anotados.push({ usuario: u, observacao: noCad.observacao });
+        return;
+      }
+
+      /* Nome repetido: não casa nem descarta por palpite — MAS isso
+         só vale quando aquele nome EXISTE no fichário. Se não existe
+         crachá nenhum com aquele nome, a repetição entre usuários não
+         atrapalha casamento nenhum: ela é duplicidade de cadastro, e
+         quem resolve isso é o §9, não esta porta. Mandar essa gente
+         para "conferir à mão" aqui escondia justamente os duplicados
+         que o §9 precisa ver. */
+      if (n && nomeConta[n] > 0 && (nomeConta[n] > 1 || nomeUsuario[n] > 1)) {
+        duvidosos.push({ usuario: u, motivo: "nome repetido — conferir à mão" });
+        return;
+      }
+
+      /* --- fonte 3 decide --- */
+      if (!conf.disponivel) { candidatos.push(u); return; }
+      if (naConf) { candidatos.push(u); return; }
+
+      investigar.push({ usuario: u,
+        motivo: "não achei crachá em nenhuma das duas listas, mas a conferência " +
+                "do sistema também não aponta esta pessoa como sem crachá" });
+    });
+
+    /* O motor de aproximação roda nos que sobraram. Ele não
+       decide: só levanta pistas para conferência. */
+    var possiveis = [];
+    if (cr.length) {
+      candidatos.concat(investigar.map(function (x) { return x.usuario; }))
+        .forEach(function (u) {
+          var ps = C.possiveisDe(u, cr);
+          if (ps.length) possiveis.push({ usuario: u, achados: ps });
+        });
+    }
+
+    /* §9 — a deduplicação acontece ANTES de qualquer geração */
+    var dd = C.deduplicar(candidatos);
+
+    return {
+      pendentes: dd.pessoas,
+      duplicados: dd.duplicados,
+      revisao: dd.revisao,
+      com: com, incompletos: incompletos, divergencias: divergencias,
+      nomesDivergentes: nomesDivergentes, possiveis: possiveis,
+      anotados: anotados, investigar: investigar, duvidosos: duvidosos,
+      totalUsuarios: us.length, totalCrachas: cr.length,
+      conferencia: conf,
+      porCaminho: porCaminho,
+      camposDoCracha: cr.length ? Object.keys(cr[0]) : [],
+      amostraDoCracha: cr.length ? C.amostra(cr[0]) : null,
+      /* a pesquisa do lado direito precisa olhar o cadastro
+         inteiro e o fichário inteiro, não só os pendentes */
+      todos: us, fichario: cr,
+      /* compatibilidade com o que já estava na tela */
+      sem: dd.pessoas
+    };
+  };
+
+  /* ============================================================
+     O QUE FALTA NO CADASTRO DE CADA UM
+     Nada é inventado: só se diz o que está em branco.
+     ============================================================ */
+  C.pendencias = function (u) {
+    var faltas = [];
+    if (!C.fotoDe(u)) faltas.push("sem fotografia");
+    if (!lp(u.cargo) && !lp(u.funcao)) faltas.push("sem cargo");
+    if (!lp(u.setor)) faltas.push("sem setor");
+    if (!lp(u.matricula)) faltas.push("sem matrícula");
+    else if (C.provisoria(u)) faltas.push("matrícula provisória");
+    return faltas;
+  };
+
+  /* impede gerar? só a falta de nome ou de matrícula */
+  C.podeGerar = function (u) {
+    return !!(lp(u && (u.nome || u.colaborador)) && lp(u && u.matricula));
+  };
+
+  /* ============================================================
+     OS DADOS QUE VÃO PARA O cracha.emitir
+     Exatamente os campos que a tela de crachá já mandava.
+     Campo vazio vai vazio — não se inventa valor.
+     ============================================================ */
+  C.paraEmitir = function (u) {
+    return {
+      colaborador: lp(u.nome) || lp(u.colaborador),
+      matricula: lp(u.matricula),
+      cpf: lp(u.cpf),
+      funcao: lp(u.cargo) || lp(u.funcao),
+      setor: lp(u.setor),
+      obra: lp(u.obra),
+      unidade: lp(u.unidade) || lp(u.empresa)
+    };
+  };
+
+  /* o que o modelo visual precisa para desenhar a prévia */
+  C.paraPrevia = function (u) {
+    var d = C.paraEmitir(u);
+    d.foto = C.fotoDe(u);
+    d.status = "ATIVO";
+    d.codigo = "";            /* quem dá o código é o Core, na emissão */
+    d.qr = "";                /* e o QR vem com ele */
+    d.nomeNivel = lp(u.perfil);
+    d.sangue = lp(u.tipoSanguineo) || lp(u.sangue);
+    return d;
+  };
+
+  /* ============================================================
+     CARREGAR — as duas listas que o sistema já busca
+     ============================================================ */
+  C.carregar = function () {
+    if (typeof API === "undefined" || !API.call) {
+      return Promise.reject(new Error("A ponte com o Core não está disponível nesta tela."));
+    }
+    C.carregando = true; C.erro = "";
+    return Promise.all([
+      Promise.resolve(API.call("usuarios", "listar", {})).catch(function (e) { return { ok: false, erro: e }; }),
+      Promise.resolve(API.call("cracha", "listar", {})).catch(function (e) { return { ok: false, erro: e }; })
+    ]).then(function (r) {
+      C.carregando = false;
+      var ru = r[0] || {}, rc = r[1] || {};
+      if (!ru.ok) {
+        C.erro = "O Core não devolveu o cadastro de usuários" +
+                 (ru.mensagem ? ": " + lp(ru.mensagem) : ".");
+        C.dados = null;
+        return C.dados;
+      }
+      if (!rc.ok) {
+        /* sem a lista de crachás eu NÃO digo que todos estão
+           pendentes: isso faria emitir crachá para quem já tem */
+        C.erro = "O Core não devolveu a lista de crachás" +
+                 (rc.mensagem ? ": " + lp(rc.mensagem) : ".") +
+                 " Sem ela não dá para saber quem já tem crachá, e eu não " +
+                 "vou mostrar todo mundo como pendente.";
+        C.dados = null;
+        return C.dados;
+      }
+      /* guardo a forma do envelope: se a lista vier vazia, é isto
+         que diz onde ela estava escondida */
+      C.envelope = {
+        cracha: (rc.dados && typeof rc.dados === "object" && !(rc.dados instanceof Array))
+          ? Object.keys(rc.dados) : [],
+        totais: (rc.dados && rc.dados.totais) || null
+      };
+      C.dados = C.cruzar(ru.dados, rc.dados);
+      return C.dados;
+    });
+  };
+
+  /* ============================================================
+     GERAR — um
+     ============================================================ */
+  C.emitir = function (u) {
+    if (!C.podeGerar(u)) {
+      return Promise.resolve({ ok: false, codigo: "CADASTRO_INCOMPLETO",
+        mensagem: "Falta nome ou matrícula. Complete o cadastro antes de emitir." });
+    }
+    if (typeof API === "undefined" || !API.call) {
+      return Promise.resolve({ ok: false, codigo: "SEM_PONTE",
+        mensagem: "A ponte com o Core não está disponível." });
+    }
+    return Promise.resolve(API.call("cracha", "emitir", C.paraEmitir(u)))
+      .then(function (r) { return r || { ok: false, mensagem: "O Core não respondeu." }; },
+            function (e) {
+              return { ok: false, codigo: "ERRO",
+                       mensagem: (e && e.message) || "Falhou ao falar com o Core." };
+            });
+  };
+
+  /* ============================================================
+     GERAR — todos os pendentes, um de cada vez
+     Em fila, nunca em paralelo: o Core é uma planilha, e dez
+     emissões ao mesmo tempo é como se produz número repetido.
+     ============================================================ */
+  C.emitirTodos = function (pendentes, aoAndar) {
+    var fila = lista_(pendentes).slice();
+    var feitos = [], falhos = [], pulados = [];
+
+    function passo(i) {
+      if (i >= fila.length) {
+        return Promise.resolve({ feitos: feitos, falhos: falhos, pulados: pulados,
+                                 total: fila.length });
+      }
+      var u = fila[i];
+      if (typeof aoAndar === "function") {
+        try { aoAndar(i + 1, fila.length, u); } catch (e) {}
+      }
+      if (!C.podeGerar(u)) {
+        pulados.push({ usuario: u, motivo: "falta nome ou matrícula" });
+        return passo(i + 1);
+      }
+      return C.emitir(u).then(function (r) {
+        if (r && r.ok) {
+          feitos.push({ usuario: u, codigo: lp(r.dados && r.dados.codigo) });
+        } else {
+          falhos.push({ usuario: u,
+            motivo: lp(r && (r.mensagem || r.codigo)) || "o Core recusou" });
+        }
+        return passo(i + 1);
+      });
+    }
+    return passo(0);
+  };
+
+  /* ============================================================
+     A TELA — duas áreas, como a janela de trabalho que ele pediu
+
+     Esquerda: a lista de pendências, com rolagem PRÓPRIA. Ela
+     rola sem mexer na área da direita — por isso a altura fica
+     presa e o overflow é dela, não da página.
+
+     Direita: pesquisa e resultado, fixos. O operador olha a
+     lista, pesquisa a pessoa, e o resultado aparece ali do lado
+     sem a lista sair do lugar.
+     ============================================================ */
+  C.busca = "";
+  C.resultado = null;        /* {usuario, cracha, varios, erro} */
+  C.marcados = {};
+  C.regularizando = "";
+
+  C.idDe = function (u) { return lp(u && (u.id || u.matricula)); };
+
+  /* ---------- a linha da esquerda: sem foto, como na referência ---------- */
+  C.linha = function (u, i) {
+    var id = C.idDe(u);
+    var nome = lp(u.nome) || lp(u.colaborador);
+    var mat = lp(u.matricula);
+    var prov = C.provisoria(u);
+    return '<tr data-cc-linha="' + esc(id) + '"' +
+      (C.selecionadoId === id ? ' style="background:var(--azul-10,#EAF1FB)"' : '') + '>' +
+      '<td style="color:var(--texto-3);font-size:12px;text-align:right">' + (i + 1) + '</td>' +
+      '<td style="text-align:center"><input type="checkbox" data-cc-marca="' + esc(id) + '"' +
+      (C.marcados[id] ? " checked" : "") + '></td>' +
+      '<td><button class="btn-link" data-cc-ver="' + esc(id) + '" ' +
+      'style="background:none;border:0;padding:0;font:inherit;font-weight:700;' +
+      'color:var(--texto-1,#13253B);cursor:pointer;text-align:left">' +
+      esc(nome) + '</button></td>' +
+      '<td class="mono" style="font-size:12.5px">' + (mat ? esc(mat) : "—") +
+      (prov ? ' <span class="badge b-gray" style="font-size:10px">prov.</span>' : '') +
+      '</td>' +
+      '<td style="font-size:12.5px">' + esc(lp(u.cargo) || lp(u.funcao) || "—") + '</td>' +
+      '<td><span class="badge b-red" style="font-size:11px">Sem Crachá</span></td>' +
+      '</tr>';
+  };
+
+  /* mantido: o cartão ainda é usado pelas provas antigas e pelo lote */
+  C.cartao = function (u) {
+    var nome = lp(u.nome) || lp(u.colaborador);
+    var pode = C.podeGerar(u);
+    return '<div class="card mb8" data-cc-linha="' + esc(C.idDe(u)) + '">' +
+      '<div class="card-body" style="padding:10px 12px;display:flex;gap:12px;align-items:center">' +
+      '<div style="flex:1 1 auto;min-width:0">' +
+      '<div style="font-weight:700;font-size:13.5px">' + esc(nome) + '</div>' +
+      '<div style="font-size:12px;color:var(--texto-3)">' +
+      (lp(u.matricula) ? "Matrícula " + esc(lp(u.matricula)) : "sem matrícula") + '</div></div>' +
+      '<button class="btn ' + (pode ? "btn-primary" : "btn-ghost") + '" ' +
+      'data-cc-gerar="' + esc(C.idDe(u)) + '"' +
+      (pode ? "" : " disabled title=\"falta nome ou matrícula\"") +
+      ' style="font-size:12.5px">Gerar crachá</button>' +
+      '</div></div>';
+  };
+
+  C.iniciais = function (nome) {
+    var p = lp(nome).split(/\s+/).filter(function (x) { return x.length > 1; });
+    if (!p.length) return "?";
+    return (p[0].charAt(0) + (p.length > 1 ? p[p.length - 1].charAt(0) : "")).toUpperCase();
+  };
+
+  /* ============================================================
+     A PESQUISA — na lista que já está carregada
+
+     Não vai ao Core a cada letra: o fichário inteiro já veio no
+     carregamento. Nenhuma consulta nova, nenhuma espera.
+     ============================================================ */
+  C.pesquisar = function (termo) {
+    C.busca = lp(termo);
+    C.resultado = null;
+    var t = C.busca;
+    if (!t) return null;
+
+    var d = C.dados;
+    if (!d) return null;
+
+    var alvoMat = C.chave(t);
+    var alvoNome = C.chaveNome(t);
+
+    /* 1) A pessoa, procurada no cadastro INTEIRO — não só entre os
+       pendentes. O trabalho dele é justamente descobrir que alguém
+       da lista já tem crachá; procurar só nos pendentes esconderia
+       metade dos casos. Os pendentes vêm na frente da lista. */
+    function bate(u) {
+      return (alvoMat && C.chave(u.matricula) === alvoMat) ||
+             (alvoNome && C.chaveNome(u.nome || u.colaborador).indexOf(alvoNome) >= 0);
+    }
+    var pend = {};
+    d.pendentes.forEach(function (u) { pend[C.idDe(u)] = 1; });
+    var candidatos = (d.todos || d.pendentes).filter(bate).sort(function (a, b) {
+      return (pend[C.idDe(b)] ? 1 : 0) - (pend[C.idDe(a)] ? 1 : 0);
+    });
+
+    if (!candidatos.length) {
+      C.resultado = { nada: true, termo: t };
+      return C.resultado;
+    }
+    if (candidatos.length > 1) {
+      /* §4: mais de um resultado possível vai para conferência humana */
+      C.resultado = { varios: candidatos, termo: t };
+      return C.resultado;
+    }
+    C.resultado = C.cruzarUm(candidatos[0]);
+    return C.resultado;
+  };
+
+  /* o cruzamento de UMA pessoa contra o fichário — a ordem do §4 */
+  C.cruzarUm = function (u) {
+    var d = C.dados || {};
+    var cr = d.fichario || [];
+    var id = lp(u.id), m = C.chave(u.matricula), cpf = C.cpfChave(u.cpf);
+    var n = C.chaveNome(u.nome || u.colaborador);
+
+    var achados = [], por = "";
+
+    cr.forEach(function (c) {
+      if (id && C.idDoDono(c) === id) { achados.push({ c: c, por: "identificador" }); return; }
+      if (m && C.chave(C.matriculaDoCracha(c)) === m) { achados.push({ c: c, por: "matrícula" }); return; }
+      if (cpf && C.cpfChave(c.cpf) === cpf) { achados.push({ c: c, por: "CPF" }); return; }
+      if (n && C.chaveNome(C.nomeDoCracha(c)) === n) { achados.push({ c: c, por: "nome completo" }); }
+    });
+
+    if (!achados.length) {
+      /* o número pode estar escrito no próprio cadastro */
+      var noCad = C.crachaNoCadastro(u);
+      if (noCad.numero) {
+        return { usuario: u, cracha: null, numeroNoCadastro: noCad.numero,
+                 por: "número escrito no cadastro" };
+      }
+      /* nenhuma chave forte: levanto as pistas para ele conferir */
+      return { usuario: u, cracha: null, possiveis: C.possiveisDe(u, cr) };
+    }
+
+    /* §4: se houver mais de um, mostra para conferência — não escolhe */
+    var fortes = achados.filter(function (a) { return a.por !== "nome completo"; });
+    var usar = fortes.length ? fortes : achados;
+    if (usar.length > 1) {
+      return { usuario: u, varios: usar.map(function (a) { return a.c; }),
+               porCada: usar.map(function (a) { return a.por; }) };
+    }
+    return { usuario: u, cracha: usar[0].c, por: usar[0].por };
+  };
+
+  /* ============================================================
+     A TELA, DESENHADA
+     ============================================================ */
+  C.render = function () {
+    if (C.erro) {
+      return '<div class="alert a-red">' + esc(C.erro) + '</div>' +
+        '<button class="btn btn-ghost mt12" data-cc-recarregar>Tentar de novo</button>';
+    }
+    if (!C.dados) {
+      return '<div class="card"><div class="card-body">' +
+        '<span class="spinner"></span> Cruzando o cadastro de usuários com o fichário ' +
+        'de crachás e com a conferência…</div></div>';
+    }
+
+    var d = C.dados;
+    var conf = d.conferencia || { disponivel: false, quantos: 0 };
+    var casaram = d.porCaminho.id + d.porCaminho.matricula + d.porCaminho.nome;
+    var travado = (d.totalCrachas > 0 && casaram === 0);
+
+    return C.alarmes(d, conf, casaram) +
+           C.cabecalho(d, conf) +
+           '<div class="cc-split" style="display:flex;gap:16px;align-items:flex-start;' +
+           'flex-wrap:wrap">' +
+             C.ladoEsquerdo(d, travado) +
+             C.ladoDireito(d) +
+           '</div>' +
+           C.rodapeListas(d);
+  };
+
+  /* ---------- os três contadores do alto ---------- */
+  C.cabecalho = function (d, conf) {
+    function q(valor, rotulo, cor) {
+      return '<div class="card" style="flex:1 1 150px;border-left:3px solid ' + cor + '">' +
+        '<div class="card-body" style="padding:10px 14px">' +
+        '<div style="font-size:11.5px;color:var(--texto-3);text-transform:uppercase;' +
+        'letter-spacing:.4px">' + rotulo + '</div>' +
+        '<b style="font-size:24px;line-height:1.1">' + valor + '</b></div></div>';
+    }
+    return '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">' +
+      q(d.totalUsuarios, "Usuários", "#2F6FD0") +
+      q(d.com.length, "Crachás vinculados", "#2E9E5B") +
+      q(d.pendentes.length, "Pendentes", "#E08A2B") +
+      q(conf.disponivel ? conf.quantos : "—", "Conferência", "#8A93A3") +
+      '<button class="btn btn-ghost" data-cc-recarregar ' +
+      'style="align-self:center">Atualizar</button>' +
+      '</div>';
+  };
+
+  /* ---------- esquerda: a lista, com rolagem própria ---------- */
+  C.ladoEsquerdo = function (d, travado) {
+    var marcados = d.pendentes.filter(function (u) { return C.marcados[C.idDe(u)]; }).length;
+
+    var corpo = d.pendentes.length
+      ? '<table class="tbl" style="width:100%;border-collapse:collapse;font-size:13px">' +
+        '<thead><tr style="position:sticky;top:0;background:var(--fundo-2,#F4F7FA);z-index:1">' +
+        '<th style="width:34px;text-align:right">#</th>' +
+        '<th style="width:34px"></th>' +
+        '<th style="text-align:left">Nome do Colaborador</th>' +
+        '<th style="text-align:left">Matrícula</th>' +
+        '<th style="text-align:left">Cargo</th>' +
+        '<th style="text-align:left">Situação</th>' +
+        '</tr></thead><tbody>' +
+        d.pendentes.map(C.linha).join("") +
+        '</tbody></table>'
+      : '<div style="padding:20px;color:var(--texto-3)">Ninguém confirmado como ' +
+        'pendente no cruzamento das três fontes.</div>';
+
+    return '<section class="card" style="flex:1 1 520px;min-width:320px;display:flex;' +
+      'flex-direction:column">' +
+      '<header style="padding:11px 14px;border-bottom:1px solid var(--linha,#DFE5EC);' +
+      'font-weight:700;font-size:14px">Lista de Pendências (' + d.pendentes.length + ')</header>' +
+      '<div data-cc-rolagem style="max-height:430px;overflow:auto">' + corpo + '</div>' +
+      '<footer style="padding:10px 14px;border-top:1px solid var(--linha,#DFE5EC);' +
+      'display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+      '<label style="display:flex;gap:6px;align-items:center;font-size:12.5px">' +
+      '<input type="checkbox" data-cc-marcatodos' +
+      ((marcados && marcados === d.pendentes.length) ? " checked" : "") + '>' +
+      'Selecionar todos (' + d.pendentes.length + ')</label>' +
+      '<button class="btn btn-primary" data-cc-todos' +
+      ((marcados && !travado) ? "" : " disabled") +
+      (travado ? ' title="os crachás não encontraram dono — conferir antes"' : "") +
+      ' style="margin-left:auto">Gerar Crachás Selecionados (' + marcados + ')</button>' +
+      '</footer><div data-cc-andamento></div></section>';
+  };
+
+  /* ---------- direita: pesquisa e resultado, fixos ---------- */
+  C.ladoDireito = function (d) {
+    return '<section class="card" style="flex:1 1 400px;min-width:320px">' +
+      '<header style="padding:11px 14px;border-bottom:1px solid var(--linha,#DFE5EC);' +
+      'font-weight:700;font-size:14px">Pesquisa e Validação de Crachá</header>' +
+      '<div style="padding:14px">' +
+      '<label style="display:block;font-size:12px;color:var(--texto-3);margin-bottom:5px">' +
+      'Pesquisar colaborador (nome ou matrícula)</label>' +
+      '<div style="display:flex;gap:8px">' +
+      '<input class="inp" data-cc-busca value="' + esc(C.busca) + '" ' +
+      'placeholder="parte do nome já serve" style="flex:1 1 auto">' +
+      (C.busca ? '<button class="btn btn-ghost" data-cc-limpar title="limpar">×</button>' : '') +
+      '<button class="btn btn-primary" data-cc-pesquisar>Pesquisar</button>' +
+      '</div>' +
+      '<div data-cc-resultado style="margin-top:14px">' + C.painelResultado() + '</div>' +
+      '</div></section>';
+  };
+
+  C.painelResultado = function () {
+    var r = C.resultado;
+    if (!r) {
+      return '<div style="color:var(--texto-3);font-size:13px;padding:14px 0">' +
+        'Escolha um nome na lista ao lado, ou pesquise aqui. Não precisa ' +
+        'digitar o nome completo.</div>';
+    }
+    if (r.nada) {
+      return '<div class="alert a-gray"><div>Ninguém encontrado com ' +
+        '<b>' + esc(r.termo) + '</b> no cadastro.</div></div>';
+    }
+    if (r.varios && !r.usuario) {
+      return '<div class="alert a-yellow"><div><b>' + r.varios.length +
+        ' pessoas</b> atendem a <b>' + esc(r.termo) + '</b>. Escolha qual:</div></div>' +
+        r.varios.map(function (u) {
+          return '<button class="btn btn-ghost btn-block mt8" data-cc-ver="' +
+            esc(C.idDe(u)) + '" style="text-align:left">' +
+            esc(lp(u.nome) || lp(u.colaborador)) +
+            ' <span class="mono" style="color:var(--texto-3)">· ' +
+            esc(lp(u.matricula) || "sem matrícula") + '</span></button>';
+        }).join("");
+    }
+
+    var u = r.usuario;
+    var ficha = C.ficha(u);
+
+    /* §4: dois crachás possíveis — não escolho, mostro */
+    if (r.varios) {
+      return ficha +
+        '<div class="alert a-yellow mt12"><div><b>' + r.varios.length +
+        ' crachás</b> podem ser desta pessoa. Não escolho por palpite — ' +
+        'confira e me diga qual é:<ul style="margin:8px 0 0 18px">' +
+        r.varios.map(function (c, i) {
+          return '<li><b>' + esc(lp(c.codigo) || "sem código") + '</b> · ' +
+            esc(C.nomeDoCracha(c)) + ' · matrícula ' +
+            esc(C.matriculaDoCracha(c) || "—") +
+            ' <span style="color:var(--texto-3)">(casou por ' +
+            esc(r.porCada[i]) + ')</span></li>';
+        }).join("") + '</ul></div></div>';
+    }
+
+    /* SITUAÇÃO A — encontrou */
+    if (r.cracha || r.numeroNoCadastro) {
+      var c = r.cracha || {};
+      var numero = lp(c.codigo) || lp(r.numeroNoCadastro);
+      var faltas = r.cracha ? C.faltasNoCracha(c) : [];
+      return ficha +
+        '<div class="alert a-green mt12"><div>' +
+        '<b style="font-size:14px">JÁ POSSUI CRACHÁ EMITIDO</b><br>' +
+        'Nº do crachá: <b class="mono">' + esc(numero || "—") + '</b>' +
+        (lp(c.status) ? '<br>Situação do crachá: <b>' + esc(lp(c.status)) + '</b>' : '') +
+        (r.por ? '<br><span style="font-size:12px">casou por ' + esc(r.por) + '</span>' : '') +
+        (faltas.length ? '<br><span style="font-size:12px">o crachá está ' +
+          esc(faltas.join(", ")) + '</span>' : '') +
+        '</div></div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' +
+        (r.cracha ? '<button class="btn btn-ghost" data-cc-vercracha>Visualizar crachá</button>' +
+                    '<button class="btn btn-ghost" data-cc-reimprimir>Reimprimir</button>' : '') +
+        '<button class="btn btn-primary" data-cc-regularizar>Marcar como regularizado</button>' +
+        '</div>' +
+        '<div class="alert a-gray mt12"><div style="font-size:12.5px">' +
+        'Regularizar <b>grava o número ' + esc(numero || "") + ' no cadastro desta ' +
+        'pessoa</b>. É isso que tira ela da conferência — a conferência não guarda ' +
+        'situação, ela calcula. Só sai da lista depois que o Core confirmar a gravação.' +
+        '</div></div>' +
+        '<div data-cc-regerro></div>';
+    }
+
+    /* SITUAÇÃO B — não encontrou por chave forte */
+    var pistas = (r.possiveis && r.possiveis.length)
+      ? '<div class="alert a-yellow mt12"><div>' +
+        '<b>' + r.possiveis.length + ' crachá(s) parecido(s)</b> — não casei ' +
+        'por conta própria, porque nenhuma prova forte bateu. Confira:' +
+        '<ul style="margin:8px 0 0 18px;padding:0">' +
+        r.possiveis.map(function (x) {
+          return '<li><b>' + esc(lp(x.cracha.codigo) || "sem código") + '</b> · ' +
+            esc(C.nomeDoCracha(x.cracha)) + ' · matrícula ' +
+            esc(C.matriculaDoCracha(x.cracha) || "—") +
+            '<br><span style="color:var(--texto-3);font-size:12px">' +
+            esc(x.motivo) + '</span></li>';
+        }).join("") + '</ul></div></div>'
+      : "";
+
+    return ficha +
+      '<div class="alert ' + (pistas ? "a-gray" : "a-yellow") + ' mt12"><div>' +
+      '<b style="font-size:14px">NENHUM CRACHÁ ENCONTRADO</b><br>' +
+      'Procurei por identificador, matrícula, CPF e nome completo.</div></div>' +
+      pistas +
+      '<div style="display:flex;gap:8px;margin-top:10px">' +
+      '<button class="btn btn-primary" data-cc-gerar="' + esc(C.idDe(u)) + '"' +
+      (C.podeGerar(u) ? "" : ' disabled title="falta nome ou matrícula"') +
+      '>Gerar crachá</button></div>';
+  };
+
+  /* a ficha da pessoa, com a foto do cadastro quando existir */
+  C.ficha = function (u) {
+    var foto = C.fotoDe(u);
+    var nome = lp(u.nome) || lp(u.colaborador);
+    var retrato = foto
+      ? '<img src="' + esc(foto) + '" alt="" style="width:76px;height:94px;' +
+        'object-fit:cover;border-radius:6px;border:1px solid var(--linha,#DFE5EC)">'
+      : '<span style="width:76px;height:94px;border-radius:6px;display:flex;' +
+        'align-items:center;justify-content:center;font-weight:700;font-size:22px;' +
+        'background:var(--fundo-3,#E8EDF3);color:var(--texto-3,#667)">' +
+        esc(C.iniciais(nome)) + '</span>';
+
+    function li(r, v) {
+      return '<div style="font-size:12.5px"><span style="color:var(--texto-3)">' + r +
+        ':</span> <b>' + esc(v || "—") + '</b></div>';
+    }
+    return '<div style="display:flex;gap:12px">' + retrato +
+      '<div style="flex:1 1 auto;min-width:0">' +
+      '<div style="font-weight:700;font-size:15px;margin-bottom:4px">' + esc(nome) + '</div>' +
+      li("Matrícula", lp(u.matricula) + (C.provisoria(u) ? " (provisória)" : "")) +
+      li("Cargo", lp(u.cargo) || lp(u.funcao)) +
+      li("Setor / Obra", lp(u.setor) || lp(u.obra)) +
+      '</div></div>';
+  };
+
+  /* ---------- as listas que não geram crachá, embaixo ---------- */
+  C.rodapeListas = function (d) {
+    function caixa(cor, titulo, texto, itens) {
+      if (!itens || !itens.length) return "";
+      return '<div class="alert ' + cor + ' mt16"><div><b>' + itens.length + ' ' +
+        titulo + '</b> — ' + texto + '<ul style="margin:8px 0 0 18px;padding:0">' +
+        itens.slice(0, 40).map(function (x) {
+          var u = x.usuario || x;
+          return '<li>' + esc(lp(u.nome) || lp(u.colaborador)) +
+            (lp(u.matricula) ? ' <span class="mono">· ' + esc(lp(u.matricula)) + '</span>' : '') +
+            (x.motivo ? ' — ' + esc(x.motivo) : '') +
+            (x.observacao ? ' — cadastro diz: <b>' + esc(x.observacao) + '</b>' : '') +
+            (x.faltas ? ' — ' + esc(x.faltas.join(", ")) : '') +
+            '</li>';
+        }).join("") +
+        (itens.length > 40 ? '<li>…e mais ' + (itens.length - 40) + '</li>' : '') +
+        '</ul></div></div>';
+    }
+
+    var duplic = d.duplicados.length
+      ? '<div class="alert a-yellow mt16"><div><b>' + d.duplicados.length +
+        ' pessoa(s) com mais de um cadastro</b> — juntei pelo identificador, pela ' +
+        'matrícula ou pelo CPF, e cada uma aparece <b>uma única vez</b> na lista. ' +
+        'Não apaguei nada.<ul style="margin:8px 0 0 18px;padding:0">' +
+        d.duplicados.slice(0, 30).map(function (x) {
+          return '<li>' + esc(x.nomes.join(" / ")) + ' — ' + x.quantos +
+            ' cadastros, mesma ' + esc(x.por) +
+            (x.nomesBatem ? '' : ' <b>com nomes diferentes</b>') + '</li>';
+        }).join("") + '</ul></div></div>'
+      : "";
+
+    /* as pistas do motor, em lista, com atalho para o painel */
+    var poss = (d.possiveis && d.possiveis.length)
+      ? '<div class="alert a-yellow mt16"><div><b>' + d.possiveis.length +
+        ' pessoa(s) têm crachá parecido no fichário</b> — podem já ter crachá, ' +
+        'só não bateu nenhuma prova forte. Clique no nome para conferir ao lado. ' +
+        'Eu não casei nenhuma por conta própria.' +
+        '<ul style="margin:8px 0 0 18px;padding:0">' +
+        d.possiveis.slice(0, 60).map(function (x) {
+          var u = x.usuario;
+          return '<li><button class="btn-link" data-cc-ver="' + esc(C.idDe(u)) + '" ' +
+            'style="background:none;border:0;padding:0;font:inherit;font-weight:700;' +
+            'color:var(--azul,#1D4FA3);cursor:pointer">' +
+            esc(lp(u.nome) || lp(u.colaborador)) + '</button>' +
+            ' <span class="mono" style="font-size:12px">· ' +
+            esc(lp(u.matricula) || "sem matrícula") + '</span> — ' +
+            esc(x.achados[0].motivo) +
+            (x.achados.length > 1 ? ' (e mais ' + (x.achados.length - 1) + ')' : '') +
+            '</li>';
+        }).join("") +
+        (d.possiveis.length > 60 ? '<li>…e mais ' + (d.possiveis.length - 60) + '</li>' : '') +
+        '</ul></div></div>'
+      : "";
+
+    return poss + duplic +
+      caixa("a-yellow", "crachá(s) em nome diferente do cadastro",
+            "casaram pela matrícula ou pelo identificador, que é a prova. " +
+            "O nome está diferente — confira se é a mesma pessoa.", d.nomesDivergentes) +
+      caixa("a-red", "cadastro(s) a revisar antes de gerar",
+            "não gero crachá para estes: a identidade não está provada.", d.revisao) +
+      caixa("a-yellow", "divergência(s) de conferência",
+            "a conferência aponta como sem crachá, mas o crachá existe. " +
+            "Tirei da lista de pendentes e registrei aqui.", d.divergencias) +
+      caixa("a-yellow", "crachá(s) incompleto(s)",
+            "o crachá existe — isto não é ausência de crachá.", d.incompletos) +
+      caixa("a-yellow", "cadastro(s) com recado no lugar do número",
+            "o campo do crachá tem texto, não número. Não gerei nada por conta disso.",
+            d.anotados) +
+      caixa("a-yellow", "cadastro(s) a investigar",
+            "sem crachá nas duas listas, mas a conferência não os aponta.", d.investigar) +
+      (d.duvidosos.length
+        ? '<div class="alert a-yellow mt16"><div><b>' + d.duvidosos.length +
+          ' cadastro(s) com nome repetido</b> ficaram de fora. Casar por nome ' +
+          'repetido emitiria crachá para a pessoa errada.</div></div>'
+        : "");
+  };
+
+  /* ---------- os avisos do alto ---------- */
+  C.alarmes = function (d, conf, casaram) {
+    var a = "";
+
+    /* [11/11 noite] O ALARME QUE FALTAVA.
+       Com o fichário vazio eu ficava calado e mostrava todo mundo
+       como pendente. Fichário vazio não é "ninguém tem crachá":
+       é leitura que não deu certo. Agora a tela para e diz isso. */
+    if (d.totalCrachas === 0) {
+      var env = (C.envelope && C.envelope.cracha) || [];
+      var tot = (C.envelope && C.envelope.totais) || null;
+      var servidorDizZero = tot && Number(tot.todos) === 0;
+
+      if (servidorDizZero) {
+        a += '<div class="alert a-gray mb16"><div>O fichário de crachás está ' +
+          'vazio, e o servidor confirma: <b>nenhum crachá emitido</b>. Então a ' +
+          'lista abaixo é toda legítima.</div></div>';
+      } else {
+        a += '<div class="alert a-red mb16"><div>' +
+          '<b>O fichário de crachás voltou vazio — e isso quase sempre não é ' +
+          'verdade.</b><br>' +
+          'Enquanto estiver assim, <b>todo mundo aparece como pendente</b>, e isso ' +
+          'está errado. Não gere nada.' +
+          (tot ? '<br><br>O próprio servidor disse quantos existem: <b>' +
+                 esc(lp(tot.todos)) + '</b> crachás (' + esc(lp(tot.ativos)) +
+                 ' ativos). Então a lista existe e eu não consegui lê-la.' : '') +
+          (env.length ? '<br><br>A resposta veio com estes campos: ' +
+                 '<span class="mono" style="font-size:12px">' + esc(env.join(", ")) +
+                 '</span>' : '') +
+          '<br><br>Me mande esta mensagem que eu acerto a leitura.' +
+          '</div></div>';
+      }
+    }
+
+    if (d.totalCrachas > 0 && casaram === 0) {
+      a += '<div class="alert a-red mb16"><div>' +
+        '<b>Os ' + d.totalCrachas + ' crachás do fichário não encontraram dono.</b> ' +
+        'Não gere nada ainda.<br><br>O registro de crachá que o Core devolveu tem ' +
+        'estes campos:<br><span class="mono" style="font-size:12px">' +
+        esc(d.camposDoCracha.join(", ")) + '</span>' +
+        '<br><br>Me mande esta lista que eu acerto a ligação.</div></div>';
+    } else if (d.totalCrachas > 0 && casaram < d.totalCrachas / 2) {
+      a += '<div class="alert a-yellow mb16"><div>Dos ' + d.totalCrachas +
+        ' crachás do fichário, só <b>' + casaram + '</b> encontraram dono no ' +
+        'cadastro. Confira antes de gerar em lote.</div></div>';
+    }
+    if (!conf.disponivel) {
+      a += '<div class="alert a-yellow mb16"><div>' +
+        '<b>A terceira fonte não respondeu.</b> A conferência de cadastro ' +
+        '(a opção SEM CRACHÁ) não está disponível nesta página, então o que ' +
+        'está abaixo é o cruzamento de duas fontes: o cadastro de usuários e o ' +
+        'fichário de crachás. Eu não chamo isso de confirmado.' +
+        (conf.erro ? '<br><span class="mono" style="font-size:12px">' +
+          esc(conf.erro) + '</span>' : '') + '</div></div>';
+    }
+    return a;
+  };
+
+  /* ---------- prévia e confirmação ---------- */
+  C.previa = function (u) {
+    var d = C.paraPrevia(u);
+    var desenho = "";
+    try {
+      if (typeof crachaPar === "function") desenho = crachaPar(d, true);
+    } catch (e) { desenho = ""; }
+
+    if (!desenho) {
+      desenho = '<div class="alert a-yellow"><div>Não consegui desenhar a prévia ' +
+        'com o modelo do sistema. A emissão continua possível — o crachá sai no ' +
+        'modelo de sempre, desenhado pelo módulo de crachás.</div></div>';
+    }
+
+    var faltas = C.pendencias(u);
+    var aviso = faltas.length
+      ? '<div class="alert a-yellow mt12"><div>Este cadastro está com: <b>' +
+        esc(faltas.join(", ")) + '</b>. O crachá sai assim mesmo, com os campos ' +
+        'em branco — não invento dado que não existe.</div></div>'
+      : "";
+
+    if (typeof UI === "undefined" || !UI.modal) return false;
+
+    UI.modal({
+      titulo: "Conferir antes de gerar",
+      sub: (lp(u.nome) || lp(u.colaborador)) +
+           (lp(u.matricula) ? " · matrícula " + lp(u.matricula) : ""),
+      tamanho: "lg",
+      corpo: '<div class="cr-grade">' + desenho + "</div>" + aviso +
+             '<div data-cc-erro></div>',
+      rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' +
+              '<button class="btn btn-primary" data-ok>Confirmar e gerar</button>',
+      aoAbrir: function (w, fechar) {
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        w.querySelector("[data-ok]").addEventListener("click", function () {
+          var b = this;
+          b.disabled = true;
+          b.innerHTML = '<span class="spinner"></span> Gerando…';
+          C.emitir(u).then(function (r) {
+            if (r && r.ok) {
+              fechar();
+              if (typeof toast === "function") {
+                toast("ok", "Crachá gerado" +
+                  (r.dados && r.dados.codigo ? " · " + r.dados.codigo : ""));
+              }
+              C.recarregarTela();
+              return;
+            }
+            b.disabled = false;
+            b.innerHTML = "Confirmar e gerar";
+            var cx = w.querySelector("[data-cc-erro]");
+            if (cx) cx.innerHTML = '<div class="alert a-red mt12"><div>' +
+              esc(lp(r && (r.mensagem || r.codigo)) || "O Core recusou.") +
+              '</div></div>';
+          });
+        });
+      }
+    });
+    return true;
+  };
+
+  C.achar = function (chave) {
+    if (!C.dados) return null;
+    var k = lp(chave);
+    var onde = (C.dados.todos && C.dados.todos.length) ? C.dados.todos : C.dados.sem;
+    var achados = onde.filter(function (u) {
+      return lp(u.id) === k || lp(u.matricula) === k;
+    });
+    return achados[0] || null;
+  };
+
+  C.recarregarTela = function () {
+    C.dados = null;
+    C.carregar().then(function () {
+      try { if (window.ROUTER && ROUTER.render) ROUTER.render(); } catch (e) {}
+    });
+  };
+
+  /* ============================================================
+     REGULARIZAR
+
+     A conferência não guarda situação: ela calcula. Então
+     "regularizar" só tem um significado honesto — gravar no
+     cadastro da pessoa o número do crachá que ela JÁ TEM. É o
+     vínculo que estava faltando. Depois disso ela sai da
+     conferência pela causa certa, e o contador cai sozinho.
+
+     Esconder a linha sem gravar seria exatamente o que ele
+     proibiu. Então: só tiro da lista depois que o Core confirmar.
+     ============================================================ */
+  C.registrarAuditoria = function (p) {
+    try {
+      if (window.REPO && typeof REPO.auditar === "function") return REPO.auditar(p);
+    } catch (e) {}
+    return null;                      /* sem ponte de auditoria: não finjo que gravou */
+  };
+
+  C.regularizar = function (u, numero) {
+    var num = lp(numero);
+    if (!u || !num) {
+      return Promise.resolve({ ok: false, codigo: "SEM_NUMERO",
+        mensagem: "Não achei o número do crachá para gravar. Nada foi alterado." });
+    }
+
+    var dados = {};
+    Object.keys(u).forEach(function (k) { dados[k] = u[k]; });
+    dados.cracha = num;
+    dados.editando = true;
+    dados.id = lp(u.id);               /* nunca gero id novo ao editar */
+
+    var envio;
+    try {
+      envio = (typeof window.salvarUsuarioNoCore === "function")
+        ? window.salvarUsuarioNoCore(dados)
+        : API.call("usuarios", "salvar", dados);
+    } catch (e) {
+      return Promise.resolve({ ok: false, codigo: "FALHOU",
+        mensagem: lp(e && e.message) || "A gravação não saiu." });
+    }
+
+    return Promise.resolve(envio).then(function (r) {
+      if (!r || !r.ok) {
+        return { ok: false,
+          codigo: lp(r && r.codigo) || "NAO_GRAVOU",
+          mensagem: lp(r && r.mensagem) ||
+            "O Core não confirmou a gravação. A pessoa continua na lista." };
+      }
+      C.registrarAuditoria({
+        modulo: "cracha-pendentes", acao: "regularizar",
+        colaborador: lp(u.nome) || lp(u.colaborador),
+        matricula: lp(u.matricula), usuarioId: lp(u.id),
+        cracha: num, resultado: "gravado"
+      });
+      return { ok: true, numero: num };
+    }).catch(function (e) {
+      return { ok: false, codigo: "FALHOU",
+        mensagem: lp(e && e.message) || "A gravação não saiu." };
+    });
+  };
+
+  /* ============================================================
+     OS BOTÕES
+
+     A pesquisa NÃO repinta a tela inteira: repinta só o painel
+     da direita. Repintar tudo perderia o foco do campo e a
+     rolagem da lista — o erro que já consertamos nas pesquisas.
+     ============================================================ */
+  C.repintarDireita = function () {
+    var alvo = document.querySelector("[data-cc-resultado]");
+    if (!alvo) return;
+    alvo.innerHTML = C.painelResultado();
+    C.ligarDireita();
+  };
+
+  C.repintarRodape = function () {
+    var d = C.dados;
+    if (!d) return;
+    var n = d.pendentes.filter(function (u) { return C.marcados[C.idDe(u)]; }).length;
+    var b = document.querySelector("[data-cc-todos]");
+    if (b) {
+      b.textContent = "Gerar Crachás Selecionados (" + n + ")";
+      b.disabled = !n;
+    }
+  };
+
+  C.ligarDireita = function () {
+    var raiz = document;
+
+    Array.prototype.forEach.call(raiz.querySelectorAll("[data-cc-ver]"), function (b) {
+      b.addEventListener("click", function () {
+        var u = C.achar(b.getAttribute("data-cc-ver"));
+        if (!u) return;
+        C.selecionadoId = C.idDe(u);
+        C.resultado = C.cruzarUm(u);
+        C.repintarDireita();
+      });
+    });
+
+    Array.prototype.forEach.call(raiz.querySelectorAll("[data-cc-gerar]"), function (b) {
+      b.addEventListener("click", function () {
+        var u = C.achar(b.getAttribute("data-cc-gerar"));
+        if (u) C.previa(u);
+      });
+    });
+
+    var vc = raiz.querySelector("[data-cc-vercracha]");
+    if (vc) vc.addEventListener("click", function () { C.verCracha(false); });
+
+    var ri = raiz.querySelector("[data-cc-reimprimir]");
+    if (ri) ri.addEventListener("click", function () { C.verCracha(true); });
+
+    var rg = raiz.querySelector("[data-cc-regularizar]");
+    if (rg) rg.addEventListener("click", function () { C.confirmarRegularizar(rg); });
+  };
+
+  C.verCracha = function (paraImprimir) {
+    var r = C.resultado;
+    if (!r || !r.usuario) return;
+    var d = C.paraPrevia(r.usuario);
+    if (r.cracha) {
+      d.codigo = lp(r.cracha.codigo) || d.codigo;
+      if (lp(r.cracha.funcao)) d.funcao = lp(r.cracha.funcao);
+      if (lp(r.cracha.setor)) d.setor = lp(r.cracha.setor);
+    }
+    var desenho = "";
+    try { if (typeof crachaPar === "function") desenho = crachaPar(d, true); } catch (e) {}
+    if (!desenho) {
+      desenho = '<div class="alert a-yellow"><div>Não consegui desenhar o crachá ' +
+        'com o modelo do sistema nesta tela.</div></div>';
+    }
+    if (!window.UI || !UI.modal) return;
+    UI.modal({
+      titulo: paraImprimir ? "Reimprimir crachá" : "Crachá emitido",
+      corpo: '<div data-cc-desenho>' + desenho + '</div>',
+      rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' +
+        (paraImprimir ? '<button class="btn btn-primary" data-imp>Imprimir</button>' : ''),
+      aoAbrir: function (w, fechar) {
+        var x = w.querySelector("[data-x]");
+        if (x) x.addEventListener("click", fechar);
+        var i = w.querySelector("[data-imp]");
+        if (i) i.addEventListener("click", function () {
+          try { window.print(); } catch (e) {}
+        });
+      }
+    });
+  };
+
+  C.confirmarRegularizar = function (botao) {
+    var r = C.resultado;
+    if (!r || !r.usuario) return;
+    var numero = lp(r.cracha && r.cracha.codigo) || lp(r.numeroNoCadastro);
+    var u = r.usuario;
+    var nome = lp(u.nome) || lp(u.colaborador);
+
+    if (!window.UI || !UI.modal) return C.executarRegularizar(u, numero, botao);
+
+    UI.modal({
+      titulo: "Marcar como regularizado",
+      corpo: '<p>Vou gravar o número <b class="mono">' + esc(numero) +
+        '</b> no cadastro de <b>' + esc(nome) + '</b>.</p>' +
+        '<p style="font-size:13px;color:var(--texto-3)">É isso que tira esta pessoa ' +
+        'da conferência. Nenhum crachá é criado, nada é apagado. Se o Core não ' +
+        'confirmar, ela continua na lista.</p><div data-cc-mdlerro></div>',
+      rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' +
+        '<button class="btn btn-primary" data-ok>Gravar</button>',
+      aoAbrir: function (w, fechar) {
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        w.querySelector("[data-ok]").addEventListener("click", function () {
+          var b = this;
+          b.disabled = true;
+          b.innerHTML = '<span class="spinner"></span> Gravando…';
+          C.regularizar(u, numero).then(function (res) {
+            if (!res.ok) {
+              b.disabled = false;
+              b.textContent = "Gravar";
+              var cx = w.querySelector("[data-cc-mdlerro]");
+              if (cx) {
+                cx.innerHTML = '<div class="alert a-red mt12"><div>' +
+                  esc(res.mensagem) +
+                  (res.codigo === "USUARIO_DUPLICADO"
+                    ? '<br><br>Esta é a falha conhecida da gravação por este endereço. ' +
+                      'Abra o sistema pela <b>URL /exec</b> e repita — lá a porta ' +
+                      'direta existe.' : '') +
+                  '</div></div>';
+              }
+              return;
+            }
+            fechar();
+            if (window.toast) toast("ok", nome + " regularizado com o crachá " + numero + ".");
+            C.busca = ""; C.resultado = null;
+            C.recarregarTela();
+          });
+        });
+      }
+    });
+  };
+
+  C.executarRegularizar = function (u, numero, botao) {
+    if (botao) { botao.disabled = true; botao.textContent = "Gravando…"; }
+    return C.regularizar(u, numero).then(function (res) {
+      var cx = document.querySelector("[data-cc-regerro]");
+      if (!res.ok) {
+        if (botao) { botao.disabled = false; botao.textContent = "Marcar como regularizado"; }
+        if (cx) cx.innerHTML = '<div class="alert a-red mt12"><div>' +
+          esc(res.mensagem) + '</div></div>';
+        return res;
+      }
+      C.busca = ""; C.resultado = null;
+      C.recarregarTela();
+      return res;
+    });
+  };
+
+  C.mount = function () {
+    var raiz = document;
+
+    var rec = raiz.querySelector("[data-cc-recarregar]");
+    if (rec) rec.addEventListener("click", function () { C.recarregarTela(); });
+
+    /* ---- pesquisa ---- */
+    var campo = raiz.querySelector("[data-cc-busca]");
+    var buscar = function () {
+      C.pesquisar(campo ? campo.value : "");
+      C.repintarDireita();
+    };
+    if (campo) {
+      campo.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter") { ev.preventDefault(); buscar(); }
+      });
+    }
+    var bp = raiz.querySelector("[data-cc-pesquisar]");
+    if (bp) bp.addEventListener("click", buscar);
+
+    var bl = raiz.querySelector("[data-cc-limpar]");
+    if (bl) bl.addEventListener("click", function () {
+      C.busca = ""; C.resultado = null;
+      if (campo) { campo.value = ""; campo.focus(); }
+      C.repintarDireita();
+    });
+
+    /* ---- seleção ---- */
+    Array.prototype.forEach.call(raiz.querySelectorAll("[data-cc-marca]"), function (cx) {
+      cx.addEventListener("change", function () {
+        var k = cx.getAttribute("data-cc-marca");
+        if (cx.checked) C.marcados[k] = true; else delete C.marcados[k];
+        C.repintarRodape();
+      });
+    });
+    var mt = raiz.querySelector("[data-cc-marcatodos]");
+    if (mt) mt.addEventListener("change", function () {
+      var liga = mt.checked;
+      C.marcados = {};
+      if (liga && C.dados) {
+        C.dados.pendentes.forEach(function (u) { C.marcados[C.idDe(u)] = true; });
+      }
+      Array.prototype.forEach.call(raiz.querySelectorAll("[data-cc-marca]"), function (cx) {
+        cx.checked = liga;
+      });
+      C.repintarRodape();
+    });
+
+    var todos = raiz.querySelector("[data-cc-todos]");
+    if (todos) todos.addEventListener("click", function () { C.confirmarTodos(); });
+
+    C.ligarDireita();
+
+    if (!C.dados && !C.carregando) {
+      C.carregar().then(function () {
+        try { if (window.ROUTER && ROUTER.render) ROUTER.render(); } catch (e) {}
+      });
+    }
+  };
+
+  /* ---------- gerar todos, com confirmação e relatório ---------- */
+  /* quem o lote vai processar: os MARCADOS. Sem marca nenhuma,
+     o botão fica desligado — não assumo "todos" por conta própria. */
+  C.selecionados = function () {
+    if (!C.dados) return [];
+    var marcados = C.dados.pendentes.filter(function (u) { return C.marcados[C.idDe(u)]; });
+    return marcados;
+  };
+
+  C.confirmarTodos = function () {
+    if (!C.dados) return false;
+    var fila = C.selecionados();
+    if (!fila.length) return false;
+    if (typeof UI === "undefined" || !UI.modal) return false;
+
+    var quantos = fila.length;
+    var semNome = fila.filter(function (u) { return !C.podeGerar(u); }).length;
+
+    UI.modal({
+      titulo: "Gerar " + quantos + " crachá(s)",
+      sub: "Um de cada vez, na ordem da lista",
+      corpo: '<div>Vou emitir o crachá de <b>' + quantos + '</b> pessoa(s) que ' +
+        'hoje não têm nenhum.</div>' +
+        (semNome ? '<div class="alert a-yellow mt12"><div><b>' + semNome +
+          '</b> vão ser pulados por falta de nome ou matrícula. Eles continuam ' +
+          'na lista para o senhor completar o cadastro.</div></div>' : "") +
+        '<div class="alert a-yellow mt12"><div>Quem já tem crachá <b>não entra</b> ' +
+        'nesta operação — a lista é só de quem está sem.</div></div>' +
+        '<div data-cc-progresso class="mt12"></div>',
+      rodape: '<button class="btn btn-ghost" data-x>Cancelar</button>' +
+              '<button class="btn btn-primary" data-ok>Gerar todos</button>',
+      aoAbrir: function (w, fechar) {
+        w.querySelector("[data-x]").addEventListener("click", fechar);
+        w.querySelector("[data-ok]").addEventListener("click", function () {
+          var b = this;
+          b.disabled = true;
+          var prog = w.querySelector("[data-cc-progresso]");
+
+          C.emitirTodos(fila, function (i, total, u) {
+            if (prog) prog.innerHTML = '<span class="spinner"></span> ' + i + " de " +
+              total + " — " + esc(lp(u.nome) || lp(u.colaborador));
+          }).then(function (r) {
+            b.disabled = false;
+            b.innerHTML = "Fechar";
+            b.onclick = function () { fechar(); C.recarregarTela(); };
+            if (prog) prog.innerHTML = C.relatorio(r);
+          });
+        });
+      }
+    });
+    return true;
+  };
+
+  C.relatorio = function (r) {
+    function nomes(lista, extra) {
+      return lista.map(function (x) {
+        return "<li>" + esc(lp(x.usuario.nome) || lp(x.usuario.colaborador)) +
+          (extra ? " — " + esc(lp(x[extra])) : "") + "</li>";
+      }).join("");
+    }
+    return '<div class="mt12"><b>' + r.feitos.length + " de " + r.total +
+      " gerado(s).</b></div>" +
+      (r.feitos.length ? '<ul style="margin:8px 0 0 18px;font-size:12.5px">' +
+        nomes(r.feitos, "codigo") + "</ul>" : "") +
+      (r.pulados.length ? '<div class="mt12"><b>' + r.pulados.length +
+        " pulado(s):</b><ul style=\"margin:6px 0 0 18px;font-size:12.5px\">" +
+        nomes(r.pulados, "motivo") + "</ul></div>" : "") +
+      (r.falhos.length ? '<div class="mt12"><b>' + r.falhos.length +
+        " recusado(s) pelo Core:</b><ul style=\"margin:6px 0 0 18px;font-size:12.5px\">" +
+        nomes(r.falhos, "motivo") + "</ul></div>" : "");
+  };
+
+  /* ============================================================
+     ENTRAR NO SISTEMA — tela própria, sem tocar na de crachás
+     ============================================================ */
+  C.enxertar = function () {
+    if (typeof window.SCREENS !== "object" || !window.SCREENS) return false;
+    if (window.SCREENS["cracha-pendentes"]) return true;
+
+    var base = window.SCREENS["crachas"] || {};
+
+    window.SCREENS["cracha-pendentes"] = {
+      titulo: "Central de crachás pendentes",
+      modulo: base.modulo || "cracha",
+      render: function () { return C.render(); },
+      mount: function () { return C.mount(); }
+    };
+
+    /* um botão na tela de crachás que já existe, sem mexer nela */
+    if (base.render && !base.__centralcracha) {
+      var antigo = base.render;
+      var novo = function () {
+        var html = antigo.apply(this, arguments);
+        var botao = '<div class="mb16">' +
+          '<a class="btn btn-primary" href="#/cracha-pendentes">' +
+          'Central de crachás pendentes</a></div>';
+
+        /* [11/11] A tela de crachás desenha de forma ASSÍNCRONA:
+           o render dela devolve uma promessa, não texto. A versão
+           anterior só acrescentava o botão quando vinha texto, e
+           por isso o botão nunca apareceu na tela de verdade. */
+        if (html && typeof html.then === "function") {
+          return html.then(function (texto) {
+            return (typeof texto === "string") ? botao + texto : texto;
+          });
+        }
+        if (typeof html === "string") return botao + html;
+        return html;
+      };
+      novo.__centralcracha = true;
+      base.render = novo;
+      C.antigoRenderCrachas = antigo;
+    }
+    return true;
+  };
+
+  C.restaurar = function () {
+    try {
+      if (C.antigoRenderCrachas && window.SCREENS && window.SCREENS["crachas"]) {
+        window.SCREENS["crachas"].render = C.antigoRenderCrachas;
+      }
+      if (window.SCREENS) delete window.SCREENS["cracha-pendentes"];
+    } catch (e) {}
+    C.ligado = false;
+  };
+
+  window.CENTRALCRACHA = C;
+
+  var t = 0;
+  var relogio = setInterval(function () {
+    t++;
+    if (C.enxertar() || t > 60) clearInterval(relogio);
+  }, 250);
+  C.enxertar();
+})();
+
+/* ############################################################
+ * NFGRAVA · 13/11/2026
+ * A NOTA LANÇADA PASSA A SER GRAVADA
+ * ------------------------------------------------------------
+ * O DEFEITO, em uma frase: o lançamento da entrada escrevia o
+ * status da nota numa variável do navegador e não mandava para
+ * lugar nenhum.
+ *
+ * O fluxo da linha 36476 do v23.html faz, nesta ordem:
+ *
+ *   1. estoque.entrada, item por item ......... grava
+ *   2. nf.registrarDivergencia ................ grava
+ *   3. NF_REGISTRAR_ENTRADAS .................. grava, se houver idLanc
+ *   4. n.status = "LANCADA"; n.listaItens = [] ... NÃO GRAVA
+ *   5. fecha o modal e mostra "Entrada lançada"
+ *
+ * O passo 4 é um objeto JavaScript. Recarregou a página, some: a
+ * nota volta a aparecer como não lançada, com o estoque já dentro.
+ *
+ * E a rota existe. NF_CORE.salvar é chamada em três lugares — na
+ * conferência do XML, na entrada manual e na correção de
+ * fornecedor. Só o lançamento não a chamava.
+ *
+ * O QUE ESTE BLOCO FAZ. Envolve DUAS funções globais e mais nada:
+ *
+ *   mostrarResultadoEntrada  → depois de mostrar o resultado do
+ *     estoque, grava a nota pela rota que já existe e diz na tela
+ *     se gravou. Falhou, aparece em vermelho com o que fazer.
+ *
+ *   abrirConferenciaNF_      → se a nota JÁ está lançada, avisa
+ *     antes, para o segundo lançamento não somar estoque de novo.
+ *
+ * O que ele NÃO faz: não toca no caminho do estoque, que funciona;
+ * não cria rota; não mexe no Core; não altera o modal original.
+ * ############################################################ */
+(function () {
+  "use strict";
+
+  var G = (window.NFGRAVA = window.NFGRAVA || {});
+  G.selo = "NFGRAVA 13/11";
+  G.ligado = true;
+  G.ultimo = null;
+
+  function lp(v) { return (v === null || v === undefined) ? "" : String(v).trim(); }
+
+  function esc(v) {
+    try { if (window.U && U.esc) return U.esc(v); } catch (e) {}
+    return lp(v).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function semAcento(v) {
+    var t = lp(v);
+    try { return t.normalize("NFD").replace(/[̀-ͯ]/g, ""); } catch (e) { return t; }
+  }
+
+  /* ------------------------------------------------------------
+     A nota já foi lançada?
+
+     Os status do código são LANCADA, LANCADA_PARCIAL e
+     LANCADA_COM_DIVERGENCIA. Nos dados pode vir com cedilha e
+     til, então eu tiro os acentos antes de comparar — a mesma
+     lição da grafia "Ativo" contra "ATIVO" que travou o login.
+     ------------------------------------------------------------ */
+  G.jaLancada = function (n) {
+    return /^LANCAD/i.test(semAcento(n && n.status));
+  };
+
+  /* ------------------------------------------------------------
+     A GRAVAÇÃO — pela rota que já existe, sem inventar nenhuma
+     ------------------------------------------------------------ */
+  G.gravar = function (nota) {
+    if (!nota) {
+      return Promise.resolve({ ok: false, codigo: "SEM_NOTA",
+        mensagem: "Não recebi a nota para gravar." });
+    }
+    if (!(window.NF_CORE && typeof window.NF_CORE.salvar === "function")) {
+      return Promise.resolve({ ok: false, codigo: "SEM_ROTA",
+        mensagem: "A rota de gravação de nota (NF_CORE.salvar) não está " +
+          "nesta página. O estoque entrou; a nota não foi registrada." });
+    }
+
+    var copia;
+    try { copia = JSON.parse(JSON.stringify(nota)); } catch (e) { copia = nota; }
+    /* os mesmos campos que a tela de fornecedor já tira antes de
+       gravar: eles são de montagem da tela, não da nota */
+    delete copia.__partes;
+    delete copia.__lancamentos;
+
+    return Promise.resolve()
+      .then(function () { return window.NF_CORE.salvar(copia); })
+      .then(function (r) {
+        if (r && r.ok) return { ok: true, codigo: "", mensagem: "" };
+        return { ok: false,
+          codigo: lp(r && r.codigo),
+          mensagem: lp(r && r.mensagem) ||
+            "O Core não confirmou a gravação da nota." };
+      })
+      .catch(function (e) {
+        return { ok: false, codigo: "FALHOU",
+          mensagem: lp(e && e.message) || "a gravação não saiu" };
+      });
+  };
+
+  /* ------------------------------------------------------------
+     ONDE O AVISO ENTRA
+
+     O modal do topo é o último .modal-wrap dentro do #modalRoot —
+     é assim que o próprio sistema acha o modal ativo. Eu só
+     acrescento uma caixa no começo do corpo; não reescrevo nada
+     do que o modal original montou.
+     ------------------------------------------------------------ */
+  G.corpoDoModalDoTopo = function () {
+    var root = document.getElementById("modalRoot");
+    if (!root) return null;
+    var wraps = root.querySelectorAll(".modal-wrap");
+    if (!wraps.length) return null;
+    return wraps[wraps.length - 1].querySelector(".modal-body");
+  };
+
+  G.caixa = function (marca) {
+    var corpo = G.corpoDoModalDoTopo();
+    if (!corpo) return null;
+    var cx = document.createElement("div");
+    cx.setAttribute("data-nfgrava", marca || "1");
+    corpo.insertBefore(cx, corpo.firstChild);
+    return cx;
+  };
+
+  G.pintarEspera = function (cx) {
+    if (!cx) return;
+    cx.innerHTML = '<div class="alert a-gray mb16"><div>' +
+      '<span class="spinner"></span> Registrando a nota no Core…</div></div>';
+  };
+
+  G.pintarResultado = function (cx, res, nota) {
+    if (!cx) return;
+    var num = esc(lp(nota && nota.numero));
+
+    if (res && res.ok) {
+      cx.innerHTML = '<div class="alert a-green mb16"><div>' +
+        '<b>A nota ' + num + ' foi registrada.</b> ' +
+        'O status do lançamento está gravado no Core — recarregando a ' +
+        'página ele continua lá.</div></div>';
+      return;
+    }
+
+    cx.innerHTML = '<div class="alert a-red mb16"><div>' +
+      '<b>O estoque entrou, mas a nota ' + num + ' NÃO foi registrada.</b><br>' +
+      esc(res && res.mensagem) +
+      (res && res.codigo ? ' <span class="mono">(' + esc(res.codigo) + ')</span>' : '') +
+      '<br><br><b>Não lance esta nota de novo</b> para tentar consertar: ' +
+      'o material já entrou, e lançar outra vez soma o estoque duas vezes. ' +
+      'Anote o número e me avise.' +
+      '</div></div>';
+  };
+
+  /* ============================================================
+     ENVOLVE 1 · mostrarResultadoEntrada
+
+     Nesta altura o código original JÁ montou nota.status e
+     nota.listaItens corretamente — ele só não mandou. Então aqui
+     eu mando, e digo na tela o que aconteceu.
+
+     O modal do estoque aparece na hora, porque o estoque entrou
+     mesmo e esconder isso seria pior. O que fica em espera é a
+     linha da nota, que vira ✓ ou ✗ quando o Core responder.
+     ============================================================ */
+  G.antigoResultado = window.mostrarResultadoEntrada;
+
+  window.mostrarResultadoEntrada = function (nota, entradas, divergencias, falhas) {
+    var saida;
+    try {
+      if (typeof G.antigoResultado === "function") {
+        saida = G.antigoResultado.apply(this, arguments);
+      }
+    } catch (e) {
+      G.ultimo = { estado: "erro-no-modal", erro: lp(e && e.message) };
+      throw e;
+    }
+
+    if (!G.ligado) return saida;
+
+    var cx = G.caixa("resultado");
+    G.pintarEspera(cx);
+    G.ultimo = { numero: lp(nota && nota.numero), estado: "gravando" };
+
+    G.gravar(nota).then(function (res) {
+      G.ultimo = {
+        numero: lp(nota && nota.numero),
+        estado: res.ok ? "gravado" : "falhou",
+        resposta: res
+      };
+      G.pintarResultado(cx, res, nota);
+      try {
+        if (!res.ok && window.toast) {
+          toast("err", "A nota NÃO foi registrada",
+            "O estoque entrou. " + res.mensagem);
+        }
+      } catch (e) {}
+    });
+
+    return saida;
+  };
+
+  /* ============================================================
+     ENVOLVE 2 · abrirConferenciaNF_
+
+     Agora que o status grava, dá para avisar antes. Sem isto, o
+     segundo lançamento da mesma nota soma o estoque outra vez —
+     e quando o aviso apareceria já seria tarde, porque o
+     estoque.entrada roda antes de qualquer resultado.
+
+     Eu NÃO bloqueio a tela: lançar de novo pode ser legítimo
+     (uma nota que entrou pela metade). Eu digo o que está em
+     jogo e deixo a decisão com quem sabe.
+     ============================================================ */
+  G.antigaConferencia = window.abrirConferenciaNF_;
+
+  G.avisarJaLancada = function (n) {
+    var cx = G.caixa("ja-lancada");
+    if (!cx) return null;
+    var st = esc(lp(n && n.status));
+    cx.innerHTML = '<div class="alert a-yellow mb16"><div>' +
+      '<b>Esta nota já consta como ' + st + '.</b><br>' +
+      'Se você lançar de novo, o material entra no estoque <b>outra vez</b> — ' +
+      'o lançamento soma, não substitui.<br>' +
+      'Só continue se esta nota entrou pela metade e faltam itens.' +
+      '</div></div>';
+    return cx;
+  };
+
+  window.abrirConferenciaNF_ = function (n) {
+    var saida;
+    if (typeof G.antigaConferencia === "function") {
+      saida = G.antigaConferencia.apply(this, arguments);
+    }
+    if (G.ligado && G.jaLancada(n)) {
+      try { G.avisarJaLancada(n); } catch (e) {}
+    }
+    return saida;
+  };
+
+  /* ------------------------------------------------------------
+     DESLIGAR, se precisar. O original fica inteiro nas duas
+     referências acima e volta sem recarregar a página.
+     ------------------------------------------------------------ */
+  G.restaurar = function () {
+    if (typeof G.antigoResultado === "function") {
+      window.mostrarResultadoEntrada = G.antigoResultado;
+    }
+    if (typeof G.antigaConferencia === "function") {
+      window.abrirConferenciaNF_ = G.antigaConferencia;
+    }
+    G.ligado = false;
+    return true;
+  };
+
+})();
 </script>
 </body>
 </html>

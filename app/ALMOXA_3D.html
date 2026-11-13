@@ -1,1860 +1,2260 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>ALMOXA PRO · Estoque 3D</title>
-
-<!--
-  ============================================================
-  ALMOXA PRO — ESTOQUE 3D
-  Aplicação independente do sistema principal.
-  ------------------------------------------------------------
-  POR QUE SEPARADA
-
-  O Babylon.js pesa alguns megabytes. Dentro do Apps Script, que
-  já é lento, isso seria um retrocesso. Aqui ela roda sozinha e
-  conversa com o sistema pela API quando precisar.
-
-  A estrutura NASCE DOS DADOS. Ninguém desenha um almoxarifado
-  aqui: você diz "rua 01, 4 níveis, 5 posições" e o motor monta.
-  ============================================================
--->
-
-<script src="https://cdn.babylonjs.com/babylon.js"></script>
-
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ALMOX PRO 3D</title>
 <style>
+/* ALMOXA 3D · almoxa3d.css · 08/11/2026
+   Responsivo de verdade (seção 11): no celular o painel vira
+   gaveta de baixo, e a tela 3D fica inteira para o dedo. */
 :root{
-  --navy:#0B2A55;
-  --navy-2:#123A6E;
-  --azul:#0B5FFF;
-  --laranja:#FF7A00;
-  --verde:#1E9E5A;
-  --amarelo:#FF9F1C;
-  --vermelho:#C0392B;
-  --cinza:#8E969F;
-  --fundo:#F4F7FB;
-  --card:#FFFFFF;
-  --linha:#E3E9F0;
-  --texto:#1A2634;
-  --texto-2:#4A5866;
-  --texto-3:#8A96A3;
+  --fundo:#EEF1F5; --papel:#FFFFFF; --texto:#1B2430; --texto2:#5A6472;
+  --texto3:#8A93A0; --borda:#DDE2E8; --azul:#2F7BE8; --azulEscuro:#1E3A5F;
+  --verde:#2E9E5B; --cinza:#9AA3AE; --amarelo:#E8A33D; --vermelho:#D2443B;
+  --sombra:0 1px 3px rgba(16,24,40,.08),0 8px 24px rgba(16,24,40,.06);
 }
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
+  color:var(--texto);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-text-size-adjust:100%}
+#app{display:flex;height:100%;width:100%}
 
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;overflow:hidden}
-body{
-  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
-  background:var(--fundo);color:var(--texto);font-size:14px;line-height:1.5;
-}
+/* ---------- a cena ---------- */
+#cena{position:relative;flex:1;min-width:0}
+#tela3d{width:100%;height:100%;display:block;outline:none;touch-action:none}
 
-/* ---------- CABEÇALHO ---------- */
-.topo{
-  height:56px;background:var(--navy);color:#fff;display:flex;align-items:center;
-  padding:0 16px;gap:16px;flex-shrink:0;
-}
-.marca{display:flex;align-items:center;gap:10px}
-.marca .ico{
-  width:34px;height:34px;border-radius:9px;background:var(--laranja);
-  display:grid;place-items:center;font-size:17px;
-}
-.marca b{font-size:16px;letter-spacing:-.3px;display:block;line-height:1.1}
-.marca b i{color:var(--laranja);font-style:normal}
-.marca small{font-size:10px;opacity:.7;display:block}
+#barra{position:absolute;top:0;left:0;right:0;padding:10px 12px;display:flex;
+  gap:8px;align-items:center;flex-wrap:wrap;
+  background:linear-gradient(180deg,rgba(238,241,245,.96),rgba(238,241,245,0));
+  pointer-events:none}
+#barra>*{pointer-events:auto}
+.marca{font-weight:700;letter-spacing:.02em;color:var(--azulEscuro);margin-right:4px}
+.marca small{font-weight:500;color:var(--texto3);display:block;font-size:10.5px;
+  letter-spacing:.06em;text-transform:uppercase}
 
-.modos{display:flex;background:rgba(255,255,255,.1);border-radius:9px;padding:3px;margin-left:auto}
-.modos button{
-  padding:7px 15px;border:0;background:transparent;color:rgba(255,255,255,.75);
-  border-radius:7px;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;
-}
-.modos button.on{background:#fff;color:var(--navy)}
+.btn{border:1px solid var(--borda);background:var(--papel);color:var(--texto2);
+  border-radius:9px;padding:7px 11px;font-size:12.5px;cursor:pointer;
+  box-shadow:var(--sombra);white-space:nowrap}
+.btn:hover{border-color:#C3CBD5;color:var(--texto)}
+.btn[aria-pressed="true"]{background:var(--azul);border-color:var(--azul);color:#fff}
+.btn:active{transform:translateY(1px)}
 
-.topo-acoes{display:flex;gap:7px}
-.bt-topo{
-  width:34px;height:34px;border-radius:8px;border:0;background:rgba(255,255,255,.12);
-  color:#fff;cursor:pointer;display:grid;place-items:center;font-size:15px;
-}
-.bt-topo:hover{background:rgba(255,255,255,.22)}
+/* ---------- legenda ---------- */
+#legenda{position:absolute;left:12px;bottom:12px;background:var(--papel);
+  border:1px solid var(--borda);border-radius:11px;padding:9px 11px;
+  box-shadow:var(--sombra);display:flex;gap:12px;flex-wrap:wrap;max-width:calc(100% - 24px)}
+.leg{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--texto2)}
+.bolinha{width:11px;height:11px;border-radius:3px;flex:none;
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
 
-/* ---------- CORPO ---------- */
-.corpo{display:flex;height:calc(100% - 56px)}
+/* ---------- painel ---------- */
+#painel{width:330px;flex:none;background:var(--papel);border-left:1px solid var(--borda);
+  display:flex;flex-direction:column;overflow:hidden}
+#painel h2{margin:0;padding:14px 16px 10px;font-size:13px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--texto3);border-bottom:1px solid var(--borda)}
+#corpoPainel{padding:14px 16px;overflow:auto;flex:1}
 
-/* ---------- ÁRVORE ---------- */
-.lateral{
-  width:270px;background:var(--card);border-right:1px solid var(--linha);
-  display:flex;flex-direction:column;flex-shrink:0;
-}
-.lateral-topo{padding:13px 15px;border-bottom:1px solid var(--linha)}
-.lateral-topo h3{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--texto-3)}
-.busca{position:relative;margin-top:9px}
-.busca input{
-  width:100%;padding:9px 11px 9px 32px;border:1px solid var(--linha);
-  border-radius:9px;font-family:inherit;font-size:13px;
-}
-.busca span{position:absolute;left:11px;top:9px;color:var(--texto-3);font-size:13px}
+.numeros{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
+.cartao{border:1px solid var(--borda);border-radius:10px;padding:9px 11px}
+.cartao b{display:block;font-size:20px;line-height:1.1;font-variant-numeric:tabular-nums}
+.cartao span{font-size:11px;color:var(--texto3)}
 
-.arvore{flex:1;overflow-y:auto;padding:9px}
-.no{
-  display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:7px;
-  cursor:pointer;font-size:13px;user-select:none;
-}
-.no:hover{background:var(--fundo)}
-.no.sel{background:#EAF2FF;color:var(--azul);font-weight:600}
-.no .seta{width:13px;font-size:10px;color:var(--texto-3);flex-shrink:0}
-.no .cor{width:9px;height:9px;border-radius:3px;flex-shrink:0}
-.no .txt{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.no .qtd{font-size:11px;color:var(--texto-3)}
-.filhos{margin-left:15px;border-left:1px solid var(--linha);padding-left:5px}
-.filhos.fechado{display:none}
+.barraOcup{height:8px;border-radius:99px;background:#EDF0F4;overflow:hidden;margin:4px 0 14px}
+.barraOcup i{display:block;height:100%;background:var(--verde);border-radius:99px}
 
-/* ---------- PALCO ---------- */
-.palco{flex:1;position:relative;background:#0A1929;min-width:0}
-#cena{width:100%;height:100%;display:block;outline:none;touch-action:none}
+.linha{display:flex;justify-content:space-between;gap:10px;padding:7px 0;
+  border-bottom:1px dashed var(--borda);font-size:13px}
+.linha:last-child{border-bottom:0}
+.linha span{color:var(--texto3)}
+.linha b{font-weight:600;text-align:right;word-break:break-word}
 
-.carregando{
-  position:absolute;inset:0;background:var(--navy);color:#fff;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:20;
-}
-.carregando .cubo{
-  width:56px;height:56px;border-radius:14px;background:var(--azul);
-  display:grid;place-items:center;font-size:26px;
-  animation:pulsa 1.4s ease-in-out infinite;
-}
-@keyframes pulsa{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(.9);opacity:.7}}
-.carregando .barra{width:220px;height:5px;background:rgba(255,255,255,.15);border-radius:3px;overflow:hidden}
-.carregando .barra i{display:block;height:100%;background:var(--azul);width:0;transition:width .3s}
+.chip{display:inline-block;padding:3px 9px;border-radius:99px;font-size:11px;
+  font-weight:700;letter-spacing:.03em;color:#fff}
+.vazio{text-align:center;color:var(--texto3);padding:26px 10px;font-size:13px;line-height:1.6}
+.aviso{border:1px solid #F0D8A8;background:#FEF8EC;color:#7A5B18;border-radius:10px;
+  padding:10px 12px;font-size:12.5px;line-height:1.5;margin-bottom:12px}
+.erro{border-color:#F2C3BF;background:#FDF1F0;color:#8A2B23}
 
-.ferramentas{
-  position:absolute;right:14px;top:14px;display:flex;flex-direction:column;gap:6px;z-index:10;
+/* ---------- celular e tablet (seção 11) ---------- */
+@media (max-width:860px){
+  #app{flex-direction:column}
+  #painel{width:100%;height:46vh;border-left:0;border-top:1px solid var(--borda);
+    border-radius:16px 16px 0 0;margin-top:-16px;box-shadow:0 -6px 24px rgba(16,24,40,.08)}
+  #painel h2{padding:12px 16px 8px}
+  #legenda{bottom:auto;top:56px;left:12px;right:12px;justify-content:center}
+  .numeros{grid-template-columns:repeat(4,1fr)}
+  .cartao b{font-size:16px}
 }
-.ferramentas button{
-  width:38px;height:38px;border-radius:9px;border:0;background:rgba(255,255,255,.92);
-  cursor:pointer;font-size:15px;box-shadow:0 2px 10px rgba(0,0,0,.18);
-  display:grid;place-items:center;
+@media (max-width:420px){
+  .numeros{grid-template-columns:repeat(2,1fr)}
+  #barra{padding:8px}
+  .btn{padding:6px 9px;font-size:12px}
 }
-.ferramentas button:hover{background:#fff}
-
-.legenda{
-  position:absolute;left:14px;bottom:14px;background:rgba(255,255,255,.94);
-  border-radius:10px;padding:9px 13px;display:flex;gap:14px;flex-wrap:wrap;
-  font-size:11.5px;box-shadow:0 2px 10px rgba(0,0,0,.14);z-index:10;
-}
-.legenda i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
-
-.dica{
-  position:absolute;left:50%;transform:translateX(-50%);bottom:14px;
-  background:rgba(11,42,85,.86);color:#fff;padding:7px 15px;border-radius:20px;
-  font-size:11.5px;z-index:10;pointer-events:none;
-}
-
-/* ---------- PLANTA 2D ---------- */
-.planta{
-  position:absolute;inset:0;background:var(--fundo);display:none;overflow:auto;padding:26px;z-index:5;
-}
-.planta.on{display:block}
-.planta-rua{
-  background:var(--card);border:1px solid var(--linha);border-radius:12px;
-  padding:15px;margin-bottom:15px;
-}
-.planta-rua h4{font-size:14px;color:var(--navy);margin-bottom:3px}
-.planta-rua .sub{font-size:11.5px;color:var(--texto-3);margin-bottom:11px}
-.planta-nivel{display:flex;align-items:center;gap:9px;margin-bottom:7px}
-.planta-nivel .rot{
-  width:64px;font-size:11px;color:var(--texto-3);text-align:right;flex-shrink:0;
-}
-.planta-pos{display:flex;gap:5px;flex-wrap:wrap}
-.pos-2d{
-  width:42px;height:34px;border-radius:6px;display:grid;place-items:center;
-  font-size:10px;font-weight:700;color:#fff;cursor:pointer;border:2px solid transparent;
-}
-.pos-2d:hover{transform:translateY(-2px)}
-.pos-2d.sel{border-color:var(--laranja);box-shadow:0 0 0 3px rgba(255,122,0,.25)}
-
-/* ---------- PAINEL ---------- */
-.painel{
-  width:300px;background:var(--card);border-left:1px solid var(--linha);
-  display:flex;flex-direction:column;flex-shrink:0;
-}
-.painel-topo{padding:15px;border-bottom:1px solid var(--linha)}
-.painel-topo h3{font-size:15px;color:var(--navy)}
-.painel-topo p{font-size:11.5px;color:var(--texto-3)}
-.painel-corpo{flex:1;overflow-y:auto;padding:15px}
-
-.kpis{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:15px}
-.kpi{background:var(--fundo);border-radius:10px;padding:11px}
-.kpi b{font-size:20px;color:var(--navy);display:block;line-height:1.1}
-.kpi span{font-size:10.5px;color:var(--texto-3)}
-
-.linha-info{
-  display:flex;justify-content:space-between;padding:8px 0;
-  border-bottom:1px solid var(--linha);font-size:13px;gap:10px;
-}
-.linha-info:last-child{border:0}
-.linha-info span{color:var(--texto-3)}
-.linha-info b{text-align:right}
-.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
-
-.selo{
-  display:inline-block;padding:3px 9px;border-radius:11px;
-  font-size:11px;font-weight:700;color:#fff;
-}
-
-.vazio{text-align:center;padding:36px 18px;color:var(--texto-3)}
-.vazio .ico{font-size:34px;margin-bottom:11px;opacity:.35}
-.vazio h4{font-size:14px;color:var(--texto-2);margin-bottom:5px}
-.vazio p{font-size:12.5px}
-
-.bt{
-  width:100%;padding:11px;border-radius:9px;border:0;font-family:inherit;
-  font-size:13.5px;font-weight:600;cursor:pointer;margin-top:9px;
-}
-.bt-azul{background:var(--azul);color:#fff}
-.bt-linha{background:var(--card);color:var(--texto-2);border:1px solid var(--linha)}
-.bt-laranja{background:var(--laranja);color:#fff}
-
-/* ---------- MODAL ---------- */
-.fundo-modal{
-  position:fixed;inset:0;background:rgba(11,42,85,.5);z-index:100;
-  display:none;align-items:center;justify-content:center;padding:18px;
-}
-.fundo-modal.on{display:flex}
-.modal{
-  background:var(--card);border-radius:15px;width:100%;max-width:440px;
-  max-height:90vh;overflow-y:auto;
-}
-.modal-topo{padding:18px 20px;border-bottom:1px solid var(--linha)}
-.modal-topo h3{font-size:17px;color:var(--navy)}
-.modal-topo p{font-size:12.5px;color:var(--texto-3)}
-.modal-corpo{padding:20px}
-.modal-rodape{
-  padding:15px 20px;border-top:1px solid var(--linha);
-  display:flex;gap:9px;justify-content:flex-end;
-}
-.modal-rodape .bt{width:auto;margin:0;padding:10px 18px}
-
-.campo{margin-bottom:13px}
-.campo label{display:block;font-size:12px;font-weight:600;color:var(--texto-2);margin-bottom:5px}
-.campo input,.campo select{
-  width:100%;padding:10px 11px;border:1px solid var(--linha);
-  border-radius:9px;font-family:inherit;font-size:14px;
-}
-.dupla{display:grid;grid-template-columns:1fr 1fr;gap:11px}
-
-.aviso{
-  border-radius:9px;padding:11px 13px;font-size:12.5px;margin-bottom:13px;
-}
-.aviso.azul{background:#EAF2FF;color:#0B3D91}
-.aviso.amarelo{background:#FEF6E7;color:#8A5A00}
-
-/* ---------- CELULAR ---------- */
-@media(max-width:900px){
-  .lateral{display:none}
-  .painel{
-    position:fixed;left:0;right:0;bottom:0;width:auto;max-height:52vh;
-    border-left:0;border-top:1px solid var(--linha);
-    border-radius:16px 16px 0 0;transform:translateY(100%);
-    transition:transform .25s;z-index:50;box-shadow:0 -4px 20px rgba(0,0,0,.14);
+@media (prefers-color-scheme:dark){
+  :root:not([data-tema="claro"]){
+    --fundo:#141922; --papel:#1C222C; --texto:#E8ECF1; --texto2:#AEB7C3;
+    --texto3:#7C8694; --borda:#2B333F; --azulEscuro:#9BC2F5;
+    --sombra:0 1px 3px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
   }
-  .painel.aberto{transform:translateY(0)}
-  .modos button{padding:7px 11px;font-size:12px}
-  .marca small{display:none}
-  .legenda{font-size:10.5px;gap:9px;padding:7px 10px}
 }
+
+/* ============================================================
+   CONSTRUTOR DE ESTANTE · 08/11
+   ============================================================ */
+.construtor .campo { margin-bottom: 10px; }
+.construtor label {
+  display: block; font-size: 11px; letter-spacing: .3px;
+  text-transform: uppercase; color: var(--texto-3); margin-bottom: 4px;
+}
+.construtor input {
+  width: 100%; box-sizing: border-box;
+  padding: 8px 10px; font-size: 14px; font-family: inherit;
+  color: var(--texto-1); background: #fff;
+  border: 1px solid var(--borda); border-radius: 6px;
+}
+.construtor input:focus {
+  outline: none; border-color: #2F7BE8;
+  box-shadow: 0 0 0 3px rgba(47,123,232,.14);
+}
+.construtor .campo2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.construtor .campo3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.construtor .sep { height: 1px; background: var(--borda); margin: 14px 0; }
+.construtor .codigos { display: flex; flex-wrap: wrap; gap: 4px; }
+.construtor .cod {
+  font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+  padding: 2px 6px; border-radius: 4px;
+  background: #E6F4EC; color: #24824A; border: 1px solid #BFE3CD;
+}
+.construtor .cod.mais { background: var(--fundo-2); color: var(--texto-3); border-color: var(--borda); }
+.construtor button[disabled] { opacity: .5; cursor: not-allowed; }
+
 </style>
+<!--
+  ALMOXA 3D · index.html · 08/11/2026
+
+  Esta página roda nos DOIS ambientes (seção 5 do adendo):
+
+   · GitHub Pages — os arquivos ficam lado a lado, como estão aqui;
+   · Apps Script  — o HtmlService não serve arquivo .js solto, então
+     na hora de publicar no /exec os quatro scripts entram no lugar
+     das quatro linhas marcadas lá embaixo. A documentação em
+     IMPLANTACAO.md explica, e NENHUMA linha de lógica muda.
+
+  O endereço do Core NÃO está escrito aqui. Ele é informado em
+  tempo de execução (ver o bloco de configuração no fim). Seção 3:
+  nada de credencial em código público.
+-->
 </head>
 <body>
 
-<div class="topo">
-  <div class="marca">
-    <span class="ico">📦</span>
-    <span>
-      <b>ALMOXA <i>PRO</i></b>
-      <small>Estoque 3D · Mapa operacional</small>
-    </span>
+<div id="app">
+
+  <div id="cena">
+    <canvas id="tela3d" touch-action="none"></canvas>
+
+    <div id="barra">
+      <div class="marca">ALMOX PRO 3D<small>Mapa do almoxarifado</small></div>
+      <button class="btn" id="v_perspectiva" aria-pressed="true">Perspectiva</button>
+      <button class="btn" id="v_superior" aria-pressed="false">De cima</button>
+      <button class="btn" id="v_frontal" aria-pressed="false">De frente</button>
+      <button class="btn" id="v_lateral" aria-pressed="false">De lado</button>
+      <button class="btn" id="v_recarregar">Atualizar</button>
+      <button class="btn" id="v_construir">Construir estante</button>
+    </div>
+
+    <div id="legenda">
+      <div class="leg"><i class="bolinha" style="background:#9AA3AE"></i>vazia</div>
+      <div class="leg"><i class="bolinha" style="background:#2E9E5B"></i>com material</div>
+      <div class="leg"><i class="bolinha" style="background:#E8A33D"></i>lotada</div>
+      <div class="leg"><i class="bolinha" style="background:#D2443B"></i>bloqueada</div>
+      <div class="leg"><i class="bolinha" style="background:#2F7BE8"></i>selecionada</div>
+    </div>
   </div>
 
-  <div class="modos">
-    <button id="btn3d" class="on">3D</button>
-    <button id="btn2d">Planta 2D</button>
-  </div>
-
-  <div class="topo-acoes">
-    <button class="bt-topo" id="btNovaRua" title="Nova rua">➕</button>
-    <button class="bt-topo" id="btTela" title="Tela cheia">⛶</button>
-  </div>
-</div>
-
-<div class="corpo">
-
-  <aside class="lateral">
-    <div class="lateral-topo">
-      <h3>Estrutura</h3>
-      <div class="busca">
-        <span>🔍</span>
-        <input id="busca" placeholder="Buscar posição (ex.: R01-N02-P03)">
-      </div>
+  <aside id="painel">
+    <h2 id="tituloPainel">O galpão</h2>
+    <div id="corpoPainel">
+      <div class="vazio">Carregando o motor 3D…</div>
     </div>
-    <div class="arvore" id="arvore"></div>
-  </aside>
-
-  <main class="palco">
-    <canvas id="cena"></canvas>
-
-    <div class="planta" id="planta"></div>
-
-    <div class="carregando" id="carregando">
-      <div class="cubo">📦</div>
-      <div>
-        <div style="font-size:15px;font-weight:600;text-align:center">Montando o almoxarifado</div>
-        <div style="font-size:12px;opacity:.7;text-align:center;margin-top:4px" id="passo">Iniciando…</div>
-      </div>
-      <div class="barra"><i id="progresso"></i></div>
-    </div>
-
-    <div class="ferramentas">
-      <button id="btZoomMais" title="Aproximar">＋</button>
-      <button id="btZoomMenos" title="Afastar">－</button>
-      <button id="btTopo" title="Vista de cima">⬇</button>
-      <button id="btReset" title="Voltar ao início">⟲</button>
-    </div>
-
-    <div class="legenda" id="legenda"></div>
-    <div class="dica" id="dica">arraste para girar · role para aproximar · clique numa posição</div>
-  </main>
-
-  <aside class="painel" id="painel">
-    <div class="painel-topo">
-      <h3 id="painelTitulo">Almoxarifado</h3>
-      <p id="painelSub">Clique numa posição para ver os detalhes</p>
-    </div>
-    <div class="painel-corpo" id="painelCorpo"></div>
   </aside>
 
 </div>
 
-<div class="fundo-modal" id="fundoModal">
-  <div class="modal" id="modal"></div>
-</div>
+<!-- ===== Babylon.js · versão fixa, nunca "latest" ============
+     Versão travada de propósito: biblioteca que se atualiza
+     sozinha quebra sistema em produção sem ninguém ter mexido.
+     ========================================================= -->
+<script src="https://cdn.jsdelivr.net/npm/babylonjs@7.54.3/babylon.js"></script>
 
-
+<!-- ===== os quatro arquivos do módulo ======================
+     No Apps Script, estas quatro linhas viram o conteúdo dos
+     arquivos, colado aqui dentro. Nada mais muda.
+     ========================================================= -->
 <script>
+/* ===== layout3d.js ===== */
 /* ============================================================
-   AP3D — DADOS
+   ALMOXA 3D · layout3d.js  ·  08/11/2026
    ------------------------------------------------------------
-   Camada única de acesso aos dados. Hoje guarda em memória e no
-   navegador; amanhã troca para o Core sem mexer no resto.
+   A MATEMÁTICA DO GALPÃO. Aqui não entra Babylon.
 
-   Nenhum componente visual fala com o Core diretamente.
+   Esta camada pega as localizações do ALMOX PRO — as mesmas da
+   aba ALMOXA_LOCALIZACOES, com rua, estante, prateleira e
+   posição — e devolve uma lista de PEÇAS com medida e lugar em
+   metros:
+
+       { tipo:'montante', x, y, z, lx, ly, lz, cor, ... }
+
+   O motor 3D só traduz essa lista em malhas. Separar assim tem
+   dois motivos concretos:
+
+     1. a conta pode ser testada sem placa de vídeo e sem CDN —
+        e foi: a suíte prova_layout3d.js roda em Node;
+     2. no dia em que o Babylon for trocado, ou aparecer uma
+        visão 2D de impressão, a geometria continua valendo.
+
+   AS MEDIDAS SÃO DE ESTANTE DE VERDADE, em metros. Não é
+   quadradinho em tela: é uma estante porta-palete com montante,
+   longarina, prateleira e vão de corredor por onde cabe gente.
    ============================================================ */
+(function (raiz) {
+  'use strict';
 
-var AP3D_Dados = (function () {
-
-  /* estrutura em memória durante a sessão */
-  var projeto = {
-    nome: 'Almoxarifado',
-    almoxarifado: 'A01',
-    ruas: [],
-    versao: 1,
-    alteradoEm: null
+  /* ----------------------------------------------------------
+     MEDIDAS PADRÃO · metros
+     Vieram de estante de almoxarifado comum. Dá para trocar
+     passando outras em LAYOUT.montar(locais, { medidas }).
+     ---------------------------------------------------------- */
+  var MEDIDAS = {
+    larguraPosicao: 1.00,   /* frente de uma posição */
+    alturaNivel: 0.55,      /* de uma prateleira à outra */
+    profundidade: 0.60,     /* o quanto a estante entra */
+    montante: 0.06,         /* a coluna de ferro */
+    longarina: 0.05,        /* a viga horizontal */
+    prateleira: 0.03,       /* a chapa onde o material apoia */
+    corredor: 2.40,         /* entre uma rua e outra: cabe empilhadeira */
+    vaoEstantes: 0.30,      /* respiro entre estantes da mesma rua */
+    peDireito: 0.00,        /* altura livre do chão até a 1ª prateleira */
+    folgaPiso: 2.00         /* sobra do piso além das estantes */
   };
 
-  var CHAVE = 'ap3d_projeto';
+  /* ----------------------------------------------------------
+     AS CORES · seção 8 da especificação
+     Elas NÃO são escolha de gosto: saem do dado oficial. Quem
+     pinta de verde é a ocupação, não o programador.
+     ---------------------------------------------------------- */
+  var CORES = {
+    vazia:       '#9AA3AE',   /* cinza  · posição livre */
+    ocupada:     '#2E9E5B',   /* verde  · tem material */
+    atencao:     '#E8A33D',   /* amarelo· cheia ou quase */
+    problema:    '#D2443B',   /* vermelho· bloqueada ou divergente */
+    selecionada: '#2F7BE8',   /* azul   · o que o usuário clicou */
+    estrutura:   '#5A6472',   /* o ferro da estante */
+    piso:        '#E7E9EC',
+    faixa:       '#C9CDD3'    /* a pintura do corredor */
+  };
 
-  /* ---------- CÓDIGOS ---------- */
+  function lp(v) { return (v === null || v === undefined) ? '' : String(v).trim(); }
+  function cima(v) { return lp(v).toUpperCase(); }
+  function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
 
-  function dois(n) {
-    var s = String(n).replace(/\D/g, '');
-    return s.length >= 2 ? s : ('0' + s).slice(-2);
+  /* ----------------------------------------------------------
+     A COR DE UMA POSIÇÃO
+     ------------------------------------------------------------
+     Ordem importa: bloqueio manda sobre lotação, que manda sobre
+     ocupação. Uma posição bloqueada com material continua
+     vermelha — senão o vermelho some justamente onde ele serve.
+     ---------------------------------------------------------- */
+  /* ------------------------------------------------------------
+     [12/11] DOIS ERROS QUE DEIXAVAM O MAPA MENTIR
+
+     1. Eu lia loc.status. A rota locais.listar não devolve
+        "status": devolve "situacao". Então a leitura dava sempre
+        vazia e NENHUMA posição ficava vermelha, nunca.
+
+     2. Eu comparava loc.itens com a capacidade. Mas "itens" é a
+        CONTAGEM DE SKUs DIFERENTES guardados ali, e capacidade é
+        de quantidade. Quem mede quantidade é "ocupacao" — a soma
+        do saldo —, e o próprio sistema já entrega "percentual"
+        calculado. Comparar contagem de SKU com capacidade de
+        quantidade pintava de amarelo posição vazia e deixava
+        verde posição lotada.
+
+     Agora: o bloqueio sai de qualquer um dos dois campos, e a
+     lotação sai do percentual do sistema quando ele vem. Onde o
+     dado não vier, a conta antiga continua valendo — por isso as
+     provas de 08/11 seguem passando.
+     ------------------------------------------------------------ */
+  var BLOQUEIO = /^(BLOQUEAD|DIVERG|INTERDIT|INATIV|DESATIV)/;
+
+  function corDaPosicao(loc) {
+    if (!loc) return CORES.vazia;
+
+    /* os DOIS campos, cada um por si. Escrever
+       (loc.status || loc.situacao) deixava um "status" qualquer
+       — um 'DISPONIVEL' velho, por exemplo — tapar a situacao
+       de verdade, que era onde o bloqueio estava escrito. */
+    if (BLOQUEIO.test(cima(loc.status))) return CORES.problema;
+    if (BLOQUEIO.test(cima(loc.situacao))) return CORES.problema;
+    if (loc.bloqueada === true || loc.ativo === false) return CORES.problema;
+
+    var cap = num(loc.capacidade);
+
+    /* quanto material está guardado ali */
+    var qtd = (loc.ocupacao !== undefined && loc.ocupacao !== null)
+      ? num(loc.ocupacao)
+      : num(loc.itens);
+
+    /* quantos SKUs diferentes — serve só para saber se está vazia */
+    var skus = (loc.itens !== undefined && loc.itens !== null)
+      ? num(loc.itens) : qtd;
+
+    if (qtd <= 0 && skus <= 0) return CORES.vazia;
+
+    /* o sistema já calcula o percentual: quando vier, mando nele */
+    var pct = (loc.percentual !== undefined && loc.percentual !== null)
+      ? num(loc.percentual)
+      : (cap > 0 ? (qtd / cap) * 100 : 0);
+
+    if (cap > 0 && pct >= 100) return CORES.atencao;   /* lotada */
+    return CORES.ocupada;
   }
 
-  /** R01-N02-P03 */
-  function codigoPosicao(rua, nivel, posicao) {
-    return 'R' + dois(rua) + '-N' + dois(nivel) + '-P' + dois(posicao);
+  function situacaoDaPosicao(loc) {
+    var c = corDaPosicao(loc);
+    if (c === CORES.problema) return 'BLOQUEADA';
+    if (c === CORES.atencao) return 'LOTADA';
+    if (c === CORES.ocupada) return 'OCUPADA';
+    return 'VAZIA';
   }
 
-  function codigoRua(rua) { return 'R' + dois(rua); }
+  /* ----------------------------------------------------------
+     ORGANIZAR: a lista plana vira árvore rua → estante →
+     prateleira → posição. Ordenada, para o galpão não mudar de
+     forma a cada carregamento.
+     ---------------------------------------------------------- */
+  function organizar(locais) {
+    var ruas = {};
+    var lista = Object.prototype.toString.call(locais) === '[object Array]' ? locais : [];
 
-  /* ---------- CRIAR ---------- */
+    for (var i = 0; i < lista.length; i++) {
+      var l = lista[i];
+      if (!l) continue;
+      var nRua = cima(l.rua);
+      if (!nRua) continue;
+      var nEst = cima(l.estante) || '(sem estante)';
+      var nPra = cima(l.prateleira) || '(sem prateleira)';
 
-  /**
-   * Cria uma rua com seus níveis e posições.
-   *
-   * Ninguém digita posição por posição: informa 4 níveis e 5
-   * posições, e as 20 nascem com código próprio.
-   */
-  function criarRua(dados) {
-    var numero = Number(dados.numero);
-    var niveis = Number(dados.niveis) || 4;
-    var posicoes = Number(dados.posicoes) || 5;
-
-    if (!numero) return { ok: false, motivo: 'Informe o número da rua.' };
-    if (niveis < 1 || posicoes < 1) {
-      return { ok: false, motivo: 'A rua precisa de pelo menos um nível e uma posição.' };
-    }
-    if (niveis > 12 || posicoes > 30) {
-      return { ok: false, motivo: 'Limite: 12 níveis e 30 posições por nível.' };
-    }
-    if (projeto.ruas.some(function (r) { return r.numero === numero; })) {
-      return { ok: false, motivo: 'A rua ' + dois(numero) + ' já existe.' };
-    }
-
-    var rua = {
-      codigo: codigoRua(numero),
-      numero: numero,
-      nome: dados.nome || ('Rua ' + dois(numero)),
-      categoria: dados.categoria || '',
-      niveis: []
-    };
-
-    for (var n = 1; n <= niveis; n++) {
-      var nivel = { numero: n, codigo: 'N' + dois(n), posicoes: [] };
-      for (var p = 1; p <= posicoes; p++) {
-        nivel.posicoes.push({
-          codigo: codigoPosicao(numero, n, p),
-          numero: p,
-          rua: numero,
-          nivel: n,
-          status: 'DISPONIVEL',
-          itens: 0,
-          capacidade: dados.capacidade || null
-        });
-      }
-      rua.niveis.push(nivel);
+      if (!ruas[nRua]) ruas[nRua] = { nome: nRua, estantes: {} };
+      var R = ruas[nRua];
+      if (!R.estantes[nEst]) R.estantes[nEst] = { nome: nEst, prateleiras: {} };
+      var E = R.estantes[nEst];
+      if (!E.prateleiras[nPra]) E.prateleiras[nPra] = { nome: nPra, posicoes: [] };
+      E.prateleiras[nPra].posicoes.push(l);
     }
 
-    projeto.ruas.push(rua);
-    projeto.ruas.sort(function (a, b) { return a.numero - b.numero; });
-    marcarAlteracao();
+    function chaves(o) { var a = []; for (var k in o) if (o.hasOwnProperty(k)) a.push(k); a.sort(); return a; }
 
-    return { ok: true, rua: rua, posicoesCriadas: niveis * posicoes };
-  }
-
-  /**
-   * Muda o tamanho de uma rua.
-   *
-   * Acrescenta o que falta e remove o que sobra — mas nunca
-   * remove posição com material dentro.
-   */
-  function ajustarRua(numero, niveis, posicoes) {
-    var rua = projeto.ruas.filter(function (r) { return r.numero === Number(numero); })[0];
-    if (!rua) return { ok: false, motivo: 'Rua não encontrada.' };
-
-    var comMaterial = [];
-    rua.niveis.forEach(function (nv) {
-      nv.posicoes.forEach(function (p) {
-        if ((nv.numero > niveis || p.numero > posicoes) && p.itens > 0) {
-          comMaterial.push(p.codigo);
-        }
-      });
-    });
-
-    if (comMaterial.length) {
+    return chaves(ruas).map(function (nr) {
+      var R = ruas[nr];
       return {
-        ok: false,
-        motivo: comMaterial.length + ' posição(ões) que seriam removidas têm material: ' +
-          comMaterial.slice(0, 3).join(', ') + (comMaterial.length > 3 ? '…' : '')
+        nome: R.nome,
+        estantes: chaves(R.estantes).map(function (ne) {
+          var E = R.estantes[ne];
+          return {
+            nome: E.nome,
+            prateleiras: chaves(E.prateleiras).map(function (np) {
+              var P = E.prateleiras[np];
+              P.posicoes.sort(function (a, b) {
+                return cima(a.posicao) < cima(b.posicao) ? -1 : 1;
+              });
+              return P;
+            })
+          };
+        })
       };
+    });
+  }
+
+  /* ----------------------------------------------------------
+     MONTAR: a árvore vira peças com medida e lugar
+     ---------------------------------------------------------- */
+  function montar(locais, opcoes) {
+    opcoes = opcoes || {};
+    var M = {};
+    for (var k in MEDIDAS) M[k] = MEDIDAS[k];
+    if (opcoes.medidas) for (var k2 in opcoes.medidas) M[k2] = opcoes.medidas[k2];
+
+    var ruas = organizar(locais);
+    var pecas = [];
+    var indice = {};          /* codigo -> peça da posição, para o clique achar */
+    var contagem = { ruas: 0, estantes: 0, prateleiras: 0, posicoes: 0 };
+    var maxX = 0, maxZ = 0, maxY = 0;
+
+    var x = M.folgaPiso;      /* caminha pelo eixo X, uma rua depois da outra */
+
+    for (var r = 0; r < ruas.length; r++) {
+      var rua = ruas[r];
+      contagem.ruas++;
+      var xRua = x;
+      var larguraRua = M.profundidade;
+      var z = M.folgaPiso;    /* dentro da rua, as estantes caminham no Z */
+
+      for (var e = 0; e < rua.estantes.length; e++) {
+        var est = rua.estantes[e];
+        contagem.estantes++;
+
+        /* quantas posições tem a prateleira mais larga manda na estante */
+        var maiorLinha = 1;
+        for (var p0 = 0; p0 < est.prateleiras.length; p0++) {
+          maiorLinha = Math.max(maiorLinha, est.prateleiras[p0].posicoes.length);
+        }
+        var compEstante = maiorLinha * M.larguraPosicao;
+        var niveis = est.prateleiras.length;
+        var alturaEstante = M.peDireito + niveis * M.alturaNivel + M.alturaNivel * 0.4;
+
+        /* --- os montantes: quatro colunas de ferro --- */
+        var cantos = [
+          [xRua, z], [xRua + M.profundidade, z],
+          [xRua, z + compEstante], [xRua + M.profundidade, z + compEstante]
+        ];
+        for (var c = 0; c < cantos.length; c++) {
+          pecas.push({
+            tipo: 'montante', id: 'MONT-' + rua.nome + '-' + est.nome + '-' + c,
+            x: cantos[c][0], y: alturaEstante / 2, z: cantos[c][1],
+            lx: M.montante, ly: alturaEstante, lz: M.montante,
+            cor: CORES.estrutura, clicavel: false
+          });
+        }
+
+        /* --- cada prateleira: chapa + longarinas + posições --- */
+        for (var pr = 0; pr < est.prateleiras.length; pr++) {
+          var prat = est.prateleiras[pr];
+          contagem.prateleiras++;
+          var yNivel = M.peDireito + (pr + 1) * M.alturaNivel;
+
+          pecas.push({
+            tipo: 'prateleira', id: 'PRAT-' + rua.nome + '-' + est.nome + '-' + prat.nome,
+            rotulo: prat.nome,
+            x: xRua + M.profundidade / 2, y: yNivel, z: z + compEstante / 2,
+            lx: M.profundidade, ly: M.prateleira, lz: compEstante,
+            cor: CORES.estrutura, clicavel: false
+          });
+
+          /* as duas longarinas da frente e do fundo */
+          pecas.push({
+            tipo: 'longarina', id: 'LONG-' + rua.nome + '-' + est.nome + '-' + prat.nome + '-F',
+            x: xRua, y: yNivel - M.prateleira, z: z + compEstante / 2,
+            lx: M.longarina, ly: M.longarina, lz: compEstante,
+            cor: CORES.estrutura, clicavel: false
+          });
+          pecas.push({
+            tipo: 'longarina', id: 'LONG-' + rua.nome + '-' + est.nome + '-' + prat.nome + '-T',
+            x: xRua + M.profundidade, y: yNivel - M.prateleira, z: z + compEstante / 2,
+            lx: M.longarina, ly: M.longarina, lz: compEstante,
+            cor: CORES.estrutura, clicavel: false
+          });
+
+          /* --- as posições: o que o usuário clica --- */
+          for (var po = 0; po < prat.posicoes.length; po++) {
+            var loc = prat.posicoes[po];
+            contagem.posicoes++;
+            var zPos = z + po * M.larguraPosicao + M.larguraPosicao / 2;
+            var alturaCaixa = M.alturaNivel * 0.66;
+
+            var peca = {
+              tipo: 'posicao',
+              id: lp(loc.codigo) || (rua.nome + '-' + est.nome + '-' + prat.nome + '-' + cima(loc.posicao)),
+              codigo: lp(loc.codigo),
+              rua: rua.nome, estante: est.nome,
+              prateleira: prat.nome, posicao: cima(loc.posicao),
+              x: xRua + M.profundidade / 2,
+              y: yNivel + alturaCaixa / 2 + M.prateleira,
+              z: zPos,
+              lx: M.profundidade * 0.86,
+              ly: alturaCaixa,
+              lz: M.larguraPosicao * 0.88,
+              cor: corDaPosicao(loc),
+              situacao: situacaoDaPosicao(loc),
+              capacidade: num(loc.capacidade),
+              itens: num(loc.itens !== undefined ? loc.itens : loc.ocupacao),
+              status: lp(loc.status),
+              clicavel: true,
+              dado: loc
+            };
+            pecas.push(peca);
+            if (peca.codigo) indice[peca.codigo] = peca;
+            maxY = Math.max(maxY, peca.y + peca.ly);
+          }
+        }
+
+        maxY = Math.max(maxY, alturaEstante);
+        z += compEstante + M.vaoEstantes;
+      }
+
+      /* a plaquinha da rua, no começo dela */
+      pecas.push({
+        tipo: 'placaRua', id: 'RUA-' + rua.nome, rotulo: rua.nome,
+        x: xRua + M.profundidade / 2, y: 2.4, z: M.folgaPiso / 2,
+        lx: 0.6, ly: 0.35, lz: 0.04, cor: CORES.faixa, clicavel: false
+      });
+
+      maxZ = Math.max(maxZ, z);
+      x += larguraRua + M.corredor;
+      maxX = Math.max(maxX, x);
     }
 
-    var antesNiveis = rua.niveis.length;
-    var antesPosicoes = rua.niveis[0] ? rua.niveis[0].posicoes.length : 0;
-
-    /* remove o que sobra */
-    rua.niveis = rua.niveis.filter(function (nv) { return nv.numero <= niveis; });
-    rua.niveis.forEach(function (nv) {
-      nv.posicoes = nv.posicoes.filter(function (p) { return p.numero <= posicoes; });
+    /* o piso, dimensionado pelo que foi montado */
+    var compX = Math.max(6, maxX - M.corredor + M.folgaPiso);
+    var compZ = Math.max(6, maxZ + M.folgaPiso);
+    pecas.unshift({
+      tipo: 'piso', id: 'PISO',
+      x: compX / 2, y: 0, z: compZ / 2,
+      lx: compX, ly: 0.02, lz: compZ,
+      cor: CORES.piso, clicavel: false
     });
 
-    /* acrescenta o que falta, preservando o que já existe */
-    for (var n = 1; n <= niveis; n++) {
-      var nivel = rua.niveis.filter(function (nv) { return nv.numero === n; })[0];
-      if (!nivel) {
-        nivel = { numero: n, codigo: 'N' + dois(n), posicoes: [] };
-        rua.niveis.push(nivel);
+    return {
+      pecas: pecas,
+      indice: indice,
+      contagem: contagem,
+      galpao: { largura: compX, profundidade: compZ, altura: Math.max(3, maxY + 0.8) },
+      medidas: M,
+      cores: CORES
+    };
+  }
+
+  /* ----------------------------------------------------------
+     RESUMO: os números do painel, calculados do mesmo dado que
+     pinta as cores — para o texto nunca discordar da imagem.
+     ---------------------------------------------------------- */
+  function resumo(montagem) {
+    var r = { total: 0, vazias: 0, ocupadas: 0, lotadas: 0, bloqueadas: 0, ocupacaoPct: 0 };
+    if (!montagem || !montagem.pecas) return r;
+    for (var i = 0; i < montagem.pecas.length; i++) {
+      var p = montagem.pecas[i];
+      if (p.tipo !== 'posicao') continue;
+      r.total++;
+      if (p.situacao === 'VAZIA') r.vazias++;
+      else if (p.situacao === 'OCUPADA') r.ocupadas++;
+      else if (p.situacao === 'LOTADA') r.lotadas++;
+      else if (p.situacao === 'BLOQUEADA') r.bloqueadas++;
+    }
+    var usadas = r.ocupadas + r.lotadas;
+    r.ocupacaoPct = r.total ? Math.round(usadas / r.total * 100) : 0;
+    return r;
+  }
+
+  /* ============================================================
+     ENQUADRAMENTO · 08/11, à noite
+
+     A primeira vez que o galpão do Ismael apareceu na tela, ele
+     apareceu minúsculo e fora de centro. A câmera mirava no meio
+     de um galpão de 20×20 metros que NÃO existe: o cadastro de
+     localizações dele tem uma estante. A mira era um palpite.
+
+     Agora a conta sai do que foi realmente montado. É matemática
+     pura — nenhuma linha de Babylon — justamente para poder ser
+     provada sem placa de vídeo, com 2 posições e com 2.000.
+     ============================================================ */
+
+  /** a caixa que contém as peças. O piso fica de fora: ele é
+      grande por definição e puxaria a câmera para longe. */
+  function caixaDe(montagem, incluirPiso) {
+    var pecas = (montagem && montagem.pecas) || [];
+    var min = null, max = null;
+
+    for (var i = 0; i < pecas.length; i++) {
+      var p = pecas[i];
+      if (!incluirPiso && p.tipo === 'piso') continue;
+      if (typeof p.x !== 'number' || typeof p.y !== 'number' || typeof p.z !== 'number') continue;
+
+      var hx = Math.abs(p.lx || 0) / 2,
+          hy = Math.abs(p.ly || 0) / 2,
+          hz = Math.abs(p.lz || 0) / 2;
+
+      if (!min) {
+        min = { x: p.x - hx, y: p.y - hy, z: p.z - hz };
+        max = { x: p.x + hx, y: p.y + hy, z: p.z + hz };
+        continue;
       }
-      for (var p = 1; p <= posicoes; p++) {
-        if (nivel.posicoes.some(function (x) { return x.numero === p; })) continue;
-        nivel.posicoes.push({
-          codigo: codigoPosicao(rua.numero, n, p),
-          numero: p, rua: rua.numero, nivel: n,
-          status: 'DISPONIVEL', itens: 0, capacidade: null
-        });
-      }
-      nivel.posicoes.sort(function (a, b) { return a.numero - b.numero; });
+      if (p.x - hx < min.x) min.x = p.x - hx;
+      if (p.y - hy < min.y) min.y = p.y - hy;
+      if (p.z - hz < min.z) min.z = p.z - hz;
+      if (p.x + hx > max.x) max.x = p.x + hx;
+      if (p.y + hy > max.y) max.y = p.y + hy;
+      if (p.z + hz > max.z) max.z = p.z + hz;
     }
 
-    rua.niveis.sort(function (a, b) { return a.numero - b.numero; });
-    marcarAlteracao();
+    if (!min) return { vazia: true, min: null, max: null,
+                       centro: { x: 0, y: 0, z: 0 },
+                       tamanho: { x: 0, y: 0, z: 0 } };
+
+    return {
+      vazia: false, min: min, max: max,
+      centro: { x: (min.x + max.x) / 2, y: (min.y + max.y) / 2, z: (min.z + max.z) / 2 },
+      tamanho: { x: max.x - min.x, y: max.y - min.y, z: max.z - min.z }
+    };
+  }
+
+  /**
+   * Onde a câmera deve mirar e a que distância, para caber tudo.
+   *
+   *   montagem  o que montar() devolveu
+   *   opcoes    { fov, aspecto, folga, minimo, maximo, piso }
+   *
+   * Devolve { alvo:{x,y,z}, raio, caixa, vazio }.
+   *
+   * A distância sai da trigonometria do campo de visão, não de
+   * um número escolhido no olho: metade da altura dividida pela
+   * tangente de meio-fov é a distância em que aquela altura ocupa
+   * a tela inteira. A largura entra dividida pela proporção da
+   * tela, porque numa tela deitada quem aperta é a altura.
+   */
+  function enquadramento(montagem, opcoes) {
+    opcoes = opcoes || {};
+    var fov     = opcoes.fov > 0 ? opcoes.fov : 0.8;     /* o padrão do Babylon */
+    var aspecto = opcoes.aspecto > 0 ? opcoes.aspecto : 1.6;
+    var folga   = opcoes.folga > 0 ? opcoes.folga : 1.25;
+    var minimo  = opcoes.minimo > 0 ? opcoes.minimo : 6;
+    var maximo  = opcoes.maximo > 0 ? opcoes.maximo : 220;
+
+    var cx = caixaDe(montagem, !!opcoes.piso);
+
+    /* nada montado: mira no chão, perto. Não inventa galpão. */
+    if (cx.vazia) {
+      return { alvo: { x: 0, y: 1, z: 0 }, raio: minimo * 2, caixa: cx, vazio: true };
+    }
+
+    var meiaAltura = cx.tamanho.y / 2;
+    var meiaLargura = Math.max(cx.tamanho.x, cx.tamanho.z) / 2;
+    var t = Math.tan(fov / 2);
+
+    var porAltura  = meiaAltura / t;
+    var porLargura = meiaLargura / (t * aspecto);
+    var raio = Math.max(porAltura, porLargura) * folga;
+
+    /* uma estante sozinha é baixa e estreita: sem um mínimo, a
+       câmera entraria dentro dela. */
+    if (raio < minimo) raio = minimo;
+    if (raio > maximo) raio = maximo;
+
+    return {
+      /* mira um pouco acima do meio: o olho procura a prateleira,
+         não o pé da estante */
+      alvo: { x: cx.centro.x, y: cx.centro.y + cx.tamanho.y * 0.08, z: cx.centro.z },
+      raio: raio,
+      caixa: cx,
+      vazio: false
+    };
+  }
+
+  /* ============================================================
+     CONFERIR · o que está torto no cadastro de localizações
+
+     Três regras que valem aqui e não se negociam:
+
+       1. NADA é corrigido. Dado histórico não se mexe sozinho —
+          é regra dele, e é a regra certa. Aqui só se mostra.
+       2. Só se confere o que o Core DEVOLVEU. O mapa não lê a
+          planilha e não inventa consulta que não existe. A
+          varredura completa da ALMOXA_OCUPACAO é do lado de lá,
+          no ENDERECO_CONFERIR.
+       3. Linha torta aparece na tela. Hoje a linha sem rua é
+          descartada em silêncio pelo organizar() — ela some do
+          mapa e ninguém fica sabendo. Isso acaba aqui.
+     ============================================================ */
+  function conferir(locais) {
+    var lista = Object.prototype.toString.call(locais) === '[object Array]' ? locais : [];
+    var avisos = [];
+    var vistos = {};        /* código -> quantas vezes */
+    var prateleirasComPosicao = {};
+    var usadasComoEndereco = [];
+
+    function anotar(tipo, titulo, detalhe, linha) {
+      avisos.push({ tipo: tipo, titulo: titulo, detalhe: detalhe, linha: linha });
+    }
+
+    for (var i = 0; i < lista.length; i++) {
+      var l = lista[i] || {};
+      var cod = lp(l.codigo);
+      var rua = cima(l.rua), est = cima(l.estante),
+          pra = cima(l.prateleira), pos = cima(l.posicao);
+
+      /* 1 · sem rua, o organizar() joga fora sem dizer nada */
+      if (!rua) {
+        anotar('SUMIU',
+          'Localização sem rua não aparece no mapa',
+          'O desenho é organizado por rua. Sem ela, esta linha é ' +
+          'descartada — e até agora isso acontecia em silêncio.',
+          l);
+        continue;
+      }
+
+      /* 2 · código repetido: duas posições disputando o mesmo QR */
+      if (cod) {
+        vistos[cod] = (vistos[cod] || 0) + 1;
+        if (vistos[cod] === 2) {
+          anotar('REPETIDO',
+            'Código repetido: ' + cod,
+            'Duas localizações com o mesmo código. O QR levaria a ' +
+            'uma delas, e não há como saber a qual.',
+            l);
+        }
+      } else {
+        anotar('SEM_CODIGO',
+          'Posição sem código',
+          'Sem código não há etiqueta nem QR: ' +
+          [rua, est, pra, pos].filter(Boolean).join(' · '),
+          l);
+      }
+
+      /* 3 · o código não bate com os campos (desalinhamento) */
+      if (cod && rua && est) {
+        var partes = cod.split('-');
+        if (partes.length >= 2 && cima(partes[0]) !== rua) {
+          anotar('DESALINHADO',
+            'O código não combina com a rua: ' + cod,
+            'O código começa com "' + partes[0] + '" mas a linha diz ' +
+            'que a rua é "' + rua + '". Um dos dois está errado — e eu ' +
+            'não sei qual, então não mexo em nenhum.',
+            l);
+        }
+      }
+
+      /* 4 · prateleira e posição disputando o mesmo endereço */
+      var chavePra = [rua, est, pra].join('|');
+      if (pos) prateleirasComPosicao[chavePra] = true;
+      else usadasComoEndereco.push({ chave: chavePra, linha: l, codigo: cod });
+    }
+
+    /* 5 · a prateleira virou endereço E tem posições embaixo dela.
+       É o caso do A-A01-1 x A-A01-1-A: material guardado em dois
+       níveis do mesmo lugar, e o saldo some entre eles. */
+    for (var u = 0; u < usadasComoEndereco.length; u++) {
+      var uu = usadasComoEndereco[u];
+      if (prateleirasComPosicao[uu.chave]) {
+        anotar('DOIS_NIVEIS',
+          'Prateleira e posição são endereço ao mesmo tempo' +
+            (uu.codigo ? ': ' + uu.codigo : ''),
+          'Esta prateleira guarda material direto, mas também tem ' +
+          'posições cadastradas dentro dela. Guardar nos dois níveis ' +
+          'faz o saldo se perder entre eles. Confira no almoxarifado ' +
+          'qual é o nível real antes de mudar qualquer coisa.',
+          uu.linha);
+      }
+    }
+
+    return {
+      total: lista.length,
+      avisos: avisos,
+      quantos: avisos.length,
+      porTipo: (function () {
+        var c = {};
+        for (var k = 0; k < avisos.length; k++) c[avisos[k].tipo] = (c[avisos[k].tipo] || 0) + 1;
+        return c;
+      })()
+    };
+  }
+
+  /* ============================================================
+     COMO SE CHAMAM AS DIVISÕES · decidido pelo Ismael em 08/11
+
+       até 26 divisões  →  A, B, C … Z
+       mais que isso    →  01, 02, 03 … NN
+
+     A regra é por PRATELEIRA inteira, não por divisão. Uma
+     prateleira de 30 não vira "A…Z, 27, 28, 29, 30": vira
+     01…30, tudo igual. Metade com letra e metade com número é
+     o tipo de coisa que ninguém lê certo no rádio às 7 da manhã.
+
+     E isto aqui é definitivo na prática: depois que a etiqueta
+     está colada na estante, mudar a numeração é reetiquetar o
+     galpão inteiro. Por isso a conta mora aqui, com prova, e
+     não espalhada dentro de uma tela.
+     ============================================================ */
+  var LETRAS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+  function nomesDePosicao(quantas) {
+    var n = Math.floor(Number(quantas) || 0);
+    if (n < 1) return [];
+    var fora = [];
+    if (n <= LETRAS.length) {
+      for (var i = 0; i < n; i++) fora.push(LETRAS.charAt(i));
+      return fora;
+    }
+    /* passou de 26: número em TODAS, com zero à esquerda para
+       ordenar direito em qualquer lugar que ordene como texto */
+    var casas = String(n).length;
+    for (var k = 1; k <= n; k++) {
+      var s = String(k);
+      while (s.length < casas) s = '0' + s;
+      fora.push(s);
+    }
+    return fora;
+  }
+
+  /* ============================================================
+     PROJETAR · o que o construtor vai criar, antes de criar
+
+     Recebe o que a pessoa digitou e devolve a LISTA de posições
+     que sairiam disso — no mesmo formato que o Core devolve, de
+     propósito: assim o mesmo montar() desenha o projeto e o
+     galpão real, e o que ela vê na tela é o que vai ser gravado.
+
+     Nada aqui grava. Nada aqui fala com o Core. É papel e lápis.
+     ============================================================ */
+  function projetar(pedido) {
+    pedido = pedido || {};
+    var rua  = cima(pedido.rua);
+    var est  = cima(pedido.estante);
+    var nPra = Math.floor(Number(pedido.prateleiras) || 0);
+    var nPos = Math.floor(Number(pedido.divisoes) || 0);
+
+    var erros = [];
+    if (!rua) erros.push('Falta o nome da rua.');
+    if (!est) erros.push('Falta o nome da estante.');
+    if (nPra < 1) erros.push('A estante precisa de pelo menos uma prateleira.');
+    if (nPos < 1) erros.push('A prateleira precisa de pelo menos uma divisão.');
+    if (nPra > 20) erros.push('Mais de 20 prateleiras numa estante só: confira se não é outra estante.');
+    if (nPos > 200) erros.push('Mais de 200 divisões numa prateleira só: confira a conta.');
+    if (erros.length) return { ok: false, erros: erros, locais: [], contagem: { posicoes: 0 } };
+
+    /* o primeiro nível de prateleira é o 1, como ele já usa */
+    var primeira = Math.floor(Number(pedido.primeiraPrateleira) || 1);
+    var nomes = nomesDePosicao(nPos);
+    var locais = [];
+
+    for (var p = 0; p < nPra; p++) {
+      var nomePra = String(primeira + p);
+      for (var d = 0; d < nPos; d++) {
+        locais.push({
+          rua: rua,
+          estante: est,
+          prateleira: nomePra,
+          posicao: nomes[d],
+          codigo: [rua, est, nomePra, nomes[d]].join('-'),
+          /* um SKU por divisão — decisão dele, 08/11 */
+          capacidade: 1,
+          ocupacao: [],
+          status: 'DISPONIVEL',
+          /* marca de projeto: nada disto existe no Core ainda */
+          __projeto: true
+        });
+      }
+    }
 
     return {
       ok: true,
-      antes: { niveis: antesNiveis, posicoes: antesPosicoes },
-      depois: { niveis: niveis, posicoes: posicoes }
+      erros: [],
+      locais: locais,
+      nomes: nomes,
+      porLetra: nPos <= LETRAS.length,
+      contagem: { prateleiras: nPra, divisoes: nPos, posicoes: locais.length },
+      medidas: medidasDe(pedido)
     };
   }
 
-  function removerRua(numero) {
-    var rua = projeto.ruas.filter(function (r) { return r.numero === Number(numero); })[0];
-    if (!rua) return { ok: false, motivo: 'Rua não encontrada.' };
-
-    var ocupadas = 0;
-    rua.niveis.forEach(function (nv) {
-      nv.posicoes.forEach(function (p) { if (p.itens > 0) ocupadas++; });
-    });
-
-    if (ocupadas) {
-      return { ok: false, motivo: 'A rua tem ' + ocupadas + ' posição(ões) com material.' };
-    }
-
-    projeto.ruas = projeto.ruas.filter(function (r) { return r.numero !== Number(numero); });
-    marcarAlteracao();
-    return { ok: true };
-  }
-
-  /* ---------- CONSULTAR ---------- */
-
-  function posicao(codigo) {
-    var achada = null;
-    projeto.ruas.forEach(function (r) {
-      r.niveis.forEach(function (nv) {
-        nv.posicoes.forEach(function (p) {
-          if (p.codigo === codigo) achada = p;
-        });
-      });
-    });
-    return achada;
-  }
-
-  function todasPosicoes() {
-    var todas = [];
-    projeto.ruas.forEach(function (r) {
-      r.niveis.forEach(function (nv) {
-        nv.posicoes.forEach(function (p) { todas.push(p); });
-      });
-    });
-    return todas;
-  }
-
-  function resumo() {
-    var todas = todasPosicoes();
-    function conta(st) {
-      return todas.filter(function (p) { return p.status === st; }).length;
+  /** as medidas em metros, a partir do que foi digitado em cm */
+  function medidasDe(pedido) {
+    function cm(v, padrao) {
+      var n = Number(v);
+      return (isFinite(n) && n > 0) ? n / 100 : padrao;
     }
     return {
-      ruas: projeto.ruas.length,
-      posicoes: todas.length,
-      disponiveis: conta('DISPONIVEL'),
-      ocupadas: conta('OCUPADA'),
-      reservadas: conta('RESERVADA'),
-      bloqueadas: conta('BLOQUEADA'),
-      ocupacao: todas.length ? Math.round((conta('OCUPADA') / todas.length) * 100) : 0
+      larguraPosicao: cm(pedido && pedido.larguraCm, MEDIDAS.larguraPosicao),
+      profundidade:   cm(pedido && pedido.profundidadeCm, MEDIDAS.profundidade),
+      alturaNivel:    cm(pedido && pedido.alturaCm, MEDIDAS.alturaNivel)
     };
   }
 
-  /** Procura por código de posição ou nome de rua */
-  function buscar(termo) {
-    var t = String(termo || '').toUpperCase().trim();
-    if (!t) return [];
-
-    var achados = [];
-    projeto.ruas.forEach(function (r) {
-      if (r.nome.toUpperCase().indexOf(t) > -1 || r.codigo.indexOf(t) > -1) {
-        achados.push({ tipo: 'RUA', codigo: r.codigo, nome: r.nome, rua: r.numero });
-      }
-      r.niveis.forEach(function (nv) {
-        nv.posicoes.forEach(function (p) {
-          if (p.codigo.indexOf(t) > -1) {
-            achados.push({ tipo: 'POSICAO', codigo: p.codigo, posicao: p });
-          }
-        });
-      });
-    });
-    return achados.slice(0, 20);
-  }
-
-  function definirStatus(codigo, status) {
-    var p = posicao(codigo);
-    if (!p) return { ok: false, motivo: 'Posição não encontrada.' };
-    p.status = status;
-    marcarAlteracao();
-    return { ok: true, posicao: p };
-  }
-
-  /* ---------- GUARDAR ---------- */
-
-  function marcarAlteracao() {
-    projeto.alteradoEm = new Date().toISOString();
-    projeto.versao++;
-    guardar();
-  }
-
-  function guardar() {
-    try {
-      /* o navegador guarda entre visitas; o Core assume depois */
-      if (typeof sessionStorage !== 'undefined') {
-        sessionStorage.setItem(CHAVE, JSON.stringify(projeto));
-      }
-    } catch (e) { }
-  }
-
-  function recuperar() {
-    try {
-      if (typeof sessionStorage === 'undefined') return false;
-      var texto = sessionStorage.getItem(CHAVE);
-      if (!texto) return false;
-      var salvo = JSON.parse(texto);
-      if (salvo && Array.isArray(salvo.ruas)) { projeto = salvo; return true; }
-    } catch (e) { }
-    return false;
-  }
-
-  /**
-   * Estrutura de demonstração — o teste da seção 49.
-   * Sempre identificada como DEMO, nunca confundida com real.
-   */
-  function demonstracao() {
-    projeto = {
-      nome: 'Almoxarifado DEMO',
-      almoxarifado: 'A01',
-      demo: true,
-      ruas: [], versao: 1, alteradoEm: null
-    };
-
-    criarRua({ numero: 1, nome: 'Rua 01 — Hidráulica', categoria: 'Hidráulica', niveis: 4, posicoes: 5 });
-    criarRua({ numero: 2, nome: 'Rua 02 — Elétrica', categoria: 'Elétrica', niveis: 3, posicoes: 6 });
-    criarRua({ numero: 3, nome: 'Rua 03 — Ferramentas', categoria: 'Ferramentas', niveis: 5, posicoes: 4 });
-
-    return projeto;
-  }
-
-  return {
-    projeto: function () { return projeto; },
-    criarRua: criarRua,
-    ajustarRua: ajustarRua,
-    removerRua: removerRua,
-    posicao: posicao,
-    todasPosicoes: todasPosicoes,
+  raiz.LAYOUT3D = {
+    MEDIDAS: MEDIDAS,
+    CORES: CORES,
+    organizar: organizar,
+    montar: montar,
     resumo: resumo,
-    buscar: buscar,
-    definirStatus: definirStatus,
-    demonstracao: demonstracao,
-    recuperar: recuperar,
-    guardar: guardar,
-    codigoPosicao: codigoPosicao
+    corDaPosicao: corDaPosicao,
+    situacaoDaPosicao: situacaoDaPosicao,
+    caixaDe: caixaDe,
+    enquadramento: enquadramento,
+    conferir: conferir,
+    nomesDePosicao: nomesDePosicao,
+    projetar: projetar
   };
-})();
 
+  if (typeof module !== 'undefined' && module.exports) module.exports = raiz.LAYOUT3D;
+
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* ===== adaptador.js ===== */
 /* ============================================================
-   AP3D — PONTE COM O ALMOXA PRO
+   ALMOXA 3D · adaptador.js  ·  08/11/2026
    ------------------------------------------------------------
-   Ainda não conectada. Quando for, é só este arquivo que muda:
-   nenhum componente visual sabe de onde os dados vêm.
+   O ADAPTADOR MULTIAMBIENTE · seção 5 do adendo.
+
+   Uma aplicação só, dois lugares para rodar:
+
+     · servida pelo Apps Script (/exec) → google.script.run
+     · servida pelo GitHub Pages       → HTTPS no /exec
+
+   O resto do módulo 3D não sabe em qual dos dois está. Ele
+   chama API3D.chamar('locais','listar') e pronto. É assim que
+   a regra de negócio não se duplica entre ambientes, que é o
+   que a seção 5 pede.
+
+   O CONTRATO é o mesmo que o ALMOX PRO já usa hoje — eu não
+   inventei endpoint nenhum:
+
+       { ponte:'ALMOXA', chave:'', modulo, acao, payload,
+         sessao, perfil, obra, origem }
+
+   SEGURANÇA. Seção 3: "não colocar senhas, tokens privados ou
+   credenciais dentro do código público". Este arquivo vai para
+   o GitHub, então ele NÃO guarda chave nenhuma. A URL do /exec
+   não é segredo — ela é endereço, e quem decide o que pode ser
+   feito é o Core, do lado de lá. Identidade e permissão
+   continuam sendo decisão do Core, nunca do navegador.
+
+   ------------------------------------------------------------
+   A CHAVE DE APLICATIVO · 08/11, à tarde
+
+   O Core do Ismael EXIGE chave. O sistema principal manda a
+   dele e passa; o mapa mandava vazia e levava "não confere".
+
+   Como o mapa passou a conseguir a chave, e o que foi recusado:
+
+     RECUSADO · escrever a chave aqui no arquivo. Isto vai para
+       um GitHub público. Seção 3 proíbe, e com razão.
+     RECUSADO · mandar a chave no endereço (?chave=…). Ficaria
+       na barra, no histórico do navegador e em todo link que
+       alguém copiasse. Endereço é endereço; chave não é.
+     RECUSADO · mexer no Core para ele parar de exigir chave.
+       Afrouxar a tranca para a minha peça caber é o contrário
+       de consertar.
+
+     FEITO · o mapa é servido pelo MESMO endereço do sistema
+       (biriguialmoxarifado-eng.github.io). Mesma origem quer
+       dizer que o mapa pode perguntar ao próprio sistema qual
+       é a chave que ele está usando AGORA — pelo window.parent
+       quando está no quadro, e pelo armazenamento que o próprio
+       ALMOX PRO já mantém quando está em tela cheia.
+
+   A chave fica só na memória, enquanto a página está aberta.
+   Este módulo NÃO cria depósito de chave, NÃO grava a chave em
+   lugar nenhum e NÃO inventa uma segunda fonte: a fonte continua
+   sendo a do sistema. Sem chave, manda vazio e mostra o que o
+   Core responder — nunca finge que deu certo.
    ============================================================ */
+(function (raiz) {
+  'use strict';
 
-var AP3D_Ponte = (function () {
-
-  var config = {
-    urlCore: '',        /* o /exec do Apps Script */
-    sessao: '',
-    ligada: false,
-    /* o sistema entregou a configuração ao abrir o módulo? */
-    automatica: false
+  var A = {
+    nome: 'API3D',
+    versao: '08/11',
+    url: '',              /* a do /exec, quando rodando fora do Apps Script */
+    chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
+    origemDaChave: 'nenhuma (fase 1)',
+    origemDaPorta: 'própria',
+    sessao: null,
+    tempoLimite: 20000,
+    chamadas: 0,
+    falhas: 0,
+    ultima: null
   };
 
-  /**
-   * Quando o módulo é aberto pelo próprio sistema, ele chega com a
-   * configuração pronta — o usuário não precisa colar endereço
-   * nenhum. A demonstração só aparece se não houver isso.
-   */
-  (function () {
+  /* ----------------------------------------------------------
+     ONDE ESTOU
+     ------------------------------------------------------------
+     google.script.run só existe quando a página foi servida
+     pelo próprio Apps Script. É a prova mais honesta de
+     ambiente que existe: ou o objeto está lá, ou não está.
+     ---------------------------------------------------------- */
+  A.ambiente = function () {
     try {
-      if (typeof window === 'undefined' || !window.AP3D_CONFIG) return;
-      var c = window.AP3D_CONFIG;
-      if (!c.urlCore) return;
-
-      config.urlCore = c.urlCore;
-      config.sessao = c.sessao || '';
-      config.ligada = true;
-      config.automatica = true;
-    } catch (e) { }
-  })();
-
-  function configurar(urlCore, sessao) {
-    config.urlCore = urlCore || '';
-    config.sessao = sessao || '';
-    config.ligada = !!urlCore;
-    return config;
-  }
-
-  function chamar(modulo, acao, payload) {
-    if (!config.ligada) {
-      return Promise.resolve({
-        ok: false,
-        codigo: 'PONTE_DESLIGADA',
-        mensagem: 'Este mapa ainda não está ligado ao ALMOXA PRO. ' +
-          'A estrutura mostrada é de demonstração.'
-      });
-    }
-
-    return fetch(config.urlCore, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        modulo: modulo, acao: acao,
-        payload: payload || {}, sessao: config.sessao
-      })
-    }).then(function (r) { return r.json(); })
-      .catch(function (e) {
-        return { ok: false, codigo: 'SEM_CONEXAO', mensagem: e.message };
-      });
-  }
-
-  /**
-   * Traz a estrutura real do sistema.
-   *
-   * Converte o formato do Core para o formato daqui — é o único
-   * ponto onde os dois vocabulários se encontram.
-   */
-  function carregarDoCore() {
-    return chamar('localizacao', 'estrutura', {}).then(function (r) {
-      if (!r.ok) return r;
-
-      var d = r.dados;
-      if (!d.configurado) {
-        return {
-          ok: false, codigo: 'SEM_ESTRUTURA',
-          mensagem: 'O almoxarifado ainda não tem estrutura cadastrada no sistema.'
-        };
+      if (typeof google !== 'undefined' && google.script && google.script.run) {
+        return 'APPS_SCRIPT';
       }
-
-      return { ok: true, dados: d };
-    });
-  }
-
-  return {
-    configurar: configurar,
-    chamar: chamar,
-    carregarDoCore: carregarDoCore,
-    ligada: function () { return config.ligada; },
-    automatica: function () { return config.automatica; },
-    config: function () { return config; }
-  };
-})();
-
-/* ============================================================
-   AP3D — CENA
-   ------------------------------------------------------------
-   Constrói o almoxarifado a partir da estrutura de dados.
-
-   Um rack de verdade tem PILARES nas pontas, TRAVESSAS ligando
-   os pilares e PRATELEIRAS apoiadas nas travessas. Desenhar só
-   caixinhas soltas não parece um almoxarifado — parece um
-   gráfico de barras.
-   ============================================================ */
-
-var AP3D_Cena = (function () {
-
-  var motor = null, cena = null, camera = null;
-  var raiz = null;
-  var meshPorPosicao = {};
-  var materiais = {};
-  var selecionada = null;
-  var aoSelecionar = null;
-
-  /* medidas em metros — proporções de um porta-palete real */
-  var M = {
-    larguraPosicao: 1.3,
-    alturaNivel: 1.6,
-    profundidade: 1.1,
-    larguraPilar: 0.09,
-    espessuraPrateleira: 0.06,
-    corredor: 2.8,
-    alturaPredio: 9
-  };
-
-  var CORES = {
-    DISPONIVEL: '#1E9E5A',
-    OCUPADA: '#0B5FFF',
-    RESERVADA: '#FF9F1C',
-    BLOQUEADA: '#8E969F',
-    CRITICA: '#C0392B',
-    BUSCA: '#FFD400'
-  };
-
-  function hex(c) { return BABYLON.Color3.FromHexString(c); }
-
-  /* ---------- INÍCIO ---------- */
-
-  /** A biblioteca 3D está disponível? */
-  function disponivel() {
-    return typeof BABYLON !== 'undefined' && !!BABYLON.Engine;
-  }
-
-  function iniciar(canvas) {
-    if (!disponivel()) return null;
-    motor = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
-    cena = new BABYLON.Scene(motor);
-    cena.clearColor = new BABYLON.Color4(0.04, 0.10, 0.16, 1);
-
-    /* névoa dá profundidade e esconde o fim do galpão */
-    cena.fogMode = BABYLON.Scene.FOGMODE_LINEAR;
-    cena.fogColor = new BABYLON.Color3(0.04, 0.10, 0.16);
-    cena.fogStart = 34;
-    cena.fogEnd = 95;
-
-    camera = new BABYLON.ArcRotateCamera('cam',
-      -Math.PI / 2.4, Math.PI / 2.9, 30,
-      new BABYLON.Vector3(0, 3, 0), cena);
-    camera.attachControl(canvas, true);
-    camera.lowerRadiusLimit = 6;
-    camera.upperRadiusLimit = 90;
-    /* trava para não olhar de baixo do chão */
-    camera.upperBetaLimit = Math.PI / 2.05;
-    camera.wheelPrecision = 18;
-    camera.pinchPrecision = 90;
-    camera.panningSensibility = 90;
-
-    /* luz ambiente + duas direcionais: sem isso tudo fica chapado */
-    var ambiente = new BABYLON.HemisphericLight('amb', new BABYLON.Vector3(0, 1, 0), cena);
-    ambiente.intensity = 0.72;
-    ambiente.groundColor = new BABYLON.Color3(0.16, 0.20, 0.26);
-
-    var principal = new BABYLON.DirectionalLight('sol', new BABYLON.Vector3(-0.5, -1, -0.4), cena);
-    principal.intensity = 0.55;
-    principal.position = new BABYLON.Vector3(24, 30, 24);
-
-    var apoio = new BABYLON.DirectionalLight('apoio', new BABYLON.Vector3(0.6, -0.5, 0.5), cena);
-    apoio.intensity = 0.22;
-
-    criarMateriais();
-
-    raiz = new BABYLON.TransformNode('raiz', cena);
-
-    motor.runRenderLoop(function () { if (cena) cena.render(); });
-    window.addEventListener('resize', function () { if (motor) motor.resize(); });
-
-    ligarSelecao();
-
-    return { motor: motor, cena: cena, camera: camera };
-  }
-
-  function criarMateriais() {
-    if (!disponivel()) return;
-
-    /* estrutura do rack: laranja industrial, como na vida real */
-    materiais.estrutura = new BABYLON.StandardMaterial('m_estrutura', cena);
-    materiais.estrutura.diffuseColor = hex('#E8641A');
-    materiais.estrutura.specularColor = new BABYLON.Color3(0.12, 0.12, 0.12);
-
-    materiais.travessa = new BABYLON.StandardMaterial('m_travessa', cena);
-    materiais.travessa.diffuseColor = hex('#1E5AA8');
-    materiais.travessa.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-
-    materiais.prateleira = new BABYLON.StandardMaterial('m_prateleira', cena);
-    materiais.prateleira.diffuseColor = hex('#9AA5B1');
-    materiais.prateleira.specularColor = new BABYLON.Color3(0.06, 0.06, 0.06);
-
-    materiais.chao = new BABYLON.StandardMaterial('m_chao', cena);
-    materiais.chao.diffuseColor = hex('#2A3542');
-    materiais.chao.specularColor = new BABYLON.Color3(0.02, 0.02, 0.02);
-
-    materiais.faixa = new BABYLON.StandardMaterial('m_faixa', cena);
-    materiais.faixa.diffuseColor = hex('#E8B21A');
-    materiais.faixa.emissiveColor = hex('#3A2C00');
-
-    materiais.placa = new BABYLON.StandardMaterial('m_placa', cena);
-    materiais.placa.diffuseColor = hex('#0B2A55');
-    materiais.placa.emissiveColor = hex('#081C39');
-
-    /* um material por estado, criado uma vez só */
-    Object.keys(CORES).forEach(function (st) {
-      var m = new BABYLON.StandardMaterial('m_' + st, cena);
-      m.diffuseColor = hex(CORES[st]);
-      m.emissiveColor = hex(CORES[st]).scale(0.22);
-      m.specularColor = new BABYLON.Color3(0.15, 0.15, 0.15);
-      materiais[st] = m;
-    });
-  }
-
-  /* ---------- CONSTRUÇÃO ---------- */
-
-  function limpar() {
-    if (!disponivel() || !cena) return;
-
-    if (raiz) raiz.dispose(false, false);
-    raiz = new BABYLON.TransformNode('raiz', cena);
-    meshPorPosicao = {};
-    selecionada = null;
-  }
-
-  /**
-   * Monta o almoxarifado inteiro.
-   * Chamada sempre que a estrutura muda.
-   */
-  function construir(projeto, aoProgredir) {
-    /* sem 3D, a planta 2D assume: o cadastro não pode parar */
-    if (!disponivel() || !cena) {
-      return { posicoes: 0, sem3d: true };
-    }
-
-    limpar();
-
-    var ruas = projeto.ruas || [];
-    if (!ruas.length) {
-      construirGalpao(12, 10);
-      return { posicoes: 0, vazio: true };
-    }
-
-    /* tamanho do galpão vem das ruas, não é fixo */
-    var maiorRua = 0;
-    ruas.forEach(function (r) {
-      var largura = (r.niveis[0] ? r.niveis[0].posicoes.length : 0) * M.larguraPosicao;
-      if (largura > maiorRua) maiorRua = largura;
-    });
-
-    var profundidadeTotal = ruas.length * (M.profundidade + M.corredor) + M.corredor;
-    construirGalpao(maiorRua + 8, profundidadeTotal + 4);
-
-    var z = -(profundidadeTotal / 2) + M.corredor;
-    var totalPosicoes = 0;
-
-    ruas.forEach(function (rua, i) {
-      construirRua(rua, z);
-      totalPosicoes += rua.niveis.reduce(function (s, nv) { return s + nv.posicoes.length; }, 0);
-      z += M.profundidade + M.corredor;
-
-      if (aoProgredir) aoProgredir(Math.round(((i + 1) / ruas.length) * 100));
-    });
-
-    enquadrar();
-    return { posicoes: totalPosicoes, ruas: ruas.length };
-  }
-
-  /** Chão, faixas de corredor e paredes */
-  function construirGalpao(largura, profundidade) {
-    var chao = BABYLON.MeshBuilder.CreateGround('chao',
-      { width: largura + 6, height: profundidade + 6 }, cena);
-    chao.material = materiais.chao;
-    chao.parent = raiz;
-    chao.receiveShadows = true;
-
-    /* faixas amarelas: dão a escala e parecem almoxarifado */
-    for (var f = -1; f <= 1; f += 2) {
-      var faixa = BABYLON.MeshBuilder.CreateGround('faixa',
-        { width: largura, height: 0.12 }, cena);
-      faixa.material = materiais.faixa;
-      faixa.position.y = 0.01;
-      faixa.position.z = f * (profundidade / 2 - 1.2);
-      faixa.parent = raiz;
-    }
-
-    /* paredes ao fundo, discretas */
-    var parede = BABYLON.MeshBuilder.CreateBox('parede',
-      { width: largura + 6, height: M.alturaPredio, depth: 0.2 }, cena);
-    parede.position.y = M.alturaPredio / 2;
-    parede.position.z = -(profundidade / 2 + 3);
-    var mParede = new BABYLON.StandardMaterial('m_parede', cena);
-    mParede.diffuseColor = hex('#1A2634');
-    mParede.specularColor = new BABYLON.Color3(0, 0, 0);
-    parede.material = mParede;
-    parede.parent = raiz;
-  }
-
-  /**
-   * Uma rua: dois racks de costas um para o outro, como num
-   * almoxarifado de verdade, com a placa da rua no topo.
-   */
-  function construirRua(rua, z) {
-    var no = new BABYLON.TransformNode('rua_' + rua.codigo, cena);
-    no.parent = raiz;
-    no.position.z = z;
-
-    var quantasPosicoes = rua.niveis[0] ? rua.niveis[0].posicoes.length : 0;
-    var larguraRua = quantasPosicoes * M.larguraPosicao;
-    var xInicial = -larguraRua / 2;
-    var alturaRack = rua.niveis.length * M.alturaNivel + 0.4;
-
-    /* PILARES — nas pontas e entre cada posição */
-    for (var i = 0; i <= quantasPosicoes; i++) {
-      var x = xInicial + i * M.larguraPosicao;
-
-      [-M.profundidade / 2, M.profundidade / 2].forEach(function (dz) {
-        var pilar = BABYLON.MeshBuilder.CreateBox('pilar', {
-          width: M.larguraPilar, height: alturaRack, depth: M.larguraPilar
-        }, cena);
-        pilar.position.set(x, alturaRack / 2, dz);
-        pilar.material = materiais.estrutura;
-        pilar.parent = no;
-        pilar.isPickable = false;
-      });
-    }
-
-    /* NÍVEIS: travessas + prateleira + posições */
-    rua.niveis.forEach(function (nivel) {
-      var y = nivel.numero * M.alturaNivel;
-
-      /* travessas ligando os pilares, frente e fundo */
-      [-M.profundidade / 2, M.profundidade / 2].forEach(function (dz) {
-        var travessa = BABYLON.MeshBuilder.CreateBox('travessa', {
-          width: larguraRua + M.larguraPilar, height: 0.1, depth: 0.07
-        }, cena);
-        travessa.position.set(0, y, dz);
-        travessa.material = materiais.travessa;
-        travessa.parent = no;
-        travessa.isPickable = false;
-      });
-
-      /* a prateleira em si */
-      var prateleira = BABYLON.MeshBuilder.CreateBox('prateleira', {
-        width: larguraRua, height: M.espessuraPrateleira, depth: M.profundidade
-      }, cena);
-      prateleira.position.set(0, y - 0.06, 0);
-      prateleira.material = materiais.prateleira;
-      prateleira.parent = no;
-      prateleira.isPickable = false;
-
-      /* as posições, que são o que a pessoa clica */
-      nivel.posicoes.forEach(function (pos) {
-        var caixa = BABYLON.MeshBuilder.CreateBox(pos.codigo, {
-          width: M.larguraPosicao * 0.82,
-          height: M.alturaNivel * 0.6,
-          depth: M.profundidade * 0.78
-        }, cena);
-
-        caixa.position.set(
-          xInicial + (pos.numero - 0.5) * M.larguraPosicao,
-          y + M.alturaNivel * 0.3 - 0.06,
-          0
-        );
-        caixa.material = materiais[pos.status] || materiais.DISPONIVEL;
-        caixa.parent = no;
-        caixa.metadata = { codigo: pos.codigo, tipo: 'POSICAO' };
-
-        meshPorPosicao[pos.codigo] = caixa;
-      });
-    });
-
-    /* PLACA DA RUA, no alto */
-    var placa = BABYLON.MeshBuilder.CreateBox('placa_' + rua.codigo, {
-      width: 2.3, height: 0.62, depth: 0.07
-    }, cena);
-    placa.position.set(0, alturaRack + 0.7, M.profundidade / 2 + 0.2);
-    placa.material = materiais.placa;
-    placa.parent = no;
-    placa.isPickable = false;
-
-    escreverNaPlaca(placa, rua.nome || rua.codigo);
-  }
-
-  /** Texto na placa, desenhado numa textura */
-  function escreverNaPlaca(placa, texto) {
+    } catch (e) { }
     try {
-      var tex = new BABYLON.DynamicTexture('t_' + placa.name,
-        { width: 460, height: 124 }, cena, true);
-      var ctx = tex.getContext();
+      if (typeof location !== 'undefined' && /github\.io$/i.test(location.hostname)) {
+        return 'GITHUB_PAGES';
+      }
+    } catch (e) { }
+    return 'NAVEGADOR';
+  };
 
-      ctx.fillStyle = '#0B2A55';
-      ctx.fillRect(0, 0, 460, 124);
-      ctx.fillStyle = '#FF7A00';
-      ctx.fillRect(0, 108, 460, 16);
+  A.configurar = function (opcoes) {
+    opcoes = opcoes || {};
+    if (opcoes.url !== undefined) A.url = String(opcoes.url || '').trim();
+    if (opcoes.chave !== undefined) {
+      A.chave = String(opcoes.chave || '').trim();
+      A.origemDaChave = A.chave ? 'informada na configuração' : 'nenhuma (fase 1)';
+    }
+    if (opcoes.sessao !== undefined) A.sessao = opcoes.sessao;
+    if (opcoes.tempoLimite) A.tempoLimite = Number(opcoes.tempoLimite) || A.tempoLimite;
+    return A.estado();
+  };
 
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 52px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+  A.estado = function () {
+    return {
+      ambiente: A.ambiente(),
+      temUrl: !!A.url,
+      temChave: !!A.chave,           /* se TEM, não QUAL. */
+      origemDaChave: A.origemDaChave,
+      porSistema: A.temPortaDoSistema(),
+      origemDaPorta: A.origemDaPorta,
+      pronto: A.pronto(),
+      chamadas: A.chamadas,
+      falhas: A.falhas
+    };
+  };
 
-      var t = String(texto).length > 20 ? String(texto).slice(0, 19) + '…' : texto;
-      ctx.fillText(t, 230, 56);
-      tex.update();
+  /* ------------------------------------------------------------
+     PERGUNTAR AO SISTEMA QUAL É A CHAVE
 
-      var m = new BABYLON.StandardMaterial('mp_' + placa.name, cena);
-      m.diffuseTexture = tex;
-      m.emissiveColor = new BABYLON.Color3(0.55, 0.55, 0.55);
-      m.specularColor = new BABYLON.Color3(0, 0, 0);
-      placa.material = m;
-    } catch (e) { /* sem texto na placa: a cena continua */ }
+     Três lugares, nesta ordem, e todos do MESMO endereço — se o
+     mapa estiver noutro domínio, o navegador barra e a função
+     devolve vazio, que é o certo. Nenhum deles é "escrito no
+     código" e nenhum deles é criado por este módulo: os três
+     pertencem ao ALMOX PRO, que continua sendo o dono da chave.
+     ------------------------------------------------------------ */
+  A.chaveDoSistema = function () {
+    /* 1 · dentro do quadro do sistema: pergunta direto a ele.
+           É o valor VIVO, o mesmo que ele está usando agora. */
+    try {
+      if (window.parent && window.parent !== window &&
+          window.parent.API && window.parent.API.PONTE) {
+        var k = String(window.parent.API.PONTE.chave || '').trim();
+        if (k) return { chave: k, origem: 'o sistema, pelo quadro' };
+      }
+    } catch (e) { /* origem diferente: o navegador barrou, e tudo bem */ }
+
+    /* 2 · aberto em tela cheia a partir do sistema */
+    try {
+      if (window.opener && window.opener.API && window.opener.API.PONTE) {
+        var o = String(window.opener.API.PONTE.chave || '').trim();
+        if (o) return { chave: o, origem: 'o sistema, pela aba de origem' };
+      }
+    } catch (e) {}
+
+    /* 3 · o depósito que o PRÓPRIO ALMOX PRO mantém neste
+           navegador. Só leitura: este módulo nunca escreve aqui. */
+    try {
+      var g = String(localStorage.getItem('almoxa_app_chave_digitada') || '').trim();
+      if (g) return { chave: g, origem: 'a que foi digitada neste navegador' };
+    } catch (e) {}
+
+    return { chave: '', origem: 'nenhuma (fase 1)' };
+  };
+
+  /* ------------------------------------------------------------
+     A PORTA DO SISTEMA
+
+     Devolve a função de chamada do ALMOX PRO, quando o mapa está
+     rodando dentro dele e no mesmo endereço. Devolve nada quando
+     não está — e aí o mapa usa o caminho próprio, que é o de
+     sempre e continua valendo para o Apps Script.
+
+     Note que NÃO se copia sessão, perfil nem obra para cá. Não
+     se lê token nenhum. Pede-se ao sistema que faça a chamada
+     dele; o que trafega é o resultado.
+     ------------------------------------------------------------ */
+  A.portaDoSistema = function () {
+    var janelas = [];
+    try { if (window.parent && window.parent !== window) janelas.push(window.parent); } catch (e) {}
+    try { if (window.opener) janelas.push(window.opener); } catch (e) {}
+
+    for (var i = 0; i < janelas.length; i++) {
+      try {
+        var j = janelas[i];
+        if (j && j.API && typeof j.API.call === 'function') {
+          A.origemDaPorta = i === 0 ? 'o sistema, pelo quadro' : 'o sistema, pela aba de origem';
+          return function (modulo, acao, payload) {
+            return j.API.call(modulo, acao, payload);
+          };
+        }
+      } catch (e) { /* origem diferente: o navegador barra, e está certo */ }
+    }
+    A.origemDaPorta = 'própria';
+    return null;
+  };
+
+  /** o mapa consegue falar pela porta do sistema? */
+  A.temPortaDoSistema = function () { return !!A.portaDoSistema(); };
+
+  /** pega a chave do sistema e passa a usá-la. Devolve só se achou. */
+  A.herdarChave = function () {
+    var r = A.chaveDoSistema();
+    A.chave = r.chave;
+    A.origemDaChave = r.origem;
+    return !!r.chave;
+  };
+
+  /** dá para falar com o Core daqui? */
+  A.pronto = function () {
+    if (A.temPortaDoSistema()) return true;
+    var amb = A.ambiente();
+    if (amb === 'APPS_SCRIPT') return true;
+    return !!A.url;
+  };
+
+  function envelope(modulo, acao, payload) {
+    return {
+      ponte: 'ALMOXA',
+      /* a chave vem do sistema, em tempo de execução. Vazia é
+         fase 1 — e fase 1 não pode bloquear a comunicação. */
+      chave: A.chave || '',
+      modulo: modulo,
+      acao: acao,
+      payload: payload || {},
+      sessao: A.sessao || null,
+      origem: 'ALMOXA_3D'
+    };
   }
 
-  /* ---------- INTERAÇÃO ---------- */
+  /* ----------------------------------------------------------
+     A CHAMADA
+     ---------------------------------------------------------- */
+  A.chamar = function (modulo, acao, payload, opcoes) {
+    opcoes = opcoes || {};
+    var amb = A.ambiente();
+    A.chamadas++;
+    var comecou = Date.now();
 
-  function ligarSelecao() {
-    if (!disponivel() || !cena) return;
+    function fim(r) {
+      A.ultima = { modulo: modulo, acao: acao, ambiente: amb,
+                   ms: Date.now() - comecou, ok: !!(r && r.ok) };
+      if (!r || !r.ok) A.falhas++;
+      return r;
+    }
+
+    /* ----------------------------------------------------------
+       PELA PORTA DO SISTEMA · o jeito certo, e o primeiro a tentar
+
+       Eu estava montando um envelope por fora e preenchendo campo
+       por campo: chave, depois sessão, depois perfil, depois obra.
+       Cada recusa do Core me fazia copiar mais um pedaço do
+       sistema para cá. Isso é construir uma SEGUNDA porta de
+       entrada — e a regra dele é clara: não duplicar
+       autenticação, sessão, usuários nem permissões.
+
+       O ALMOX PRO já tem uma porta que funciona, com a sessão do
+       Ismael, o perfil, a obra, a chave e o prazo dele. O mapa é
+       servido pelo mesmo endereço, então pode simplesmente BATER
+       NAQUELA PORTA em vez de abrir uma ao lado.
+
+       Assim não existe segunda sessão para ficar fora de sincronia,
+       e quem continua decidendo tudo é o Core.
+       ---------------------------------------------------------- */
+    var doSistema = A.portaDoSistema();
+    if (doSistema && !opcoes.semSistema) {
+      return Promise.resolve()
+        .then(function () { return doSistema(modulo, acao, payload || {}); })
+        .then(function (r) { return fim(A.entender(r)); })
+        .catch(function (e) {
+          return fim({ ok: false, codigo: 'ERRO_SISTEMA',
+            mensagem: 'A porta do sistema recusou: ' + ((e && e.message) || e) });
+        });
+    }
+
+    if (amb === 'APPS_SCRIPT') {
+      return new Promise(function (resolve) {
+        var respondeu = false;
+        var relogio = setTimeout(function () {
+          if (respondeu) return;
+          respondeu = true;
+          resolve(fim({ ok: false, codigo: 'TEMPO',
+            mensagem: 'O Core não respondeu em ' +
+              Math.round((opcoes.tempoLimite || A.tempoLimite) / 1000) +
+              ' segundos (' + modulo + '.' + acao + ').' }));
+        }, opcoes.tempoLimite || A.tempoLimite);
+
+        try {
+          google.script.run
+            .withSuccessHandler(function (t) {
+              if (respondeu) return; respondeu = true; clearTimeout(relogio);
+              resolve(fim(A.entender(t)));
+            })
+            .withFailureHandler(function (e) {
+              if (respondeu) return; respondeu = true; clearTimeout(relogio);
+              resolve(fim({ ok: false, codigo: 'ERRO_GAS',
+                mensagem: (e && e.message) || 'o Apps Script recusou a chamada' }));
+            })
+            .APIX_atender_(JSON.stringify(envelope(modulo, acao, payload)));
+        } catch (e) {
+          respondeu = true; clearTimeout(relogio);
+          resolve(fim({ ok: false, codigo: 'ERRO_GAS', mensagem: String(e && e.message) }));
+        }
+      });
+    }
+
+    /* fora do Apps Script: HTTPS no mesmo /exec */
+    if (!A.url) {
+      return Promise.resolve(fim({ ok: false, codigo: 'SEM_URL',
+        mensagem: 'O endereço do Core não foi configurado. ' +
+          'Chame API3D.configurar({ url: "...". }) antes de usar.' }));
+    }
+
+    var corta = null;
+    var prazo = new Promise(function (resolve) {
+      corta = setTimeout(function () {
+        resolve(fim({ ok: false, codigo: 'TEMPO',
+          mensagem: 'O Core não respondeu em ' +
+            Math.round((opcoes.tempoLimite || A.tempoLimite) / 1000) + ' segundos.' }));
+      }, opcoes.tempoLimite || A.tempoLimite);
+    });
+
+    var ida = fetch(A.url, {
+      method: 'POST',
+      /* text/plain evita o pedido de verificação prévia do CORS,
+         que o Apps Script não responde. É o mesmo caminho que o
+         ALMOX PRO já usa hoje no GitHub Pages. */
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(envelope(modulo, acao, payload))
+    }).then(function (res) {
+      return res.text();
+    }).then(function (txt) {
+      clearTimeout(corta);
+      return fim(A.entender(txt));
+    }).catch(function (e) {
+      clearTimeout(corta);
+      return fim({ ok: false, codigo: 'REDE',
+        mensagem: (e && e.message) || 'não consegui falar com o Core' });
+    });
+
+    return Promise.race([ida, prazo]);
+  };
+
+  /** a resposta pode vir como texto ou como objeto; entendo as duas */
+  A.entender = function (t) {
+    if (t === null || t === undefined) {
+      return { ok: false, codigo: 'VAZIO', mensagem: 'o Core respondeu nada' };
+    }
+    if (typeof t === 'object') return t;
+    try {
+      var o = JSON.parse(t);
+      return (o && typeof o === 'object') ? o
+        : { ok: false, codigo: 'FORMATO', mensagem: 'resposta em formato inesperado' };
+    } catch (e) {
+      return { ok: false, codigo: 'FORMATO',
+        mensagem: 'não entendi a resposta do Core',
+        bruto: String(t).slice(0, 300) };
+    }
+  };
+
+  /* ----------------------------------------------------------
+     OS PEDIDOS QUE O 3D FAZ
+     ------------------------------------------------------------
+     Só ações que eu confirmei existirem no Core em 08/11, lendo
+     o código do AP_Modulo_locais. Não invento ação.
+     ---------------------------------------------------------- */
+  A.localizacoes = function () { return A.chamar('locais', 'listar'); };
+  A.semLocalizacao = function () { return A.chamar('locais', 'semLocalizacao'); };
+
+  /* ------------------------------------------------------------
+     [12/11] VINCULAR ESTAVA APAGANDO O ENDEREÇO
+
+     Eu mandava { sku, codigo }. A rota lê { sku, localId } e
+     grava assim:
+
+         item.localId = p.localId || null;
+         item.localizacao = local ? localTexto(local) : "";
+
+     Com "codigo" no lugar de "localId", o localId chegava
+     indefinido, virava null — e a rota respondia ok:true tendo
+     APAGADO o endereço do item. Falha que responde "deu certo" é
+     pior do que falha que responde erro.
+
+     Agora: só localId, e vazio é RECUSADO aqui mesmo. Desfazer o
+     vínculo passou a ter função própria, para nunca acontecer
+     por descuido.
+
+     O código ("A-A01-1-B") não vira localId por adivinhação: quem
+     tem a lista de locais é o app, e é lá que a tradução é feita.
+     ------------------------------------------------------------ */
+  A.vincular = function (sku, localId) {
+    var s = String(sku || '').trim();
+    var l = String(localId || '').trim();
+    if (!s) {
+      return Promise.resolve({ ok: false, codigo: 'SEM_SKU',
+        mensagem: 'Vincular sem o código do item não é possível.' });
+    }
+    if (!l) {
+      return Promise.resolve({ ok: false, codigo: 'SEM_LOCAL',
+        mensagem: 'Vincular sem o identificador da localização apagaria o ' +
+          'endereço do item. Se a intenção é tirar o item do endereço, ' +
+          'use API3D.desvincular(sku).' });
+    }
+    return A.chamar('locais', 'vincular', { sku: s, localId: l });
+  };
+
+  /** tirar o item do endereço — de propósito, nunca por descuido */
+  A.desvincular = function (sku) {
+    var s = String(sku || '').trim();
+    if (!s) {
+      return Promise.resolve({ ok: false, codigo: 'SEM_SKU',
+        mensagem: 'Desvincular sem o código do item não é possível.' });
+    }
+    return A.chamar('locais', 'vincular', { sku: s, localId: null });
+  };
+
+  /* ------------------------------------------------------------
+     [12/11] estoque.item LÊ "id", NÃO "sku"
+
+     A rota procura por x.id === p.id, x.codigo === p.id ou
+     x.sku === p.id. Mandando { sku } o p.id ficava indefinido e
+     a resposta era sempre ITEM_NAO_ENCONTRADO.
+
+     Mando os dois nomes: id é o que esta rota lê, sku é o nome
+     do campo. Nenhum dos dois é inventado.
+     ------------------------------------------------------------ */
+  A.item = function (sku) {
+    return A.chamar('itens', 'obter', { id: sku, sku: sku });
+  };
+  A.estoqueDoItem = function (sku) {
+    return A.chamar('estoque', 'item', { id: sku, sku: sku });
+  };
+
+  /* ------------------------------------------------------------
+     [12/11] criarFaixa SAIU
+
+     Eu oferecia A.criarFaixa('locais','criarFaixa'). Fui procurar
+     essa ação no sistema e ela não existe: nem nas chamadas do
+     HTML, nem na camada de simulação. Ninguém chamava, e oferecer
+     uma porta que não abre só faz alguém bater nela um dia.
+
+     As ações de locais que eu CONFIRMEI: listar, salvar, excluir,
+     vincular, semLocalizacao. Criar faixa de endereços, quando a
+     gente for fazer, sai de locais.salvar em sequência — ou de
+     uma ação nova que o Core precise ganhar, e aí eu peço antes.
+     ------------------------------------------------------------ */
+  A.salvarLocal = function (d) { return A.chamar('locais', 'salvar', d || {}); };
+
+  raiz.API3D = A;
+  if (typeof module !== 'undefined' && module.exports) module.exports = A;
+
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* ===== motor3d.js ===== */
+/* ============================================================
+   ALMOXA 3D · motor3d.js  ·  08/11/2026
+   ------------------------------------------------------------
+   O MOTOR BABYLON.
+
+   Este arquivo não calcula nada: ele recebe a lista de peças
+   pronta do layout3d.js e transforma em malha. Toda a conta de
+   onde fica cada montante e cada posição está lá, e é testada
+   em Node sem precisar de placa de vídeo.
+
+   Aqui mora só o que é Babylon de verdade: cena, câmera, luz,
+   sombra, material, instância e clique.
+
+   DESEMPENHO · seção 15. Um almoxarifado de 5.000 posições são
+   5.000 caixas iguais. Criar 5.000 malhas separadas derruba
+   celular. Então as posições são INSTÂNCIAS de um mesmo molde,
+   uma por cor: a placa de vídeo desenha milhares de cópias num
+   lance só. Montante, longarina e prateleira seguem a mesma
+   ideia.
+   ============================================================ */
+(function (raiz) {
+  'use strict';
+
+  var M = {
+    nome: 'MOTOR3D',
+    versao: '08/11',
+    engine: null,
+    cena: null,
+    camera: null,
+    moldes: {},
+    instancias: [],
+    porCodigo: {},
+    selecionada: null,
+    corDaSelecionada: null,
+    aoSelecionar: null,     /* função que a tela registra */
+    pronto: false
+  };
+
+  function B() {
+    if (typeof BABYLON === 'undefined') {
+      throw new Error('O Babylon.js não carregou. Confira a conexão e o endereço da biblioteca.');
+    }
+    return BABYLON;
+  }
+
+  function cor3(hex) {
+    return B().Color3.FromHexString(hex || '#888888');
+  }
+
+  /* ----------------------------------------------------------
+     A CENA
+     ---------------------------------------------------------- */
+  M.iniciar = function (canvas, opcoes) {
+    opcoes = opcoes || {};
+    var b = B();
+
+    M.engine = new b.Engine(canvas, true, {
+      preserveDrawingBuffer: true,
+      stencil: true,
+      /* no celular, metade dos pixels é o suficiente e dobra o fôlego */
+      adaptToDeviceRatio: true
+    });
+
+    var cena = new b.Scene(M.engine);
+    cena.clearColor = b.Color4.FromHexString((opcoes.fundo || '#EEF1F5') + 'FF');
+    M.cena = cena;
+
+    /* câmera orbital · seção 1 */
+    var cam = new b.ArcRotateCamera('cam',
+      -Math.PI / 4, Math.PI / 3.2, 28,
+      new b.Vector3(0, 1.2, 0), cena);
+    cam.attachControl(canvas, true);
+    cam.lowerBetaLimit = 0.12;
+    cam.upperBetaLimit = Math.PI / 2.05;   /* não deixa passar por baixo do piso */
+    cam.lowerRadiusLimit = 3;
+    cam.upperRadiusLimit = 220;
+    cam.wheelDeltaPercentage = 0.02;
+    cam.pinchDeltaPercentage = 0.02;       /* pinça no celular */
+    cam.panningSensibility = 80;
+    M.camera = cam;
+
+    /* luz: uma geral e uma direcional que lança sombra */
+    var ceu = new b.HemisphericLight('ceu', new b.Vector3(0, 1, 0), cena);
+    ceu.intensity = 0.78;
+    ceu.groundColor = cor3('#B9C0C9');
+
+    var sol = new b.DirectionalLight('sol', new b.Vector3(-0.5, -1, -0.35), cena);
+    sol.position = new b.Vector3(40, 60, 40);
+    sol.intensity = 0.65;
+    M.sol = sol;
+
+    if (opcoes.sombras !== false) {
+      M.sombra = new b.ShadowGenerator(1024, sol);
+      M.sombra.useBlurExponentialShadowMap = true;
+      M.sombra.blurKernel = 16;
+    }
+
+    M.engine.runRenderLoop(function () { cena.render(); });
+    raiz.addEventListener('resize', function () { M.engine.resize(); });
 
     cena.onPointerObservable.add(function (info) {
-      if (info.type !== BABYLON.PointerEventTypes.POINTERPICK) return;
-
-      var alvo = info.pickInfo && info.pickInfo.pickedMesh;
-      if (!alvo || !alvo.metadata || alvo.metadata.tipo !== 'POSICAO') return;
-
-      selecionar(alvo.metadata.codigo);
-    });
-  }
-
-  function selecionar(codigo) {
-    if (!disponivel() || !cena) {
-      if (aoSelecionar) aoSelecionar(codigo, AP3D_Dados.posicao(codigo));
-      return;
-    }
-
-    /* devolve a anterior à cor do estado */
-    if (selecionada && meshPorPosicao[selecionada]) {
-      var anterior = AP3D_Dados.posicao(selecionada);
-      meshPorPosicao[selecionada].material =
-        materiais[anterior ? anterior.status : 'DISPONIVEL'];
-      meshPorPosicao[selecionada].scaling.setAll(1);
-    }
-
-    selecionada = codigo;
-    var mesh = meshPorPosicao[codigo];
-    if (mesh) {
-      mesh.material = materiais.BUSCA;
-      mesh.scaling.setAll(1.12);
-      /* a câmera vai até a posição, sem cortar o caminho */
-      irPara(mesh.getAbsolutePosition());
-    }
-
-    if (aoSelecionar) aoSelecionar(codigo, AP3D_Dados.posicao(codigo));
-  }
-
-  function irPara(alvo) {
-    if (!camera) return;
-    BABYLON.Animation.CreateAndStartAnimation('irPara', camera, 'target',
-      60, 22, camera.target.clone(), alvo.clone(),
-      BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT);
-  }
-
-  function destacarBusca(codigos) {
-    if (!disponivel() || !cena) return;
-
-    Object.keys(meshPorPosicao).forEach(function (cod) {
-      var p = AP3D_Dados.posicao(cod);
-      meshPorPosicao[cod].material = materiais[p ? p.status : 'DISPONIVEL'];
-      meshPorPosicao[cod].scaling.setAll(1);
+      if (info.type !== b.PointerEventTypes.POINTERPICK) return;
+      var m = info.pickInfo && info.pickInfo.pickedMesh;
+      M.clicar(m);
     });
 
-    (codigos || []).forEach(function (cod) {
-      if (!meshPorPosicao[cod]) return;
-      meshPorPosicao[cod].material = materiais.BUSCA;
-      meshPorPosicao[cod].scaling.setAll(1.15);
-    });
-
-    if (codigos && codigos.length && meshPorPosicao[codigos[0]]) {
-      irPara(meshPorPosicao[codigos[0]].getAbsolutePosition());
-    }
-  }
-
-  function atualizarStatus(codigo, status) {
-    if (!disponivel() || !cena) return;
-
-    if (!meshPorPosicao[codigo]) return;
-    meshPorPosicao[codigo].material = materiais[status] || materiais.DISPONIVEL;
-  }
-
-  /* ---------- CÂMERA ---------- */
-
-  function enquadrar() {
-    if (!disponivel()) return;
-
-    if (!camera) return;
-    camera.alpha = -Math.PI / 2.4;
-    camera.beta = Math.PI / 2.9;
-    camera.radius = 30;
-    camera.target = new BABYLON.Vector3(0, 3, 0);
-  }
-
-  function vistaDeCima() {
-    if (!disponivel()) return;
-
-    if (!camera) return;
-    BABYLON.Animation.CreateAndStartAnimation('cima', camera, 'beta',
-      60, 22, camera.beta, 0.06, BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT);
-  }
-
-  function zoom(fator) {
-    if (!disponivel()) return;
-
-    if (!camera) return;
-    camera.radius = Math.max(camera.lowerRadiusLimit,
-      Math.min(camera.upperRadiusLimit, camera.radius * fator));
-  }
-
-  return {
-    iniciar: iniciar,
-    construir: construir,
-    selecionar: selecionar,
-    destacarBusca: destacarBusca,
-    atualizarStatus: atualizarStatus,
-    enquadrar: enquadrar,
-    vistaDeCima: vistaDeCima,
-    zoom: zoom,
-    cores: CORES,
-    aoSelecionar: function (fn) { aoSelecionar = fn; },
-    pronta: function () { return !!cena; },
-    disponivel: disponivel
+    M.pronto = true;
+    return M;
   };
-})();
 
+  /* ----------------------------------------------------------
+     MATERIAIS E MOLDES
+     ---------------------------------------------------------- */
+  function material(nome, hex, opcoes) {
+    opcoes = opcoes || {};
+    var b = B();
+    var chave = 'mat:' + nome;
+    if (M.moldes[chave]) return M.moldes[chave];
+    var mat = new b.StandardMaterial(nome, M.cena);
+    mat.diffuseColor = cor3(hex);
+    mat.specularColor = cor3(opcoes.brilho || '#2A2A2A');
+    if (opcoes.emissivo) mat.emissiveColor = cor3(opcoes.emissivo);
+    mat.freeze();
+    M.moldes[chave] = mat;
+    return mat;
+  }
+
+  /** um molde por combinação de tamanho+cor; o resto vira instância */
+  function molde(peca) {
+    var b = B();
+    var chave = [peca.tipo, peca.lx.toFixed(3), peca.ly.toFixed(3),
+                 peca.lz.toFixed(3), peca.cor].join('|');
+    if (M.moldes[chave]) return M.moldes[chave];
+
+    var caixa = b.MeshBuilder.CreateBox('molde_' + peca.tipo, {
+      width: peca.lx, height: peca.ly, depth: peca.lz
+    }, M.cena);
+    caixa.material = material('m_' + peca.tipo + '_' + peca.cor, peca.cor,
+      { brilho: peca.tipo === 'piso' ? '#0A0A0A' : '#303030' });
+    caixa.isVisible = false;                 /* o molde não aparece */
+    caixa.isPickable = false;
+    M.moldes[chave] = caixa;
+    return caixa;
+  }
+
+  /* ----------------------------------------------------------
+     DESENHAR o galpão a partir da montagem do layout3d
+     ---------------------------------------------------------- */
+  M.desenhar = function (montagem) {
+    if (!M.cena) throw new Error('A cena não foi iniciada.');
+    var b = B();
+    M.limpar();
+
+    var pecas = (montagem && montagem.pecas) || [];
+    for (var i = 0; i < pecas.length; i++) {
+      var p = pecas[i];
+      var base = molde(p);
+      var inst = base.createInstance('i_' + p.id);
+      inst.position = new b.Vector3(p.x, p.y, p.z);
+      inst.isPickable = !!p.clicavel;
+      inst.metadata = p;
+
+      if (M.sombra && p.tipo !== 'piso') {
+        try { M.sombra.addShadowCaster(inst); } catch (e) { }
+      }
+      if (p.tipo === 'piso') {
+        inst.receiveShadows = true;
+      }
+
+      M.instancias.push(inst);
+      if (p.tipo === 'posicao' && p.codigo) M.porCodigo[p.codigo] = inst;
+    }
+
+    /* Guarda a montagem: é dela que sai o enquadramento, e é ela
+       que a troca de visão reusa. Antes a câmera mirava no meio
+       de um galpão suposto; agora mira no que existe. */
+    M.montagem = montagem;
+    M.enquadrar();
+
+    return { instancias: M.instancias.length, moldes: Object.keys(M.moldes).length };
+  };
+
+  M.limpar = function () {
+    for (var i = 0; i < M.instancias.length; i++) {
+      try { M.instancias[i].dispose(); } catch (e) { }
+    }
+    M.instancias = [];
+    M.porCodigo = {};
+    M.selecionada = null;
+    M.corDaSelecionada = null;
+    /* a montagem sai junto: enquadrar pelo galpão anterior seria
+       mirar numa estante que já não está mais na cena */
+    M.montagem = null;
+  };
+
+  /* ----------------------------------------------------------
+     SELEÇÃO · azul, e devolve a cor de antes ao sair
+     ---------------------------------------------------------- */
+  M.clicar = function (malha) {
+    if (M.selecionada) {
+      try { M.selecionada.instancedBuffers = M.selecionada.instancedBuffers; } catch (e) { }
+      M.destacar(M.selecionada, false);
+      M.selecionada = null;
+    }
+    if (!malha || !malha.metadata || malha.metadata.tipo !== 'posicao') {
+      if (typeof M.aoSelecionar === 'function') M.aoSelecionar(null);
+      return null;
+    }
+    M.selecionada = malha;
+    M.destacar(malha, true);
+    if (typeof M.aoSelecionar === 'function') M.aoSelecionar(malha.metadata);
+    return malha.metadata;
+  };
+
+  /** o destaque é uma moldura, não troca de cor: assim o verde
+      continua verde e o usuário não perde a leitura da ocupação */
+  M.destacar = function (malha, ligado) {
+    var b = B();
+    if (!M.realce) {
+      M.realce = new b.HighlightLayer('realce', M.cena, { blurHorizontalSize: 0.6 });
+    }
+    try {
+      if (ligado) M.realce.addMesh(malha.sourceMesh || malha, cor3('#2F7BE8'));
+      else M.realce.removeMesh(malha.sourceMesh || malha);
+    } catch (e) { }
+  };
+
+  M.selecionarPorCodigo = function (codigo) {
+    var m = M.porCodigo[codigo];
+    if (!m) return null;
+    return M.clicar(m);
+  };
+
+  /* ----------------------------------------------------------
+     AS VISÕES · seção 8
+     ---------------------------------------------------------- */
+  /* ------------------------------------------------------------
+     ENQUADRAR · põe a câmera onde cabe o que foi desenhado
+
+     A conta mora no layout3d, que é matemática pura e tem prova
+     própria. Aqui só se aplica o resultado no Babylon — assim o
+     enquadramento continua verificável sem placa de vídeo.
+     ------------------------------------------------------------ */
+  M.enquadrar = function (opcoes) {
+    if (!M.camera || !raiz.LAYOUT3D || !raiz.LAYOUT3D.enquadramento) return null;
+    var b = B();
+    opcoes = opcoes || {};
+
+    /* a proporção real da tela: numa tela deitada quem aperta é
+       a altura, e é isso que a conta precisa saber */
+    var aspecto = opcoes.aspecto;
+    if (!aspecto) {
+      try { aspecto = M.engine.getAspectRatio(M.camera); } catch (e) {}
+    }
+    var fov = opcoes.fov || M.camera.fov || 0.8;
+
+    var e = raiz.LAYOUT3D.enquadramento(M.montagem,
+      { fov: fov, aspecto: aspecto, folga: opcoes.folga, piso: !!opcoes.piso });
+
+    M.camera.setTarget(new b.Vector3(e.alvo.x, e.alvo.y, e.alvo.z));
+    M.camera.radius = e.raio;
+    /* o limite de aproximação acompanha o tamanho: num galpão
+       de uma estante, 3 metros já é longe demais */
+    M.camera.lowerRadiusLimit = Math.min(3, e.raio * 0.35);
+    M.ultimoEnquadre = e;
+    return e;
+  };
+
+  M.visao = function (qual, galpao) {
+    if (!M.camera) return;
+    var a = { superior: [-Math.PI / 2, 0.02], frontal: [-Math.PI / 2, Math.PI / 2.1],
+              lateral: [0, Math.PI / 2.1], perspectiva: [-Math.PI / 4, Math.PI / 3.2] };
+    var v = a[qual] || a.perspectiva;
+    M.camera.alpha = v[0];
+    M.camera.beta = v[1];
+    /* a distância sai do enquadramento, igual em todas as visões:
+       trocar de ângulo não é motivo para perder o galpão de vista */
+    if (!M.enquadrar()) {
+      var g = galpao || { largura: 20, profundidade: 20, altura: 4 };
+      M.camera.radius = Math.max(g.largura, g.profundidade) * 1.15 + 8;
+    }
+  };
+
+  M.foto = function () {
+    try { return M.engine && M.cena ? M.cena.getEngine().getRenderingCanvas().toDataURL() : ''; }
+    catch (e) { return ''; }
+  };
+
+  M.parar = function () {
+    try { M.engine && M.engine.stopRenderLoop(); } catch (e) { }
+    try { M.cena && M.cena.dispose(); } catch (e) { }
+    try { M.engine && M.engine.dispose(); } catch (e) { }
+    M.pronto = false;
+  };
+
+  raiz.MOTOR3D = M;
+  if (typeof module !== 'undefined' && module.exports) module.exports = M;
+
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* ===== construtor.js ===== */
 /* ============================================================
-   AP3D — INTERFACE
+   ALMOXA 3D · construtor.js · 08/11/2026
    ------------------------------------------------------------
-   Árvore, painel lateral, planta 2D e os controles.
-   Nenhuma decisão de dado acontece aqui: a interface pergunta
-   ao AP3D_Dados e mostra o que ele responde.
+   O CONSTRUTOR DE GALPÃO — seção 4 do documento dele.
+
+   ETAPA 1, E SÓ A ETAPA 1: desenhar no papel.
+
+   Esta tela monta a estante que o Ismael digitar e DESENHA, para
+   ele conferir no 3D antes de qualquer coisa chegar na planilha.
+   Não existe gravação aqui. O botão de gravar está desligado de
+   propósito, com o motivo escrito na tela — a seção 10 do
+   documento dele manda pedir autorização antes de cada etapa, e
+   endereço gravado errado arrasta produto vinculado junto.
+
+   Duas decisões dele, de 08/11, que estão amarradas no código:
+
+     · UM SKU POR DIVISÃO. Cada box guarda um item só, então a
+       capacidade nasce 1 e não há lista dentro do box.
+     · LETRA ATÉ 26, NÚMERO DEPOIS. E por prateleira inteira,
+       nunca metade letra e metade número.
+
+   A conta toda mora no layout3d, que é matemática pura e tem
+   prova rodando sem navegador. Aqui é só a tela.
    ============================================================ */
+(function (raiz) {
+  'use strict';
 
-var AP3D_UI = (function () {
+  var C = {
+    nome: 'CONSTRUTOR3D',
+    versao: '08/11',
+    aberto: false,
+    projeto: null,
+    /* o galpão real fica guardado enquanto o projeto está na tela,
+       para voltar sem precisar consultar o Core de novo */
+    guardado: null
+  };
 
-  var abertos = {};       /* quais ruas estão expandidas */
-  var modo = '3d';
-
-  function esc(t) {
-    return String(t === null || t === undefined ? '' : t)
+  function $(id) { return document.getElementById(id); }
+  function esc(v) {
+    return String(v === null || v === undefined ? '' : v)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
+  function num(id, padrao) {
+    var el = $(id);
+    if (!el) return padrao;
+    var n = Number(String(el.value).replace(',', '.'));
+    return isFinite(n) ? n : padrao;
+  }
+  function txt(id) { var el = $(id); return el ? String(el.value || '').trim() : ''; }
 
-  function el(id) { return document.getElementById(id); }
+  /* ------------------------------------------------------------
+     O FORMULÁRIO
+     ------------------------------------------------------------ */
+  C.html = function () {
+    return '' +
+    '<div class="construtor">' +
 
-  /* ============================================================
-     ÁRVORE
-     ============================================================ */
+      '<div class="aviso" style="margin:0 0 12px">' +
+        '<b>Etapa 1 — desenhar no papel.</b> ' +
+        'Nada do que está aqui é gravado. Serve para o senhor ver a estante ' +
+        'no 3D e conferir as medidas antes de a planilha ser tocada.' +
+      '</div>' +
 
-  function pintarArvore() {
-    var projeto = AP3D_Dados.projeto();
-    var alvo = el('arvore');
+      '<div class="campo">' +
+        '<label for="cRua">Rua</label>' +
+        '<input id="cRua" type="text" value="A" maxlength="12" autocomplete="off">' +
+      '</div>' +
+      '<div class="campo">' +
+        '<label for="cEstante">Estante</label>' +
+        '<input id="cEstante" type="text" value="A01" maxlength="16" autocomplete="off">' +
+      '</div>' +
 
-    if (!projeto.ruas.length) {
-      alvo.innerHTML =
-        '<div class="vazio">' +
-        '<div class="ico">🏗️</div>' +
-        '<h4>Sem estrutura</h4>' +
-        '<p>Crie a primeira rua para o mapa aparecer.</p>' +
-        '<button class="bt bt-laranja" onclick="AP3D_UI.abrirNovaRua()">Criar rua</button>' +
+      '<div class="campo2">' +
+        '<div class="campo">' +
+          '<label for="cPrateleiras">Prateleiras</label>' +
+          '<input id="cPrateleiras" type="number" min="1" max="20" value="1">' +
+        '</div>' +
+        '<div class="campo">' +
+          '<label for="cPrimeira">A partir do nível</label>' +
+          '<input id="cPrimeira" type="number" min="1" max="99" value="1">' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="campo">' +
+        '<label for="cDivisoes">Divisões por prateleira</label>' +
+        '<input id="cDivisoes" type="number" min="1" max="200" value="20">' +
+      '</div>' +
+
+      '<div class="sep"></div>' +
+      '<div class="small" style="margin-bottom:8px;color:var(--texto-2)">' +
+        'As medidas são de trena, em centímetros. É o que decide se a estante ' +
+        'sai do tamanho certo no desenho.' +
+      '</div>' +
+
+      '<div class="campo3">' +
+        '<div class="campo">' +
+          '<label for="cLargura">Largura da divisão</label>' +
+          '<input id="cLargura" type="number" min="5" max="400" value="30">' +
+        '</div>' +
+        '<div class="campo">' +
+          '<label for="cProfundidade">Profundidade</label>' +
+          '<input id="cProfundidade" type="number" min="10" max="200" value="60">' +
+        '</div>' +
+        '<div class="campo">' +
+          '<label for="cAltura">Altura do nível</label>' +
+          '<input id="cAltura" type="number" min="10" max="300" value="55">' +
+        '</div>' +
+      '</div>' +
+
+      '<div id="cResultado"></div>' +
+
+      '<div class="sep"></div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+        '<button class="btn" id="cVoltar">Voltar ao galpão real</button>' +
+        '<button class="btn" id="cGravar" disabled ' +
+          'title="A gravação entra na etapa 2, com autorização dele">' +
+          'Gravar no Core</button>' +
+      '</div>' +
+      '<div class="small" style="margin-top:8px;color:var(--texto-3);line-height:1.5">' +
+        'O botão de gravar está desligado porque esta é a etapa 1. ' +
+        'Endereço gravado errado leva produto vinculado junto — por isso ' +
+        'ele só liga depois que o senhor vir o desenho e autorizar.' +
+      '</div>' +
+
+    '</div>';
+  };
+
+  /* ------------------------------------------------------------
+     DESENHAR O PROJETO · mesmo caminho do galpão real
+     ------------------------------------------------------------ */
+  C.atualizar = function () {
+    var L = raiz.LAYOUT3D;
+    var pedido = {
+      rua: txt('cRua'),
+      estante: txt('cEstante'),
+      prateleiras: num('cPrateleiras', 1),
+      primeiraPrateleira: num('cPrimeira', 1),
+      divisoes: num('cDivisoes', 1),
+      larguraCm: num('cLargura', 0),
+      profundidadeCm: num('cProfundidade', 0),
+      alturaCm: num('cAltura', 0)
+    };
+
+    var p = L.projetar(pedido);
+    C.projeto = p;
+
+    if (!p.ok) {
+      $('cResultado').innerHTML =
+        '<div class="aviso erro" style="margin-top:12px"><b>Falta resolver:</b>' +
+        p.erros.map(function (x) { return '<div>· ' + esc(x) + '</div>'; }).join('') +
         '</div>';
-      return;
+      return p;
     }
 
-    var html = '';
+    /* desenha pelo mesmo montar() do galpão de verdade: o que ele
+       vê aqui é exatamente o que vai existir depois */
+    var montagem = L.montar(p.locais, { medidas: p.medidas });
+    raiz.MOTOR3D.desenhar(montagem);
 
-    projeto.ruas.forEach(function (rua) {
-      var aberta = abertos[rua.codigo] !== false;
-      var posicoes = rua.niveis.reduce(function (s, nv) { return s + nv.posicoes.length; }, 0);
-      var ocupadas = 0;
-      rua.niveis.forEach(function (nv) {
-        nv.posicoes.forEach(function (p) { if (p.status === 'OCUPADA') ocupadas++; });
-      });
+    var comprimento = p.contagem.divisoes * p.medidas.larguraPosicao;
+    var altura = p.contagem.prateleiras * p.medidas.alturaNivel;
+    var primeiro = p.locais[0].codigo;
+    var ultimo = p.locais[p.locais.length - 1].codigo;
 
-      html += '<div class="no" onclick="AP3D_UI.alternar(\'' + rua.codigo + '\')">' +
-        '<span class="seta">' + (aberta ? '▾' : '▸') + '</span>' +
-        '<span class="cor" style="background:' +
-        (ocupadas ? AP3D_Cena.cores.OCUPADA : AP3D_Cena.cores.DISPONIVEL) + '"></span>' +
-        '<span class="txt">' + esc(rua.nome) + '</span>' +
-        '<span class="qtd">' + ocupadas + '/' + posicoes + '</span>' +
-        '</div>';
+    $('cResultado').innerHTML =
+      '<div class="sep"></div>' +
+      '<div class="linha"><span>Divisões que seriam criadas</span><b>' +
+        p.contagem.posicoes + '</b></div>' +
+      '<div class="linha"><span>Comprimento da estante</span><b>' +
+        comprimento.toFixed(2).replace('.', ',') + ' m</b></div>' +
+      '<div class="linha"><span>Altura</span><b>' +
+        altura.toFixed(2).replace('.', ',') + ' m</b></div>' +
+      '<div class="linha"><span>Numeração</span><b>' +
+        (p.porLetra ? 'letras (A…' + p.nomes[p.nomes.length - 1] + ')'
+                    : 'números (01…' + p.nomes[p.nomes.length - 1] + ')') +
+        '</b></div>' +
+      '<div class="linha"><span>Do primeiro</span><b class="mono">' +
+        esc(primeiro) + '</b></div>' +
+      '<div class="linha"><span>Ao último</span><b class="mono">' +
+        esc(ultimo) + '</b></div>' +
 
-      html += '<div class="filhos' + (aberta ? '' : ' fechado') + '">';
-
-      rua.niveis.forEach(function (nivel) {
-        html += '<div class="no" style="font-size:12px;color:var(--texto-3)">' +
-          '<span class="seta"></span>' +
-          '<span class="txt">Nível ' + nivel.numero + '</span>' +
-          '<span class="qtd">' + nivel.posicoes.length + '</span>' +
-          '</div>';
-
-        html += '<div class="filhos">';
-        nivel.posicoes.forEach(function (pos) {
-          html += '<div class="no" data-pos="' + pos.codigo + '" ' +
-            'onclick="AP3D_UI.irParaPosicao(\'' + pos.codigo + '\')">' +
-            '<span class="seta"></span>' +
-            '<span class="cor" style="background:' + AP3D_Cena.cores[pos.status] + '"></span>' +
-            '<span class="txt mono">' + pos.codigo + '</span>' +
-            (pos.itens ? '<span class="qtd">' + pos.itens + '</span>' : '') +
-            '</div>';
-        });
-        html += '</div>';
-      });
-
-      html += '</div>';
-    });
-
-    alvo.innerHTML = html;
-  }
-
-  function alternar(codigoRua) {
-    abertos[codigoRua] = abertos[codigoRua] === false;
-    pintarArvore();
-  }
-
-  function irParaPosicao(codigo) {
-    if (modo === '2d') {
-      mostrarPosicao(codigo);
-      pintarPlanta();
-      return;
-    }
-    AP3D_Cena.selecionar(codigo);
-  }
-
-  /* ============================================================
-     PAINEL
-     ============================================================ */
-
-  function pintarResumo() {
-    var r = AP3D_Dados.resumo();
-    var projeto = AP3D_Dados.projeto();
-
-    el('painelTitulo').textContent = projeto.nome;
-    el('painelSub').textContent = projeto.demo
-      ? 'Estrutura de demonstração'
-      : 'Clique numa posição para ver os detalhes';
-
-    var html =
-      (projeto.demo
-        ? '<div class="aviso amarelo">Esta é uma estrutura de <b>demonstração</b>. ' +
-          'Os dados não são do seu almoxarifado.</div>'
+      (comprimento > 12
+        ? '<div class="aviso" style="margin-top:10px"><b>Confira a medida.</b> ' +
+          comprimento.toFixed(1).replace('.', ',') + ' metros numa estante só é ' +
+          'muito. Se cada divisão for menor do que o digitado, o número aqui cai.' +
+          '</div>'
         : '') +
 
-      '<div class="kpis">' +
-      '<div class="kpi"><b>' + r.posicoes + '</b><span>posições</span></div>' +
-      '<div class="kpi"><b>' + r.ruas + '</b><span>ruas</span></div>' +
-      '<div class="kpi"><b>' + r.ocupadas + '</b><span>ocupadas</span></div>' +
-      '<div class="kpi"><b>' + r.ocupacao + '%</b><span>ocupação</span></div>' +
-      '</div>' +
+      (!p.porLetra
+        ? '<div class="aviso" style="margin-top:10px"><b>Passou de 26 divisões.</b> ' +
+          'A prateleira inteira vira número — nenhuma fica com letra. ' +
+          'Depois de etiquetado, mudar isso é reetiquetar o galpão.</div>'
+        : '') +
 
-      '<div class="linha-info"><span>Disponíveis</span><b>' + r.disponiveis + '</b></div>' +
-      '<div class="linha-info"><span>Reservadas</span><b>' + r.reservadas + '</b></div>' +
-      '<div class="linha-info"><span>Bloqueadas</span><b>' + r.bloqueadas + '</b></div>' +
-
-      '<button class="bt bt-laranja" onclick="AP3D_UI.abrirNovaRua()">➕ Nova rua</button>' +
-      (AP3D_Ponte.ligada()
-        ? '<button class="bt bt-linha" onclick="AP3D_UI.sincronizar()">🔄 Buscar do sistema</button>' +
-          (AP3D_Ponte.automatica()
-            ? '<p style="font-size:11.5px;color:var(--texto-3);text-align:center;margin-top:10px">' +
-              'Ligado ao ALMOXA PRO · dados do seu almoxarifado</p>'
-            : '')
-        : '<button class="bt bt-linha" onclick="AP3D_UI.abrirConexao()">🔗 Ligar ao ALMOXA PRO</button>');
-
-    el('painelCorpo').innerHTML = html;
-  }
-
-  function mostrarPosicao(codigo) {
-    var pos = AP3D_Dados.posicao(codigo);
-    if (!pos) return;
-
-    var projeto = AP3D_Dados.projeto();
-    var rua = projeto.ruas.filter(function (r) { return r.numero === pos.rua; })[0];
-
-    el('painelTitulo').textContent = codigo;
-    el('painelSub').textContent = rua ? rua.nome : '';
-
-    var rotulos = {
-      DISPONIVEL: 'Disponível', OCUPADA: 'Ocupada',
-      RESERVADA: 'Reservada', BLOQUEADA: 'Bloqueada', CRITICA: 'Crítica'
-    };
-
-    el('painelCorpo').innerHTML =
-      '<div style="margin-bottom:14px">' +
-      '<span class="selo" style="background:' + AP3D_Cena.cores[pos.status] + '">' +
-      rotulos[pos.status] + '</span></div>' +
-
-      '<div class="linha-info"><span>Endereço</span><b class="mono">' + codigo + '</b></div>' +
-      '<div class="linha-info"><span>Rua</span><b>' + (rua ? esc(rua.nome) : pos.rua) + '</b></div>' +
-      '<div class="linha-info"><span>Nível</span><b>' + pos.nivel + '</b></div>' +
-      '<div class="linha-info"><span>Posição</span><b>' + pos.numero + '</b></div>' +
-      (rua && rua.categoria
-        ? '<div class="linha-info"><span>Categoria</span><b>' + esc(rua.categoria) + '</b></div>' : '') +
-      '<div class="linha-info"><span>Itens guardados</span><b>' + (pos.itens || 0) + '</b></div>' +
-
-      (pos.itens
-        ? ''
-        : '<div class="aviso azul" style="margin-top:14px">' +
-          'Esta posição está vazia. O conteúdo aparece aqui quando o mapa ' +
-          'estiver ligado ao sistema.</div>') +
-
-      '<div class="campo" style="margin-top:16px">' +
-      '<label>Situação da posição</label>' +
-      '<select id="selStatus" onchange="AP3D_UI.mudarStatus(\'' + codigo + '\', this.value)">' +
-      Object.keys(rotulos).map(function (st) {
-        return '<option value="' + st + '"' + (pos.status === st ? ' selected' : '') + '>' +
-          rotulos[st] + '</option>';
-      }).join('') +
-      '</select></div>' +
-
-      '<button class="bt bt-linha" onclick="AP3D_UI.pintarResumo()">← Voltar ao resumo</button>';
-
-    /* no celular, o painel sobe */
-    var painel = el('painel');
-    if (painel) painel.classList.add('aberto');
-  }
-
-  function mudarStatus(codigo, status) {
-    AP3D_Dados.definirStatus(codigo, status);
-    AP3D_Cena.atualizarStatus(codigo, status);
-    pintarArvore();
-    if (modo === '2d') pintarPlanta();
-  }
-
-  /* ============================================================
-     PLANTA 2D
-     ============================================================ */
-
-  function pintarPlanta() {
-    var projeto = AP3D_Dados.projeto();
-    var alvo = el('planta');
-
-    if (!projeto.ruas.length) {
-      alvo.innerHTML = '<div class="vazio"><div class="ico">📐</div>' +
-        '<h4>Sem estrutura</h4><p>Crie uma rua para ver a planta.</p></div>';
-      return;
-    }
-
-    alvo.innerHTML = projeto.ruas.map(function (rua) {
-      return '<div class="planta-rua">' +
-        '<h4>' + esc(rua.nome) + '</h4>' +
-        '<div class="sub">' + rua.niveis.length + ' níveis · ' +
-        (rua.niveis[0] ? rua.niveis[0].posicoes.length : 0) + ' posições por nível' +
-        (rua.categoria ? ' · ' + esc(rua.categoria) : '') + '</div>' +
-
-        /* nível mais alto em cima, como se olhasse a estante de frente */
-        rua.niveis.slice().reverse().map(function (nivel) {
-          return '<div class="planta-nivel">' +
-            '<div class="rot">Nível ' + nivel.numero + '</div>' +
-            '<div class="planta-pos">' +
-            nivel.posicoes.map(function (pos) {
-              return '<div class="pos-2d" style="background:' + AP3D_Cena.cores[pos.status] + '" ' +
-                'title="' + pos.codigo + '" ' +
-                'onclick="AP3D_UI.irParaPosicao(\'' + pos.codigo + '\')">' +
-                pos.numero + '</div>';
-            }).join('') +
-            '</div></div>';
+      '<div class="sep"></div>' +
+      '<div class="small" style="color:var(--texto-2);margin-bottom:6px">' +
+        'Os códigos que sairiam:</div>' +
+      '<div class="codigos">' +
+        p.locais.slice(0, 40).map(function (l) {
+          return '<span class="cod">' + esc(l.codigo) + '</span>';
         }).join('') +
-        '</div>';
-    }).join('');
-  }
+        (p.locais.length > 40
+          ? '<span class="cod mais">+' + (p.locais.length - 40) + '</span>' : '') +
+      '</div>';
 
-  /* ============================================================
-     MODAIS
-     ============================================================ */
+    return p;
+  };
 
-  function abrirModal(titulo, sub, corpo, rodape) {
-    el('modal').innerHTML =
-      '<div class="modal-topo"><h3>' + titulo + '</h3>' +
-      (sub ? '<p>' + sub + '</p>' : '') + '</div>' +
-      '<div class="modal-corpo">' + corpo + '</div>' +
-      '<div class="modal-rodape">' + rodape + '</div>';
-    el('fundoModal').classList.add('on');
-  }
+  /* ------------------------------------------------------------
+     ABRIR E FECHAR
+     ------------------------------------------------------------ */
+  C.abrir = function () {
+    if (C.aberto) return;
+    /* guarda o galpão real para voltar sem reconsultar o Core */
+    C.guardado = raiz.APP3D ? raiz.APP3D.locais : null;
+    C.aberto = true;
 
-  function fecharModal() {
-    el('fundoModal').classList.remove('on');
-  }
+    $('tituloPainel').textContent = 'Construir estante';
+    $('corpoPainel').innerHTML = C.html();
 
-  function abrirNovaRua() {
-    var projeto = AP3D_Dados.projeto();
-    var proximo = projeto.ruas.length
-      ? Math.max.apply(null, projeto.ruas.map(function (r) { return r.numero; })) + 1
-      : 1;
-
-    abrirModal('Nova rua', 'A estrutura é criada a partir destes números',
-      '<div class="dupla">' +
-      '<div class="campo"><label>Número da rua</label>' +
-      '<input id="nrNumero" type="number" min="1" value="' + proximo + '"></div>' +
-      '<div class="campo"><label>Categoria</label>' +
-      '<input id="nrCategoria" placeholder="Hidráulica, Elétrica…"></div>' +
-      '</div>' +
-
-      '<div class="campo"><label>Nome</label>' +
-      '<input id="nrNome" placeholder="Rua ' + (proximo < 10 ? '0' : '') + proximo + '"></div>' +
-
-      '<div class="dupla">' +
-      '<div class="campo"><label>Níveis (altura)</label>' +
-      '<input id="nrNiveis" type="number" min="1" max="12" value="4"></div>' +
-      '<div class="campo"><label>Posições por nível</label>' +
-      '<input id="nrPosicoes" type="number" min="1" max="30" value="5"></div>' +
-      '</div>' +
-
-      '<div class="aviso azul">Serão criadas <b id="nrTotal">20</b> posições, ' +
-      'cada uma com seu endereço.</div>' +
-      '<div id="nrErro"></div>',
-
-      '<button class="bt bt-linha" onclick="AP3D_UI.fecharModal()">Cancelar</button>' +
-      '<button class="bt bt-azul" onclick="AP3D_UI.salvarNovaRua()">Criar rua</button>');
-
-    /* o total se atualiza enquanto a pessoa digita */
-    function recalcular() {
-      var n = Number(el('nrNiveis').value) || 0;
-      var p = Number(el('nrPosicoes').value) || 0;
-      el('nrTotal').textContent = n * p;
-    }
-    el('nrNiveis').addEventListener('input', recalcular);
-    el('nrPosicoes').addEventListener('input', recalcular);
-  }
-
-  function salvarNovaRua() {
-    var r = AP3D_Dados.criarRua({
-      numero: el('nrNumero').value,
-      nome: el('nrNome').value,
-      categoria: el('nrCategoria').value,
-      niveis: el('nrNiveis').value,
-      posicoes: el('nrPosicoes').value
+    var campos = ['cRua', 'cEstante', 'cPrateleiras', 'cPrimeira', 'cDivisoes',
+                  'cLargura', 'cProfundidade', 'cAltura'];
+    campos.forEach(function (id) {
+      var el = $(id);
+      if (!el) return;
+      el.addEventListener('input', function () { C.atualizar(); });
+      el.addEventListener('change', function () { C.atualizar(); });
     });
 
-    if (!r.ok) {
-      el('nrErro').innerHTML = '<div class="aviso amarelo">' + esc(r.motivo) + '</div>';
-      return;
-    }
+    var voltar = $('cVoltar');
+    if (voltar) voltar.addEventListener('click', function () { C.fechar(); });
 
-    fecharModal();
-    reconstruir();
+    C.atualizar();
+  };
+
+  C.fechar = function () {
+    if (!C.aberto) return;
+    C.aberto = false;
+    C.projeto = null;
+
+    /* redesenha o galpão REAL, com os dados que já estavam na mão */
+    if (raiz.APP3D) {
+      if (C.guardado) raiz.APP3D.locais = C.guardado;
+      raiz.APP3D.desenhar();
+    }
+    C.guardado = null;
+  };
+
+  C.alternar = function () { C.aberto ? C.fechar() : C.abrir(); };
+
+  raiz.CONSTRUTOR3D = C;
+  if (typeof module !== 'undefined' && module.exports) module.exports = C;
+
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* ===== app.js ===== */
+/* ============================================================
+   ALMOXA 3D · app.js  ·  08/11/2026
+   ------------------------------------------------------------
+   A AMARRAÇÃO. Pega o dado pelo adaptador, passa pelo layout,
+   entrega ao motor e cuida do painel.
+
+   Nenhuma regra de negócio mora aqui — é só costura. Quem
+   decide cor é o layout3d, quem decide permissão é o Core.
+   ============================================================ */
+(function (raiz) {
+  'use strict';
+
+  var APP = {
+    versao: '08/11',
+    montagem: null,
+    locais: [],
+    carregando: false,
+    modoDemo: false
+  };
+
+  function $(id) { return document.getElementById(id); }
+  function esc(v) {
+    return String(v === null || v === undefined ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
-  function abrirConexao() {
-    abrirModal('Ligar ao ALMOXA PRO',
-      'O mapa passa a mostrar o almoxarifado de verdade',
+  /* ----------------------------------------------------------
+     O PAINEL
+     ---------------------------------------------------------- */
+  var ROTULO = {
+    /* o cinza da BOLINHA do mapa é claro de propósito, para a
+       posição vazia não competir com o material. Mas na ETIQUETA
+       do painel ele leva texto branco em cima — e branco sobre
+       #9AA3AE é ilegível. Então a etiqueta usa um cinza escuro:
+       mesma leitura, contraste de verdade. */
+    VAZIA:      { txt: 'Vazia',     cor: '#6B7482' },
+    OCUPADA:    { txt: 'Ocupada',   cor: 'var(--verde)' },
+    LOTADA:     { txt: 'Lotada',    cor: 'var(--amarelo)' },
+    BLOQUEADA:  { txt: 'Bloqueada', cor: 'var(--vermelho)' }
+  };
 
-      '<div class="aviso azul">Cole o endereço que termina em <b>/exec</b>, ' +
-      'o mesmo que você usa para abrir o sistema.</div>' +
+  APP.pintarResumo = function () {
+    var r = raiz.LAYOUT3D.resumo(APP.montagem);
+    var amb = raiz.API3D ? raiz.API3D.ambiente() : 'NAVEGADOR';
+    var nomeAmb = { APPS_SCRIPT: 'Apps Script', GITHUB_PAGES: 'GitHub Pages' }[amb] || 'navegador';
 
-      '<div class="campo"><label>Endereço do sistema</label>' +
-      '<input id="cxUrl" placeholder="https://script.google.com/macros/s/.../exec"></div>' +
-
-      '<div class="campo"><label>Sessão (opcional)</label>' +
-      '<input id="cxSessao" placeholder="deixe vazio para consulta pública"></div>' +
-
-      '<div id="cxResultado"></div>',
-
-      '<button class="bt bt-linha" onclick="AP3D_UI.fecharModal()">Cancelar</button>' +
-      '<button class="bt bt-azul" onclick="AP3D_UI.testarConexao()">Conectar</button>');
-  }
-
-  function testarConexao() {
-    var url = el('cxUrl').value.trim();
-    if (!url) {
-      el('cxResultado').innerHTML = '<div class="aviso amarelo">Informe o endereço.</div>';
-      return;
+    var html = '';
+    if (APP.modoDemo) {
+      html += '<div class="aviso"><b>Galpão de demonstração.</b> ' +
+        'O endereço do Core não foi configurado, então estou desenhando um ' +
+        'galpão de exemplo para você ver o motor funcionando. ' +
+        'Nenhum dado seu foi lido.</div>';
     }
 
-    el('cxResultado').innerHTML = '<div class="aviso azul">Conectando…</div>';
-    AP3D_Ponte.configurar(url, el('cxSessao').value.trim());
+    html +=
+      '<div class="numeros">' +
+        cartao(r.total, 'posições') +
+        cartao(r.ocupadas + r.lotadas, 'com material') +
+        cartao(r.vazias, 'vazias') +
+        cartao(r.bloqueadas, 'bloqueadas') +
+      '</div>' +
+      '<div class="linha"><span>Ocupação do galpão</span><b>' + r.ocupacaoPct + '%</b></div>' +
+      '<div class="barraOcup"><i style="width:' + r.ocupacaoPct + '%"></i></div>' +
+      '<div class="linha"><span>Ruas</span><b>' + APP.montagem.contagem.ruas + '</b></div>' +
+      '<div class="linha"><span>Estantes</span><b>' + APP.montagem.contagem.estantes + '</b></div>' +
+      '<div class="linha"><span>Prateleiras</span><b>' + APP.montagem.contagem.prateleiras + '</b></div>' +
+      '<div class="linha"><span>Medidas do galpão</span><b>' +
+        APP.montagem.galpao.largura.toFixed(1) + ' × ' +
+        APP.montagem.galpao.profundidade.toFixed(1) + ' m</b></div>' +
+      '<div class="linha"><span>Ambiente</span><b>' + nomeAmb + '</b></div>' +
+      APP.htmlDosAvisos() +
+      '<div class="vazio">Clique numa posição do galpão<br>para ver o que está guardado nela.</div>';
 
-    AP3D_Ponte.carregarDoCore().then(function (r) {
-      if (!r.ok) {
-        el('cxResultado').innerHTML =
-          '<div class="aviso amarelo"><b>Não deu certo</b><br>' + esc(r.mensagem || '') +
-          '<br><br>O mapa continua com a estrutura atual.</div>';
+    $('corpoPainel').innerHTML = html;
+    $('tituloPainel').textContent = 'O galpão';
+  };
+
+  function cartao(n, rot) {
+    return '<div class="cartao"><b>' + n + '</b><span>' + rot + '</span></div>';
+  }
+
+  APP.pintarPosicao = function (p) {
+    if (!p) { APP.pintarResumo(); return; }
+    var rot = ROTULO[p.situacao] || ROTULO.VAZIA;
+    var d = p.dado || {};
+
+    var html =
+      '<div class="linha"><span>Endereço</span><b>' + esc(p.codigo || '—') + '</b></div>' +
+      '<div class="linha"><span>Situação</span><b><span class="chip" style="background:' +
+        rot.cor + '">' + rot.txt + '</span></b></div>' +
+      '<div class="linha"><span>Rua</span><b>' + esc(p.rua) + '</b></div>' +
+      '<div class="linha"><span>Estante</span><b>' + esc(p.estante) + '</b></div>' +
+      '<div class="linha"><span>Prateleira</span><b>' + esc(p.prateleira) + '</b></div>' +
+      '<div class="linha"><span>Posição</span><b>' + esc(p.posicao || '(a prateleira inteira)') + '</b></div>' +
+      '<div class="linha"><span>Materiais guardados</span><b>' + p.itens + '</b></div>' +
+      '<div class="linha"><span>Capacidade</span><b>' +
+        (p.capacidade ? p.capacidade : 'não informada') + '</b></div>';
+
+    if (d.observacao) {
+      html += '<div class="linha"><span>Observação</span><b>' + esc(d.observacao) + '</b></div>';
+    }
+    html += '<div class="linha"><span>Chave do QR Code</span><b>ALMOXA:LOC:' +
+      esc(p.codigo) + '</b></div>';
+
+    if (p.itens > 0) {
+      html += '<div class="vazio">A lista do que está guardado aqui vem do módulo ' +
+        'de estoque. Ainda não liguei essa consulta — é o próximo passo.</div>';
+    }
+
+    $('corpoPainel').innerHTML = html;
+    $('tituloPainel').textContent = 'Posição selecionada';
+  };
+
+  /* ----------------------------------------------------------
+     CARREGAR
+     ---------------------------------------------------------- */
+  APP.carregar = function () {
+    if (APP.carregando) return Promise.resolve();
+    APP.carregando = true;
+    $('corpoPainel').innerHTML = '<div class="vazio">Consultando o Core…</div>';
+
+    var api = raiz.API3D;
+    var pedido;
+
+    if (api && api.pronto()) {
+      APP.modoDemo = false;
+      pedido = api.localizacoes();
+    } else {
+      /* sem Core configurado: desenho um galpão de exemplo em vez de
+         deixar a tela preta. E DIGO que é exemplo, no painel. */
+      APP.modoDemo = true;
+      pedido = Promise.resolve({ ok: true, dados: APP.galpaoDeDemonstracao() });
+    }
+
+    return pedido.then(function (r) {
+      APP.carregando = false;
+      if (!r || !r.ok) {
+        /* Quando a recusa é de CHAVE, dizer de onde a chave veio
+           — ou que não veio nenhuma — poupa uma ida e volta.
+           O valor da chave nunca aparece: só a procedência. */
+        var bruta = (r && r.mensagem) || 'o Core não respondeu';
+        var msg = esc(bruta);
+        var deIdentidade = /chave|sess(ã|a)o|token|permiss|autentic|perfil|login/i.test(bruta);
+        var extra = '';
+        if (deIdentidade && window.API3D) {
+          var e3 = window.API3D.estado();
+          extra = '<div class="small" style="margin-top:8px">' +
+            (e3.porSistema
+              ? 'O mapa falou pela porta do próprio ALMOX PRO (' +
+                esc(e3.origemDaPorta) + '), com a sessão que o sistema está ' +
+                'usando agora. Se o sistema entra e isto não, quem recusou foi ' +
+                'o Core — e o motivo é o texto acima, não o mapa.'
+              : '<b>O mapa não está falando pela porta do sistema.</b> ' +
+                'Sozinho ele não tem sessão, e sessão não se copia nem se ' +
+                'inventa. Abra pelo botão <b>Mapeamento 3D</b> de dentro do ' +
+                'ALMOX PRO, já identificado — é de lá que ele herda a entrada.') +
+            '</div>';
+        }
+        $('corpoPainel').innerHTML = '<div class="aviso erro"><b>Não consegui carregar.</b><br>' +
+          msg + extra + '</div>';
         return;
       }
-
-      el('cxResultado').innerHTML =
-        '<div class="aviso azul"><b>Conectado</b><br>' +
-        r.dados.resumo.totalPosicoes + ' posições encontradas no sistema.</div>';
-
-      setTimeout(function () { fecharModal(); importarDoCore(r.dados); }, 1200);
+      APP.locais = r.dados || [];
+      APP.desenhar();
     });
-  }
+  };
 
-  /** Converte a estrutura do Core para o formato daqui */
-  function importarDoCore(dados) {
-    var projeto = AP3D_Dados.projeto();
-    projeto.ruas = [];
-    projeto.demo = false;
-    projeto.nome = 'Almoxarifado';
+  APP.desenhar = function () {
+    APP.montagem = raiz.LAYOUT3D.montar(APP.locais);
+    /* confere ANTES de desenhar: o que o mapa não consegue mostrar
+       é justamente o que precisa aparecer escrito. */
+    APP.conferencia = raiz.LAYOUT3D.conferir(APP.locais);
+    raiz.MOTOR3D.desenhar(APP.montagem);
+    APP.pintarResumo();
+  };
 
-    (dados.almoxarifados || []).forEach(function (a) {
-      (a.ruas || []).forEach(function (r) {
-        var rua = {
-          codigo: r.codigo, numero: r.numero,
-          nome: r.nome, categoria: r.categoria || '', niveis: []
-        };
+  /* ------------------------------------------------------------
+     OS AVISOS · mostrar, nunca consertar
 
-        (r.niveis || []).forEach(function (n) {
-          rua.niveis.push({
-            numero: n.numero, codigo: n.codigo,
-            posicoes: (n.posicoes || []).map(function (p) {
-              return {
-                codigo: p.codigo, numero: p.numero,
-                rua: r.numero, nivel: n.numero,
-                status: p.status || 'DISPONIVEL',
-                itens: p.itens || 0, capacidade: null
-              };
-            })
-          });
+     Regra dele, e a certa: "Não tente corrigir dados históricos
+     automaticamente." Então aqui não há botão de arrumar. Há o
+     que está torto, onde está, e o que conferir no almoxarifado.
+     ------------------------------------------------------------ */
+  var NOME_AVISO = {
+    SUMIU:       'não aparece no mapa',
+    REPETIDO:    'código repetido',
+    SEM_CODIGO:  'sem código',
+    DESALINHADO: 'código não bate',
+    DOIS_NIVEIS: 'dois níveis de endereço'
+  };
+
+  APP.htmlDosAvisos = function () {
+    var c = APP.conferencia;
+    if (!c || !c.quantos) return '';
+
+    var linhas = c.avisos.slice(0, 12).map(function (a) {
+      return '<div class="linha" style="display:block;padding:6px 0">' +
+        '<b>' + esc(a.titulo) + '</b>' +
+        '<div class="small" style="color:var(--texto-2);line-height:1.5">' +
+          esc(a.detalhe) + '</div>' +
+      '</div>';
+    }).join('');
+
+    var sobra = c.quantos - Math.min(c.quantos, 12);
+
+    return '<div class="aviso" style="margin-top:14px">' +
+      '<b>' + c.quantos + ' ' +
+        (c.quantos === 1 ? 'coisa para conferir' : 'coisas para conferir') +
+        ' no cadastro</b>' +
+      linhas +
+      (sobra ? '<div class="small">… e mais ' + sobra + '.</div>' : '') +
+      '<div class="small" style="margin-top:10px;color:var(--texto-2);line-height:1.5">' +
+        'Nada foi alterado. O mapa só enxerga o que o Core devolveu — ' +
+        'a varredura completa da ocupação é no servidor, pelo ' +
+        '<b>ENDERECO_CONFERIR</b>.' +
+      '</div>' +
+    '</div>';
+  };
+
+  /* um galpão pequeno, só para o motor ter o que mostrar */
+  APP.galpaoDeDemonstracao = function () {
+    var fora = [], ruas = ['A', 'B', 'C'];
+    for (var r = 0; r < ruas.length; r++) {
+      for (var e = 1; e <= 2; e++) {
+        for (var p = 1; p <= 4; p++) {
+          for (var o = 0; o < 6; o++) {
+            var itens = (r * 7 + e * 3 + p * 2 + o) % 5;
+            var cap = 4;
+            var st = (r === 2 && p === 1 && o < 2) ? 'BLOQUEADA' : 'DISPONIVEL';
+            var est = ruas[r] + '0' + e;
+            var pos = String.fromCharCode(65 + o);
+            fora.push({
+              id: 'DEMO' + r + e + p + o,
+              rua: ruas[r], estante: est, prateleira: String(p), posicao: pos,
+              codigo: [ruas[r], est, String(p), pos].join('-'),
+              capacidade: cap, itens: itens > cap ? cap : itens,
+              ocupacao: itens, status: st
+            });
+          }
+        }
+      }
+    }
+    return fora;
+  };
+
+  /* ----------------------------------------------------------
+     LIGAR TUDO
+     ---------------------------------------------------------- */
+  APP.iniciar = function (opcoes) {
+    opcoes = opcoes || {};
+    try {
+      raiz.MOTOR3D.iniciar($('tela3d'), { fundo: opcoes.fundo });
+    } catch (err) {
+      $('corpoPainel').innerHTML = '<div class="aviso erro"><b>O 3D não iniciou.</b><br>' +
+        esc(err.message) + '</div>';
+      return;
+    }
+
+    raiz.MOTOR3D.aoSelecionar = function (p) { APP.pintarPosicao(p); };
+
+    /* os botões de visão */
+    var visoes = ['perspectiva', 'superior', 'frontal', 'lateral'];
+    visoes.forEach(function (v) {
+      var b = $('v_' + v);
+      if (!b) return;
+      b.addEventListener('click', function () {
+        raiz.MOTOR3D.visao(v, APP.montagem && APP.montagem.galpao);
+        visoes.forEach(function (o) {
+          var bo = $('v_' + o);
+          if (bo) bo.setAttribute('aria-pressed', o === v ? 'true' : 'false');
         });
-
-        projeto.ruas.push(rua);
       });
     });
+    var rec = $('v_recarregar');
+    if (rec) rec.addEventListener('click', function () { APP.carregar(); });
 
-    AP3D_Dados.guardar();
-    reconstruir();
-  }
-
-  function sincronizar() {
-    el('painelCorpo').innerHTML = '<div class="vazio"><div class="ico">🔄</div>' +
-      '<h4>Buscando…</h4><p>Lendo a estrutura do sistema.</p></div>';
-
-    AP3D_Ponte.carregarDoCore().then(function (r) {
-      if (!r.ok) {
-        pintarResumo();
-        alert('Não foi possível buscar: ' + (r.mensagem || ''));
-        return;
-      }
-      importarDoCore(r.dados);
-    });
-  }
-
-  /* ============================================================
-     MODO E BUSCA
-     ============================================================ */
-
-  function trocarModo(novo) {
-    modo = novo;
-    el('btn3d').classList.toggle('on', novo === '3d');
-    el('btn2d').classList.toggle('on', novo === '2d');
-    el('planta').classList.toggle('on', novo === '2d');
-
-    if (novo === '2d') pintarPlanta();
-  }
-
-  function buscar(termo) {
-    var achados = AP3D_Dados.buscar(termo);
-
-    if (!termo.trim()) {
-      AP3D_Cena.destacarBusca([]);
-      pintarArvore();
-      return;
+    /* o construtor de galpão · seção 4, etapa 1 */
+    var con = $('v_construir');
+    if (con && raiz.CONSTRUTOR3D) {
+      con.addEventListener('click', function () {
+        raiz.CONSTRUTOR3D.alternar();
+        con.setAttribute('aria-pressed', raiz.CONSTRUTOR3D.aberto ? 'true' : 'false');
+        con.textContent = raiz.CONSTRUTOR3D.aberto ? 'Fechar construtor' : 'Construir estante';
+      });
     }
 
-    var codigos = achados.filter(function (a) { return a.tipo === 'POSICAO'; })
-      .map(function (a) { return a.codigo; });
-
-    AP3D_Cena.destacarBusca(codigos);
-
-    if (codigos.length === 1) mostrarPosicao(codigos[0]);
-  }
-
-  /* ============================================================
-     CICLO
-     ============================================================ */
-
-  function reconstruir() {
-    var projeto = AP3D_Dados.projeto();
-    AP3D_Cena.construir(projeto);
-    pintarArvore();
-    pintarResumo();
-    if (modo === '2d') pintarPlanta();
-    pintarLegenda();
-  }
-
-  function pintarLegenda() {
-    var rotulos = {
-      DISPONIVEL: 'Disponível', OCUPADA: 'Ocupada',
-      RESERVADA: 'Reservada', BLOQUEADA: 'Bloqueada'
-    };
-    el('legenda').innerHTML = Object.keys(rotulos).map(function (st) {
-      return '<span><i style="background:' + AP3D_Cena.cores[st] + '"></i>' + rotulos[st] + '</span>';
-    }).join('');
-  }
-
-  /**
-   * Sem estrutura no sistema.
-   *
-   * Mostrar um almoxarifado inventado aqui seria pior que mostrar
-   * nada: a pessoa acharia que o mapa está errado.
-   */
-  function semEstrutura(motivo) {
-    var projeto = AP3D_Dados.projeto();
-    projeto.ruas = [];
-    projeto.demo = false;
-    projeto.nome = 'Almoxarifado';
-
-    AP3D_Cena.construir(projeto);
-    pintarArvore();
-    pintarLegenda();
-    if (modo === '2d') pintarPlanta();
-
-    el('painelTitulo').textContent = 'Sem estrutura';
-    el('painelSub').textContent = 'Nada cadastrado ainda';
-
-    el('painelCorpo').innerHTML =
-      '<div class="aviso amarelo"><b>O almoxarifado ainda não tem estrutura</b><br>' +
-      esc(motivo || 'Nenhuma localização foi encontrada no sistema.') + '</div>' +
-
-      '<p style="font-size:13px;color:var(--texto-2);line-height:1.6;margin:14px 0">' +
-      'O mapa nasce das localizações cadastradas. Cadastre as ruas e prateleiras ' +
-      'em <b>Estoque → Localização física</b>, ou crie a estrutura aqui mesmo.</p>' +
-
-      '<button class="bt bt-laranja" onclick="AP3D_UI.abrirNovaRua()">Criar rua aqui</button>' +
-      '<button class="bt bt-linha" onclick="AP3D_UI.sincronizar()">Buscar de novo</button>';
-  }
-
-  return {
-    semEstrutura: semEstrutura,
-    importarDoCore: importarDoCore,
-    pintarArvore: pintarArvore,
-    pintarResumo: pintarResumo,
-    pintarPlanta: pintarPlanta,
-    pintarLegenda: pintarLegenda,
-    mostrarPosicao: mostrarPosicao,
-    mudarStatus: mudarStatus,
-    alternar: alternar,
-    irParaPosicao: irParaPosicao,
-    abrirNovaRua: abrirNovaRua,
-    salvarNovaRua: salvarNovaRua,
-    abrirConexao: abrirConexao,
-    testarConexao: testarConexao,
-    sincronizar: sincronizar,
-    fecharModal: fecharModal,
-    trocarModo: trocarModo,
-    buscar: buscar,
-    reconstruir: reconstruir,
-    modo: function () { return modo; }
+    return APP.carregar();
   };
-})();
 
+  raiz.APP3D = APP;
+  if (typeof module !== 'undefined' && module.exports) module.exports = APP;
+
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+
+<script>
 /* ============================================================
-   AP3D — INÍCIO
+   CONFIGURAÇÃO DE AMBIENTE
+   ------------------------------------------------------------
+   No Apps Script não precisa de nada: o adaptador acha o
+   google.script.run sozinho.
+
+   No GitHub Pages, o endereço do /exec pode vir de três lugares,
+   nesta ordem — e nenhum deles é "escrito no código":
+
+     1. ?core=<url> na barra de endereço
+     2. o que ficou guardado no navegador de quem já configurou
+     3. nada: aí a tela mostra um galpão de DEMONSTRAÇÃO e
+        avisa, em vez de ficar preta
+
+   Guardar no navegador é conveniência de quem usa, não fonte
+   oficial de nada: quem decide o que pode ser feito é o Core.
    ============================================================ */
-
 (function () {
-  function passo(texto, porcento) {
-    var p = document.getElementById('passo');
-    var b = document.getElementById('progresso');
-    if (p) p.textContent = texto;
-    if (b) b.style.width = porcento + '%';
-  }
-
-  function esconderCarregamento() {
-    setTimeout(function () {
-      var c = document.getElementById('carregando');
-      if (c) c.style.display = 'none';
-    }, 300);
+  function acharUrlDoCore() {
+    try {
+      var q = new URLSearchParams(location.search).get('core');
+      if (q) {
+        try { localStorage.setItem('almoxa3d:core', q); } catch (e) {}
+        return q;
+      }
+    } catch (e) {}
+    try { return localStorage.getItem('almoxa3d:core') || ''; } catch (e) { return ''; }
   }
 
   function comecar() {
-    passo('Preparando a cena…', 20);
-
-    var canvas = document.getElementById('cena');
-
-    /**
-     * Sem a biblioteca 3D, a aplicação NÃO para.
-     *
-     * Ela vem da internet; numa obra com sinal ruim isso acontece.
-     * Cadastrar ruas e usar a planta 2D continua funcionando —
-     * prometer isso e travar seria pior que não prometer.
-     */
-    var tem3D = AP3D_Cena.disponivel();
-
-    if (!tem3D) {
-      if (AP3D_Ponte.automatica()) {
-        AP3D_Ponte.carregarDoCore().then(function (r) {
-          if (r.ok) AP3D_UI.importarDoCore(r.dados);
-          else AP3D_UI.semEstrutura(r.mensagem);
-        });
-      } else if (!AP3D_Dados.recuperar()) {
-        AP3D_Dados.demonstracao();
-      }
-
-      AP3D_UI.trocarModo('2d');
-      AP3D_UI.pintarArvore();
-      AP3D_UI.pintarResumo();
-      AP3D_UI.pintarPlanta();
-      AP3D_UI.pintarLegenda();
-
-      var c = document.getElementById('carregando');
-      if (c) c.style.display = 'none';
-
-      var btn3d = document.getElementById('btn3d');
-      if (btn3d) {
-        btn3d.disabled = true;
-        btn3d.title = 'A biblioteca 3D não carregou';
-        btn3d.style.opacity = '.45';
-      }
-
-      var dica = document.getElementById('dica');
-      if (dica) {
-        dica.textContent = 'A biblioteca 3D não carregou — a planta 2D está ativa';
-        dica.style.background = 'rgba(255,159,28,.92)';
-      }
+    if (typeof BABYLON === 'undefined') {
+      document.getElementById('corpoPainel').innerHTML =
+        '<div class="aviso erro"><b>O Babylon.js não carregou.</b><br>' +
+        'Confira a conexão. Se esta página estiver dentro do Apps Script, ' +
+        'veja em IMPLANTACAO.md como embutir a biblioteca.</div>';
       return;
     }
-
-    AP3D_Cena.iniciar(canvas);
-
-    AP3D_Cena.aoSelecionar(function (codigo) {
-      AP3D_UI.mostrarPosicao(codigo);
-    });
-
-    /**
-     * Aberto pelo sistema: lê o almoxarifado de verdade.
-     * Nenhuma estrutura inventada aparece quando há dados reais.
-     */
-    if (AP3D_Ponte.automatica()) {
-      passo('Lendo o seu almoxarifado…', 45);
-
-      AP3D_Ponte.carregarDoCore().then(function (r) {
-        if (r.ok) {
-          AP3D_UI.importarDoCore(r.dados);
-          passo('Pronto', 100);
-          esconderCarregamento();
-          return;
-        }
-
-        /* sem estrutura no sistema: diz isso, não inventa */
-        passo('', 100);
-        esconderCarregamento();
-        AP3D_UI.semEstrutura(r.mensagem);
-      });
-      return;
+    if (window.API3D) {
+      window.API3D.configurar({ url: acharUrlDoCore() });
+      /* A chave NÃO está escrita aqui e não vem pelo endereço.
+         Ela é perguntada ao próprio ALMOX PRO, que é servido
+         pelo mesmo endereço que esta página. Se não houver, vai
+         vazia: fase 1 não pode bloquear a comunicação, e se o
+         Core recusar, quem explica é a resposta dele. */
+      window.API3D.herdarChave();
     }
-
-    passo('Lendo a estrutura…', 45);
-
-    /* estrutura guardada, ou a de demonstração */
-    if (!AP3D_Dados.recuperar()) AP3D_Dados.demonstracao();
-
-    passo('Montando os racks…', 70);
-
-    setTimeout(function () {
-      AP3D_UI.reconstruir();
-      passo('Pronto', 100);
-      esconderCarregamento();
-    }, 120);
-  }
-
-  function ligarControles() {
-    document.getElementById('btn3d').onclick = function () { AP3D_UI.trocarModo('3d'); };
-    document.getElementById('btn2d').onclick = function () { AP3D_UI.trocarModo('2d'); };
-    document.getElementById('btNovaRua').onclick = function () { AP3D_UI.abrirNovaRua(); };
-
-    document.getElementById('btZoomMais').onclick = function () { AP3D_Cena.zoom(0.82); };
-    document.getElementById('btZoomMenos').onclick = function () { AP3D_Cena.zoom(1.22); };
-    document.getElementById('btTopo').onclick = function () { AP3D_Cena.vistaDeCima(); };
-    document.getElementById('btReset').onclick = function () { AP3D_Cena.enquadrar(); };
-
-    document.getElementById('btTela').onclick = function () {
-      if (document.fullscreenElement) document.exitFullscreen();
-      else document.documentElement.requestFullscreen();
-    };
-
-    var busca = document.getElementById('busca');
-    var timer = null;
-    busca.addEventListener('input', function () {
-      clearTimeout(timer);
-      timer = setTimeout(function () { AP3D_UI.buscar(busca.value); }, 280);
-    });
-
-    document.getElementById('fundoModal').addEventListener('click', function (e) {
-      if (e.target.id === 'fundoModal') AP3D_UI.fecharModal();
-    });
+    window.APP3D.iniciar({});
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function () { ligarControles(); comecar(); });
-  } else {
-    ligarControles(); comecar();
-  }
+    document.addEventListener('DOMContentLoaded', comecar);
+  } else { comecar(); }
 })();
-
 </script>
+
 </body>
 </html>
