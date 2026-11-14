@@ -1611,7 +1611,7 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
      servindo a página velha. Sem um número visível, nenhum dos
      dois consegue saber. Agora sabe, em um segundo, olhando o
      rodapé. */
-  var CARIMBO = 'módulo NF 11 · 13/11';
+  var CARIMBO = 'módulo NF 12 · 13/11';
 
   var A = {
     nome: 'NFAPP', versao: CARIMBO,
@@ -2166,6 +2166,7 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
   A.abrir = function (nota, peloLapis) {
     if (!nota) return;
     A.selecionada = nota; A.itens = null; A.importada = null; A.recado = null;
+    A.provaItens = null;
     A.abaPainel = peloLapis ? 'itens' : 'dados';
     A.pintarPainel(); A.pintar();
 
@@ -2173,10 +2174,25 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
     if (Object.prototype.toString.call(jaTem) === '[object Array]' && jaTem.length) {
       A.itens = jaTem; return A.pintarPainel();
     }
-    P.chamar('itens', { numero: nota.numero, chave: nota.chave }).then(function (r) {
+    /* [NFITENSLIGA] 13/11 — mando TUDO o que identifica a nota: o
+       módulo liga item e nota por número, por id ou pela chave, e
+       sem a série duas notas de mesmo número se misturam. */
+    P.chamar('itens', { numero: nota.numero, serie: nota.serie,
+                        chave: nota.chave,
+                        id: nota.id || nota.idNF || nota.idLanc }).then(function (r) {
       A.itens = (r.ok && Object.prototype.toString.call(r.dados) === '[object Array]')
         ? r.dados : [];
       A.recado = r.ok ? null : r.mensagem;
+      /* quando veio ZERO, guardo a prova que o módulo mandou junto:
+         quantas linhas ele leu e por qual coluna tentou ligar. Sem
+         isso a tela diz "não trouxe itens" tanto quando a nota não
+         tem itens quanto quando a ligação está errada — e essas duas
+         coisas pedem providências opostas. */
+      A.provaItens = (r.ok && !A.itens.length) ? {
+        aba: r.aba, ligueiPor: r.ligueiPor, linhasLidas: r.linhasLidas,
+        valores: r.valoresNaColunaDeLigacao, procurei: r.procurei
+      } : null;
+      if (!r.ok && r.codigo) A.recado = '[' + r.codigo + '] ' + r.mensagem;
       A.pintarPainel();
     });
   };
@@ -2374,8 +2390,33 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
   A.htmlItens = function (n) {
     var itens = A.itens;
     if (itens === null) return '<div class="aviso leve">Procurando os itens…</div>';
-    if (!itens.length) return '<div class="aviso">' +
-      (A.recado ? esc(A.recado) : 'Esta nota não trouxe itens.') + '</div>';
+    if (!itens.length) {
+      if (A.recado) {
+        return '<div class="aviso">' + esc(A.recado) + '</div>';
+      }
+      var pv = A.provaItens;
+      if (pv && pv.linhasLidas) {
+        /* [NFITENSLIGA] zero itens COM prova: mostro o que o módulo
+           leu, para dar para ver se é ausência mesmo ou ligação errada */
+        return '<div class="aviso">Esta nota não trouxe itens.</div>' +
+          '<div class="linhas peq" style="margin-top:8px">' +
+          linha('Aba lida', esc(pv.aba || '—')) +
+          linha('Linhas lidas', String(pv.linhasLidas)) +
+          linha('Liguei pela coluna', '<span class="mono">' +
+            esc(pv.ligueiPor || '—') + '</span>') +
+          linha('Procurei por', '<span class="mono">' +
+            esc(JSON.stringify(pv.procurei || {})) + '</span>') +
+          (pv.valores && pv.valores.length
+            ? linha('Valores que existem lá', '<span class="mono">' +
+                esc(pv.valores.join(' · ')) + '</span>')
+            : '') +
+          '</div>' +
+          '<div class="aviso leve" style="margin-top:8px">Se os valores acima ' +
+          'não se parecem com esta nota, a ligação está na coluna errada — ' +
+          'não é que a nota esteja sem itens.</div>';
+      }
+      return '<div class="aviso">Esta nota não trouxe itens.</div>';
+    }
 
     var soma = 0, semTotal = 0, desc = 0;
     itens.forEach(function (i) {

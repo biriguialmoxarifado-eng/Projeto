@@ -1,0 +1,970 @@
+/* ============================================================
+   ALMOX-PRO — MÓDULO DE NOTAS FISCAIS   ·   AP_NF.gs v2   ·  13/11/2026
+   ------------------------------------------------------------
+   v2 — corrigido com o resultado do AP_NF_DIAGNOSTICO na planilha
+   real. Quatro defeitos meus, que o diagnóstico mostrou:
+     1. a aba de itens caía em ALMOXA_DIVERGENCIAS (4 linhas) em vez
+        de ALMOXA_NF_ITENS (757) — eu pegava a primeira aba que
+        batesse em 2 colunas; agora pontuo as candidatas e descarto
+        backup, cópia, log, divergência e patrimônio;
+     2. "quando" caía em lancadoEm — cada edição apagaria a data do
+        lançamento; agora a minha ordem de prioridade decide a coluna;
+     3. editar gravava quem editou na coluna lancadoPor, apagando
+        quem lançou a nota; agora só a linha nova recebe esses dois;
+     4. excluir escrevia na observação; a planilha já tem excluidoEm,
+        excluidoPor e motivoExclusao — uso essas.
+   ------------------------------------------------------------
+   POR QUE ESTE ARQUIVO EXISTE
+
+   A tela de Notas Fiscais mostrava, depois de quase 15 segundos:
+
+       Ação: nf.listar · código RESPOSTA_VAZIA
+
+   e isso pelas DUAS portas que o sistema tem para nota — a própria
+   (NF_CORE / AP_NF_direto) e o roteador. As outras cinco bolinhas
+   do rodapé estavam verdes: Core, Produtos, Compras, Reservas e
+   Estoque respondendo. Ou seja, o Core está de pé; o que está mudo
+   é o módulo "nf" dele.
+
+   Este arquivo é esse módulo.
+
+   ------------------------------------------------------------
+   O QUE ELE NÃO FAZ, DE PROPÓSITO
+
+   - Não cria banco novo. Ele PROCURA as abas de nota que já
+     existem na planilha e trabalha nelas.
+   - Não inventa aba. Se não achar onde as notas moram, ele RECUSA
+     e diz o que procurou. Lista vazia seria mentira: "não achei a
+     aba" e "não há notas" são coisas diferentes, e confundir as
+     duas é o que faz alguém lançar tudo de novo.
+   - Não apaga linha. Excluir grava status EXCLUIDA, com quem e
+     quando. O histórico fica.
+   - Não duplica. Salvar a mesma nota duas vezes acha a linha que
+     já existe (pela chave de 44 dígitos, ou por número + série +
+     CNPJ) e REESCREVE — não acrescenta.
+   - Não devolve sucesso sem conferir. Depois de gravar, ele relê a
+     linha e só então responde ok.
+
+   ------------------------------------------------------------
+   COMO INSTALAR
+
+   1. Planilha  Base Dado almoxarifado  →  Extensões  →  Apps Script.
+   2. No  +  ao lado de "Arquivos" → Script.
+      Nome:  AP_NF
+   3. Apague o que vier e cole TODO este arquivo. Salve.
+
+   4. ATENÇÃO, O PASSO QUE IMPORTA:
+      Se o projeto já tiver outra função chamada  AP_Modulo_nf ,
+      as duas vão brigar e qual vence é imprevisível. Antes de
+      publicar, aperte  Ctrl + Shift + F  e procure por
+
+          AP_Modulo_nf
+
+      Se aparecer em outro arquivo além deste, renomeie a antiga
+      para  AP_Modulo_nf_ANTIGO  (só o nome; não apague nada).
+
+   5. Rode uma vez a função  AP_NF_DIAGNOSTICO  — ela só LÊ, não
+      grava nada — e me mande a foto do resultado. É ela que diz
+      em qual aba as suas notas estão e quantas são.
+
+   6. Implantar → Gerenciar implantações → editar → Nova versão.
+   ============================================================ */
+
+
+var AP_NF_CFG = {
+  /* nomes que já vi usados para a aba de notas neste projeto e nos
+     arquivos do sistema. A busca NÃO para aqui: se nenhum bater, o
+     módulo procura pelo CONTEÚDO do cabeçalho. */
+  /* 13/11 — confirmados pelo diagnostico na planilha dele:
+     as notas moram em ALMOXA_NOTAS e os itens em ALMOXA_NF_ITENS. */
+  nomesNotas: ['ALMOXA_NOTAS', 'NOTAS_FISCAIS', 'NOTAS', 'NF', 'NFE',
+               'ALMOXA_NOTAS_FISCAIS', 'NOTA_FISCAL'],
+  nomesItens: ['ALMOXA_NF_ITENS', 'NOTAS_FISCAIS_ITENS', 'NOTAS_ITENS',
+               'NF_ITENS', 'NFE_ITENS', 'ITENS_NOTA', 'ALMOXA_NOTAS_ITENS',
+               'ITENS_NF'],
+
+  /* abas que NUNCA devem ser confundidas com as de trabalho: copia,
+     backup, divergencia, patrimonio. O diagnostico apontou os itens
+     para ALMOXA_DIVERGENCIAS porque eu pegava a PRIMEIRA aba que
+     batesse em duas colunas, e essa e a primeira da planilha. */
+  proibidas: ['BACKUP', 'BKP', 'COPIA', 'HIST', 'DIVERGENCIA', 'LOG',
+              'AUDITORIA', 'SNAPSHOT', 'PATRIMONIO'],
+
+  /* as colunas que identificam uma aba de NOTA, quando o nome não
+     ajuda. Preciso de pelo menos duas destas no cabeçalho. */
+  marcasNotas: ['CHAVE', 'NUMERO', 'FORNECEDOR', 'CNPJ', 'EMISSAO', 'SERIE'],
+  marcasItens: ['DESCRICAO', 'QTD', 'QUANTIDADE', 'VALOR_UNITARIO', 'SKU', 'NUMERO_NOTA'],
+
+  tetoLeitura: 5000      /* linhas por leitura, para não estourar o tempo */
+};
+
+
+/* ============================================================
+   1. ACHAR ONDE AS NOTAS MORAM — sem inventar
+   ============================================================ */
+
+function AP_NF_txt_(v) { return v == null ? '' : String(v).trim(); }
+function AP_NF_num_(v) {
+  var t = AP_NF_txt_(v).replace(/\s/g, '');
+  if (!t) return 0;
+  /* 1.234,56 e 1234.56 chegam os dois; o que manda é a última vírgula/ponto */
+  if (/,\d{1,2}$/.test(t)) t = t.replace(/\./g, '').replace(',', '.');
+  else t = t.replace(/,/g, '');
+  var n = Number(t);
+  return isFinite(n) ? n : 0;
+}
+function AP_NF_soNumeros_(v) { return AP_NF_txt_(v).replace(/\D/g, ''); }
+function AP_NF_normal_(v) {
+  return AP_NF_txt_(v).toUpperCase()
+    .replace(/[ÁÀÂÃÄ]/g, 'A').replace(/[ÉÈÊË]/g, 'E').replace(/[ÍÌÎÏ]/g, 'I')
+    .replace(/[ÓÒÔÕÖ]/g, 'O').replace(/[ÚÙÛÜ]/g, 'U').replace(/Ç/g, 'C')
+    .replace(/[^A-Z0-9]/g, '');
+}
+
+function AP_NF_planilha_() {
+  /* a mesma porta que os outros módulos usam */
+  try {
+    if (typeof AP_SRV_planilha_ === 'function') {
+      var p = AP_SRV_planilha_();
+      if (p) return p;
+    }
+  } catch (e) {}
+  return SpreadsheetApp.getActive();
+}
+
+/** Devolve { aba, nome, via } ou { aba: null, tentativas: [...] } */
+function AP_NF_acharAba_(nomes, marcas, papel) {
+  var tentativas = [];
+  var ss = AP_NF_planilha_();
+  if (!ss) {
+    return { aba: null, tentativas: ['não há planilha ativa para este script'] };
+  }
+
+  /* 1) pelo nome, como está escrito */
+  for (var i = 0; i < nomes.length; i++) {
+    try {
+      var d = ss.getSheetByName(nomes[i]);
+      if (d) return { aba: d, nome: d.getName(), via: 'nome exato "' + nomes[i] + '"' };
+    } catch (e) {}
+  }
+  tentativas.push('nenhuma aba com os nomes: ' + nomes.join(', '));
+
+  /* 2) pelo nome, sem acento e sem espaço */
+  var todas = ss.getSheets();
+  var alvos = nomes.map(AP_NF_normal_);
+  for (var k = 0; k < todas.length; k++) {
+    var n = AP_NF_normal_(todas[k].getName());
+    if (alvos.indexOf(n) > -1) {
+      return { aba: todas[k], nome: todas[k].getName(),
+               via: 'nome parecido com "' + todas[k].getName() + '"' };
+    }
+  }
+
+  /* 3) pelo CONTEÚDO do cabeçalho — é assim que eu acho uma aba
+        cujo nome eu não conheço, sem adivinhar.
+
+        13/11: aqui estava o erro que o diagnóstico dele mostrou. Eu
+        devolvia a PRIMEIRA aba que batesse em duas colunas, e a
+        primeira da planilha dele é ALMOXA_DIVERGENCIAS (4 linhas).
+        Agora eu PONTUO todas as candidatas e devolvo a melhor, e
+        descarto de saída as abas de backup, cópia, log, divergência
+        e patrimônio: essas nunca são a aba de trabalho. */
+  var marcasN = marcas.map(AP_NF_normal_);
+  var pistasPapel = papel === 'itens'
+    ? ['ITEN', 'ITEM', 'PRODUTO']
+    : ['NOTA', 'NFE', 'NF'];
+  var melhor = null, descartadas = [], candidatas = [];
+
+  for (var j = 0; j < todas.length; j++) {
+    try {
+      var aba = todas[j];
+      var nomeAba = aba.getName();
+      var nomeN = AP_NF_normal_(nomeAba);
+
+      /* aba proibida para o papel de trabalho — nem pontua */
+      var proibida = '';
+      for (var pr = 0; pr < AP_NF_CFG.proibidas.length; pr++) {
+        if (nomeN.indexOf(AP_NF_CFG.proibidas[pr]) > -1) {
+          proibida = AP_NF_CFG.proibidas[pr]; break;
+        }
+      }
+      if (proibida) { descartadas.push(nomeAba + ' (contém ' + proibida + ')'); continue; }
+
+      if (aba.getLastColumn() < 2 || aba.getLastRow() < 1) continue;
+      var cab = aba.getRange(1, 1, 1, aba.getLastColumn()).getValues()[0]
+        .map(AP_NF_normal_);
+      var batem = 0;
+      for (var m = 0; m < marcasN.length; m++) {
+        if (cab.indexOf(marcasN[m]) > -1) batem++;
+      }
+      if (batem < 2) continue;
+
+      /* o nome ajuda a desempatar, mas não decide sozinho */
+      var pelNome = 0;
+      for (var q = 0; q < pistasPapel.length; q++) {
+        if (nomeN.indexOf(pistasPapel[q]) > -1) { pelNome = 1; break; }
+      }
+      var linhas = Math.max(0, aba.getLastRow() - 1);
+      var nota = (batem * 10) + (pelNome * 5);
+      candidatas.push(nomeAba + ' [' + batem + ' coluna(s)' +
+        (pelNome ? ', nome combina' : '') + ', ' + linhas + ' linha(s)]');
+
+      if (!melhor || nota > melhor.nota ||
+          (nota === melhor.nota && linhas > melhor.linhas)) {
+        melhor = { aba: aba, nome: nomeAba, nota: nota,
+                   batem: batem, pelNome: pelNome, linhas: linhas };
+      }
+    } catch (e) {}
+  }
+
+  if (melhor) {
+    return { aba: melhor.aba, nome: melhor.nome,
+             via: 'cabeçalho com ' + melhor.batem + ' coluna(s)' +
+                  (melhor.pelNome ? ' e nome combinando' : '') +
+                  ', ' + melhor.linhas + ' linha(s) — melhor de ' +
+                  candidatas.length + ' candidata(s)',
+             candidatas: candidatas, descartadas: descartadas };
+  }
+  tentativas.push('nenhum cabeçalho com pelo menos 2 de: ' + marcas.join(', '));
+  if (descartadas.length) {
+    tentativas.push('descartei por serem backup/cópia/log/divergência: ' +
+      descartadas.join(', '));
+  }
+  tentativas.push('abas na planilha: ' +
+    todas.map(function (a) { return a.getName(); }).join(', '));
+  return { aba: null, tentativas: tentativas };
+}
+
+
+/* ============================================================
+   2. LER UMA ABA — cabeçalho descoberto, não presumido
+   ============================================================ */
+
+function AP_NF_lerAba_(aba) {
+  var ultLin = aba.getLastRow(), ultCol = aba.getLastColumn();
+  if (ultLin < 2) return { colunas: [], linhas: [] };
+  var quantas = Math.min(ultLin - 1, AP_NF_CFG.tetoLeitura);
+  var cab = aba.getRange(1, 1, 1, ultCol).getValues()[0].map(AP_NF_txt_);
+  var dados = aba.getRange(2, 1, quantas, ultCol).getValues();
+  return { colunas: cab, linhas: dados, ultCol: ultCol, lidas: quantas,
+           total: ultLin - 1 };
+}
+
+/** Acha o índice de uma coluna por qualquer um dos nomes dados. */
+function AP_NF_col_(colunas, nomes) {
+  /* 13/11: eu percorria as COLUNAS da planilha e aceitava a primeira
+     que estivesse na minha lista. Assim a ordem da planilha decidia:
+     na dele, "quando" caiu em lancadoEm (a data do lançamento) em vez
+     de atualizadoEm, e cada edição apagaria a data original. Agora
+     quem decide é a ORDEM DA MINHA LISTA — o primeiro nome da lista
+     que existir na planilha ganha. */
+  var normalizadas = colunas.map(AP_NF_normal_);
+  for (var n = 0; n < nomes.length; n++) {
+    var i = normalizadas.indexOf(AP_NF_normal_(nomes[n]));
+    if (i > -1) return i;
+  }
+  return -1;
+}
+
+function AP_NF_mapaNota_(colunas) {
+  return {
+    chave:      AP_NF_col_(colunas, ['CHAVE', 'CHAVE_ACESSO', 'CHAVE DE ACESSO', 'CHAVENFE']),
+    numero:     AP_NF_col_(colunas, ['NUMERO', 'NUM', 'NUMERO_NOTA', 'NF', 'NUMERO DA NOTA']),
+    serie:      AP_NF_col_(colunas, ['SERIE']),
+    fornecedor: AP_NF_col_(colunas, ['FORNECEDOR', 'EMITENTE', 'RAZAO_SOCIAL', 'RAZAO SOCIAL']),
+    cnpj:       AP_NF_col_(colunas, ['CNPJ', 'CNPJ_EMITENTE']),
+    emissao:    AP_NF_col_(colunas, ['EMISSAO', 'DATA_EMISSAO', 'DATA', 'DT_EMISSAO']),
+    entrada:    AP_NF_col_(colunas, ['ENTRADA', 'DATA_ENTRADA', 'LANCAMENTO']),
+    valor:      AP_NF_col_(colunas, ['VALOR', 'VALOR_TOTAL', 'TOTAL', 'VALOR TOTAL', 'VNF']),
+    status:     AP_NF_col_(colunas, ['STATUS', 'SITUACAO']),
+    obra:       AP_NF_col_(colunas, ['OBRA']),
+    pedido:     AP_NF_col_(colunas, ['PEDIDO', 'PEDIDO_COMPRA', 'OC']),
+    obs:        AP_NF_col_(colunas, ['OBS', 'OBSERVACAO', 'OBSERVACOES']),
+    id:         AP_NF_col_(colunas, ['ID', 'ID_NOTA', 'IDNF', 'ID_NF', 'IDLANC']),
+    quem:       AP_NF_col_(colunas, ['QUEM', 'USUARIO', 'LANCADO_POR', 'LANCADOPOR',
+                                     'CRIADO_POR']),
+    /* quando = data da ULTIMA ALTERACAO. Nunca a do lançamento. */
+    quando:     AP_NF_col_(colunas, ['ATUALIZADOEM', 'ATUALIZADO_EM', 'ALTERADO_EM',
+                                     'QUANDO']),
+    /* criadoEm = data do lançamento. Só é escrita quando a linha nasce. */
+    criadoEm:   AP_NF_col_(colunas, ['LANCADOEM', 'LANCADO_EM', 'CRIADO_EM',
+                                     'CRIADOEM']),
+    /* a planilha dele ja tem as tres colunas certas para exclusao
+       logica — usar observacao para isso seria pior */
+    excluidoEm:   AP_NF_col_(colunas, ['EXCLUIDOEM', 'EXCLUIDO_EM']),
+    excluidoPor:  AP_NF_col_(colunas, ['EXCLUIDOPOR', 'EXCLUIDO_POR']),
+    motivoExcl:   AP_NF_col_(colunas, ['MOTIVOEXCLUSAO', 'MOTIVO_EXCLUSAO'])
+  };
+}
+
+function AP_NF_mapaItem_(colunas) {
+  return {
+    /* a coluna que liga o item a nota. A ordem e a minha prioridade:
+       primeiro o numero da nota, depois o id. Nao presumo nenhuma —
+       se nao existir nenhuma delas, AP_NF_itens RECUSA. */
+    nota:       AP_NF_col_(colunas, ['NUMERO_NOTA', 'NUMERONOTA', 'NUM_NOTA',
+                                     'NOTA_NUMERO', 'NUMERO_NF', 'NUMERONF',
+                                     'NUMERO', 'NUM', 'NF', 'NOTA',
+                                     'DOCUMENTO', 'NRO_NOTA']),
+    idNota:     AP_NF_col_(colunas, ['IDNF', 'ID_NF', 'NOTA_ID', 'NOTAID',
+                                     'ID_NOTA', 'IDNOTA', 'IDLANC', 'ID_LANC',
+                                     'ID_LANCAMENTO']),
+    serie:      AP_NF_col_(colunas, ['SERIE', 'SERIE_NOTA', 'SERIENOTA']),
+    chave:      AP_NF_col_(colunas, ['CHAVE', 'CHAVE_ACESSO', 'CHAVENFE',
+                                     'CHAVE_NFE', 'CHAVEACESSO']),
+    sku:        AP_NF_col_(colunas, ['SKU', 'CODIGO', 'COD', 'PRODUTO']),
+    descricao:  AP_NF_col_(colunas, ['DESCRICAO', 'ITEM', 'PRODUTO_DESCRICAO']),
+    qtd:        AP_NF_col_(colunas, ['QTD', 'QUANTIDADE', 'QTDE']),
+    unidade:    AP_NF_col_(colunas, ['UNIDADE', 'UN', 'UND']),
+    unitario:   AP_NF_col_(colunas, ['VALOR_UNITARIO', 'UNITARIO', 'PRECO', 'VLR_UNIT']),
+    total:      AP_NF_col_(colunas, ['VALOR_TOTAL', 'TOTAL', 'VALOR']),
+    status:     AP_NF_col_(colunas, ['STATUS', 'SITUACAO'])
+  };
+}
+
+function AP_NF_pegar_(linha, i) { return i >= 0 ? linha[i] : ''; }
+
+function AP_NF_data_(v) {
+  if (!v) return '';
+  if (v instanceof Date) {
+    var m = ('0' + (v.getMonth() + 1)).slice(-2), d = ('0' + v.getDate()).slice(-2);
+    return v.getFullYear() + '-' + m + '-' + d;
+  }
+  var t = AP_NF_txt_(v);
+  var br = t.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (br) return br[3] + '-' + br[2] + '-' + br[1];
+  return t.slice(0, 10);
+}
+
+function AP_NF_notaDaLinha_(linha, mapa, numeroDaLinha) {
+  return {
+    id:         AP_NF_txt_(AP_NF_pegar_(linha, mapa.id)) || ('L' + numeroDaLinha),
+    linha:      numeroDaLinha,
+    chave:      AP_NF_soNumeros_(AP_NF_pegar_(linha, mapa.chave)),
+    numero:     AP_NF_txt_(AP_NF_pegar_(linha, mapa.numero)),
+    serie:      AP_NF_txt_(AP_NF_pegar_(linha, mapa.serie)),
+    fornecedor: AP_NF_txt_(AP_NF_pegar_(linha, mapa.fornecedor)),
+    cnpj:       AP_NF_soNumeros_(AP_NF_pegar_(linha, mapa.cnpj)),
+    emissao:    AP_NF_data_(AP_NF_pegar_(linha, mapa.emissao)),
+    entrada:    AP_NF_data_(AP_NF_pegar_(linha, mapa.entrada)),
+    valor:      AP_NF_num_(AP_NF_pegar_(linha, mapa.valor)),
+    status:     AP_NF_txt_(AP_NF_pegar_(linha, mapa.status)),
+    obra:       AP_NF_txt_(AP_NF_pegar_(linha, mapa.obra)),
+    pedido:     AP_NF_txt_(AP_NF_pegar_(linha, mapa.pedido)),
+    obs:        AP_NF_txt_(AP_NF_pegar_(linha, mapa.obs)),
+    quem:       AP_NF_txt_(AP_NF_pegar_(linha, mapa.quem)),
+    quando:     AP_NF_txt_(AP_NF_pegar_(linha, mapa.quando))
+  };
+}
+
+/** A identidade da nota, igual à do sistema (NF_IDENTIDADE). */
+function AP_NF_identidade_(n) {
+  if (!n) return '';
+  var chave = AP_NF_soNumeros_(n.chave);
+  if (chave.length >= 20) return 'NFE:' + chave;
+  return 'NF:' + AP_NF_normal_(n.numero) + '-' + AP_NF_normal_(n.serie) +
+         '-' + AP_NF_soNumeros_(n.cnpj);
+}
+
+
+/* ============================================================
+   3. AS AÇÕES
+   ============================================================ */
+
+function AP_NF_ok_(dados, extra) {
+  var r = { ok: true, dados: dados };
+  if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) r[k] = extra[k];
+  return r;
+}
+function AP_NF_erro_(codigo, mensagem, extra) {
+  var r = { ok: false, codigo: codigo, mensagem: mensagem };
+  if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) r[k] = extra[k];
+  return r;
+}
+
+/** As duas abas, achadas uma vez por chamada. */
+function AP_NF_abas_() {
+  var n = AP_NF_acharAba_(AP_NF_CFG.nomesNotas, AP_NF_CFG.marcasNotas, 'notas');
+  var i = AP_NF_acharAba_(AP_NF_CFG.nomesItens, AP_NF_CFG.marcasItens, 'itens');
+  return { notas: n, itens: i };
+}
+
+function AP_NF_listar(payload) {
+  var a = AP_NF_abas_();
+  if (!a.notas.aba) {
+    /* A REGRA QUE NÃO SE QUEBRA: falha de leitura NÃO é lista vazia.
+       Devolver [] aqui faria a tela dizer "nenhuma nota lançada" —
+       e alguém lançaria tudo de novo. */
+    return AP_NF_erro_('ABA_NAO_ENCONTRADA',
+      'Não achei a aba onde as notas estão guardadas. Isto NÃO quer dizer ' +
+      'que não há notas: quer dizer que eu não sei onde procurar.',
+      { procurei: a.notas.tentativas });
+  }
+
+  var lido = AP_NF_lerAba_(a.notas.aba);
+  if (!lido.linhas.length) {
+    return AP_NF_ok_([], { aba: a.notas.nome, via: a.notas.via, total: 0,
+      observacao: 'a aba "' + a.notas.nome + '" existe e está vazia — ' +
+                  'isto eu posso afirmar, porque a leitura deu certo' });
+  }
+
+  var mapa = AP_NF_mapaNota_(lido.colunas);
+  if (mapa.numero < 0 && mapa.chave < 0) {
+    return AP_NF_erro_('COLUNAS_DESCONHECIDAS',
+      'Achei a aba "' + a.notas.nome + '", mas nela não há coluna de número ' +
+      'nem de chave. Sem uma das duas eu não sei o que é cada linha.',
+      { colunas: lido.colunas });
+  }
+
+  var fora = AP_NF_txt_((payload || {}).incluirExcluidas) === 'sim';
+  var saida = [];
+  for (var i = 0; i < lido.linhas.length; i++) {
+    var n = AP_NF_notaDaLinha_(lido.linhas[i], mapa, i + 2);
+    if (!n.numero && !n.chave) continue;             /* linha em branco */
+    if (!fora && /^EXCLUID/i.test(AP_NF_normal_(n.status))) continue;
+    saida.push(n);
+  }
+  return AP_NF_ok_(saida, { aba: a.notas.nome, via: a.notas.via,
+    lidas: lido.lidas, total: lido.total,
+    truncada: lido.total > lido.lidas });
+}
+
+function AP_NF_itens(payload) {
+  var p = payload || {};
+  var a = AP_NF_abas_();
+  if (!a.itens.aba) {
+    return AP_NF_erro_('ABA_ITENS_NAO_ENCONTRADA',
+      'Não achei a aba dos itens das notas.', { procurei: a.itens.tentativas });
+  }
+  var lido = AP_NF_lerAba_(a.itens.aba);
+  if (!lido.linhas.length) {
+    return AP_NF_ok_([], { aba: a.itens.nome,
+      observacao: 'a aba "' + a.itens.nome + '" existe mas não tem nenhuma linha' });
+  }
+
+  var mapa = AP_NF_mapaItem_(lido.colunas);
+
+  /* 13/11 — NÃO devolver lista vazia quando o problema sou eu.
+     Se nenhuma das colunas que ligam item e nota existe nesta aba,
+     eu não tenho como saber de quem é cada item. Lista vazia aqui
+     diria "esta nota não tem itens", e isso seria falso. */
+  if (mapa.nota < 0 && mapa.idNota < 0 && mapa.chave < 0) {
+    return AP_NF_erro_('ITENS_SEM_LIGACAO',
+      'A aba "' + a.itens.nome + '" tem ' + lido.linhas.length + ' linha(s), ' +
+      'mas nenhuma coluna que ligue o item à nota. NÃO é que a nota não ' +
+      'tenha itens: é que eu não sei qual item é de qual nota.',
+      { aba: a.itens.nome, colunasDaAba: lido.colunas,
+        procurei: 'numero da nota, id da nota ou chave' });
+  }
+
+  var numero = AP_NF_normal_(p.numero);
+  var chave = AP_NF_soNumeros_(p.chave);
+  var id = AP_NF_normal_(p.id || p.idNota);
+  var serie = AP_NF_normal_(p.serie);
+
+  var saida = [], vistos = {}, amostraLigacao = [];
+  for (var i = 0; i < lido.linhas.length; i++) {
+    var l = lido.linhas[i];
+    var cN = AP_NF_normal_(AP_NF_pegar_(l, mapa.nota));
+    var cC = AP_NF_soNumeros_(AP_NF_pegar_(l, mapa.chave));
+    var cI = AP_NF_normal_(AP_NF_pegar_(l, mapa.idNota));
+    var cS = AP_NF_normal_(AP_NF_pegar_(l, mapa.serie));
+
+    /* guardo o que vi na coluna de ligação para poder PROVAR depois
+       por que nada casou, em vez de só devolver vazio */
+    var visto = cN || cI || cC;
+    if (visto && !vistos[visto]) {
+      vistos[visto] = 1;
+      if (amostraLigacao.length < 8) amostraLigacao.push(visto);
+    }
+
+    var bate = (chave && cC && cC === chave) ||
+               (id && cI && cI === id) ||
+               (numero && cN && cN === numero);
+
+    /* número igual mas série diferente não é a mesma nota, quando as
+       duas pontas têm série */
+    if (bate && numero && cN === numero && serie && cS && cS !== serie) bate = false;
+    if (!bate) continue;
+
+    var st = AP_NF_normal_(AP_NF_pegar_(l, mapa.status));
+    if (/^EXCLUID/.test(st)) continue;
+    saida.push({
+      linha: i + 2,
+      sku: AP_NF_txt_(AP_NF_pegar_(l, mapa.sku)),
+      descricao: AP_NF_txt_(AP_NF_pegar_(l, mapa.descricao)),
+      qtd: AP_NF_num_(AP_NF_pegar_(l, mapa.qtd)),
+      unidade: AP_NF_txt_(AP_NF_pegar_(l, mapa.unidade)),
+      valorUnitario: AP_NF_num_(AP_NF_pegar_(l, mapa.unitario)),
+      valorTotal: AP_NF_num_(AP_NF_pegar_(l, mapa.total)),
+      status: AP_NF_txt_(AP_NF_pegar_(l, mapa.status))
+    });
+  }
+
+  var extra = { aba: a.itens.nome,
+                ligueiPor: mapa.nota >= 0 ? lido.colunas[mapa.nota]
+                         : (mapa.idNota >= 0 ? lido.colunas[mapa.idNota]
+                         : lido.colunas[mapa.chave]) };
+  if (!saida.length) {
+    /* nenhum item casou. Isso PODE ser verdade, mas também pode ser
+       eu ligando pela coluna errada. Mostro o que procurei e o que
+       existe lá, para a tela poder dizer a diferença. */
+    extra.procurei = { numero: AP_NF_txt_(p.numero), serie: AP_NF_txt_(p.serie),
+                       chave: AP_NF_txt_(p.chave), id: AP_NF_txt_(p.id) };
+    extra.linhasLidas = lido.linhas.length;
+    extra.valoresNaColunaDeLigacao = amostraLigacao;
+    extra.colunasDaAba = lido.colunas;
+    extra.observacao = 'li ' + lido.linhas.length + ' linha(s) em "' + a.itens.nome +
+      '" e nenhuma casou com esta nota. Compare o que procurei com os ' +
+      'valores que existem na coluna de ligação.';
+  }
+  return AP_NF_ok_(saida, extra);
+}
+
+function AP_NF_obter(payload) {
+  var r = AP_NF_listar({ incluirExcluidas: 'sim' });
+  if (!r.ok) return r;
+  var p = payload || {};
+  var alvo = AP_NF_identidade_(p) ||
+             (AP_NF_txt_(p.identidade) || AP_NF_txt_(p.id));
+  var achada = null;
+  for (var i = 0; i < r.dados.length; i++) {
+    var n = r.dados[i];
+    if (AP_NF_identidade_(n) === alvo || AP_NF_txt_(n.id) === AP_NF_txt_(p.id) ||
+        (AP_NF_txt_(p.numero) && AP_NF_normal_(n.numero) === AP_NF_normal_(p.numero))) {
+      achada = n; break;
+    }
+  }
+  if (!achada) {
+    return AP_NF_erro_('NAO_ENCONTRADA',
+      'Não achei esta nota entre as ' + r.dados.length + ' lidas.');
+  }
+  var it = AP_NF_itens({ numero: achada.numero, serie: achada.serie,
+                         chave: achada.chave, id: achada.id });
+  achada.itens = it.ok ? it.dados : [];
+  achada.__itensLidos = it.ok;
+  if (!it.ok) achada.__itensMotivo = it.mensagem;
+  return AP_NF_ok_(achada);
+}
+
+/* ---- gravação -------------------------------------------------- */
+
+function AP_NF_quem_(sessao) {
+  var s = sessao || {};
+  return AP_NF_txt_(s.nome || s.usuario || s.email ||
+    (function () { try { return Session.getActiveUser().getEmail(); } catch (e) { return ''; } })()) ||
+    'não identificado';
+}
+
+function AP_NF_agora_() {
+  try {
+    return Utilities.formatDate(new Date(), Session.getScriptTimeZone(),
+      'yyyy-MM-dd HH:mm:ss');
+  } catch (e) { return new Date().toISOString(); }
+}
+
+/** Escreve os campos da nota numa linha, respeitando o cabeçalho real. */
+function AP_NF_escrever_(aba, numeroDaLinha, colunas, mapa, nota, quem) {
+  var larg = colunas.length;
+  var atual = numeroDaLinha
+    ? aba.getRange(numeroDaLinha, 1, 1, larg).getValues()[0]
+    : new Array(larg).join('.').split('.');
+
+  function por(i, v) { if (i >= 0 && i < larg && v !== undefined) atual[i] = v; }
+  por(mapa.chave, AP_NF_soNumeros_(nota.chave));
+  por(mapa.numero, AP_NF_txt_(nota.numero));
+  por(mapa.serie, AP_NF_txt_(nota.serie));
+  por(mapa.fornecedor, AP_NF_txt_(nota.fornecedor));
+  por(mapa.cnpj, AP_NF_soNumeros_(nota.cnpj));
+  por(mapa.emissao, AP_NF_data_(nota.emissao));
+  if (AP_NF_txt_(nota.entrada)) por(mapa.entrada, AP_NF_data_(nota.entrada));
+  if (nota.valor !== undefined) por(mapa.valor, AP_NF_num_(nota.valor));
+  if (AP_NF_txt_(nota.status)) por(mapa.status, AP_NF_txt_(nota.status));
+  if (AP_NF_txt_(nota.obra)) por(mapa.obra, AP_NF_txt_(nota.obra));
+  if (AP_NF_txt_(nota.pedido)) por(mapa.pedido, AP_NF_txt_(nota.pedido));
+  if (AP_NF_txt_(nota.obs)) por(mapa.obs, AP_NF_txt_(nota.obs));
+  /* QUEM LANÇOU e QUANDO LANÇOU pertencem ao nascimento da linha.
+     Numa edição eu mexo só na data de alteração — senão a edição
+     apagaria o histórico de quem lançou a nota. */
+  if (!numeroDaLinha) {
+    por(mapa.quem, quem);
+    por(mapa.criadoEm, AP_NF_agora_());
+  }
+  por(mapa.quando, AP_NF_agora_());
+  if (mapa.quando < 0 && numeroDaLinha) {
+    /* a aba não tem coluna de alteração: não invento, e também não
+       escrevo na de lançamento */
+  }
+
+  var linha = numeroDaLinha || (aba.getLastRow() + 1);
+  aba.getRange(linha, 1, 1, larg).setValues([atual]);
+  SpreadsheetApp.flush();
+  return linha;
+}
+
+function AP_NF_salvar(payload, sessao) {
+  var nota = payload || {};
+  if (!AP_NF_txt_(nota.numero) && !AP_NF_soNumeros_(nota.chave)) {
+    return AP_NF_erro_('SEM_IDENTIDADE',
+      'A nota precisa de número ou de chave para ser gravada.');
+  }
+  var a = AP_NF_abas_();
+  if (!a.notas.aba) {
+    return AP_NF_erro_('ABA_NAO_ENCONTRADA',
+      'Não achei a aba das notas; não vou criar uma por conta própria.',
+      { procurei: a.notas.tentativas });
+  }
+
+  var lido = AP_NF_lerAba_(a.notas.aba);
+  var colunas = lido.colunas.length
+    ? lido.colunas
+    : a.notas.aba.getRange(1, 1, 1, a.notas.aba.getLastColumn()).getValues()[0].map(AP_NF_txt_);
+  var mapa = AP_NF_mapaNota_(colunas);
+  var quem = AP_NF_quem_(sessao);
+
+  /* IDEMPOTÊNCIA: a mesma nota não entra duas vezes. Acho a linha
+     que já existe pela identidade e REESCREVO. Foi assim que a
+     53072 dobrou — acrescentando em vez de reescrever. */
+  var alvo = AP_NF_identidade_(nota);
+  var linhaExistente = 0;
+  for (var i = 0; i < lido.linhas.length; i++) {
+    var n = AP_NF_notaDaLinha_(lido.linhas[i], mapa, i + 2);
+    if (AP_NF_identidade_(n) === alvo) { linhaExistente = i + 2; break; }
+  }
+
+  var linha = AP_NF_escrever_(a.notas.aba, linhaExistente, colunas, mapa, nota, quem);
+
+  /* CONFERIR DEPOIS DE GRAVAR: só digo que gravou se eu reler e achar */
+  var depois = a.notas.aba.getRange(linha, 1, 1, colunas.length).getValues()[0];
+  var conferida = AP_NF_notaDaLinha_(depois, mapa, linha);
+  if (AP_NF_identidade_(conferida) !== alvo) {
+    return AP_NF_erro_('NAO_CONFIRMOU',
+      'Escrevi na linha ' + linha + ' mas, ao reler, a nota não confere. ' +
+      'NÃO considere gravada: confira a planilha antes de lançar de novo.');
+  }
+  return AP_NF_ok_(conferida, {
+    criada: !linhaExistente, atualizada: !!linhaExistente,
+    linha: linha, aba: a.notas.nome, quem: quem
+  });
+}
+
+function AP_NF_excluir(payload, sessao) {
+  var p = payload || {};
+  var a = AP_NF_abas_();
+  if (!a.notas.aba) {
+    return AP_NF_erro_('ABA_NAO_ENCONTRADA', 'Não achei a aba das notas.',
+      { procurei: a.notas.tentativas });
+  }
+  var lido = AP_NF_lerAba_(a.notas.aba);
+  var mapa = AP_NF_mapaNota_(lido.colunas);
+  if (mapa.status < 0) {
+    return AP_NF_erro_('SEM_COLUNA_STATUS',
+      'A aba "' + a.notas.nome + '" não tem coluna de status. Excluir aqui ' +
+      'seria apagar a linha, e eu não apago linha.');
+  }
+  var alvo = AP_NF_identidade_(p) || AP_NF_txt_(p.identidade);
+  var linha = 0, antes = null;
+  for (var i = 0; i < lido.linhas.length; i++) {
+    var n = AP_NF_notaDaLinha_(lido.linhas[i], mapa, i + 2);
+    if (AP_NF_identidade_(n) === alvo || AP_NF_txt_(n.id) === AP_NF_txt_(p.id)) {
+      linha = i + 2; antes = n; break;
+    }
+  }
+  if (!linha) return AP_NF_erro_('NAO_ENCONTRADA', 'Não achei esta nota para excluir.');
+
+  /* EXCLUSÃO LÓGICA. A linha fica, com quem e quando.
+
+     13/11: eu gravava quem excluiu na coluna de QUEM LANÇOU
+     (lancadoPor) — isso apagava o histórico de quem lançou a nota.
+     A planilha dele já tem excluidoEm, excluidoPor e motivoExclusao.
+     Uso essas. A coluna de quem lançou NÃO é mais tocada aqui. */
+  var quemExcluiu = AP_NF_quem_(sessao);
+  var agora = AP_NF_agora_();
+  var ondeGravei = [];
+
+  a.notas.aba.getRange(linha, mapa.status + 1).setValue('EXCLUIDA');
+  ondeGravei.push('status');
+
+  if (mapa.excluidoPor >= 0) {
+    a.notas.aba.getRange(linha, mapa.excluidoPor + 1).setValue(quemExcluiu);
+    ondeGravei.push('excluidoPor');
+  }
+  if (mapa.excluidoEm >= 0) {
+    a.notas.aba.getRange(linha, mapa.excluidoEm + 1).setValue(agora);
+    ondeGravei.push('excluidoEm');
+  }
+  if (mapa.motivoExcl >= 0 && AP_NF_txt_(p.motivo)) {
+    a.notas.aba.getRange(linha, mapa.motivoExcl + 1).setValue(AP_NF_txt_(p.motivo));
+    ondeGravei.push('motivoExclusao');
+  }
+
+  /* sem as colunas próprias, registro na observação — sem apagar o que
+     já estava escrito nela */
+  if (mapa.excluidoPor < 0 && mapa.excluidoEm < 0 && mapa.obs >= 0) {
+    var obsAntes = AP_NF_txt_(a.notas.aba.getRange(linha, mapa.obs + 1).getValue());
+    var recado = 'excluída por ' + quemExcluiu + ' em ' + agora +
+      (AP_NF_txt_(p.motivo) ? ' — ' + AP_NF_txt_(p.motivo) : '');
+    a.notas.aba.getRange(linha, mapa.obs + 1)
+      .setValue((obsAntes ? obsAntes + ' | ' : '') + recado);
+    ondeGravei.push('observacao (a aba não tem colunas de exclusão)');
+  }
+  SpreadsheetApp.flush();
+
+  var st = AP_NF_txt_(a.notas.aba.getRange(linha, mapa.status + 1).getValue());
+  if (!/^EXCLUID/i.test(AP_NF_normal_(st))) {
+    return AP_NF_erro_('NAO_CONFIRMOU',
+      'Marquei a linha ' + linha + ' como excluída, mas ao reler ela diz "' +
+      st + '". NÃO considere excluída.');
+  }
+  return AP_NF_ok_({ linha: linha, status: st, nota: antes,
+                     quemExcluiu: quemExcluiu, quando: agora,
+                     colunasGravadas: ondeGravei },
+    { observacao: 'a linha não foi apagada: ficou com status EXCLUIDA' });
+}
+
+function AP_NF_atualizar(payload, sessao) {
+  /* atualizar é salvar: a identidade acha a linha e reescreve */
+  return AP_NF_salvar(payload, sessao);
+}
+
+function AP_NF_contarTudo() {
+  var a = AP_NF_abas_();
+  if (!a.notas.aba) {
+    return AP_NF_erro_('ABA_NAO_ENCONTRADA', 'Não achei a aba das notas.',
+      { procurei: a.notas.tentativas });
+  }
+  var lido = AP_NF_lerAba_(a.notas.aba);
+  var mapa = AP_NF_mapaNota_(lido.colunas);
+  var vivas = 0, excluidas = 0;
+  for (var i = 0; i < lido.linhas.length; i++) {
+    var n = AP_NF_notaDaLinha_(lido.linhas[i], mapa, i + 2);
+    if (!n.numero && !n.chave) continue;
+    if (/^EXCLUID/i.test(AP_NF_normal_(n.status))) excluidas++; else vivas++;
+  }
+  var itens = 0;
+  if (a.itens.aba) itens = Math.max(0, a.itens.aba.getLastRow() - 1);
+  return AP_NF_ok_({ notas: vivas, excluidas: excluidas, itens: itens,
+    abaNotas: a.notas.nome, abaItens: a.itens.nome || '' });
+}
+
+
+/* ============================================================
+   4. AS PORTAS — as duas que o sistema já procura
+   ============================================================ */
+
+function AP_NF_executar_(acao, payload, sessao) {
+  switch (AP_NF_txt_(acao)) {
+    case 'listar':      return AP_NF_listar(payload);
+    case 'obter':       return AP_NF_obter(payload);
+    case 'itens':       return AP_NF_itens(payload);
+    case 'salvar':      return AP_NF_salvar(payload, sessao);
+    case 'atualizar':   return AP_NF_atualizar(payload, sessao);
+    case 'excluir':     return AP_NF_excluir(payload, sessao);
+    case 'contarTudo':  return AP_NF_contarTudo();
+    case 'diagnostico': return AP_NF_ok_(AP_NF_DIAGNOSTICO());
+    /* estas eu NÃO tenho, e digo em vez de devolver lista vazia */
+    case 'pendentes':
+    case 'divergencias':
+    case 'registrarDivergencia':
+    case 'decidirDivergencia':
+      return AP_NF_erro_('ACAO_NAO_IMPLEMENTADA',
+        'A ação "' + acao + '" não existe neste módulo. Lista vazia aqui ' +
+        'seria dizer que não há nada, e eu não sei disso.');
+    default:
+      return AP_NF_erro_('ACAO_DESCONHECIDA',
+        'O módulo de notas não conhece a ação "' + acao + '".');
+  }
+}
+
+/** A porta do roteador: é por aqui que a página hospedada chega. */
+function AP_Modulo_nf(acao, payload, sessao) {
+  try {
+    return AP_NF_executar_(acao, payload, sessao);
+  } catch (e) {
+    return AP_NF_erro_('ERRO_NO_MODULO',
+      'O módulo de notas estourou em "' + acao + '": ' + (e && e.message ? e.message : e));
+  }
+}
+
+/** A porta direta, que o NF_CORE tenta primeiro dentro do Apps Script. */
+function AP_NF_direto(texto) {
+  var p = {};
+  try { p = typeof texto === 'string' ? JSON.parse(texto) : (texto || {}); }
+  catch (e) {
+    return JSON.stringify(AP_NF_erro_('PEDIDO_ILEGIVEL',
+      'Não consegui ler o pedido: ' + e.message));
+  }
+  var r;
+  try {
+    r = AP_NF_executar_(p.acao, p.payload, p.sessao || { token: p.token });
+  } catch (e) {
+    r = AP_NF_erro_('ERRO_NO_MODULO', (e && e.message) ? e.message : String(e));
+  }
+  return JSON.stringify(r);
+}
+
+
+/* ============================================================
+   5. O DIAGNÓSTICO — rode esta, só lê
+   ============================================================ */
+/** Diagnóstico só dos ITENS. Rode com o número da nota que está
+    aberta na tela, por exemplo:  AP_NF_DIAG_ITENS('193835')
+    Ele mostra o cabeçalho REAL da aba e linhas cruas, sem interpretar,
+    para sabermos por qual coluna ligar item e nota. */
+function AP_NF_DIAG_ITENS(numeroDaNota) {
+  var saida = { quando: AP_NF_agora_(), procurando: AP_NF_txt_(numeroDaNota) };
+  var a = AP_NF_abas_();
+  if (!a.itens.aba) {
+    saida.erro = 'não achei a aba dos itens';
+    saida.procurei = a.itens.tentativas;
+    Logger.log(JSON.stringify(saida, null, 2));
+    return saida;
+  }
+  saida.aba = a.itens.nome;
+  saida.via = a.itens.via;
+
+  var lido = AP_NF_lerAba_(a.itens.aba);
+  saida.linhas = lido.linhas.length;
+  saida.cabecalhoReal = lido.colunas;
+
+  var mapa = AP_NF_mapaItem_(lido.colunas);
+  saida.colunasQueEntendi = {};
+  for (var k in mapa) if (mapa.hasOwnProperty(k)) {
+    saida.colunasQueEntendi[k] = mapa[k] >= 0 ? lido.colunas[mapa[k]] : '(não achei)';
+  }
+
+  /* três linhas cruas, do jeito que estão na planilha */
+  saida.tresLinhasCruas = [];
+  for (var i = 0; i < Math.min(3, lido.linhas.length); i++) {
+    var obj = {};
+    for (var c = 0; c < lido.colunas.length; c++) {
+      obj[lido.colunas[c]] = AP_NF_txt_(lido.linhas[i][c]);
+    }
+    saida.tresLinhasCruas.push(obj);
+  }
+
+  /* onde o número da nota aparece, seja em que coluna for */
+  var alvo = AP_NF_normal_(numeroDaNota);
+  if (alvo) {
+    saida.ondeEsseNumeroAparece = [];
+    for (var j = 0; j < lido.linhas.length && saida.ondeEsseNumeroAparece.length < 5; j++) {
+      for (var c2 = 0; c2 < lido.colunas.length; c2++) {
+        if (AP_NF_normal_(lido.linhas[j][c2]) === alvo) {
+          saida.ondeEsseNumeroAparece.push({
+            linha: j + 2, coluna: lido.colunas[c2],
+            valor: AP_NF_txt_(lido.linhas[j][c2])
+          });
+          break;
+        }
+      }
+    }
+    if (!saida.ondeEsseNumeroAparece.length) {
+      saida.ondeEsseNumeroAparece =
+        'o número ' + numeroDaNota + ' NÃO aparece em nenhuma coluna desta aba';
+    }
+    var r = AP_NF_itens({ numero: numeroDaNota });
+    saida.oQueOModuloDevolve = r.ok
+      ? { ok: true, quantos: r.dados.length, ligueiPor: r.ligueiPor,
+          valoresNaColunaDeLigacao: r.valoresNaColunaDeLigacao,
+          observacao: r.observacao }
+      : { ok: false, codigo: r.codigo, mensagem: r.mensagem };
+  }
+  Logger.log(JSON.stringify(saida, null, 2));
+  return saida;
+}
+
+function AP_NF_DIAGNOSTICO() {
+  var saida = { quando: AP_NF_agora_(), planilha: '', abas: [],
+                notas: null, itens: null, amostra: [], avisos: [] };
+  var ss = AP_NF_planilha_();
+  if (!ss) {
+    saida.avisos.push('NÃO HÁ PLANILHA ATIVA para este script.');
+    Logger.log(JSON.stringify(saida, null, 2));
+    return saida;
+  }
+  try { saida.planilha = ss.getName(); } catch (e) {}
+  try {
+    saida.abas = ss.getSheets().map(function (a) {
+      return a.getName() + ' (' + Math.max(0, a.getLastRow() - 1) + ' linha(s))';
+    });
+  } catch (e) {}
+
+  var a = AP_NF_abas_();
+  saida.notas = a.notas.aba
+    ? { aba: a.notas.nome, via: a.notas.via }
+    : { aba: null, procurei: a.notas.tentativas };
+  saida.itens = a.itens.aba
+    ? { aba: a.itens.nome, via: a.itens.via,
+        candidatas: a.itens.candidatas || '(achada pelo nome)',
+        descartadas: a.itens.descartadas || [] }
+    : { aba: null, procurei: a.itens.tentativas };
+
+  if (a.notas.aba) {
+    var lido = AP_NF_lerAba_(a.notas.aba);
+    saida.colunasDaAba = lido.colunas;
+    var mapa = AP_NF_mapaNota_(lido.colunas);
+    saida.colunasQueEntendi = {};
+    for (var k in mapa) if (mapa.hasOwnProperty(k)) {
+      saida.colunasQueEntendi[k] = mapa[k] >= 0 ? lido.colunas[mapa[k]] : '(não achei)';
+    }
+    var r = AP_NF_listar({});
+    if (r.ok) {
+      saida.quantasNotas = r.dados.length;
+      saida.amostra = r.dados.slice(0, 3).map(function (n) {
+        return { numero: n.numero, serie: n.serie, fornecedor: n.fornecedor,
+                 emissao: n.emissao, valor: n.valor, status: n.status };
+      });
+    } else {
+      saida.avisos.push('listar recusou: ' + r.codigo + ' — ' + r.mensagem);
+    }
+  } else {
+    saida.avisos.push('Não achei a aba das notas. Me mande esta lista de abas ' +
+      'que eu acrescento o nome certo.');
+  }
+
+  /* 13/11 — provar que a aba de itens é a certa: contar as linhas e
+     mostrar os itens de uma nota real que tenha itens. */
+  if (a.itens.aba) {
+    try {
+      var li = AP_NF_lerAba_(a.itens.aba);
+      var mi = AP_NF_mapaItem_(li.colunas);
+      saida.itens.colunasDaAba = li.colunas;
+      saida.itens.linhas = li.linhas.length;
+      saida.itens.colunasQueEntendi = {};
+      for (var ki in mi) if (mi.hasOwnProperty(ki)) {
+        saida.itens.colunasQueEntendi[ki] =
+          mi[ki] >= 0 ? li.colunas[mi[ki]] : '(não achei)';
+      }
+      /* uma nota de verdade, com itens de verdade */
+      if (saida.amostra && saida.amostra.length) {
+        for (var ai = 0; ai < saida.amostra.length; ai++) {
+          var ri = AP_NF_itens({ numero: saida.amostra[ai].numero,
+                                 serie: saida.amostra[ai].serie });
+          if (ri.ok && ri.dados.length) {
+            saida.itens.exemplo = {
+              nota: saida.amostra[ai].numero,
+              quantos: ri.dados.length,
+              primeiros: ri.dados.slice(0, 3)
+            };
+            break;
+          }
+        }
+        if (!saida.itens.exemplo) {
+          saida.avisos.push('A aba de itens é "' + a.itens.nome + '" com ' +
+            li.linhas.length + ' linha(s), mas nenhuma das 3 notas da amostra ' +
+            'casou com um item. Pode ser a coluna que liga item e nota.');
+        }
+      }
+    } catch (eI) {
+      saida.avisos.push('não consegui ler a aba de itens: ' + eI);
+    }
+  } else {
+    saida.avisos.push('Não achei a aba dos itens.');
+  }
+
+  if (typeof AP_Modulo_nf !== 'function') {
+    saida.avisos.push('AP_Modulo_nf não está definida — o roteador não vai achar.');
+  }
+  Logger.log(JSON.stringify(saida, null, 2));
+  return saida;
+}
