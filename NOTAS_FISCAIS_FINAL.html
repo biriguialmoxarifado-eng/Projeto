@@ -1381,17 +1381,25 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
                 NF_CORE, as acoes de nota vao por ela. Nenhuma porta
                 nova foi inventada: e a mesma que o resto do sistema
                 ja usa. */
-          return function (modulo, acao, payload, opcoes) {
+          return function (modulo, acao, payload, opcoes, recado) {
+            /* [NFPORTA3] 13/11 — a porta usada era guardada numa
+               variavel unica de P, e o rodape dispara cinco chamadas
+               ao mesmo tempo: quando a resposta de nf.listar chegava,
+               a variavel ja tinha sido sobrescrita por estoque.listar.
+               A tarja dele dizia "por API.call ,estoque.listar" numa
+               falha de nf.listar — erro meu, e dos que fazem perder
+               tempo procurando no lugar errado. Agora cada chamada
+               carrega a sua. */
             if (modulo === 'nf') {
               try {
                 var nc = j.NF_CORE;
                 if (nc && typeof nc[acao] === 'function') {
-                  P.ultimaPorta = 'NF_CORE.' + acao;
+                  if (recado) recado.porta = 'NF_CORE.' + acao;
                   return nc[acao](payload || {});
                 }
               } catch (e) { /* sem NF_CORE: segue pelo roteador */ }
             }
-            P.ultimaPorta = 'API.call ' + modulo + '.' + acao;
+            if (recado) recado.porta = 'API.call ' + modulo + '.' + acao;
             return j.API.call(modulo, acao, payload, opcoes);
           };
         }
@@ -1402,6 +1410,24 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
   };
 
   P.temPorta = function () { return !!P.portaDoSistema(); };
+
+  /* [NFPORTA3] o roteador do sistema, sem passar pelo NF_CORE. E a
+     segunda das duas portas que o ALMOX PRO ja tem para nota. */
+  P.roteadorDireto = function (modulo, acao, payload, opcoes) {
+    var janelas = [];
+    try { if (raiz.parent && raiz.parent !== raiz) janelas.push(raiz.parent); } catch (e) {}
+    try { if (raiz.opener) janelas.push(raiz.opener); } catch (e) {}
+    for (var i = 0; i < janelas.length; i++) {
+      try {
+        var j = janelas[i];
+        if (j && j.API && typeof j.API.call === 'function') {
+          return j.API.call(modulo, acao, payload || {}, opcoes || {});
+        }
+      } catch (e) {}
+    }
+    return Promise.resolve({ ok: false, codigo: 'SEM_PORTA',
+      mensagem: 'Sem a porta do sistema para a segunda tentativa.' });
+  };
 
   /* dentro do /exec, o caminho é o do próprio Apps Script */
   P.ambiente = function () {
@@ -1436,14 +1462,16 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
     var comecou = Date.now();
     var porta = P.portaDoSistema();
 
-    function fim(r) {
+    function fim(r, recado) {
+      var daChamada = (recado && recado.porta) || '';
       P.ultima = { acao: nomeDaAcao, ms: Date.now() - comecou, ok: !!(r && r.ok),
-                   codigo: (r && r.codigo) || '', porta: P.ultimaPorta || '',
+                   codigo: (r && r.codigo) || '', porta: daChamada,
                    par: par[0] + '.' + par[1] };
       if (!r || !r.ok) P.falhas++;
       if (r && !r.ok) {
         r.__detalhe = { acao: par[0] + '.' + par[1], ms: P.ultima.ms,
-                        porta: P.ultimaPorta || '', codigo: r.codigo || '' };
+                        porta: daChamada, codigo: r.codigo || '',
+                        primeira: r.__primeiraFalhou || null };
       }
       return r;
     }
@@ -1451,13 +1479,46 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
     if (porta) {
       var op = opcoes || {};
       if (!op.limite && P.PRAZO[nomeDaAcao]) op = { limite: P.PRAZO[nomeDaAcao] };
-      return Promise.resolve()
-        .then(function () { return porta(par[0], par[1], payload || {}, op); })
-        .then(function (r) { return fim(P.entender(r)); })
-        .catch(function (e) {
-          return fim({ ok: false, codigo: 'ERRO_SISTEMA',
-            mensagem: 'A porta do sistema recusou: ' + ((e && e.message) || e) });
-        });
+      var recado = { porta: '' };
+
+      function tentar(viaRoteador) {
+        return Promise.resolve()
+          .then(function () {
+            if (viaRoteador) {
+              /* [NFPORTA3] a SEGUNDA porta. O sistema tem dois caminhos
+                 para nota: NF_CORE (que usa a porta propria do Apps
+                 Script) e o roteador. Quando o primeiro volta vazio, o
+                 segundo pode responder — e o contrario tambem. Em vez
+                 de desistir na primeira, eu tento a outra e digo qual
+                 das duas respondeu. Nenhuma porta foi inventada: sao as
+                 duas que o proprio sistema ja usa. */
+              recado.porta = 'API.call ' + par[0] + '.' + par[1] + ' (2ª tentativa)';
+              return P.roteadorDireto(par[0], par[1], payload || {}, op);
+            }
+            return porta(par[0], par[1], payload || {}, op, recado);
+          })
+          .then(function (r) { return P.entender(r); })
+          .catch(function (e) {
+            return { ok: false, codigo: 'ERRO_SISTEMA',
+              mensagem: 'A porta do sistema recusou: ' + ((e && e.message) || e) };
+          });
+      }
+
+      return tentar(false).then(function (r) {
+        var vaziaOuRecusada = !r.ok;
+        if (vaziaOuRecusada && par[0] === 'nf' && P.roteadorDireto) {
+          var primeira = { codigo: r.codigo, mensagem: r.mensagem, porta: recado.porta };
+          return tentar(true).then(function (r2) {
+            if (r2.ok) {
+              r2.__primeiraFalhou = primeira;
+              return fim(r2, recado);
+            }
+            r2.__primeiraFalhou = primeira;
+            return fim(r2, recado);
+          });
+        }
+        return fim(r, recado);
+      });
     }
 
     if (P.ambiente() === 'APPS_SCRIPT') {
@@ -1550,7 +1611,7 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
      servindo a página velha. Sem um número visível, nenhum dos
      dois consegue saber. Agora sabe, em um segundo, olhando o
      rodapé. */
-  var CARIMBO = 'módulo NF 10 · 13/11';
+  var CARIMBO = 'módulo NF 11 · 13/11';
 
   var A = {
     nome: 'NFAPP', versao: CARIMBO,
@@ -1827,6 +1888,12 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
               (A.erro.__detalhe.codigo ? ' · código <code>' + esc(A.erro.__detalhe.codigo) + '</code>' : '') +
               ' · ' + esc(A.erro.__detalhe.ms) + ' ms' +
               (A.erro.__detalhe.porta ? ' · por <code>' + esc(A.erro.__detalhe.porta) + '</code>' : '') +
+              (A.erro.__detalhe.primeira
+                ? '<br>Primeira tentativa, por <code>' +
+                  esc(A.erro.__detalhe.primeira.porta || '—') + '</code>: código <code>' +
+                  esc(A.erro.__detalhe.primeira.codigo || '—') + '</code>. ' +
+                  'As duas portas que o sistema tem para nota foram tentadas.'
+                : '') +
               '</div>'
             : '') +
           '</div>' +
