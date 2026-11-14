@@ -1504,16 +1504,30 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
           });
       }
 
+      /* [NFPORTA4] 14/11 — quando vale a pena tentar a segunda porta.
+         Antes eu tentava sempre que a primeira falhava. Isso atropelava
+         RECUSA COM SIGNIFICADO: o módulo respondia ITENS_SEM_LIGACAO,
+         explicando o problema, e o roteador devolvia MODULO_DESCONHECIDO
+         por cima — a tela mostrava a mensagem genérica e a informação
+         útil se perdia. A segunda porta só serve para falha de
+         TRANSPORTE: a porta não respondeu. Se o módulo respondeu e
+         recusou, a resposta dele é a verdade e eu a mantenho. */
+      var soTransporte = { RESPOSTA_VAZIA: 1, VAZIO: 1, ERRO_SISTEMA: 1,
+                           TIMEOUT: 1, SEM_RESPOSTA: 1, RESPOSTA_ESTRANHA: 1,
+                           MODULO_DESCONHECIDO: 1, ACAO_DESCONHECIDA: 1 };
       return tentar(false).then(function (r) {
-        var vaziaOuRecusada = !r.ok;
-        if (vaziaOuRecusada && par[0] === 'nf' && P.roteadorDireto) {
+        var valeTentarDeNovo = !r.ok && soTransporte[r.codigo || 'VAZIO'] === 1;
+        if (valeTentarDeNovo && par[0] === 'nf' && P.roteadorDireto) {
           var primeira = { codigo: r.codigo, mensagem: r.mensagem, porta: recado.porta };
           return tentar(true).then(function (r2) {
-            if (r2.ok) {
-              r2.__primeiraFalhou = primeira;
-              return fim(r2, recado);
-            }
             r2.__primeiraFalhou = primeira;
+            /* as duas falharam: fico com a mensagem MAIS ESPECÍFICA,
+               não com a última que chegou */
+            if (!r2.ok && soTransporte[r2.codigo || 'VAZIO'] === 1 &&
+                r.codigo && soTransporte[r.codigo] !== 1) {
+              r.__segundaFalhou = { codigo: r2.codigo, mensagem: r2.mensagem };
+              return fim(r, recado);
+            }
             return fim(r2, recado);
           });
         }
@@ -1555,8 +1569,12 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
         mensagem: 'O Core respondeu algo que não é JSON.' }; }
     }
     if (r.ok === false) {
+      /* 14/11: a recusa também carrega prova (o cabeçalho real da aba,
+         por exemplo). Eu jogava fora. Agora vai em bruto, igual ao
+         caminho de sucesso. */
       return { ok: false, codigo: r.codigo || 'RECUSADO',
-               mensagem: r.mensagem || 'O Core recusou, sem dizer o motivo.' };
+               mensagem: r.mensagem || 'O Core recusou, sem dizer o motivo.',
+               bruto: r };
     }
     var dados = r.dados;
     if (dados === undefined) dados = r.lista !== undefined ? r.lista : r;
@@ -1611,7 +1629,7 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
      servindo a página velha. Sem um número visível, nenhum dos
      dois consegue saber. Agora sabe, em um segundo, olhando o
      rodapé. */
-  var CARIMBO = 'módulo NF 12 · 13/11';
+  var CARIMBO = 'módulo NF 13 · 14/11';
 
   var A = {
     nome: 'NFAPP', versao: CARIMBO,
@@ -2188,9 +2206,14 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
          isso a tela diz "não trouxe itens" tanto quando a nota não
          tem itens quanto quando a ligação está errada — e essas duas
          coisas pedem providências opostas. */
+      /* P.entender devolve { ok, dados, bruto }: os campos extras que
+         o módulo manda ficam em BRUTO, não na raiz. Eu lia da raiz e
+         por isso a prova nunca aparecia. */
+      var b = r.bruto || r;
       A.provaItens = (r.ok && !A.itens.length) ? {
-        aba: r.aba, ligueiPor: r.ligueiPor, linhasLidas: r.linhasLidas,
-        valores: r.valoresNaColunaDeLigacao, procurei: r.procurei
+        aba: b.aba, ligueiPor: b.ligueiPor, linhasLidas: b.linhasLidas,
+        valores: b.valoresNaColunaDeLigacao, procurei: b.procurei,
+        colunasDaAba: b.colunasDaAba
       } : null;
       if (!r.ok && r.codigo) A.recado = '[' + r.codigo + '] ' + r.mensagem;
       A.pintarPainel();
