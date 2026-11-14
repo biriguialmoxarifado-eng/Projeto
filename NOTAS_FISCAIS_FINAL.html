@@ -1362,7 +1362,38 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
         var j = janelas[i];
         if (j && j.API && typeof j.API.call === 'function') {
           P.origemDaPorta = i === 0 ? 'o sistema, pelo quadro' : 'o sistema, pela aba de origem';
-          return function (modulo, acao, payload) { return j.API.call(modulo, acao, payload); };
+          /* [NFPORTA2] 13/11 — DUAS CORRECOES NESTA PORTA.
+
+             1) Ela entregava so tres argumentos ao API.call, e o quarto
+                e o das OPCOES. Sem ele nenhuma chamada deste modulo
+                consegue pedir mais prazo: todas ficam nos 15 segundos
+                de leitura do sistema, e as listas grandes (produtos,
+                reservas, notas) estouram. No rodape dele, Compras e
+                Estoque ficaram verdes e Produtos e Reservas cinzas —
+                as duas maiores. Agora o quarto argumento passa.
+
+             2) Para o modulo "nf" o sistema NAO fala pelo roteador: ele
+                fala por NF_CORE, que tenta primeiro a porta propria do
+                Apps Script (AP_NF_direto) e so depois cai no roteador.
+                Este modulo chamava o roteador direto. Se o roteador nao
+                conhece "nf", a tela antiga funciona e esta nao — que e
+                exatamente o que ele viu. Agora, quando o sistema tem
+                NF_CORE, as acoes de nota vao por ela. Nenhuma porta
+                nova foi inventada: e a mesma que o resto do sistema
+                ja usa. */
+          return function (modulo, acao, payload, opcoes) {
+            if (modulo === 'nf') {
+              try {
+                var nc = j.NF_CORE;
+                if (nc && typeof nc[acao] === 'function') {
+                  P.ultimaPorta = 'NF_CORE.' + acao;
+                  return nc[acao](payload || {});
+                }
+              } catch (e) { /* sem NF_CORE: segue pelo roteador */ }
+            }
+            P.ultimaPorta = 'API.call ' + modulo + '.' + acao;
+            return j.API.call(modulo, acao, payload, opcoes);
+          };
         }
       } catch (e) { /* outra origem: o navegador barra, e está certo */ }
     }
@@ -1384,7 +1415,15 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
   /* ------------------------------------------------------------
      CHAMAR
      ------------------------------------------------------------ */
-  P.chamar = function (nomeDaAcao, payload) {
+  /* [NFPORTA2] quanto tempo cada leitura pode levar. As listas
+     grandes do Core passam de 15 segundos com o historico cheio, e
+     era por isso que elas voltavam como "nao respondeu". O teto de
+     300s e do proprio sistema; aqui fico bem abaixo. */
+  P.PRAZO = { listar: 60000, produtos: 60000, reservas: 60000,
+              estoque: 45000, compras: 45000, itens: 45000,
+              pendentes: 45000, divergencias: 45000 };
+
+  P.chamar = function (nomeDaAcao, payload, opcoes) {
     var par = P.ACOES[nomeDaAcao];
     if (!par) {
       /* a regra dele: "não invente endpoints, nomes de ações,
@@ -1398,14 +1437,22 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
     var porta = P.portaDoSistema();
 
     function fim(r) {
-      P.ultima = { acao: nomeDaAcao, ms: Date.now() - comecou, ok: !!(r && r.ok) };
+      P.ultima = { acao: nomeDaAcao, ms: Date.now() - comecou, ok: !!(r && r.ok),
+                   codigo: (r && r.codigo) || '', porta: P.ultimaPorta || '',
+                   par: par[0] + '.' + par[1] };
       if (!r || !r.ok) P.falhas++;
+      if (r && !r.ok) {
+        r.__detalhe = { acao: par[0] + '.' + par[1], ms: P.ultima.ms,
+                        porta: P.ultimaPorta || '', codigo: r.codigo || '' };
+      }
       return r;
     }
 
     if (porta) {
+      var op = opcoes || {};
+      if (!op.limite && P.PRAZO[nomeDaAcao]) op = { limite: P.PRAZO[nomeDaAcao] };
       return Promise.resolve()
-        .then(function () { return porta(par[0], par[1], payload || {}); })
+        .then(function () { return porta(par[0], par[1], payload || {}, op); })
         .then(function (r) { return fim(P.entender(r)); })
         .catch(function (e) {
           return fim({ ok: false, codigo: 'ERRO_SISTEMA',
@@ -1503,7 +1550,7 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
      servindo a página velha. Sem um número visível, nenhum dos
      dois consegue saber. Agora sabe, em um segundo, olhando o
      rodapé. */
-  var CARIMBO = 'módulo NF 9 · 09/11 11:20';
+  var CARIMBO = 'módulo NF 10 · 13/11';
 
   var A = {
     nome: 'NFAPP', versao: CARIMBO,
@@ -1770,7 +1817,19 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
       alvo.innerHTML = A.htmlImporta() +
         '<div class="cartao"><div class="painel-corpo">' +
         '<div class="aviso erro"><b>Não consegui trazer as notas.</b><br>' +
-          esc(A.erro.mensagem) + '</div>' +
+          esc(A.erro.mensagem) +
+          /* [NFPORTA2] "O Core nao respondeu" sozinho nao diz nada a
+             ninguem. Qual acao, por qual porta, em quanto tempo e com
+             que codigo — e isso que permite achar a causa sem chutar. */
+          (A.erro.__detalhe
+            ? '<div class="peq" style="margin-top:6px;opacity:.85">' +
+              'Ação: <code>' + esc(A.erro.__detalhe.acao) + '</code>' +
+              (A.erro.__detalhe.codigo ? ' · código <code>' + esc(A.erro.__detalhe.codigo) + '</code>' : '') +
+              ' · ' + esc(A.erro.__detalhe.ms) + ' ms' +
+              (A.erro.__detalhe.porta ? ' · por <code>' + esc(A.erro.__detalhe.porta) + '</code>' : '') +
+              '</div>'
+            : '') +
+          '</div>' +
         '<div class="peq mudo" style="line-height:1.5">' +
           (est.porSistema
             ? 'O módulo falou pela porta do ALMOX PRO (' + esc(est.origemDaPorta) +
@@ -2591,16 +2650,37 @@ body.com-painel #nfPdf{right:620px;box-shadow:-10px 0 28px rgba(10,42,84,.10)}
 
       '<div class="rodape-painel">' +
         '<button class="btn" id="nfCancelarPainel">Fechar</button>' +
-        '<button class="btn primario" disabled title="Gravação é a etapa 2">' +
-          '✓ Lançar esta nota</button>' +
+        /* [NFLANCAR] 13/11 — este botao estava DESABILITADO, com o
+           recado de que "a auditoria nao encontrou acao de escrita no
+           modulo nf". A conclusao estava errada: o ALMOX PRO grava
+           nota sim, por NF_CORE.salvar, e tem a tela nf-importar que
+           faz o lancamento inteiro. Era por isso que ele lia o XML e
+           nao conseguia adicionar nada.
+
+           Mesmo assim eu NAO gravo daqui. Lancar da entrada no
+           estoque, confere item a item e pede cracha; gravar so a
+           nota por fora criaria meia operacao, e este sistema ja teve
+           nota dobrada. Entao o botao leva para a tela que faz o
+           caminho completo. */
+        '<button class="btn primario" id="nfLancarImportada" ' +
+          'title="Abre a tela de lançamento do ALMOX PRO, que dá entrada no ' +
+          'estoque e confere item a item">⤓ Lançar no ALMOX PRO</button>' +
       '</div>' +
       '<div class="painel-corpo peq mudo" style="padding-top:0;line-height:1.5">' +
-        'Lançar grava no Core, e a auditoria de hoje não encontrou ação de escrita ' +
-        'no módulo <span class="mono">nf</span>. Pela seção 8, a lacuna é apresentada, ' +
-        'não simulada.</div>';
+        'O lançamento acontece na tela do ALMOX PRO, que dá entrada no estoque, ' +
+        'confere item a item e registra quem lançou. Este módulo lê o arquivo e ' +
+        'mostra o que veio; quem grava é o sistema.</div>';
 
     ligarFechar();
     var c = $('nfCancelarPainel'); if (c) c.addEventListener('click', A.fechar);
+
+    /* [NFLANCAR] leva a nota lida para a tela que sabe lancar */
+    var bl = $('nfLancarImportada');
+    if (bl) bl.addEventListener('click', function () {
+      var r = raiz.NFAUTO.irPara('nf-importar');
+      if (!r.ok) { A.recadoDeJanela(r.motivo, 'lançar esta nota'); return; }
+      A.fechar();
+    });
   };
 
   /* ------------------------------------------------------------ */
