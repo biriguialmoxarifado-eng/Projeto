@@ -76,6 +76,22 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   padding:10px 12px;font-size:12.5px;line-height:1.5;margin-bottom:12px}
 .erro{border-color:#F2C3BF;background:#FDF1F0;color:#8A2B23}
 
+/* [FRENTE] 15/11 — estas variantes eram usadas na marcação e não
+   tinham regra nenhuma: todo aviso saía cor de âmbar, inclusive o
+   que dizia "deu certo". Agora cada um tem a sua cor. */
+.aviso.azul{border-color:#BBD3F2;background:#F1F6FD;color:#1C4E8F}
+.aviso.cinza{border-color:#D9DEE6;background:#F6F8FA;color:#4A5568}
+.aviso.verde{border-color:#B6DCC4;background:#F1FAF4;color:#1F6B41}
+.aviso.amarelo{border-color:#F0D8A8;background:#FEF8EC;color:#7A5B18}
+
+/* a lista de marcar rua, estante e nível */
+.opcao{display:flex;align-items:center;gap:8px;padding:7px 10px;margin:4px 0;
+  border:1px solid var(--linha,#E3E7EE);border-radius:9px;cursor:pointer;
+  font-size:13px;background:#fff}
+.opcao:hover{background:#F6F8FA}
+.opcao input{width:17px;height:17px;flex:0 0 auto;margin:0}
+.btn.pequeno{padding:3px 9px;font-size:11.5px;border-radius:7px}
+
 /* ============================================================
    [F1] FASE 1 · 14/11 · estabilização visual
    Nada aqui muda geometria, cor de ocupação ou endereçamento:
@@ -418,6 +434,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
       <button class="btn" id="v_recarregar">Atualizar</button>
       <button class="btn" id="v_construir">Construir estante</button>
       <button class="btn" id="v_rota" aria-pressed="false">Rota</button>
+      <button class="btn" id="v_frente" aria-pressed="false"
+              title="Montar frente de serviço para um colaborador">Frente de serviço</button>
       <button class="btn" id="v_inv" aria-pressed="false">Inventário</button>
       <button class="btn" id="v_rastreio" aria-pressed="false">Rastreio</button>
       <button class="btn" id="v_calor" aria-pressed="false" title="Mapa de calor">Calor</button>
@@ -1863,7 +1881,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   }
 
   raiz.LAYOUT3D = {
-    VERSAO: '6.6.1',
+    VERSAO: '6.7.0',
     MEDIDAS: MEDIDAS,
     CORES: CORES,
     organizar: organizar,
@@ -1965,7 +1983,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var A = {
     nome: 'API3D',
-    versao: '6.6.1',
+    versao: '6.7.0',
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
     chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
     origemDaChave: 'nenhuma (fase 1)',
@@ -2378,7 +2396,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var M = {
     nome: 'MOTOR3D',
-    versao: '6.6.1',
+    versao: '6.7.0',
     engine: null,
     cena: null,
     camera: null,
@@ -3537,7 +3555,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var C = {
     nome: 'CONSTRUTOR3D',
-    versao: '6.6.1',
+    versao: '6.7.0',
     aberto: false,
     projeto: null,
     /* o galpão real fica guardado enquanto o projeto está na tela,
@@ -4216,7 +4234,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   'use strict';
 
   var APP = {
-    versao: '6.6.1',
+    versao: '6.7.0',
     montagem: null,
     locais: [],
     carregando: false,
@@ -5457,6 +5475,417 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
     });
   };
 
+  /* ============================================================
+     [FRENTE] 15/11 · CENTRAL DE ATIVIDADES E ROTAS — módulo 01,
+     seção 3
+     ------------------------------------------------------------
+     Ele perguntou: "como que eu vou conseguir criar uma frente de
+     serviço para pessoa?". A resposta honesta era: não dá — o
+     motor de rotas existia no Core, mas não havia tela nenhuma
+     para usá-lo. Só por API, na mão.
+
+     Esta tela mora AQUI, no mapa, e não no sistema, por um motivo
+     prático: o que ele quer escolher é rua, estante e nível — e
+     isso ele já está vendo desenhado na frente dele. A lista de
+     endereços é a MESMA que o mapa carregou do Core; não há um
+     segundo cadastro de endereço em lugar nenhum.
+
+     O que ela faz, em ordem:
+       1. ele marca as ruas, as estantes e os níveis;
+       2. a tela mostra quantas posições isso dá, na hora;
+       3. ele escolhe o colaborador, do cadastro de verdade;
+       4. decide como dividir em rotas;
+       5. publica — e aí o Core cria a atividade e as rotas.
+
+     O que ela NÃO faz: inventar endereço, inventar colaborador,
+     e dizer "publicado" antes do Core confirmar cada gravação.
+     ============================================================ */
+
+  APP.frente = { ruas: {}, estantes: {}, niveis: {}, divisao: 'rua' };
+
+  /* a árvore sai dos endereços que o mapa já tem — não de um
+     cadastro paralelo */
+  APP.arvoreDeEnderecos = function () {
+    var locais = APP.locais || [];
+    var ruas = {};
+    for (var i = 0; i < locais.length; i++) {
+      var L = locais[i];
+      var rua = String(L.rua || '').trim();
+      var est = String(L.estante || '').trim();
+      var pra = String(L.prateleira || '').trim();
+      if (!rua) continue;
+      if (!ruas[rua]) ruas[rua] = { estantes: {}, quantas: 0 };
+      ruas[rua].quantas++;
+      if (!ruas[rua].estantes[est]) ruas[rua].estantes[est] = { niveis: {}, quantas: 0 };
+      ruas[rua].estantes[est].quantas++;
+      if (!ruas[rua].estantes[est].niveis[pra]) ruas[rua].estantes[est].niveis[pra] = 0;
+      ruas[rua].estantes[est].niveis[pra]++;
+    }
+    return ruas;
+  };
+
+  /* quais posições o que ele marcou cobre, agora */
+  APP.posicoesDaFrente = function () {
+    var f = APP.frente, locais = APP.locais || [], fora = [];
+    var temRua = false, temEst = false, temNiv = false, k;
+    for (k in f.ruas) if (f.ruas[k]) temRua = true;
+    for (k in f.estantes) if (f.estantes[k]) temEst = true;
+    for (k in f.niveis) if (f.niveis[k]) temNiv = true;
+
+    for (var i = 0; i < locais.length; i++) {
+      var L = locais[i];
+      var rua = String(L.rua || '').trim();
+      var est = String(L.estante || '').trim();
+      var pra = String(L.prateleira || '').trim();
+      var codigo = String(L.codigo || '').trim();
+      if (!codigo) continue;
+      if (temRua && !f.ruas[rua]) continue;
+      if (temEst && !f.estantes[rua + '|' + est]) continue;
+      if (temNiv && !f.niveis[pra]) continue;
+      if (!temRua && !temEst && !temNiv) continue;   /* nada marcado = nada */
+      fora.push({ codigo: codigo, rua: rua, estante: est, prateleira: pra });
+    }
+    return fora;
+  };
+
+  APP.pintarFrente = function () {
+    APP.titulo('Frente de serviço');
+    var ruas = APP.arvoreDeEnderecos();
+    var nomesDeRua = [];
+    for (var r in ruas) if (ruas.hasOwnProperty(r)) nomesDeRua.push(r);
+    nomesDeRua.sort();
+
+    if (!nomesDeRua.length) {
+      $('corpoPainel').innerHTML =
+        '<div class="aviso erro"><b>Não há endereço carregado.</b><br>' +
+        'A frente de serviço sai dos endereços que o mapa leu do Core. ' +
+        'Sem eles eu não tenho o que distribuir — e não vou inventar rua ' +
+        'nenhuma.</div>' +
+        '<div class="sep"></div><button class="btn" id="frSair">Voltar ao galpão</button>';
+      APP.ligarSairFrente();
+      return;
+    }
+
+    /* níveis existentes, juntando todas as ruas */
+    var niveis = {}, nv;
+    for (var ra in ruas) {
+      for (var e in ruas[ra].estantes) {
+        for (nv in ruas[ra].estantes[e].niveis) niveis[nv] = 1;
+      }
+    }
+    var nomesDeNivel = [];
+    for (nv in niveis) if (niveis.hasOwnProperty(nv)) nomesDeNivel.push(nv);
+    nomesDeNivel.sort();
+
+    var h = '<div class="small" style="margin-bottom:10px">' +
+      'Monte o serviço de uma pessoa marcando onde ela vai trabalhar. ' +
+      'Desmarcar é o jeito de tirar: se a madeira fica na estante 03 e ela ' +
+      'não entra nesta frente, deixe a 03 desmarcada.</div>';
+
+    /* ---- ruas ---- */
+    h += '<div class="linha"><span>1 · Ruas</span>' +
+      '<b><button class="btn pequeno" id="frTodasRuas">marcar todas</button></b></div>' +
+      '<div id="frRuas" style="margin:6px 0 12px">';
+    for (var i = 0; i < nomesDeRua.length; i++) {
+      var R = nomesDeRua[i];
+      h += '<label class="opcao"><input type="checkbox" data-rua="' + esc(R) + '"' +
+        (APP.frente.ruas[R] ? ' checked' : '') + '> Rua ' + esc(R) +
+        ' <span class="small">(' + ruas[R].quantas + ' posições)</span></label>';
+    }
+    h += '</div>';
+
+    /* ---- estantes das ruas marcadas ---- */
+    h += '<div class="linha"><span>2 · Estantes</span><b id="frQtdEst">—</b></div>' +
+      '<div id="frEstantes" style="margin:6px 0 12px"></div>';
+
+    /* ---- níveis ---- */
+    h += '<div class="linha"><span>3 · Níveis</span>' +
+      '<b><button class="btn pequeno" id="frTodosNiveis">marcar todos</button></b></div>' +
+      '<div id="frNiveis" style="margin:6px 0 12px">';
+    for (var n = 0; n < nomesDeNivel.length; n++) {
+      var N = nomesDeNivel[n];
+      h += '<label class="opcao"><input type="checkbox" data-nivel="' + esc(N) + '"' +
+        (APP.frente.niveis[N] ? ' checked' : '') + '> Nível ' + esc(N) + '</label>';
+    }
+    h += '</div>';
+
+    h += '<div class="aviso azul" id="frConta">Marque pelo menos uma rua.</div>';
+
+    /* ---- quem vai fazer ---- */
+    h += '<div class="sep"></div>' +
+      '<div class="linha"><span>4 · Quem vai fazer</span><b></b></div>' +
+      '<div id="frQuem"><div class="vazio">Lendo o cadastro de colaboradores…</div></div>';
+
+    /* ---- como dividir ---- */
+    h += '<div class="linha"><span>5 · Como dividir</span><b></b></div>' +
+      '<select id="frDivisao" class="campo">' +
+      '<option value="rua">uma rota por rua</option>' +
+      '<option value="estante">uma rota por estante</option>' +
+      '<option value="unica">tudo numa rota só</option>' +
+      '</select>';
+
+    h += '<div class="campo"><label for="frPrazo">Prazo</label>' +
+      '<input type="date" id="frPrazo"></div>' +
+      '<div class="campo"><label for="frPrioridade">Prioridade</label>' +
+      '<select id="frPrioridade">' +
+      '<option value="NORMAL">normal</option>' +
+      '<option value="ALTA">alta</option>' +
+      '<option value="URGENTE">urgente</option>' +
+      '<option value="BAIXA">baixa</option></select></div>' +
+      '<div class="campo"><label for="frInstrucoes">Instruções para quem vai executar</label>' +
+      '<input type="text" id="frInstrucoes" placeholder="opcional"></div>';
+
+    h += '<div class="sep"></div>' +
+      '<button class="btn primario" id="frPublicar">Publicar a frente de serviço</button>' +
+      '<div id="frRecado"></div>' +
+      '<div class="sep"></div><button class="btn" id="frSair">Voltar ao galpão</button>';
+
+    $('corpoPainel').innerHTML = h;
+
+    APP.ligarFrente(ruas, nomesDeRua, nomesDeNivel);
+    APP.ligarSairFrente();
+  };
+
+  APP.ligarSairFrente = function () {
+    var b = $('frSair');
+    if (b) b.addEventListener('click', function () {
+      APP.modoFrente = false;
+      var bt = $('v_frente');
+      if (bt) bt.setAttribute('aria-pressed', 'false');
+      APP.pintarResumo();
+    });
+  };
+
+  APP.ligarFrente = function (ruas, nomesDeRua, nomesDeNivel) {
+    function redesenharEstantes() {
+      var alvo = $('frEstantes');
+      if (!alvo) return;
+      var marcadas = [], r;
+      for (r in APP.frente.ruas) if (APP.frente.ruas[r]) marcadas.push(r);
+      marcadas.sort();
+      if (!marcadas.length) {
+        alvo.innerHTML = '<div class="small">Marque uma rua primeiro.</div>';
+        $('frQtdEst').textContent = '—';
+        return;
+      }
+      var html = '', quantas = 0;
+      for (var i = 0; i < marcadas.length; i++) {
+        var R = marcadas[i], ests = [];
+        for (var e in ruas[R].estantes) if (ruas[R].estantes.hasOwnProperty(e)) ests.push(e);
+        ests.sort();
+        html += '<div class="small" style="margin-top:6px">Rua ' + esc(R) + '</div>';
+        for (var j = 0; j < ests.length; j++) {
+          var chave = R + '|' + ests[j];
+          quantas++;
+          html += '<label class="opcao"><input type="checkbox" data-est="' + esc(chave) + '"' +
+            (APP.frente.estantes[chave] ? ' checked' : '') + '> Estante ' + esc(ests[j]) +
+            ' <span class="small">(' + ruas[R].estantes[ests[j]].quantas + ')</span></label>';
+        }
+      }
+      alvo.innerHTML = html;
+      $('frQtdEst').textContent = quantas + ' disponível(is)';
+      alvo.querySelectorAll('[data-est]').forEach(function (c) {
+        c.addEventListener('change', function () {
+          APP.frente.estantes[c.getAttribute('data-est')] = c.checked;
+          contar();
+        });
+      });
+    }
+
+    function contar() {
+      var lista = APP.posicoesDaFrente();
+      var el = $('frConta');
+      if (!el) return;
+      if (!lista.length) {
+        el.className = 'aviso azul';
+        el.innerHTML = 'Nada marcado ainda — nenhuma posição entra.';
+        return;
+      }
+      /* quantas rotas isso daria, do jeito escolhido */
+      var sel = $('frDivisao');
+      var modo = sel ? sel.value : 'rua';
+      var grupos = {};
+      for (var i = 0; i < lista.length; i++) {
+        var k = modo === 'rua' ? lista[i].rua
+              : modo === 'estante' ? (lista[i].rua + ' / ' + lista[i].estante)
+              : 'tudo';
+        grupos[k] = (grupos[k] || 0) + 1;
+      }
+      var nomes = [];
+      for (var g in grupos) if (grupos.hasOwnProperty(g)) nomes.push(g + ' (' + grupos[g] + ')');
+      el.className = 'aviso verde';
+      el.innerHTML = '<b>' + lista.length + ' posição(ões) selecionada(s)</b>' +
+        '<div class="small" style="margin-top:4px">viraria(m) ' + nomes.length +
+        ' rota(s): ' + esc(nomes.join(' · ')) + '</div>';
+    }
+
+    $('frRuas').querySelectorAll('[data-rua]').forEach(function (c) {
+      c.addEventListener('change', function () {
+        var R = c.getAttribute('data-rua');
+        APP.frente.ruas[R] = c.checked;
+        if (!c.checked) {
+          for (var k in APP.frente.estantes) {
+            if (k.indexOf(R + '|') === 0) APP.frente.estantes[k] = false;
+          }
+        }
+        redesenharEstantes();
+        contar();
+      });
+    });
+    $('frNiveis').querySelectorAll('[data-nivel]').forEach(function (c) {
+      c.addEventListener('change', function () {
+        APP.frente.niveis[c.getAttribute('data-nivel')] = c.checked;
+        contar();
+      });
+    });
+    var bt = $('frTodasRuas');
+    if (bt) bt.addEventListener('click', function () {
+      for (var i = 0; i < nomesDeRua.length; i++) APP.frente.ruas[nomesDeRua[i]] = true;
+      APP.pintarFrente();
+    });
+    var bn = $('frTodosNiveis');
+    if (bn) bn.addEventListener('click', function () {
+      for (var i = 0; i < nomesDeNivel.length; i++) APP.frente.niveis[nomesDeNivel[i]] = true;
+      APP.pintarFrente();
+    });
+    var sd = $('frDivisao');
+    if (sd) sd.addEventListener('change', function () {
+      APP.frente.divisao = sd.value; contar();
+    });
+
+    redesenharEstantes();
+    contar();
+
+    /* o colaborador vem do cadastro de verdade */
+    APP.carregarColaboradores().then(function (c) {
+      var alvo = $('frQuem');
+      if (!alvo) return;
+      if (!c.lista || !c.lista.length) {
+        alvo.innerHTML = '<div class="aviso amarelo"><b>Não consegui ler o cadastro ' +
+          'de colaboradores.</b><br>' +
+          esc((c.erro && c.erro.mensagem) || 'sem resposta') +
+          '<br>Não vou deixar digitar um nome solto aqui: a atividade precisa ' +
+          'apontar para a pessoa do cadastro, senão ela não aparece no celular ' +
+          'de ninguém.</div>';
+        return;
+      }
+      var opc = '<option value="">— escolha —</option>';
+      for (var i = 0; i < c.lista.length; i++) {
+        var u = c.lista[i];
+        opc += '<option value="' + esc(u.id) + '" data-nome="' + esc(u.nome) + '">' +
+          esc(u.nome) + (u.cargo ? ' — ' + esc(u.cargo) : '') + '</option>';
+      }
+      alvo.innerHTML = '<select id="frColaborador" class="campo">' + opc + '</select>';
+    });
+
+    var bp = $('frPublicar');
+    if (bp) bp.addEventListener('click', function () { APP.publicarFrente(bp); });
+  };
+
+  APP.publicarFrente = function (botao) {
+    var recado = $('frRecado');
+    var lista = APP.posicoesDaFrente();
+    if (!lista.length) {
+      recado.innerHTML = '<div class="aviso amarelo">Nada selecionado. ' +
+        'Marque pelo menos uma rua.</div>';
+      return;
+    }
+    var sel = $('frColaborador');
+    var id = sel ? sel.value : '';
+    var nome = sel && sel.selectedOptions[0]
+      ? sel.selectedOptions[0].getAttribute('data-nome') : '';
+    if (!id || !nome) {
+      recado.innerHTML = '<div class="aviso amarelo">Falta escolher quem vai fazer. ' +
+        'Sem dono a frente não aparece no celular de ninguém.</div>';
+      return;
+    }
+
+    var modo = ($('frDivisao') || {}).value || 'rua';
+    var prazo = ($('frPrazo') || {}).value || '';
+    var prioridade = ($('frPrioridade') || {}).value || 'NORMAL';
+    var instrucoes = ($('frInstrucoes') || {}).value || '';
+
+    var grupos = {}, ordem = [];
+    for (var i = 0; i < lista.length; i++) {
+      var k = modo === 'rua' ? ('Rua ' + lista[i].rua)
+            : modo === 'estante' ? ('Rua ' + lista[i].rua + ' · estante ' + lista[i].estante)
+            : 'Frente completa';
+      if (!grupos[k]) { grupos[k] = []; ordem.push(k); }
+      grupos[k].push(lista[i].codigo);
+    }
+
+    botao.disabled = true;
+    botao.textContent = 'Publicando…';
+    recado.innerHTML = '<div class="aviso cinza">Criando a atividade no Core. ' +
+      'Ainda <b>não</b> está publicada.</div>';
+
+    var todas = [];
+    for (var g = 0; g < ordem.length; g++) todas = todas.concat(grupos[ordem[g]]);
+
+    APP.invChamar('criarAtividade', {
+      tipo: modo === 'unica' ? 'RUA' : 'RUA',
+      posicoes: todas,
+      responsavel: nome, responsavelId: id,
+      prazo: prazo, prioridade: prioridade,
+      instrucoes: instrucoes
+    }).then(function (r) {
+      if (!r || !r.ok) {
+        botao.disabled = false;
+        botao.textContent = 'Publicar a frente de serviço';
+        recado.innerHTML = (r && r.__semModulo)
+          ? APP.avisoSemInventario()
+          : '<div class="aviso erro"><b>A atividade NÃO foi criada.</b><br>' +
+            esc((r && r.mensagem) || 'o Core não respondeu') + '</div>';
+        return;
+      }
+      var atividadeId = (r.dados && r.dados.id) || '';
+      recado.innerHTML = '<div class="aviso cinza">Atividade ' + esc(atividadeId) +
+        ' criada. Publicando as rotas…</div>';
+
+      var feitas = [], falhas = [], pos = 0;
+      function proxima() {
+        if (pos >= ordem.length) return terminar();
+        var nomeRota = ordem[pos];
+        var codigos = grupos[nomeRota];
+        pos++;
+        APP.invChamar('criarRota', {
+          atividadeId: atividadeId,
+          nome: nomeRota,
+          ordem: pos,
+          posicoes: codigos,
+          responsavel: nome, responsavelId: id,
+          prioridade: prioridade, prazo: prazo
+        }).then(function (rr) {
+          if (rr && rr.ok) feitas.push(nomeRota + ' (' + codigos.length + ')');
+          else falhas.push(nomeRota + ': ' +
+            ((rr && rr.mensagem) || 'sem resposta'));
+          proxima();
+        });
+      }
+      function terminar() {
+        botao.disabled = false;
+        botao.textContent = 'Publicar a frente de serviço';
+        var ok = feitas.length && !falhas.length;
+        recado.innerHTML =
+          '<div class="aviso ' + (ok ? 'verde' : 'amarelo') + '">' +
+          '<b>' + (ok ? 'Frente publicada.' : 'Publicada em parte.') + '</b>' +
+          '<div class="small" style="margin-top:6px">Atividade <b>' +
+          esc(atividadeId) + '</b> para <b>' + esc(nome) + '</b>.<br>' +
+          'Rotas criadas: ' + (feitas.length ? esc(feitas.join(' · ')) : 'nenhuma') +
+          (falhas.length
+            ? '<br><b>Falharam:</b> ' + esc(falhas.join(' · '))
+            : '') +
+          '</div>' +
+          (ok ? '<div class="small" style="margin-top:8px">' +
+            'No celular, ' + esc(nome) + ' abre o <b>ALMOXA CAMPO</b> e toca em ' +
+            '<b>Minhas atividades</b> na tela inicial. As rotas aparecem lá ' +
+            'sozinhas — ele não precisa pedir nada a ninguém.</div>' : '') +
+          '</div>';
+      }
+      proxima();
+    });
+  };
+
   APP.pintarInventario = function () {
     APP.modoInv = true;
     APP.titulo('Inventário móvel');
@@ -6345,7 +6774,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
      Salvar o arquivo não é publicar, e publicar não é o
      navegador ter recebido.
      ============================================================ */
-  APP.VERSAO = '6.6.1';
+  APP.VERSAO = '6.7.0';
   APP.COMPILADO = '2026-11-15';
   APP.CARIMBO = 'ALMOXA 3D ' + APP.VERSAO + ' · ' + APP.COMPILADO;
 
@@ -7081,6 +7510,19 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
     });
 
     /* [F4] inventário móvel */
+    var bf = $('v_frente');
+    if (bf) bf.addEventListener('click', function () {
+      if (APP.modoFrente) {
+        APP.modoFrente = false;
+        bf.setAttribute('aria-pressed', 'false');
+        APP.pintarResumo();
+      } else {
+        APP.modoFrente = true;
+        bf.setAttribute('aria-pressed', 'true');
+        APP.pintarFrente();
+      }
+    });
+
     var bi = $('v_inv');
     if (bi) bi.addEventListener('click', function () {
       if (APP.modoInv) {
