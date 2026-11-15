@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>ALMOX PRO 3D 6.3.0 · 15/11</title>
+<title>ALMOX PRO 3D 6.4.0 · 15/11</title>
 <style>
 /* ALMOXA 3D · almoxa3d.css · 08/11/2026
    Responsivo de verdade (seção 11): no celular o painel vira
@@ -1849,7 +1849,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   }
 
   raiz.LAYOUT3D = {
-    VERSAO: '6.3.0',
+    VERSAO: '6.4.0',
     MEDIDAS: MEDIDAS,
     CORES: CORES,
     organizar: organizar,
@@ -1951,7 +1951,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var A = {
     nome: 'API3D',
-    versao: '6.3.0',
+    versao: '6.4.0',
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
     chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
     origemDaChave: 'nenhuma (fase 1)',
@@ -2364,7 +2364,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var M = {
     nome: 'MOTOR3D',
-    versao: '6.3.0',
+    versao: '6.4.0',
     engine: null,
     cena: null,
     camera: null,
@@ -2633,6 +2633,10 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
                   dureza: 96 },
     saco:       { brilho: '#0C0C0C', ambiente: '#E8E4DA', textura: 'rafia',
                   dureza: 6 },
+    bobina:     { brilho: '#3A3A3A', ambiente: '#D8D2C4', textura: 'madeira',
+                  dureza: 20 },
+    barra:      { brilho: '#9AA3AE', ambiente: '#FFFFFF', textura: 'metal',
+                  dureza: 110 },
     placaRua:   { brilho: '#1A1A1A', ambiente: '#FFFFFF' }
   };
 
@@ -2696,6 +2700,21 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
         height: p.ly, tessellation: 16
       }, M.cena);
     },
+    bobina: function (b, p) {
+      /* bobina fica DEITADA na prateleira, como rolo de cabo */
+      var m = b.MeshBuilder.CreateCylinder('f_bobina', {
+        diameter: Math.min(p.ly, p.lz) * 0.95,
+        height: p.lx * 0.9, tessellation: 18
+      }, M.cena);
+      m.rotation.z = Math.PI / 2;
+      return m;
+    },
+    barra: function (b, p) {
+      /* tubos e barras: comprido e fino, atravessando a prateleira */
+      return b.MeshBuilder.CreateBox('f_barra', {
+        width: p.lx * 0.9, height: p.ly * 0.35, depth: p.lz * 0.9
+      }, M.cena);
+    },
     saco: function (b, p) {
       /* saco não tem quina: esfera achatada */
       var m = b.MeshBuilder.CreateSphere('f_saco', {
@@ -2719,6 +2738,10 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
         t.indexOf('balde') > -1) return 'tambor';
     if (t.indexOf('saco') > -1 || t.indexOf('saca') > -1 ||
         t.indexOf('big bag') > -1) return 'saco';
+    if (t.indexOf('bobina') > -1 || t.indexOf('rolo') > -1 ||
+        t.indexOf('carretel') > -1) return 'bobina';
+    if (t.indexOf('barra') > -1 || t.indexOf('tubo') > -1 ||
+        t.indexOf('perfil') > -1 || t.indexOf('vergalh') > -1) return 'barra';
     return 'caixa';
   }
 
@@ -2732,9 +2755,19 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
     var chave = 'placa:' + peca.rotulo;
     if (M.moldes[chave]) return M.moldes[chave];
 
-    var placa = b.MeshBuilder.CreateBox('placa_' + peca.rotulo, {
-      width: peca.lx, height: peca.ly, depth: peca.lz
+    /* [P] 15/11, 10h10 — A PLACA ESTAVA ESPELHADA.
+       Na tela do Ismael aparecia "A AUЯ". Eu fiz a placa como uma
+       CAIXA, e a caixa mostra a mesma textura nas seis faces: a de
+       trás aparece invertida, e era justamente a de trás que a
+       câmera pegava na vista padrão.
+
+       Agora a placa é um PLANO que gira junto com a câmera no eixo
+       vertical — como placa de rua de verdade, que se lê de
+       qualquer lado do corredor e nunca de cabeça para baixo. */
+    var placa = b.MeshBuilder.CreatePlane('placa_' + peca.rotulo, {
+      width: peca.lx, height: peca.ly
     }, M.cena);
+    placa.billboardMode = b.Mesh.BILLBOARDMODE_Y;
 
     var mat = new b.StandardMaterial('m_placa_' + peca.rotulo, M.cena);
     mat.diffuseColor = cor3('#1E3A5F');
@@ -2804,6 +2837,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
       inst.position = new b.Vector3(p.x, p.y, p.z);
       inst.isPickable = !!p.clicavel;
       inst.metadata = p;
+      /* [P] a placa da rua acompanha a câmera; o resto fica parado */
+      if (p.tipo === 'placaRua') inst.billboardMode = b.Mesh.BILLBOARDMODE_Y;
 
       if (M.sombra && p.tipo !== 'piso') {
         try { M.sombra.addShadowCaster(inst); } catch (e) { }
@@ -3044,7 +3079,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var C = {
     nome: 'CONSTRUTOR3D',
-    versao: '6.3.0',
+    versao: '6.4.0',
     aberto: false,
     projeto: null,
     /* o galpão real fica guardado enquanto o projeto está na tela,
@@ -3723,7 +3758,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   'use strict';
 
   var APP = {
-    versao: '6.3.0',
+    versao: '6.4.0',
     montagem: null,
     locais: [],
     carregando: false,
@@ -3798,6 +3833,164 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
     return '<div class="cartao"><b>' + n + '</b><span>' + rot + '</span></div>';
   }
 
+  /* ============================================================
+     [TIPO] 15/11 · TIPO DE ARMAZENAMENTO · seção 2.2
+     ------------------------------------------------------------
+     O Ismael procurou onde escolher se a posição guarda caixa,
+     pallet, tambor — e não achou, porque não existia. A forma
+     vinha do campo "objeto" do cadastro, e nenhuma tela escrevia
+     nesse campo.
+
+     O QUE EU DESCOBRI ANTES DE PROGRAMAR: o locais.salvar do Core
+     dele aceita hoje { rua, estante, prateleira, posicao,
+     capacidade }. NÃO existe campo de tipo de armazenamento. Então
+     eu mando o campo junto, RELEIO, e digo o que aconteceu de
+     verdade — se o Core guardou ou se ignorou. Prometer que salvou
+     sem conferir seria o pior tipo de botão.
+     ============================================================ */
+  APP.TIPOS_ARMAZENAMENTO = [
+    ['', '— não informado —'],
+    ['caixa plástica', 'caixa plástica'],
+    ['caixa organizadora', 'caixa organizadora'],
+    ['caixa de papelão', 'caixa de papelão'],
+    ['caixa metálica', 'caixa metálica'],
+    ['pallet de madeira', 'pallet de madeira'],
+    ['pallet plástico', 'pallet plástico'],
+    ['saco', 'sacaria / big bag'],
+    ['tambor', 'tambor / bombona'],
+    ['bobina', 'bobina / rolo'],
+    ['barra', 'tubos e barras'],
+    ['ferramenta', 'ferramenta'],
+    ['equipamento', 'equipamento'],
+    ['material de construção', 'material de construção']
+  ];
+
+  APP.tipoDaPosicao = function (p) {
+    var d = (p && p.dado) || {};
+    return String(d.objeto || d.embalagem || d.tipoObjeto || '');
+  };
+
+  APP.htmlDoTipo = function (p) {
+    var atual = APP.tipoDaPosicao(p);
+    var opcoes = APP.TIPOS_ARMAZENAMENTO.map(function (t) {
+      return '<option value="' + esc(t[0]) + '"' +
+        (atual === t[0] ? ' selected' : '') + '>' + esc(t[1]) + '</option>';
+    }).join('');
+    return '<div class="sep"></div>' +
+      '<div class="campo"><label for="pTipo">Tipo de armazenamento</label>' +
+      '<select id="pTipo">' + opcoes + '</select></div>' +
+      '<div class="small" style="margin:-4px 0 8px;color:var(--texto-3)">' +
+      'Muda a forma desenhada no mapa: caixa, pallet, tambor, saco, ' +
+      'bobina ou barra.</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+        '<button class="btn" id="pTipoVer">Ver no mapa</button>' +
+        '<button class="btn" id="pTipoGravar">Gravar no cadastro</button>' +
+      '</div><div id="pTipoRecado"></div>';
+  };
+
+  APP.ligarTipo = function (p) {
+    var sel = $('pTipo');
+    if (!sel) return;
+
+    var ver = $('pTipoVer');
+    if (ver) ver.addEventListener('click', function () {
+      /* só o desenho, aqui na tela: nada foi gravado */
+      var alvo = (APP.locais || []).filter(function (l) {
+        return String(l.codigo) === String(p.codigo);
+      })[0];
+      if (alvo) alvo.objeto = sel.value;
+      if (p.dado) p.dado.objeto = sel.value;
+
+      /* 15/11 — APP.desenhar() repinta o painel inteiro e levava o
+         recado junto. Redesenho só a CENA e repinto a POSIÇÃO. */
+      APP.montagem = raiz.LAYOUT3D.montar(APP.locais || []);
+      try { raiz.MOTOR3D.desenhar(APP.montagem); } catch (e) {}
+      var nova = APP.montagem.indice[p.codigo];
+      if (nova) APP.pintarPosicao(nova);
+
+      var r = $('pTipoRecado');
+      if (r) {
+        r.innerHTML = '<div class="aviso" style="margin-top:8px">' +
+          '<b>Só no desenho.</b> A forma mudou no mapa desta tela. ' +
+          'Nada foi gravado no cadastro — para isso, use Gravar.</div>';
+      }
+      try { raiz.MOTOR3D.selecionarPorCodigo(p.codigo); } catch (e) {}
+    });
+
+    var gravar = $('pTipoGravar');
+    if (gravar) gravar.addEventListener('click', function () {
+      var recado = $('pTipoRecado');
+      if (!raiz.API3D || !raiz.API3D.pronto()) {
+        if (recado) recado.innerHTML = '<div class="aviso erro" style="margin-top:8px">' +
+          'O mapa não está ligado ao Core. Não dá para gravar.</div>';
+        return;
+      }
+      gravar.disabled = true; gravar.textContent = 'Gravando…';
+      var escolhido = sel.value;
+
+      raiz.API3D.chamar('locais', 'salvar', {
+        rua: p.rua, estante: p.estante,
+        prateleira: p.prateleira, posicao: p.posicao,
+        capacidade: p.capacidade,
+        objeto: escolhido        /* campo que o Core pode ainda não ter */
+      }).then(function (r) {
+        if (!r || !r.ok) {
+          if (recado) recado.innerHTML = '<div class="aviso erro" style="margin-top:8px">' +
+            '<b>O Core recusou.</b><br>' + esc((r && r.mensagem) || 'sem resposta') +
+            ((r && r.codigo) ? '<div class="small">código: ' + esc(r.codigo) +
+              '</div>' : '') + '</div>';
+          gravar.disabled = false; gravar.textContent = 'Gravar no cadastro';
+          return;
+        }
+        /* RELER: o Core pode ter aceitado a chamada e ignorado o campo */
+        return raiz.API3D.chamar('locais', 'listar', {}).then(function (r2) {
+          gravar.disabled = false; gravar.textContent = 'Gravar no cadastro';
+          if (!r2 || !r2.ok) {
+            if (recado) recado.innerHTML = '<div class="aviso" style="margin-top:8px">' +
+              '<b>Gravei, mas não consegui reler para conferir.</b><br>' +
+              esc((r2 && r2.mensagem) || 'sem resposta') +
+              '<div class="small" style="margin-top:6px">NÃO considere ' +
+              'guardado até conferir.</div></div>';
+            return;
+          }
+          var volta = (r2.dados || []).filter(function (l) {
+            return String(l.codigo) === String(p.codigo);
+          })[0];
+          var guardou = volta && String(volta.objeto || volta.embalagem ||
+                                        volta.tipoObjeto || '') === escolhido;
+          if (guardou) {
+            /* 15/11 — aqui eu chamava APP.desenhar(), que repinta o
+               PAINEL inteiro: a mensagem de sucesso ia para um
+               elemento já destruído e o Ismael nunca a veria, e a
+               tela pulava para "O galpão" sem explicar nada.
+               Agora redesenho só a CENA e repinto a POSIÇÃO. */
+            APP.locais = r2.dados;
+            APP.montagem = raiz.LAYOUT3D.montar(APP.locais);
+            try { raiz.MOTOR3D.desenhar(APP.montagem); } catch (e) {}
+            var nova = APP.montagem.indice[p.codigo];
+            if (nova) APP.pintarPosicao(nova);
+            var frescor = $('pTipoRecado');
+            if (frescor) frescor.innerHTML = '<div class="aviso" style="margin-top:8px;' +
+              'border-color:#BFE3CC;background:#F0FAF4;color:#1E5F3A">' +
+              '<b>Guardado no cadastro e conferido na releitura.</b></div>';
+            try { raiz.MOTOR3D.selecionarPorCodigo(p.codigo); } catch (e) {}
+            return;
+          }
+          if (recado) recado.innerHTML = '<div class="aviso erro" style="margin-top:8px">' +
+            '<b>O Core aceitou a gravação, mas NÃO guardou o tipo.</b><br>' +
+            'Reli a posição ' + esc(p.codigo) + ' e o campo voltou vazio. ' +
+            'O módulo <b>locais</b> do seu Core grava hoje rua, estante, ' +
+            'prateleira, posição e capacidade — não tem campo de tipo de ' +
+            'armazenamento.' +
+            '<div class="small" style="margin-top:6px">Enquanto esse campo ' +
+            'não existir no Core, o tipo vale só nesta tela, pelo botão ' +
+            '“Ver no mapa”. Não vou dizer que guardei o que não guardou.</div>' +
+            '</div>';
+        });
+      });
+    });
+  };
+
   APP.pintarPosicao = function (p) {
     if (!p) { APP.pintarResumo(); return; }
     var rot = ROTULO[p.situacao] || ROTULO.VAZIA;
@@ -3856,6 +4049,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
         'O número acima é do cadastro, não uma contagem física.</div>';
     }
 
+    html += APP.htmlDoTipo(p);
+
     /* [F3] de dentro da posição, o gestor põe o endereço na rota */
     html += '<div class="sep"></div>' +
       '<button class="btn" id="pRota" style="width:100%">' +
@@ -3865,6 +4060,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
     $('corpoPainel').innerHTML = html;
     APP.titulo('Posição selecionada');
+
+    APP.ligarTipo(p);
 
     var bR = $('pRota');
     if (bR) bR.addEventListener('click', function () {
@@ -4053,7 +4250,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
      ============================================================ */
 
   APP.rota = { codigos: [], estados: {}, ocorrencias: {},
-               tipo: 'separacao', responsavel: '' };
+               tipo: 'separacao', responsavel: '',
+               responsavelId: '', responsavelMatricula: '' };
 
   APP.TIPOS_ROTA = [
     ['separacao',   'Separação de materiais'],
@@ -4063,6 +4261,93 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
     ['auditoria',   'Auditoria'],
     ['inspecao',    'Inspeção da ferramentaria']
   ];
+
+  /* ============================================================
+     [COLAB] 15/11 · O RESPONSÁVEL VEM DO CADASTRO
+     ------------------------------------------------------------
+     "Não utilizar campo de texto livre como identificação oficial
+     do responsável. Integrar com o cadastro de usuários e
+     funcionários já existente. Não duplicar cadastros."
+
+     O módulo "usuarios" já existe no Core do Ismael — o sistema o
+     chama em 63 lugares. Então eu LEIO dele. Não crio cadastro,
+     não peço foto de novo, não invento endpoint.
+
+     Se o Core recusar a leitura, a tela diz isso e cai para texto
+     livre AVISANDO que aquilo não é identificação oficial. Falha
+     de leitura não é prova de que não há cadastro.
+     ============================================================ */
+  APP.colaboradores = { lista: null, erro: null, lendo: false };
+
+  APP.carregarColaboradores = function () {
+    if (APP.colaboradores.lista || APP.colaboradores.lendo) {
+      return Promise.resolve(APP.colaboradores);
+    }
+    if (!raiz.API3D || !raiz.API3D.pronto()) {
+      APP.colaboradores.erro = { mensagem: 'o mapa não está ligado ao Core' };
+      return Promise.resolve(APP.colaboradores);
+    }
+    APP.colaboradores.lendo = true;
+    return raiz.API3D.chamar('usuarios', 'listar', {}).then(function (r) {
+      APP.colaboradores.lendo = false;
+      if (!r || !r.ok) {
+        APP.colaboradores.erro = r || { mensagem: 'sem resposta' };
+        APP.colaboradores.lista = null;
+        return APP.colaboradores;
+      }
+      var crus = r.dados || [];
+      /* os campos são os que o próprio ALMOX PRO lê desses registros:
+         nome, matricula, cargo, setor. Não invento nenhum. */
+      APP.colaboradores.lista = crus.map(function (u) {
+        return {
+          id: String(u.id || u.matricula || u.usuario || u.email || ''),
+          nome: String(u.nome || u.usuario || '').trim(),
+          matricula: String(u.matricula || '').trim(),
+          cargo: String(u.cargo || '').trim(),
+          setor: String(u.setor || '').trim(),
+          situacao: String(u.situacao || u.status || '').trim()
+        };
+      }).filter(function (u) { return !!u.nome; });
+      APP.colaboradores.erro = null;
+      return APP.colaboradores;
+    });
+  };
+
+  APP.htmlDoResponsavel = function () {
+    var c = APP.colaboradores;
+
+    if (c.lista && c.lista.length) {
+      var opcoes = ['<option value="">— escolha o responsável —</option>'];
+      for (var i = 0; i < c.lista.length; i++) {
+        var u = c.lista[i];
+        var rotulo = u.nome + (u.matricula ? ' · ' + u.matricula : '') +
+                     (u.cargo ? ' · ' + u.cargo : '');
+        opcoes.push('<option value="' + esc(u.id) + '"' +
+          (APP.rota.responsavelId === u.id ? ' selected' : '') + '>' +
+          esc(rotulo) + '</option>');
+      }
+      return '<div class="campo"><label for="rResp">Responsável</label>' +
+        '<select id="rResp">' + opcoes.join('') + '</select></div>' +
+        '<div class="small" style="margin:-4px 0 10px;color:var(--texto-3)">' +
+        c.lista.length + ' colaborador(es) lidos do cadastro do ALMOX PRO. ' +
+        'Nenhum cadastro foi duplicado aqui.</div>';
+    }
+
+    if (c.erro) {
+      return '<div class="aviso erro"><b>Não consegui ler o cadastro de ' +
+        'colaboradores.</b><br>' + esc(c.erro.mensagem || 'sem resposta') +
+        '<div class="small" style="margin-top:6px">Isto NÃO quer dizer que ' +
+        'não há colaboradores: quer dizer que não consegui ler. Enquanto ' +
+        'isso o campo abaixo é texto livre — e texto livre <b>não é ' +
+        'identificação oficial</b>.</div></div>' +
+        '<div class="campo"><label for="rRespLivre">Responsável (texto livre)</label>' +
+        '<input id="rRespLivre" type="text" autocomplete="off" ' +
+        'value="' + esc(APP.rota.responsavel) + '"></div>';
+    }
+
+    return '<div class="campo"><label>Responsável</label>' +
+      '<div class="small" style="color:var(--texto-3)">lendo o cadastro…</div></div>';
+  };
 
   APP.rotaCalculada = function () {
     if (!APP.montagem) return null;
@@ -4116,6 +4401,13 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   APP.pintarRota = function () {
     APP.modoRota = true;
     APP.titulo('Rota de trabalho');
+    /* busca o cadastro de colaboradores na primeira vez e repinta */
+    if (!APP.colaboradores.lista && !APP.colaboradores.erro &&
+        !APP.colaboradores.lendo) {
+      APP.carregarColaboradores().then(function () {
+        if (APP.modoRota) APP.pintarRota();
+      });
+    }
 
     var r = APP.redesenharRota();
     var h = '';
@@ -4133,12 +4425,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
       }).join('') +
       '</select></div>';
 
-    h += '<div class="campo"><label for="rResp">Responsável</label>' +
-      '<input id="rResp" type="text" autocomplete="off" placeholder="quem vai executar" ' +
-      'value="' + esc(APP.rota.responsavel) + '"></div>' +
-      '<div class="small" style="margin:-4px 0 10px;color:var(--texto-3)">' +
-      'Texto livre por enquanto: ligar ao cadastro de funcionários exige o ' +
-      'serviço de atividade, que é da fase 4.</div>';
+    h += APP.htmlDoResponsavel();
 
     h += '<div class="sep"></div>';
 
@@ -4281,8 +4568,19 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
       APP.rota.tipo = tipo.value;
     });
     var resp = $('rResp');
-    if (resp) resp.addEventListener('input', function () {
-      APP.rota.responsavel = resp.value;
+    if (resp) resp.addEventListener('change', function () {
+      var u = (APP.colaboradores.lista || []).filter(function (x) {
+        return x.id === resp.value;
+      })[0];
+      APP.rota.responsavelId = resp.value;
+      APP.rota.responsavel = u ? u.nome : '';
+      APP.rota.responsavelMatricula = u ? u.matricula : '';
+    });
+
+    var respLivre = $('rRespLivre');
+    if (respLivre) respLivre.addEventListener('input', function () {
+      APP.rota.responsavel = respLivre.value;
+      APP.rota.responsavelId = '';        /* texto livre não tem id oficial */
     });
 
     Array.prototype.forEach.call(cx.querySelectorAll('[data-sobe]'), function (b) {
@@ -5394,7 +5692,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
      Salvar o arquivo não é publicar, e publicar não é o
      navegador ter recebido.
      ============================================================ */
-  APP.VERSAO = '6.3.0';
+  APP.VERSAO = '6.4.0';
   APP.COMPILADO = '2026-11-15';
   APP.CARIMBO = 'ALMOXA 3D ' + APP.VERSAO + ' · ' + APP.COMPILADO;
 
