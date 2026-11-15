@@ -41773,7 +41773,7 @@ UI.modal({
 titulo: "Abrir o mapa 3D",
 sub: "O módulo abre numa aba nova",
 tamanho: "md",
-corpo: '<div class="alert a-blue mb16">' + ic("info") + "<div><b>Clique no botão abaixo</b>" + "Se nada acontecer, copie o endereço e cole numa aba nova — " + "alguns navegadores bloqueiam janelas abertas de dentro do sistema.</div></div>" + '<div class="field"><label>Endereço do módulo</label>' + '<div class="flex gap8">' + '<input class="input mono" id="url3d" readonly value="' + U.esc(info.url) + '" ' + 'style="font-size:12px">' + '<button class="btn btn-ghost" id="copiar3d">' + ic("copiar") + "Copiar</button>" + "</div></div>" + '<div class="info-row mt12"><span>Como o sistema está aberto</span>' + "<b>" + U.esc(info.ambiente) + "</b></div>" + (info.ambiente === "Apps Script" ? '<div class="alert a-gray mt12">' + ic("info") + "<div>O arquivo <b>ALMOXA_3D</b> precisa existir neste projeto, " + "criado como <b>HTML</b> (não como Script), e o sistema precisa ter sido " + "publicado em <b>nova versão</b> depois disso.</div></div>" : '<div class="alert a-gray mt12">' + ic("info") + "<div>O arquivo <b>ALMOXA_3D.html</b> precisa estar na mesma pasta " + "deste sistema.</div></div>"),
+corpo: '<div class="alert a-blue mb16">' + ic("info") + "<div><b>Clique no botão abaixo</b>" + "Se nada acontecer, copie o endereço e cole numa aba nova — " + "alguns navegadores bloqueiam janelas abertas de dentro do sistema.</div></div>" + '<div class="field"><label>Endereço do módulo</label>' + '<div class="flex gap8">' + '<input class="input mono" id="url3d" readonly value="' + U.esc(info.url) + '" ' + 'style="font-size:12px">' + '<button class="btn btn-ghost" id="copiar3d">' + ic("copiar") + "Copiar</button>" + "</div></div>" + '<div class="info-row mt12"><span>Como o sistema está aberto</span>' + "<b>" + U.esc(info.ambiente) + "</b></div>" + (info.unificado ? '<div class="alert a-gray mt12">' + ic("info") + "<div>Este é o <b>mesmo endereço</b> que a tela de Mapeamento 3D usa. " + "Se o mapa abrir uma versão antiga, clique no carimbo de versão dentro " + "dele e use <b>Recarregar limpo</b>.</div></div>" : info.ambiente === "Apps Script" ? '<div class="alert a-gray mt12">' + ic("info") + "<div>O arquivo <b>ALMOXA_3D</b> precisa existir neste projeto, " + "criado como <b>HTML</b> (não como Script), e o sistema precisa ter sido " + "publicado em <b>nova versão</b> depois disso.</div></div>" : '<div class="alert a-gray mt12">' + ic("info") + "<div>O arquivo <b>ALMOXA_3D/mapa3d.html</b> precisa estar publicado " + "junto deste sistema.</div></div>"),
 rodape: '<button class="btn btn-ghost" data-x>Fechar</button>' + '<a class="btn btn-orange" id="abrir3d" href="' + U.esc(info.url) + '" ' + 'target="_blank" rel="noopener" style="text-decoration:none;display:inline-flex;' + 'align-items:center;gap:6px">' + ic("cubo") + "Abrir o mapa 3D</a>",
 aoAbrir: function(w, fechar) {
 w.querySelector("[data-x]").addEventListener("click", fechar);
@@ -41799,6 +41799,25 @@ setTimeout(fechar, 600);
 }
 
 function enderecoModulo3D() {
+/* [MAPA3DV] 15/11 — um endereço só para o módulo 3D.
+   Este botão apontava para ALMOXA_3D.html, na mesma pasta do
+   sistema, enquanto a tela de Mapeamento 3D apontava para
+   ALMOXA_3D/mapa3d.html. Dois arquivos, duas versões, e a certeza
+   de que um dos dois estaria velho. Agora, quando o bloco MAPA3D
+   está carregado, quem manda é ele. */
+try {
+if (window.MAPA3D && typeof MAPA3D.linkCompleto === "function") {
+var daTela = MAPA3D.linkCompleto();
+if (daTela) {
+return {
+url: daTela,
+ambiente: /\/exec/.test(String(location.href)) ? "Apps Script" : "Servidor web",
+base: daTela.split("?")[0],
+unificado: true
+};
+}
+}
+} catch (e) {}
 var ambiente = "Arquivo local";
 var base = "";
 try {
@@ -65199,7 +65218,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 427 · 13/11";
+var ALMOXA_VERSAO = "sistema 428 · 15/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -109291,11 +109310,40 @@ emissao: hoje,
     return M.baseGithub + M.pasta;
   };
 
+  /* [MAPA3DV] 15/11 — A VERSÃO QUE NÃO ATUALIZAVA NO COMPUTADOR.
+
+     Duas causas, as duas aqui:
+
+     1) O GitHub Pages serve o mapa3d.html do cache por bastante
+        tempo. O quadro pedia o endereço sem nenhuma marca, então o
+        navegador reaproveitava o arquivo velho e o Ismael via a
+        versão anterior mesmo depois de publicar. Agora vai uma
+        marca por SESSÃO: recarregou o sistema, o mapa vem novo;
+        dentro da mesma sessão, continua aproveitando o cache, que
+        é o certo.
+
+     2) Havia DOIS caminhos para o 3D neste arquivo, apontando para
+        arquivos DIFERENTES:
+          · esta tela  → ALMOXA_3D/mapa3d.html
+          · o botão "Abrir o galpão em 3D" → ALMOXA_3D.html
+        Atualizar um e abrir o outro é exatamente ver versão velha.
+        Agora os dois passam por aqui. */
+  M.marcaDaSessao = (function () {
+    try {
+      var k = "almoxa3d:sessao";
+      var v = sessionStorage.getItem(k);
+      if (!v) { v = String(Date.now()); sessionStorage.setItem(k, v); }
+      return v;
+    } catch (e) { return String(Date.now()); }
+  })();
+
   M.linkCompleto = function () {
     var base = M.urlDoMapa();
     var core = M.urlDoCore();
     var junta = base.indexOf("?") > -1 ? "&" : "?";
-    return base + (core ? junta + "core=" + encodeURIComponent(core) : "");
+    var url = base + junta + "v=" + encodeURIComponent(M.marcaDaSessao);
+    if (core) url += "&core=" + encodeURIComponent(core);
+    return url;
   };
 
   /* ----------------------------------------------------------
