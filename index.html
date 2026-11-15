@@ -65218,7 +65218,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 428 · 15/11";
+var ALMOXA_VERSAO = "sistema 429 · 15/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -109355,15 +109355,29 @@ emissao: hoje,
     var alvo = M.urlDoMapa();
     if (!alvo) return Promise.resolve({ ok: false, motivo: "não sei o endereço do mapa" });
     var junta = alvo.indexOf("?") > -1 ? "&" : "?";
+    var cabecalhos = null;
     return fetch(alvo + junta + "semcache=" + Date.now(), { cache: "no-store" })
       .then(function (r) {
         if (!r.ok) throw new Error("o servidor respondeu " + r.status);
+        /* [MAPA3DV3] 15/11 — a PROVA de qual arquivo o servidor
+           está entregando. "É antigo" é conclusão minha; a data em
+           que o arquivo foi modificado no servidor é fato, e é ela
+           que encerra a discussão sobre se a publicação aconteceu. */
+        cabecalhos = {
+          modificado: r.headers.get("last-modified") || "",
+          etag: r.headers.get("etag") || "",
+          tamanho: r.headers.get("content-length") || ""
+        };
         return r.text();
       })
       .then(function (t) {
+        var tit = (t.match(/<title>([^<]*)<\/title>/i) || [])[1] || "";
         var m = t.match(/APP\.VERSAO\s*=\s*'([^']+)'/);
-        if (m) return { ok: true, versao: m[1], temCarimbo: true, bytes: t.length };
-        return { ok: true, versao: "", temCarimbo: false, bytes: t.length };
+        var base = { ok: true, bytes: t.length, titulo: tit.trim(),
+                     cabecalhos: cabecalhos, url: alvo };
+        if (m) { base.versao = m[1]; base.temCarimbo = true; }
+        else { base.versao = ""; base.temCarimbo = false; }
+        return base;
       })
       .catch(function (e) {
         return { ok: false, motivo: String((e && e.message) || e) };
@@ -109503,15 +109517,26 @@ emissao: hoje,
         alvo.style.color = "var(--amarelo, #7A5B18)";
         return;
       }
+      var quando = (r.cabecalhos && r.cabecalhos.modificado) || "";
+      var provaDoArquivo =
+        '<div style="margin-top:4px">' +
+          (quando ? "Arquivo no servidor, modificado em <b>" + esc(quando) +
+                    "</b>. " : "") +
+          Math.round(r.bytes / 1024) + " KB" +
+          (r.titulo ? ' &middot; título "<b>' + esc(r.titulo) + '</b>"' : "") +
+          ' &middot; <a href="' + esc(r.url) + '?semcache=' + Date.now() +
+            '" target="_blank" rel="noopener">abrir o arquivo direto</a>' +
+        '</div>';
+
       if (r.temCarimbo) {
-        alvo.innerHTML = "Mapa publicado: <b>v" + esc(r.versao) + "</b> &middot; " +
-          Math.round(r.bytes / 1024) + " KB";
+        alvo.innerHTML = "Mapa publicado: <b>v" + esc(r.versao) + "</b>" + provaDoArquivo;
         alvo.style.color = "var(--texto-3)";
         return;
       }
-      alvo.innerHTML = "<b>O mapa publicado é ANTIGO.</b> O arquivo que está " +
-        "no servidor não tem carimbo de versão, então é anterior a 15/11. " +
-        "Publique o mapa3d.html novo em <b>" + esc(M.pasta) + "</b> e recarregue.";
+      alvo.innerHTML = "<b>O mapa publicado é ANTIGO.</b> O arquivo que o servidor " +
+        "entregou agora não tem carimbo de versão, então é anterior a 15/11. " +
+        "Olhe a data abaixo: se ela não for de hoje, o arquivo novo não chegou " +
+        "ao <b>" + esc(M.pasta) + "</b>." + provaDoArquivo;
       alvo.style.color = "#8A2B23";
     });
   };
