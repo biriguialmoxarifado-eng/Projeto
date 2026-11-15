@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>ALMOX PRO 3D · fase 6 · 14/11</title>
+<title>ALMOX PRO 3D · 6.1.0 · 15/11</title>
 <style>
 /* ALMOXA 3D · almoxa3d.css · 08/11/2026
    Responsivo de verdade (seção 11): no celular o painel vira
@@ -273,6 +273,15 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 #app.apresentando #cena:hover #barra{opacity:1;pointer-events:auto}
 #app.apresentando #minimapa{display:none}
 
+/* [V] o carimbo de versão, sempre visível */
+.pino.versao{cursor:pointer;font-variant-numeric:tabular-nums;font-weight:700;
+  letter-spacing:.02em}
+.pino.versao::before{content:"v";opacity:.5;margin-right:1px;font-weight:600}
+.pino.versao.producao{border-color:#BFE3CC;color:#1E5F3A}
+.pino.versao.local{border-color:#F0D8A8;color:#7A5B18}
+.pino.versao.desconhecido{border-color:#F2C3BF;color:#8A2B23}
+.peq{font-size:11px}
+
 /* ---------- celular e tablet (seção 11) ---------- */
 @media (max-width:860px){
   #app{flex-direction:column}
@@ -420,6 +429,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
       <!-- indicador de conexão · seção 4. Mostra o estado REAL do
            adaptador. Começa em "verificando" e nunca mente. -->
+      <button id="v_versao" class="pino versao" title="Versão">…</button>
       <span id="v_conexao" class="pino verificando" title="Conexão com o Core">
         <i></i><b>verificando…</b></span>
     </div>
@@ -1839,6 +1849,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   }
 
   raiz.LAYOUT3D = {
+    VERSAO: '6.1.0',
     MEDIDAS: MEDIDAS,
     CORES: CORES,
     organizar: organizar,
@@ -1940,7 +1951,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var A = {
     nome: 'API3D',
-    versao: '08/11',
+    versao: '6.1.0',
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
     chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
     origemDaChave: 'nenhuma (fase 1)',
@@ -2353,7 +2364,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var M = {
     nome: 'MOTOR3D',
-    versao: '08/11',
+    versao: '6.1.0',
     engine: null,
     cena: null,
     camera: null,
@@ -2730,7 +2741,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var C = {
     nome: 'CONSTRUTOR3D',
-    versao: '08/11',
+    versao: '6.1.0',
     aberto: false,
     projeto: null,
     /* o galpão real fica guardado enquanto o projeto está na tela,
@@ -3409,7 +3420,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   'use strict';
 
   var APP = {
-    versao: '08/11',
+    versao: '6.1.0',
     montagem: null,
     locais: [],
     carregando: false,
@@ -5053,6 +5064,189 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
      fonte aparece escrito como não integrado.
      ============================================================ */
 
+  /* ============================================================
+     [V] VERSÃO E PUBLICAÇÃO · seção 2 do prompt de 15/11
+     ------------------------------------------------------------
+     A QUEIXA: "a versão atualizada não está sendo exibida no
+     computador, que continua abrindo uma versão anterior".
+
+     A CAUSA, que eu encontrei olhando o arquivo: não havia NADA
+     na tela dizendo qual versão estava rodando. As camadas diziam
+     "08/11" por dentro e o título dizia outra coisa. Sem carimbo
+     visível, não há como saber se o que abriu é o novo ou o
+     velho — e o GitHub Pages serve do cache por bastante tempo.
+
+     O que entra aqui:
+       · a versão e a data, SEMPRE visíveis na barra;
+       · o ambiente: produção, demonstração ou local;
+       · um verificador que busca o PRÓPRIO arquivo no servidor,
+         furando o cache, e compara a versão de lá com a que está
+         rodando. Se forem diferentes, avisa que a tela está
+         velha e oferece recarregar limpo;
+       · a conferência entre as camadas: se layout, adaptador,
+         motor, construtor e app não forem da mesma versão, isso
+         aparece — é o sintoma de meio arquivo atualizado.
+
+     O que NÃO entra: nenhuma promessa de que publicar deu certo.
+     Salvar o arquivo não é publicar, e publicar não é o
+     navegador ter recebido.
+     ============================================================ */
+  APP.VERSAO = '6.1.0';
+  APP.COMPILADO = '2026-11-15';
+  APP.CARIMBO = 'ALMOXA 3D ' + APP.VERSAO + ' · ' + APP.COMPILADO;
+
+  APP.ambienteDePublicacao = function () {
+    var onde = '';
+    try { onde = String(location.href || ''); } catch (e) {}
+    if (/^file:/.test(onde)) return { chave: 'LOCAL', texto: 'arquivo local' };
+    if (/127\.0\.0\.1|localhost/.test(onde)) return { chave: 'LOCAL', texto: 'local' };
+    if (/\/exec/.test(onde)) return { chave: 'PRODUCAO', texto: 'Apps Script' };
+    if (/github\.io/.test(onde)) return { chave: 'PRODUCAO', texto: 'GitHub Pages' };
+    return { chave: 'DESCONHECIDO', texto: 'origem desconhecida' };
+  };
+
+  /* as cinco camadas têm de ser da mesma safra */
+  APP.conferirCamadas = function () {
+    var v = {
+      layout: raiz.LAYOUT3D && raiz.LAYOUT3D.VERSAO,
+      adaptador: raiz.API3D && raiz.API3D.versao,
+      motor: raiz.MOTOR3D && raiz.MOTOR3D.versao,
+      construtor: raiz.CONSTRUTOR3D && raiz.CONSTRUTOR3D.versao,
+      app: APP.VERSAO
+    };
+    var faltando = [];
+    for (var k in v) if (v.hasOwnProperty(k) && !v[k]) faltando.push(k);
+    return { versoes: v, faltando: faltando };
+  };
+
+  /* busca o próprio arquivo no servidor furando o cache e compara.
+     É a única maneira honesta de saber se a tela está velha: não
+     adianta eu dizer "está atualizado" só porque a constante aqui
+     dentro diz isso — essa constante veio junto com o arquivo
+     velho, se ele for o velho. */
+  APP.verificarAtualizacao = function () {
+    var alvo = '';
+    try {
+      alvo = String(location.href).split('#')[0].split('?')[0] +
+             '?semcache=' + Date.now();
+    } catch (e) {
+      return Promise.resolve({ ok: false, motivo: 'não sei o meu próprio endereço' });
+    }
+    if (/^file:/.test(alvo)) {
+      return Promise.resolve({ ok: false,
+        motivo: 'arquivo aberto direto do disco: não há servidor para comparar' });
+    }
+    return fetch(alvo, { cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('o servidor respondeu ' + r.status);
+        return r.text();
+      })
+      .then(function (texto) {
+        var m = texto.match(/APP\.VERSAO\s*=\s*'([^']+)'/);
+        var d = texto.match(/APP\.COMPILADO\s*=\s*'([^']+)'/);
+        if (!m) {
+          return { ok: false,
+            motivo: 'baixei o arquivo mas não achei a versão dentro dele' };
+        }
+        return { ok: true, noServidor: m[1], compiladoNoServidor: d ? d[1] : '',
+                 rodando: APP.VERSAO,
+                 igual: m[1] === APP.VERSAO };
+      })
+      .catch(function (e) {
+        return { ok: false, motivo: String((e && e.message) || e) };
+      });
+  };
+
+  APP.recarregarLimpo = function () {
+    try {
+      var base = String(location.href).split('#')[0].split('?')[0];
+      location.replace(base + '?v=' + Date.now());
+    } catch (e) {
+      try { location.reload(true); } catch (e2) {}
+    }
+  };
+
+  APP.pintarVersao = function () {
+    var el = $('v_versao');
+    if (!el) return;
+    var amb = APP.ambienteDePublicacao();
+    el.textContent = APP.VERSAO;
+    el.setAttribute('title', APP.CARIMBO + ' · ' + amb.texto);
+    el.className = 'pino versao ' + amb.chave.toLowerCase();
+  };
+
+  APP.pintarPublicacao = function () {
+    APP.titulo('Versão e publicação');
+    var amb = APP.ambienteDePublicacao();
+    var c = APP.conferirCamadas();
+
+    var h =
+      '<div class="linha"><span>Versão</span><b>' + esc(APP.VERSAO) + '</b></div>' +
+      '<div class="linha"><span>Compilada em</span><b>' + esc(APP.COMPILADO) + '</b></div>' +
+      '<div class="linha"><span>Ambiente</span><b>' + esc(amb.texto) + '</b></div>' +
+      '<div class="linha"><span>Endereço</span><b class="mono peq" ' +
+        'style="word-break:break-all">' + esc(String(location.href).split('?')[0]) +
+        '</b></div>';
+
+    h += '<div class="sep"></div><b style="font-size:12.5px">As cinco camadas</b>' +
+      '<div style="margin-top:6px">';
+    for (var k in c.versoes) if (c.versoes.hasOwnProperty(k)) {
+      h += '<div class="linha"><span>' + esc(k) + '</span><b>' +
+        esc(c.versoes[k] || '(não disse)') + '</b></div>';
+    }
+    h += '</div>';
+    if (c.faltando.length) {
+      h += '<div class="aviso">Estas camadas não dizem a versão: ' +
+        esc(c.faltando.join(', ')) + '. Como o arquivo é um só, isso não quer ' +
+        'dizer que estão desatualizadas — quer dizer que não carimbam.</div>';
+    }
+
+    h += '<div class="sep"></div>' +
+      '<div id="vResultado"><div class="small" style="color:var(--texto-3)">' +
+      'O botão abaixo baixa este mesmo arquivo do servidor, furando o cache, ' +
+      'e compara a versão de lá com a que está rodando aqui. É a única ' +
+      'maneira de saber se a tela está velha.</div></div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' +
+        '<button class="btn primario" id="vVerificar">Verificar atualização</button>' +
+        '<button class="btn" id="vRecarregar">Recarregar limpo</button>' +
+        '<button class="btn" id="vSair">Voltar</button>' +
+      '</div>';
+
+    $('corpoPainel').innerHTML = h;
+
+    var bv = $('vVerificar');
+    if (bv) bv.addEventListener('click', function () {
+      bv.disabled = true; bv.textContent = 'Verificando…';
+      var cx = $('vResultado');
+      APP.verificarAtualizacao().then(function (r) {
+        bv.disabled = false; bv.textContent = 'Verificar atualização';
+        if (!r.ok) {
+          cx.innerHTML = '<div class="aviso"><b>Não consegui comparar.</b><br>' +
+            esc(r.motivo) + '<div class="small" style="margin-top:6px">Isto NÃO ' +
+            'quer dizer que está atualizado. Quer dizer que não deu para ' +
+            'verificar.</div></div>';
+          return;
+        }
+        cx.innerHTML = r.igual
+          ? '<div class="aviso" style="border-color:#BFE3CC;background:#F0FAF4;' +
+            'color:#1E5F3A"><b>Esta é a versão que está no servidor.</b><br>' +
+            'rodando ' + esc(r.rodando) + ' · no servidor ' + esc(r.noServidor) +
+            '</div>'
+          : '<div class="aviso erro"><b>A tela está velha.</b><br>' +
+            'O servidor tem a versão <b>' + esc(r.noServidor) + '</b>' +
+            (r.compiladoNoServidor ? ' (de ' + esc(r.compiladoNoServidor) + ')' : '') +
+            ' e aqui está rodando a <b>' + esc(r.rodando) + '</b>.<br>' +
+            'Use “Recarregar limpo”.</div>';
+      });
+    });
+
+    var br = $('vRecarregar');
+    if (br) br.addEventListener('click', function () { APP.recarregarLimpo(); });
+
+    var bs = $('vSair');
+    if (bs) bs.addEventListener('click', function () { APP.pintarResumo(); });
+  };
+
   APP.vista = { calor: false, explodida: 0, apresentando: false };
 
   APP.redesenharComVista = function () {
@@ -5549,6 +5743,11 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
       bm.setAttribute('aria-pressed', el.hidden ? 'false' : 'true');
       if (!el.hidden) APP.pintarMinimapa(APP.rotaCalculada());
     });
+
+    /* [V] a versão fica sempre na barra, e clicar abre o painel */
+    APP.pintarVersao();
+    var bver = $('v_versao');
+    if (bver) bver.addEventListener('click', function () { APP.pintarPublicacao(); });
 
     /* [F6] calor, explodir, indicadores, apresentação */
     var bc = $('v_calor');
