@@ -1863,7 +1863,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   }
 
   raiz.LAYOUT3D = {
-    VERSAO: '6.6.0',
+    VERSAO: '6.6.1',
     MEDIDAS: MEDIDAS,
     CORES: CORES,
     organizar: organizar,
@@ -1965,7 +1965,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var A = {
     nome: 'API3D',
-    versao: '6.6.0',
+    versao: '6.6.1',
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
     chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
     origemDaChave: 'nenhuma (fase 1)',
@@ -2378,7 +2378,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var M = {
     nome: 'MOTOR3D',
-    versao: '6.6.0',
+    versao: '6.6.1',
     engine: null,
     cena: null,
     camera: null,
@@ -3537,7 +3537,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var C = {
     nome: 'CONSTRUTOR3D',
-    versao: '6.6.0',
+    versao: '6.6.1',
     aberto: false,
     projeto: null,
     /* o galpão real fica guardado enquanto o projeto está na tela,
@@ -4216,7 +4216,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   'use strict';
 
   var APP = {
-    versao: '6.6.0',
+    versao: '6.6.1',
     montagem: null,
     locais: [],
     carregando: false,
@@ -4575,6 +4575,31 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
                 'Sozinho ele não tem sessão, e sessão não se copia nem se ' +
                 'inventa. Abra pelo botão <b>Mapeamento 3D</b> de dentro do ' +
                 'ALMOX PRO, já identificado — é de lá que ele herda a entrada.') +
+            '</div>';
+        }
+        /* [15/11] "Failed to fetch" é recado de navegador, não de
+           almoxarifado. Quando o mapa é aberto do celular, pelo
+           ALMOXA CAMPO, o endereço do Core veio em ?core= — e a
+           falha quase sempre é uma destas três. Digo quais são,
+           em vez de repassar o erro cru e deixar ele adivinhando. */
+        var semRede = /failed to fetch|networkerror|load failed|não respondeu/i.test(bruta);
+        if (semRede) {
+          var veioDaUrl = '';
+          try {
+            veioDaUrl = new URLSearchParams(location.search).get('core') || '';
+          } catch (eU) { veioDaUrl = ''; }
+          extra += '<div class="small" style="margin-top:8px">' +
+            '<b>O navegador nem chegou a falar com o servidor.</b> ' +
+            'Isso costuma ser uma destas três coisas:' +
+            '<br>1. o aparelho está sem internet;' +
+            '<br>2. o endereço /exec está errado ou foi trocado;' +
+            '<br>3. a implantação não está publicada como ' +
+            '<b>Qualquer pessoa</b>, e aí o Google pede login e o mapa ' +
+            'não tem como responder.' +
+            (veioDaUrl
+              ? '<br><br>O endereço que chegou aqui foi:<br><span class="mono">' +
+                esc(veioDaUrl) + '</span>'
+              : '') +
             '</div>';
         }
         $('corpoPainel').innerHTML = '<div class="aviso erro"><b>Não consegui carregar.</b><br>' +
@@ -6320,7 +6345,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
      Salvar o arquivo não é publicar, e publicar não é o
      navegador ter recebido.
      ============================================================ */
-  APP.VERSAO = '6.6.0';
+  APP.VERSAO = '6.6.1';
   APP.COMPILADO = '2026-11-15';
   APP.CARIMBO = 'ALMOXA 3D ' + APP.VERSAO + ' · ' + APP.COMPILADO;
 
@@ -6979,9 +7004,20 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
     var bq = $('v_qualidade');
     if (bq) {
       try {
+        /* [15/11] o celular entra em qualidade média porque o ALMOXA
+           CAMPO abre o mapa com ?qualidade=medio. A URL manda na
+           primeira vez; depois vale o que o próprio usuário escolheu
+           aqui, que fica guardado no aparelho. */
+        var daUrl = '';
+        try { daUrl = new URLSearchParams(location.search).get('qualidade') || ''; }
+        catch (e0) { daUrl = ''; }
         var guardada = raiz.localStorage && raiz.localStorage.getItem('almoxa3d:qualidade');
-        if (guardada && raiz.MOTOR3D && raiz.MOTOR3D.definirQualidade(guardada)) {
-          bq.value = guardada;
+        var escolhida = guardada || daUrl;
+        if (escolhida && raiz.MOTOR3D && raiz.MOTOR3D.definirQualidade(escolhida)) {
+          bq.value = escolhida;
+          if (daUrl && !guardada) {
+            try { raiz.localStorage.setItem('almoxa3d:qualidade', escolhida); } catch (e1) {}
+          }
         } else if (raiz.MOTOR3D) {
           bq.value = raiz.MOTOR3D.qualidade;
         }
