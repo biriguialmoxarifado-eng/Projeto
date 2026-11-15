@@ -109328,14 +109328,47 @@ emissao: hoje,
           · o botão "Abrir o galpão em 3D" → ALMOXA_3D.html
         Atualizar um e abrir o outro é exatamente ver versão velha.
         Agora os dois passam por aqui. */
-  M.marcaDaSessao = (function () {
-    try {
-      var k = "almoxa3d:sessao";
-      var v = sessionStorage.getItem(k);
-      if (!v) { v = String(Date.now()); sessionStorage.setItem(k, v); }
-      return v;
-    } catch (e) { return String(Date.now()); }
-  })();
+  /* [MAPA3DV2] 15/11, 8h20 — ERRO MEU, CORRIGIDO.
+
+     Eu tinha posto a marca no sessionStorage "para aproveitar o
+     cache dentro da sessão". Só que sessionStorage SOBREVIVE AO
+     F5: o Ismael publicava o mapa novo, apertava F5, a marca
+     continuava a mesma e o navegador servia o arquivo velho de
+     novo. Ou seja, a minha proteção contra cache não protegia
+     exatamente na hora em que ele precisava.
+
+     Agora a marca nasce a cada CARREGAMENTO desta página. Apertou
+     F5 no sistema, o mapa vem do servidor. Andar entre as telas
+     sem recarregar continua aproveitando o cache, que é o que a
+     gente queria economizar. */
+  M.marcaDaSessao = String(Date.now());
+
+  /* [MAPA3DV2] QUAL VERSÃO DO MAPA ESTÁ PUBLICADA, DE VERDADE.
+
+     O mapa novo sabe dizer a própria versão. O mapa VELHO não —
+     e é justamente quando ele está velho que o Ismael precisa
+     saber. Então quem pergunta é o sistema: baixa o arquivo do
+     servidor, furando o cache, e procura a versão lá dentro.
+     Não achou carimbo nenhum? Então o que está publicado é
+     anterior a 15/11. Isso é informação, não suposição. */
+  M.versaoPublicada = function () {
+    var alvo = M.urlDoMapa();
+    if (!alvo) return Promise.resolve({ ok: false, motivo: "não sei o endereço do mapa" });
+    var junta = alvo.indexOf("?") > -1 ? "&" : "?";
+    return fetch(alvo + junta + "semcache=" + Date.now(), { cache: "no-store" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("o servidor respondeu " + r.status);
+        return r.text();
+      })
+      .then(function (t) {
+        var m = t.match(/APP\.VERSAO\s*=\s*'([^']+)'/);
+        if (m) return { ok: true, versao: m[1], temCarimbo: true, bytes: t.length };
+        return { ok: true, versao: "", temCarimbo: false, bytes: t.length };
+      })
+      .catch(function (e) {
+        return { ok: false, motivo: String((e && e.message) || e) };
+      });
+  };
 
   M.linkCompleto = function () {
     var base = M.urlDoMapa();
@@ -109367,6 +109400,10 @@ emissao: hoje,
                   ? 'Ligado ao Core &middot; as cores saem das localizações reais'
                   : 'Sem o endereço do Core &middot; mostrando um galpão de demonstração') +
               '</div>' +
+              /* [MAPA3DV2] a versão que o SERVIDOR está entregando */
+              '<div class="small" data-mapa3d-versao ' +
+                'style="color:var(--texto-3);margin-top:3px">' +
+                'conferindo qual versão do mapa está publicada…</div>' +
             '</div>' +
             '<div style="display:flex;gap:8px">' +
               '<button class="btn btn-ghost btn-sm" data-mapa3d-recarregar>Recarregar</button>' +
@@ -109453,8 +109490,35 @@ emissao: hoje,
     document.addEventListener("keydown", aoEsc);
   };
 
+  /* [MAPA3DV2] pergunta ao servidor qual mapa está lá e escreve na
+     tela. Funciona MESMO quando o publicado é o antigo — que é
+     justamente quando precisa funcionar. */
+  M.mostrarVersaoPublicada = function () {
+    var alvo = document.querySelector("[data-mapa3d-versao]");
+    if (!alvo) return;
+    M.versaoPublicada().then(function (r) {
+      if (!r.ok) {
+        alvo.innerHTML = "Não consegui conferir a versão do mapa: " +
+          esc(r.motivo) + ". Isto NÃO quer dizer que está atualizado.";
+        alvo.style.color = "var(--amarelo, #7A5B18)";
+        return;
+      }
+      if (r.temCarimbo) {
+        alvo.innerHTML = "Mapa publicado: <b>v" + esc(r.versao) + "</b> &middot; " +
+          Math.round(r.bytes / 1024) + " KB";
+        alvo.style.color = "var(--texto-3)";
+        return;
+      }
+      alvo.innerHTML = "<b>O mapa publicado é ANTIGO.</b> O arquivo que está " +
+        "no servidor não tem carimbo de versão, então é anterior a 15/11. " +
+        "Publique o mapa3d.html novo em <b>" + esc(M.pasta) + "</b> e recarregue.";
+      alvo.style.color = "#8A2B23";
+    });
+  };
+
   M.ligarBotoes = function () {
     try {
+      M.mostrarVersaoPublicada();
       var rec = document.querySelector("[data-mapa3d-recarregar]");
       if (rec && !rec.__ligado) {
         rec.__ligado = true;
