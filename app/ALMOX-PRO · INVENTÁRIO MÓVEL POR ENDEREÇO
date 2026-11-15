@@ -40,6 +40,8 @@
      1. Cole este arquivo no projeto do Apps Script (Script, não HTML).
      2. Rode AP_INV_DIAGNOSTICO  → ele diz o que falta.
      3. Rode AP_INV_INSTALAR     → cria só o que falta, e informa.
+        Se der erro, rode AP_INV_DIAGNOSTICO_INSTALACAO() — ela só
+        lê, e diz a causa com nome de função e etapa.
      4. Publique nova versão.
    ============================================================ */
 
@@ -196,6 +198,11 @@ function AP_INV_gravar_(nome, objeto) {
     linha.push(objeto[c] !== undefined ? objeto[c] : '');
   }
   var n = lido.aba.getLastRow() + 1;
+  /* a aba tem um número fixo de linhas (1000 por padrão). Sem isto, a
+     gravação que passa do limite responde "Those rows are out of bounds"
+     e a contagem do funcionário seria perdida em silêncio. */
+  AP_INV_garantirAltura_(lido.aba, n);
+  AP_INV_garantirLargura_(lido.aba, linha.length);
   lido.aba.getRange(n, 1, 1, linha.length).setValues([linha]);
   SpreadsheetApp.flush();
   return AP_INV_ok_({ linha: n });
@@ -1002,18 +1009,216 @@ function AP_INV_estadoDasAbas_() {
   return estado;
 }
 
+/* ------------------------------------------------------------
+   11-A. INSTALAÇÃO — por etapas, com nome da função e etapa em
+   todo erro. Nenhuma etapa apaga, renomeia ou limpa coisa alguma.
+
+   CAUSA DO ERRO RELATADO NA LINHA 1031, reproduzida em teste:
+   o cabeçalho tem 19, 21 e 8 colunas, e o código gravava
+   getRange(1, 1, 1, 19).setValues(...) SEM conferir a largura da
+   aba. Uma aba do Sheets tem um número fixo de colunas (26 por
+   padrão, mas menos em planilha importada ou em aba que alguém
+   estreitou). Se a aba tem menos colunas que o cabeçalho, o
+   Google responde "Those columns are out of bounds" e a
+   instalação morria inteira: não criava as outras duas abas e
+   não dizia em que etapa parou. Agora a largura é conferida e
+   ampliada antes de gravar, cada aba é tratada por conta própria
+   e toda falha volta com função, etapa e a mensagem crua do Google.
+   ------------------------------------------------------------ */
+
+/** Monta o registro de uma falha: função, etapa e mensagem crua. */
+function AP_INV_falha_(funcao, etapa, aba, e) {
+  return {
+    funcao: funcao,
+    etapa: etapa,
+    aba: aba || '(nenhuma)',
+    erro: (e && e.message) ? String(e.message) : String(e),
+    tipo: (e && e.name) ? String(e.name) : 'Erro'
+  };
+}
+
+/** Confere o plano de uma aba ANTES de escrever. Devolve a lista de
+    problemas; vazia quer dizer que o plano está bom. */
+function AP_INV_conferirPlano_(nome, quer) {
+  var p = [];
+  if (!nome || typeof nome !== 'string' || !AP_INV_txt_(nome)) {
+    p.push('o nome da aba está vazio ou não é texto');
+  }
+  if (quer == null) {
+    p.push('a lista de colunas é nula — o AP_INV_CFG não carregou, ou outro ' +
+           'arquivo do projeto declarou um AP_INV_CFG diferente');
+    return p;
+  }
+  if (Object.prototype.toString.call(quer) !== '[object Array]') {
+    p.push('a lista de colunas não é um array, e sim ' + (typeof quer));
+    return p;
+  }
+  if (!quer.length) {
+    p.push('a lista de colunas está vazia — getRange com 0 colunas estoura');
+    return p;
+  }
+  var vistos = {};
+  for (var i = 0; i < quer.length; i++) {
+    var c = AP_INV_txt_(quer[i]);
+    if (!c) { p.push('a coluna ' + (i + 1) + ' está em branco'); continue; }
+    if ('=+-@'.indexOf(c.charAt(0)) >= 0) {
+      p.push('a coluna "' + c + '" começa com "' + c.charAt(0) +
+             '", que o Sheets tenta ler como fórmula');
+    }
+    var chave = AP_INV_normal_(c);
+    if (vistos[chave]) p.push('a coluna "' + c + '" aparece duas vezes no plano');
+    vistos[chave] = true;
+  }
+  return p;
+}
+
+/** Garante que a aba tem pelo menos "quantas" colunas. Só ACRESCENTA
+    colunas vazias no fim; nunca remove, nunca reordena. */
+function AP_INV_garantirLargura_(aba, quantas) {
+  var tinha = aba.getMaxColumns();
+  if (tinha >= quantas) return { tinha: tinha, acrescentou: 0 };
+  aba.insertColumnsAfter(tinha, quantas - tinha);
+  return { tinha: tinha, acrescentou: quantas - tinha };
+}
+
+/** Mesma ideia para linhas. É por isso que a milésima contagem não
+    para de gravar: a aba cresce antes da escrita. */
+function AP_INV_garantirAltura_(aba, quantas) {
+  var tinha = aba.getMaxRows();
+  if (tinha >= quantas) return { tinha: tinha, acrescentou: 0 };
+  aba.insertRowsAfter(tinha, quantas - tinha);
+  return { tinha: tinha, acrescentou: quantas - tinha };
+}
+
+/** Abas com nome parecido — caixa ou espaços diferentes. Serve para
+    avisar antes que ele fique com duas abas gêmeas. */
+function AP_INV_abasParecidas_(ss, nome) {
+  var achados = [], alvo = AP_INV_normal_(nome), folhas = [];
+  try { folhas = ss.getSheets(); } catch (e) { folhas = []; }
+  for (var i = 0; i < folhas.length; i++) {
+    var n = '';
+    try { n = folhas[i].getName(); } catch (e2) { n = ''; }
+    if (n !== nome && AP_INV_normal_(n) === alvo) achados.push(n);
+  }
+  return achados;
+}
+
+/** Instala UMA aba. Não lança nada: toda falha volta dentro do
+    objeto, com a etapa em que parou. */
+function AP_INV_instalarUmaAba_(ss, nome, quer) {
+  var etapa = 'conferir o plano da aba';
+  var avisos = [];
+  try {
+    var problemas = AP_INV_conferirPlano_(nome, quer);
+    if (problemas.length) {
+      return { feito: false, falha: AP_INV_falha_('AP_INV_instalarUmaAba_',
+        etapa, nome, new Error(problemas.join('; '))) };
+    }
+
+    etapa = 'procurar a aba';
+    var aba = null;
+    try { aba = ss.getSheetByName(nome); } catch (e) { aba = null; }
+
+    var parecidas = AP_INV_abasParecidas_(ss, nome);
+    if (parecidas.length) {
+      avisos.push('ATENÇÃO: existe aba de nome parecido (' +
+        parecidas.join(', ') + '). O nome exato que este módulo usa é "' +
+        nome + '". Não renomeei nem apaguei nada — confira se os dados ' +
+        'não estão na aba de nome parecido.');
+    }
+
+    if (!aba) {
+      etapa = 'criar a aba';
+      aba = ss.insertSheet(nome);
+
+      etapa = 'alargar a aba nova para ' + quer.length + ' colunas';
+      var largura = AP_INV_garantirLargura_(aba, quer.length);
+
+      etapa = 'garantir a linha 1 da aba nova';
+      AP_INV_garantirAltura_(aba, 1);
+
+      etapa = 'gravar o cabeçalho na aba nova';
+      aba.getRange(1, 1, 1, quer.length).setValues([quer]);
+
+      etapa = 'congelar a linha 1';
+      try { aba.setFrozenRows(1); } catch (e3) {
+        avisos.push('criei a aba e o cabeçalho, mas não congelei a linha 1: ' +
+          (e3 && e3.message ? e3.message : e3));
+      }
+      return { feito: true, criada: true, avisos: avisos,
+        recado: nome + ': criada com ' + quer.length + ' colunas' +
+          (largura.acrescentou ? ' (alarguei em ' + largura.acrescentou +
+           ' colunas; a aba nasceu com ' + largura.tinha + ')' : '') };
+    }
+
+    etapa = 'ler o cabeçalho que já está lá';
+    var largura0 = aba.getMaxColumns();
+    var ultimaCol = Math.min(aba.getLastColumn(), largura0);
+    var cab = ultimaCol > 0
+      ? aba.getRange(1, 1, 1, ultimaCol).getValues()[0].map(AP_INV_txt_)
+      : [];
+
+    if (!cab.join('')) {
+      etapa = 'alargar a aba para ' + quer.length + ' colunas';
+      var l2 = AP_INV_garantirLargura_(aba, quer.length);
+      etapa = 'garantir a linha 1';
+      AP_INV_garantirAltura_(aba, 1);
+      etapa = 'gravar o cabeçalho numa aba que estava sem cabeçalho';
+      aba.getRange(1, 1, 1, quer.length).setValues([quer]);
+      etapa = 'congelar a linha 1';
+      try { aba.setFrozenRows(1); } catch (e4) {}
+      return { feito: true, ajustada: true, avisos: avisos,
+        recado: nome + ': estava sem cabeçalho; escrevi os ' + quer.length +
+          ' nomes de coluna' + (l2.acrescentou ? ' (alarguei em ' +
+           l2.acrescentou + ' colunas; a aba tinha ' + l2.tinha + ')' : '') };
+    }
+
+    etapa = 'ver quais colunas faltam';
+    var novas = [];
+    for (var c = 0; c < quer.length; c++) {
+      if (AP_INV_col_(cab, quer[c]) < 0) novas.push(quer[c]);
+    }
+    if (!novas.length) {
+      return { feito: true, jaEstava: true, avisos: avisos,
+        recado: nome + ': já estava certa, com as ' + quer.length +
+          ' colunas. Não toquei em nada.' };
+    }
+
+    etapa = 'alargar a aba para ' + novas.length + ' coluna(s) nova(s)';
+    var l3 = AP_INV_garantirLargura_(aba, cab.length + novas.length);
+    etapa = 'acrescentar no fim as colunas que faltam';
+    aba.getRange(1, cab.length + 1, 1, novas.length).setValues([novas]);
+    return { feito: true, ajustada: true, avisos: avisos,
+      recado: nome + ': acrescentei no fim a(s) coluna(s) ' + novas.join(', ') +
+        '. A ordem do que já existia não mudou.' +
+        (l3.acrescentou ? ' (alarguei em ' + l3.acrescentou + ' colunas)' : '') };
+
+  } catch (e) {
+    return { feito: false, avisos: avisos,
+      falha: AP_INV_falha_('AP_INV_instalarUmaAba_', etapa, nome, e) };
+  }
+}
+
 /** Cria as três abas do inventário móvel, SE faltarem, e acrescenta
-    colunas que faltem. NÃO apaga nada, NÃO renomeia nada e NÃO toca
-    em nenhuma outra aba. Rode à mão, uma vez. */
+    colunas que faltem. NÃO apaga nada, NÃO renomeia nada, NÃO limpa
+    nada e NÃO toca em nenhuma outra aba. Pode rodar quantas vezes
+    quiser: da segunda em diante não faz nada e diz isso. */
 function AP_INV_INSTALAR() {
-  var saida = { quando: AP_INV_agora_(), criadas: [], ajustadas: [],
-                jaEstavam: [], avisos: [] };
+  var saida = { funcao: 'AP_INV_INSTALAR', quando: AP_INV_agora_(),
+                concluida: false, criadas: [], ajustadas: [], jaEstavam: [],
+                avisos: [], falhas: [] };
+
   var ss = AP_INV_planilha_();
   if (!ss) {
-    saida.avisos.push('NÃO HÁ PLANILHA ATIVA para este script.');
+    saida.falhas.push(AP_INV_falha_('AP_INV_INSTALAR', 'abrir a planilha ativa',
+      '', new Error('SpreadsheetApp.getActive() voltou vazio: este script ' +
+      'não está amarrado a nenhuma planilha. Abra o editor DE DENTRO da ' +
+      'planilha Base Dado almoxarifado (Extensões > Apps Script) e rode de novo.')));
+    saida.resumo = 'INSTALAÇÃO NÃO CONCLUÍDA: não há planilha ativa.';
     Logger.log(JSON.stringify(saida, null, 2));
     return saida;
   }
+  try { saida.planilha = ss.getName(); } catch (e) {}
 
   var planos = [
     [AP_INV_CFG.abaAtividades, AP_INV_CFG.colunasAtividades],
@@ -1021,47 +1226,238 @@ function AP_INV_INSTALAR() {
     [AP_INV_CFG.abaEventos,    AP_INV_CFG.colunasEventos]
   ];
 
+  /* cada aba por conta própria: se uma falhar, as outras duas ainda
+     são instaladas, e a falha diz em que etapa parou */
   for (var i = 0; i < planos.length; i++) {
-    var nome = planos[i][0], quer = planos[i][1];
-    var aba = null;
-    try { aba = ss.getSheetByName(nome); } catch (e) { aba = null; }
-
-    if (!aba) {
-      aba = ss.insertSheet(nome);
-      aba.getRange(1, 1, 1, quer.length).setValues([quer]);
-      aba.setFrozenRows(1);
-      saida.criadas.push(nome + ' (' + quer.length + ' colunas)');
-      continue;
-    }
-
-    var ultimaCol = aba.getLastColumn();
-    var cab = ultimaCol > 0
-      ? aba.getRange(1, 1, 1, ultimaCol).getValues()[0].map(AP_INV_txt_) : [];
-    if (!cab.join('')) {
-      aba.getRange(1, 1, 1, quer.length).setValues([quer]);
-      aba.setFrozenRows(1);
-      saida.ajustadas.push(nome + ': estava sem cabeçalho, escrevi os ' +
-        quer.length + ' nomes de coluna');
-      continue;
-    }
-
-    var novas = [];
-    for (var c = 0; c < quer.length; c++) {
-      if (AP_INV_col_(cab, quer[c]) < 0) novas.push(quer[c]);
-    }
-    if (novas.length) {
-      /* acrescenta no fim; não mexe na ordem do que já existe */
-      aba.getRange(1, cab.length + 1, 1, novas.length).setValues([novas]);
-      saida.ajustadas.push(nome + ': acrescentei as colunas ' + novas.join(', '));
-    } else {
-      saida.jaEstavam.push(nome);
-    }
+    var r = AP_INV_instalarUmaAba_(ss, planos[i][0], planos[i][1]);
+    if (r.avisos && r.avisos.length) saida.avisos = saida.avisos.concat(r.avisos);
+    if (!r.feito) { saida.falhas.push(r.falha); continue; }
+    if (r.criada) saida.criadas.push(r.recado);
+    else if (r.ajustada) saida.ajustadas.push(r.recado);
+    else saida.jaEstavam.push(r.recado);
   }
 
-  SpreadsheetApp.flush();
+  try { SpreadsheetApp.flush(); } catch (e) {}
+
+  /* a conferência final não acredita no que eu acabei de fazer:
+     relê as abas da planilha */
   saida.estadoAgora = AP_INV_estadoDasAbas_();
-  saida.observacao = 'Nenhuma aba foi apagada, renomeada ou limpa. ' +
-    'Nenhuma outra aba da planilha foi tocada.';
+  saida.concluida = !saida.falhas.length && !!saida.estadoAgora.completo;
+
+  if (saida.concluida) {
+    saida.resumo = 'INSTALAÇÃO CONCLUÍDA. As três abas do inventário móvel ' +
+      'existem e têm todas as colunas. ' +
+      (saida.criadas.length ? saida.criadas.length + ' criada(s). ' : '') +
+      (saida.ajustadas.length ? saida.ajustadas.length + ' ajustada(s). ' : '') +
+      (saida.jaEstavam.length ? saida.jaEstavam.length + ' já estava(m) certa(s). ' : '') +
+      'Nada foi apagado, renomeado ou limpo.';
+  } else if (saida.falhas.length) {
+    saida.resumo = 'INSTALAÇÃO NÃO CONCLUÍDA: ' + saida.falhas.length +
+      ' falha(s). Veja o campo "falhas" — cada uma diz a função, a etapa e ' +
+      'a mensagem do Google. Rode AP_INV_DIAGNOSTICO_INSTALACAO() para o ' +
+      'retrato completo da planilha.';
+  } else {
+    saida.resumo = 'INSTALAÇÃO NÃO CONCLUÍDA: não houve erro, mas a releitura ' +
+      'das abas diz que ainda falta coluna. Veja "estadoAgora".';
+  }
+
+  saida.observacao = 'Nenhuma aba foi apagada, renomeada ou limpa. Nenhuma ' +
+    'outra aba da planilha foi tocada. Rodar de novo não duplica cabeçalho.';
+  Logger.log(JSON.stringify(saida, null, 2));
+  return saida;
+}
+
+
+/** DIAGNÓSTICO DA INSTALAÇÃO — só leitura, não grava nada.
+    Procura, uma por uma, cada coisa capaz de fazer o getRange do
+    cabeçalho estourar, e termina com um veredito. */
+function AP_INV_DIAGNOSTICO_INSTALACAO() {
+  var saida = { funcao: 'AP_INV_DIAGNOSTICO_INSTALACAO',
+                quando: AP_INV_agora_(),
+                aviso: 'Esta rotina SÓ LÊ. Não cria, não grava, não apaga.',
+                planilha: {}, abas: [], suspeitas: [], veredito: '' };
+
+  /* 1 · o AP_INV_CFG carregou? */
+  var cfgOk = false;
+  try { cfgOk = (typeof AP_INV_CFG !== 'undefined') && AP_INV_CFG != null; }
+  catch (e) { cfgOk = false; }
+  saida.cfg = { carregou: cfgOk };
+  if (cfgOk) {
+    saida.cfg.nomesDasAbas = [AP_INV_CFG.abaAtividades,
+      AP_INV_CFG.abaContagens, AP_INV_CFG.abaEventos];
+    saida.cfg.quantasColunas = {
+      atividades: (AP_INV_CFG.colunasAtividades || []).length,
+      contagens:  (AP_INV_CFG.colunasContagens  || []).length,
+      eventos:    (AP_INV_CFG.colunasEventos    || []).length
+    };
+    if (!saida.cfg.quantasColunas.atividades ||
+        !saida.cfg.quantasColunas.contagens ||
+        !saida.cfg.quantasColunas.eventos) {
+      saida.suspeitas.push('CAUSA POSSÍVEL: alguma lista de colunas do ' +
+        'AP_INV_CFG está vazia ou ausente. Com ela vazia, quer.length dá 0 ' +
+        'e o getRange estoura. Confira se outro arquivo do projeto não ' +
+        'declarou um AP_INV_CFG por cima deste.');
+    }
+  } else {
+    saida.suspeitas.push('CAUSA ENCONTRADA: o AP_INV_CFG não existe neste ' +
+      'projeto. Sem ele, quer.length não existe e a gravação do cabeçalho ' +
+      'estoura. O arquivo AP_INVENTARIO.gs foi colado inteiro?');
+  }
+
+  /* 2 · a planilha */
+  var ss = AP_INV_planilha_();
+  if (!ss) {
+    saida.suspeitas.push('CAUSA ENCONTRADA: SpreadsheetApp.getActive() voltou ' +
+      'vazio — o script não está amarrado a nenhuma planilha.');
+    saida.veredito = 'Não há planilha ativa. Abra o Apps Script de dentro da ' +
+      'planilha (Extensões > Apps Script) e rode de novo.';
+    Logger.log(JSON.stringify(saida, null, 2));
+    return saida;
+  }
+  try { saida.planilha.nome = ss.getName(); } catch (e) {}
+  try { saida.planilha.id = ss.getId(); } catch (e) {}
+  try { saida.planilha.euSou = Session.getActiveUser().getEmail() ||
+        '(o Google não informou)'; } catch (e) {
+    saida.planilha.euSou = '(o Google não informou)';
+  }
+
+  try {
+    var todas = ss.getSheets(), nomes = [], celulas = 0;
+    for (var t = 0; t < todas.length; t++) {
+      try { nomes.push(todas[t].getName()); } catch (e8) {}
+      try { celulas += todas[t].getMaxRows() * todas[t].getMaxColumns(); }
+      catch (e9) {}
+    }
+    saida.planilha.quantasAbas = todas.length;
+    saida.planilha.nomesDasAbas = nomes;
+    saida.planilha.celulasReservadas = celulas;
+    saida.planilha.tetoDoGoogle = 10000000;
+    if (celulas > 9500000) {
+      saida.suspeitas.push('CAUSA POSSÍVEL: a planilha já reservou ' + celulas +
+        ' células, perto do teto de 10 milhões do Google. Criar aba nova ou ' +
+        'alargar aba pode falhar por isso.');
+    }
+  } catch (e) {
+    saida.suspeitas.push('Não consegui listar as abas: ' + (e.message || e));
+  }
+
+  try {
+    var faixas = ss.getProtections(SpreadsheetApp.ProtectionType.RANGE) || [];
+    saida.planilha.faixasProtegidas = faixas.length;
+  } catch (e) { saida.planilha.faixasProtegidas = '(não consegui ler)'; }
+
+  if (!cfgOk) {
+    saida.veredito = 'O AP_INV_CFG não carregou — veja as suspeitas.';
+    Logger.log(JSON.stringify(saida, null, 2));
+    return saida;
+  }
+
+  /* 3 · aba por aba, tudo que pode estourar */
+  var planos = [
+    [AP_INV_CFG.abaAtividades, AP_INV_CFG.colunasAtividades],
+    [AP_INV_CFG.abaContagens,  AP_INV_CFG.colunasContagens],
+    [AP_INV_CFG.abaEventos,    AP_INV_CFG.colunasEventos]
+  ];
+
+  for (var i = 0; i < planos.length; i++) {
+    var nome = planos[i][0], quer = planos[i][1] || [];
+    var d = { aba: nome, cabecalhoPrecisaDe: quer.length };
+
+    var problemas = AP_INV_conferirPlano_(nome, planos[i][1]);
+    d.planoOk = !problemas.length;
+    if (problemas.length) {
+      d.problemasDoPlano = problemas;
+      saida.suspeitas.push('CAUSA ENCONTRADA na aba "' + nome + '": ' +
+        problemas.join('; '));
+    }
+
+    var aba = null;
+    try { aba = ss.getSheetByName(nome); } catch (e) { aba = null; }
+    d.existe = !!aba;
+
+    d.nomesParecidos = AP_INV_abasParecidas_(ss, nome);
+    if (d.nomesParecidos.length) {
+      saida.suspeitas.push('ATENÇÃO: existe aba de nome parecido com "' +
+        nome + '" (' + d.nomesParecidos.join(', ') + '). Se os dados estão ' +
+        'nela, o módulo não vai encontrá-los: o nome tem de ser exato.');
+    }
+
+    if (!aba) {
+      d.observacao = 'ainda não existe; a instalação vai criá-la';
+      saida.abas.push(d);
+      continue;
+    }
+
+    try { d.colunasQueAAbaTem = aba.getMaxColumns(); } catch (e) {}
+    try { d.linhasQueAAbaTem  = aba.getMaxRows(); } catch (e) {}
+    try { d.ultimaColunaUsada = aba.getLastColumn(); } catch (e) {}
+    try { d.ultimaLinhaUsada  = aba.getLastRow(); } catch (e) {}
+    try { d.oculta = aba.isSheetHidden(); } catch (e) {}
+    try {
+      d.protecoesNaAba =
+        (aba.getProtections(SpreadsheetApp.ProtectionType.SHEET) || []).length;
+    } catch (e) { d.protecoesNaAba = '(não consegui ler)'; }
+
+    /* é ESTE o teste da linha 1031 */
+    if (typeof d.colunasQueAAbaTem === 'number' &&
+        d.colunasQueAAbaTem < quer.length) {
+      d.cabeOCabecalho = false;
+      saida.suspeitas.push('CAUSA ENCONTRADA: a aba "' + nome + '" tem ' +
+        d.colunasQueAAbaTem + ' colunas e o cabeçalho precisa de ' +
+        quer.length + '. getRange(1, 1, 1, ' + quer.length + ') responde ' +
+        '"Those columns are out of bounds" — é exatamente o erro da linha ' +
+        '1031. A correção alarga a aba antes de gravar.');
+    } else {
+      d.cabeOCabecalho = true;
+    }
+
+    if (d.protecoesNaAba && d.protecoesNaAba !== '(não consegui ler)') {
+      saida.suspeitas.push('CAUSA POSSÍVEL: a aba "' + nome + '" tem ' +
+        d.protecoesNaAba + ' proteção(ões). Se o senhor não estiver na ' +
+        'lista de editores dela, o setValues responde "You are trying to ' +
+        'edit a protected cell or object".');
+    }
+
+    try {
+      var lc = Math.min(d.ultimaColunaUsada || 0, d.colunasQueAAbaTem || 0);
+      var cab = lc > 0
+        ? aba.getRange(1, 1, 1, lc).getValues()[0].map(AP_INV_txt_) : [];
+      d.cabecalhoAtual = cab;
+      d.temCabecalho = !!cab.join('');
+      var faltando = [];
+      for (var c = 0; c < quer.length; c++) {
+        if (AP_INV_col_(cab, quer[c]) < 0) faltando.push(quer[c]);
+      }
+      d.colunasFaltando = faltando;
+    } catch (e) {
+      d.cabecalhoAtual = '(não consegui ler: ' + (e.message || e) + ')';
+      saida.suspeitas.push('CAUSA POSSÍVEL: nem a LEITURA do cabeçalho da ' +
+        'aba "' + nome + '" funcionou: ' + (e.message || e));
+    }
+
+    saida.abas.push(d);
+  }
+
+  /* 4 · veredito */
+  var encontradas = [];
+  for (var s = 0; s < saida.suspeitas.length; s++) {
+    if (saida.suspeitas[s].indexOf('CAUSA ENCONTRADA') === 0) {
+      encontradas.push(saida.suspeitas[s]);
+    }
+  }
+  if (encontradas.length) {
+    saida.veredito = 'CAUSA IDENTIFICADA (' + encontradas.length + '). ' +
+      encontradas.join(' | ');
+  } else if (saida.suspeitas.length) {
+    saida.veredito = 'Nenhuma causa definitiva, mas há ' +
+      saida.suspeitas.length + ' ponto(s) de atenção acima.';
+  } else {
+    saida.veredito = 'Nenhum impedimento encontrado: a planilha está ' +
+      'acessível, o AP_INV_CFG carregou e as abas cabem o cabeçalho. ' +
+      'Se o erro voltar, copie a MENSAGEM inteira que o Apps Script mostrar ' +
+      '— agora ela vem com função e etapa.';
+  }
+
   Logger.log(JSON.stringify(saida, null, 2));
   return saida;
 }
