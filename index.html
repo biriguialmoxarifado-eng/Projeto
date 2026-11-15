@@ -65218,7 +65218,7 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 429 · 15/11";
+var ALMOXA_VERSAO = "sistema 430 · 15/11";
 var ALMOXA_NOVIDADES = [
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
@@ -109384,6 +109384,106 @@ emissao: hoje,
       });
   };
 
+  /* ============================================================
+     [MAPA3DV4] 15/11, 8h50 — PROCURAR O MAPA, EM VEZ DE EXIGIR
+     QUE ELE ESTEJA EXATAMENTE ONDE EU MANDEI.
+     ------------------------------------------------------------
+     O QUE ESTAVA ACONTECENDO. O servidor entregou, hoje às 8h42,
+     um arquivo de 55 KB com o título "ALMOX PRO 3D — Mapa do
+     almoxarifado". O mapa novo tem 240 KB. Ou seja: o Ismael
+     publicou — a data é de hoje — mas num lugar que não é o que
+     eu estava lendo, ou copiou o arquivo errado.
+
+     E tem uma armadilha no meio: na pasta dele o diretório se
+     chama "Almoxa_3D"; eu pedia "ALMOXA_3D". No Windows essas
+     duas são a MESMA pasta. No GitHub são DUAS. Dá para atualizar
+     uma a manhã inteira enquanto o site serve a outra, e ninguém
+     vê o erro, porque na tela do computador só existe uma.
+
+     Então eu paro de exigir caminho exato. Procuro o arquivo nos
+     lugares prováveis, leio a versão de cada um, e fico com o
+     melhor — dizendo qual escolhi e o que achei em cada um. O
+     Ismael não tem de adivinhar o que eu espero; eu é que tenho
+     de achar o que ele publicou.
+     ============================================================ */
+  M.CANDIDATOS = [
+    "ALMOXA_3D/mapa3d.html",
+    "Almoxa_3D/mapa3d.html",
+    "almoxa_3d/mapa3d.html",
+    "ALMOXA_3D/MAPA3D.html",
+    "Almoxa_3D/MAPA3D.html",
+    "ALMOXA_3D.html",
+    "mapa3d.html",
+    "app/ALMOX PRO 3D — Mapa do almoxarifado.html"
+  ];
+
+  M.baseDoSite = function () {
+    try {
+      if (/github\.io$/i.test(location.hostname)) {
+        return location.origin + location.pathname.replace(/[^/]*$/, "");
+      }
+    } catch (e) {}
+    return M.baseGithub;
+  };
+
+  /* olha UM candidato e devolve o que achou, sem concluir nada */
+  M.olharArquivo = function (caminho) {
+    var url = M.baseDoSite() + caminho.split("/").map(encodeURIComponent).join("/");
+    var cab = null;
+    return fetch(url + "?semcache=" + Date.now(), { cache: "no-store" })
+      .then(function (r) {
+        if (!r.ok) return { caminho: caminho, url: url, existe: false,
+                            status: r.status };
+        cab = r.headers.get("last-modified") || "";
+        return r.text().then(function (t) {
+          var v = (t.match(/APP\.VERSAO\s*=\s*'([^']+)'/) || [])[1] || "";
+          var tit = ((t.match(/<title>([^<]*)<\/title>/i) || [])[1] || "").trim();
+          return { caminho: caminho, url: url, existe: true, status: r.status,
+                   versao: v, temCarimbo: !!v, titulo: tit,
+                   bytes: t.length, modificado: cab };
+        });
+      })
+      .catch(function (e) {
+        return { caminho: caminho, url: url, existe: false,
+                 erro: String((e && e.message) || e) };
+      });
+  };
+
+  /* compara versões tipo 6.1.1 sem inventar ordem alfabética */
+  M.maior = function (a, b) {
+    var A = String(a || "").split("."), B = String(b || "").split(".");
+    for (var i = 0; i < 3; i++) {
+      var x = Number(A[i] || 0), y = Number(B[i] || 0);
+      if (x !== y) return x > y;
+    }
+    return false;
+  };
+
+  M.procurarMapa = function () {
+    if (M.procura) return M.procura;
+    var pedidos = M.CANDIDATOS.map(function (c) { return M.olharArquivo(c); });
+    M.procura = Promise.all(pedidos).then(function (achados) {
+      var vivos = achados.filter(function (a) { return a.existe; });
+      var melhor = null;
+      for (var i = 0; i < vivos.length; i++) {
+        var a = vivos[i];
+        if (!melhor) { melhor = a; continue; }
+        /* quem tem carimbo ganha de quem não tem */
+        if (a.temCarimbo && !melhor.temCarimbo) { melhor = a; continue; }
+        if (!a.temCarimbo && melhor.temCarimbo) continue;
+        /* os dois com carimbo: a versão maior */
+        if (a.temCarimbo && melhor.temCarimbo) {
+          if (M.maior(a.versao, melhor.versao)) melhor = a;
+          continue;
+        }
+        /* nenhum com carimbo: o maior arquivo, que tende a ser o mais novo */
+        if (a.bytes > melhor.bytes) melhor = a;
+      }
+      return { achados: achados, vivos: vivos, melhor: melhor };
+    });
+    return M.procura;
+  };
+
   M.linkCompleto = function () {
     var base = M.urlDoMapa();
     var core = M.urlDoCore();
@@ -109507,37 +109607,75 @@ emissao: hoje,
   /* [MAPA3DV2] pergunta ao servidor qual mapa está lá e escreve na
      tela. Funciona MESMO quando o publicado é o antigo — que é
      justamente quando precisa funcionar. */
+  /* [MAPA3DV4] mostra o que achou em CADA caminho, e usa o melhor.
+     Ver os dois ALMOXA_3D lado a lado, com datas diferentes, é o
+     que torna o problema da maiúscula visível — no Windows ele é
+     invisível de propósito. */
   M.mostrarVersaoPublicada = function () {
     var alvo = document.querySelector("[data-mapa3d-versao]");
     if (!alvo) return;
-    M.versaoPublicada().then(function (r) {
-      if (!r.ok) {
-        alvo.innerHTML = "Não consegui conferir a versão do mapa: " +
-          esc(r.motivo) + ". Isto NÃO quer dizer que está atualizado.";
-        alvo.style.color = "var(--amarelo, #7A5B18)";
-        return;
-      }
-      var quando = (r.cabecalhos && r.cabecalhos.modificado) || "";
-      var provaDoArquivo =
-        '<div style="margin-top:4px">' +
-          (quando ? "Arquivo no servidor, modificado em <b>" + esc(quando) +
-                    "</b>. " : "") +
-          Math.round(r.bytes / 1024) + " KB" +
-          (r.titulo ? ' &middot; título "<b>' + esc(r.titulo) + '</b>"' : "") +
-          ' &middot; <a href="' + esc(r.url) + '?semcache=' + Date.now() +
-            '" target="_blank" rel="noopener">abrir o arquivo direto</a>' +
-        '</div>';
+    alvo.innerHTML = "procurando o mapa nos caminhos conhecidos…";
 
-      if (r.temCarimbo) {
-        alvo.innerHTML = "Mapa publicado: <b>v" + esc(r.versao) + "</b>" + provaDoArquivo;
-        alvo.style.color = "var(--texto-3)";
+    M.procurarMapa().then(function (r) {
+      if (!r.melhor) {
+        /* 15/11 — "não achei" e "não consegui procurar" são coisas
+           diferentes. Se TODOS falharam por erro de rede, dizer que
+           o mapa não está publicado seria afirmar o que eu não sei. */
+        var porRede = r.achados.filter(function (a) { return !!a.erro; });
+        if (porRede.length === r.achados.length) {
+          alvo.innerHTML = "<b>Não consegui procurar o mapa.</b> " +
+            esc(porRede[0].erro) + ". Isto NÃO quer dizer que o mapa não " +
+            "está publicado: quer dizer que não deu para verificar.";
+        } else {
+          alvo.innerHTML = "<b>Não achei o mapa em lugar nenhum.</b> " +
+            "O servidor respondeu, mas nenhum destes caminhos existe: " +
+            M.CANDIDATOS.map(esc).join(", ") + ".";
+        }
+        alvo.style.color = "#8A2B23";
         return;
       }
-      alvo.innerHTML = "<b>O mapa publicado é ANTIGO.</b> O arquivo que o servidor " +
-        "entregou agora não tem carimbo de versão, então é anterior a 15/11. " +
-        "Olhe a data abaixo: se ela não for de hoje, o arquivo novo não chegou " +
-        "ao <b>" + esc(M.pasta) + "</b>." + provaDoArquivo;
-      alvo.style.color = "#8A2B23";
+
+      var m = r.melhor;
+      var linhas = r.vivos.map(function (a) {
+        var marca = (a.caminho === m.caminho) ? " &larr; <b>usando este</b>" : "";
+        return '<div style="margin-top:2px">' +
+          '<span class="mono" style="font-size:11px">' + esc(a.caminho) + '</span> &middot; ' +
+          (a.temCarimbo ? "<b>v" + esc(a.versao) + "</b>" : "<b>sem carimbo</b>") +
+          " &middot; " + Math.round(a.bytes / 1024) + " KB" +
+          (a.modificado ? " &middot; " + esc(a.modificado) : "") +
+          marca + '</div>';
+      }).join("");
+
+      var cabecalho = m.temCarimbo
+        ? "Mapa em uso: <b>v" + esc(m.versao) + "</b>"
+        : "<b>O mapa que achei é ANTIGO</b> (sem carimbo de versão)";
+
+      var aviso = "";
+      if (r.vivos.length > 1) {
+        aviso = '<div style="margin-top:4px">Achei o mapa em <b>' +
+          r.vivos.length + " lugares</b>. Se dois caminhos só diferem por " +
+          "maiúscula/minúscula, no Windows eles parecem uma pasta só — " +
+          "mas no GitHub são duas, e você pode estar atualizando a que o " +
+          "site não serve.</div>";
+      }
+
+      alvo.innerHTML = cabecalho + aviso +
+        '<div style="margin-top:4px">' + linhas + '</div>' +
+        '<div style="margin-top:3px"><a href="' + esc(m.url) +
+          '?semcache=' + Date.now() + '" target="_blank" rel="noopener">' +
+          'abrir o que está em uso</a></div>';
+      alvo.style.color = m.temCarimbo ? "var(--texto-3)" : "#8A2B23";
+
+      /* se o melhor não é o que o quadro carregou, troca e lembra */
+      try {
+        var q = document.querySelector("[data-mapa3d-quadro]");
+        if (q && m.url && q.src.split("?")[0] !== m.url) {
+          localStorage.setItem("almoxa3d:pasta", m.url);
+          var core = M.urlDoCore();
+          q.src = m.url + "?v=" + M.marcaDaSessao +
+                  (core ? "&core=" + encodeURIComponent(core) : "");
+        }
+      } catch (e) {}
     });
   };
 
