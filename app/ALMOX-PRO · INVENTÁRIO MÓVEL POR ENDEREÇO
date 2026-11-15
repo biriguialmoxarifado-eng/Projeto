@@ -1268,6 +1268,115 @@ function AP_INV_INSTALAR() {
 }
 
 
+/** CONFERIR ROTA — só leitura. Responde a uma pergunta só:
+    o projeto onde este arquivo está é o mesmo projeto do Core?
+
+    Serve para o caso do erro MODULO_AUSENTE na tela: o roteador do
+    Core diz que ninguém atende "invmovel". Isso tem três causas
+    possíveis, e esta função separa as três:
+
+      1. o arquivo não está salvo neste projeto
+         → "AP_Modulo_invmovel" NÃO aparece na lista abaixo;
+
+      2. o arquivo está num projeto DIFERENTE do Core
+         → "AP_Modulo_invmovel" aparece sozinho, sem os outros
+           módulos do sistema (locais, estoque, usuarios...);
+
+      3. o arquivo está no lugar certo, mas a IMPLANTAÇÃO do app da
+         web ainda serve a versão antiga do código
+         → "AP_Modulo_invmovel" aparece JUNTO com os outros módulos.
+           Nesse caso o editor enxerga, mas o /exec não: é preciso
+           Implantar > Gerenciar implantações > editar (lápis) >
+           Versão: Nova versão > Implantar. A URL não muda.          */
+function AP_INV_CONFERIR_ROTA() {
+  var saida = { funcao: 'AP_INV_CONFERIR_ROTA', quando: AP_INV_agora_(),
+                aviso: 'Esta rotina S\u00d3 L\u00ca. N\u00e3o grava nada.' };
+
+  /* o objeto global, sem depender de globalThis */
+  var raiz = null;
+  try { raiz = (function () { return this; })(); } catch (e) { raiz = null; }
+  if (!raiz) { try { raiz = globalThis; } catch (e2) { raiz = null; } }
+
+  /* 1 · quais módulos este projeto publica */
+  var modulos = [];
+  if (raiz) {
+    for (var k in raiz) {
+      try {
+        if (k.indexOf('AP_Modulo_') === 0 && typeof raiz[k] === 'function') {
+          modulos.push(k.substring('AP_Modulo_'.length));
+        }
+      } catch (e3) {}
+    }
+    modulos.sort();
+  }
+  saida.modulosNesteProjeto = modulos;
+  saida.quantos = modulos.length;
+
+  /* 2 · eu estou entre eles? */
+  var euExisto = false;
+  try { euExisto = (typeof AP_Modulo_invmovel === 'function'); } catch (e) {}
+  saida.AP_Modulo_invmovel_existe = euExisto;
+
+  /* 3 · a planilha deste projeto */
+  var ss = AP_INV_planilha_();
+  saida.planilhaDesteProjeto = ss ? { nome: '', id: '' } : null;
+  if (ss) {
+    try { saida.planilhaDesteProjeto.nome = ss.getName(); } catch (e) {}
+    try { saida.planilhaDesteProjeto.id = ss.getId(); } catch (e) {}
+  }
+
+  /* 4 · chamo a mim mesmo, do jeito que o roteador chamaria */
+  if (euExisto) {
+    try {
+      var r = AP_Modulo_invmovel('listarAtividades', {}, null);
+      saida.testeDeChamada = {
+        respondeu: true,
+        ok: !!(r && r.ok),
+        codigo: (r && r.codigo) || '',
+        mensagem: (r && r.mensagem) || '',
+        quantasAtividades: (r && r.dados && r.dados.length !== undefined)
+          ? r.dados.length : '(n\u00e3o veio lista)'
+      };
+    } catch (e4) {
+      saida.testeDeChamada = { respondeu: false,
+        erro: (e4 && e4.message) ? e4.message : String(e4) };
+    }
+  } else {
+    saida.testeDeChamada = { respondeu: false,
+      erro: 'AP_Modulo_invmovel n\u00e3o existe neste projeto' };
+  }
+
+  /* 5 · veredito */
+  var outros = [];
+  for (var i = 0; i < modulos.length; i++) {
+    if (modulos[i] !== 'invmovel') outros.push(modulos[i]);
+  }
+  saida.outrosModulosDoSistema = outros;
+
+  if (!euExisto) {
+    saida.veredito = 'CAUSA 1: o AP_INVENTARIO.gs N\u00c3O est\u00e1 salvo neste ' +
+      'projeto. Cole o arquivo inteiro num arquivo novo do Apps Script ' +
+      '(nome sugerido: AP_INVENTARIO.gs), salve, e rode de novo.';
+  } else if (!outros.length) {
+    saida.veredito = 'CAUSA 2: o AP_Modulo_invmovel existe, mas este projeto ' +
+      'N\u00c3O tem nenhum outro m\u00f3dulo do sistema (locais, estoque, usuarios...). ' +
+      'Ou seja: o arquivo foi colado num projeto DIFERENTE do Core. Cole-o no ' +
+      'projeto do Core \u2014 o mesmo que responde pela URL /exec que a tela usa.';
+  } else {
+    saida.veredito = 'CAUSA 3 (a mais prov\u00e1vel): o AP_Modulo_invmovel est\u00e1 ' +
+      'no projeto certo, junto com ' + outros.length + ' outro(s) m\u00f3dulo(s) (' +
+      outros.join(', ') + '). O EDITOR enxerga. Se a tela ainda diz ' +
+      'MODULO_AUSENTE, quem n\u00e3o enxerga \u00e9 a IMPLANTA\u00c7\u00c3O: o app da web ainda ' +
+      'serve a vers\u00e3o antiga do c\u00f3digo. Fa\u00e7a Implantar > Gerenciar ' +
+      'implanta\u00e7\u00f5es > l\u00e1pis (editar) > Vers\u00e3o: Nova vers\u00e3o > Implantar. ' +
+      'A URL /exec continua a mesma; s\u00f3 o c\u00f3digo servido muda.';
+  }
+
+  Logger.log(JSON.stringify(saida, null, 2));
+  return saida;
+}
+
+
 /** DIAGNÓSTICO DA INSTALAÇÃO — só leitura, não grava nada.
     Procura, uma por uma, cada coisa capaz de fazer o getRange do
     cabeçalho estourar, e termina com um veredito. */
