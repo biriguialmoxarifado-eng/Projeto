@@ -428,6 +428,19 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
       <button class="btn" id="v_telacheia" aria-pressed="false"
               title="Tela cheia">Tela cheia</button>
 
+      <!-- [G] 15/11 · qualidade gráfica. Em máquina fraca e na TV da
+           sala de reunião, "baixo" troca o detalhe das peças por
+           quadros por segundo. O dado mostrado é o mesmo nos três. -->
+      <label class="pino" for="v_qualidade" title="Qualidade gráfica"
+             style="display:inline-flex;gap:6px;align-items:center">
+        <span>Qualidade</span>
+        <select id="v_qualidade" style="font:inherit;border:0;background:transparent">
+          <option value="alto">alta</option>
+          <option value="medio">média</option>
+          <option value="baixo">baixa</option>
+        </select>
+      </label>
+
       <!-- indicador de conexão · seção 4. Mostra o estado REAL do
            adaptador. Começa em "verificando" e nunca mente. -->
       <button id="v_versao" class="pino versao" title="Versão">…</button>
@@ -1850,7 +1863,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   }
 
   raiz.LAYOUT3D = {
-    VERSAO: '6.5.0',
+    VERSAO: '6.6.0',
     MEDIDAS: MEDIDAS,
     CORES: CORES,
     organizar: organizar,
@@ -1952,7 +1965,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var A = {
     nome: 'API3D',
-    versao: '6.5.0',
+    versao: '6.6.0',
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
     chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
     origemDaChave: 'nenhuma (fase 1)',
@@ -2365,7 +2378,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var M = {
     nome: 'MOTOR3D',
-    versao: '6.5.0',
+    versao: '6.6.0',
     engine: null,
     cena: null,
     camera: null,
@@ -2685,66 +2698,441 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
      material: isso seria desenhar uma informação que ninguém
      cadastrou, e aí o mapa passaria a afirmar coisas. Sem o campo,
      caixa. */
-  var FORMAS = {
-    caixa: function (b, p) {
-      return b.MeshBuilder.CreateBox('f_caixa',
-        { width: p.lx, height: p.ly, depth: p.lz }, M.cena);
-    },
-    pallet: function (b, p) {
-      /* achatado e largo, como pallet carregado fica */
-      return b.MeshBuilder.CreateBox('f_pallet',
-        { width: p.lx, height: p.ly * 0.55, depth: p.lz }, M.cena);
-    },
-    tambor: function (b, p) {
-      return b.MeshBuilder.CreateCylinder('f_tambor', {
-        diameter: Math.min(p.lx, p.lz) * 0.92,
-        height: p.ly, tessellation: 16
-      }, M.cena);
-    },
-    bobina: function (b, p) {
-      /* bobina fica DEITADA na prateleira, como rolo de cabo */
-      var m = b.MeshBuilder.CreateCylinder('f_bobina', {
-        diameter: Math.min(p.ly, p.lz) * 0.95,
-        height: p.lx * 0.9, tessellation: 18
-      }, M.cena);
-      m.rotation.z = Math.PI / 2;
-      return m;
-    },
-    barra: function (b, p) {
-      /* tubos e barras: comprido e fino, atravessando a prateleira */
-      return b.MeshBuilder.CreateBox('f_barra', {
-        width: p.lx * 0.9, height: p.ly * 0.35, depth: p.lz * 0.9
-      }, M.cena);
-    },
-    saco: function (b, p) {
-      /* saco não tem quina: esfera achatada */
-      var m = b.MeshBuilder.CreateSphere('f_saco', {
-        diameterX: p.lx * 0.96, diameterY: p.ly * 0.88,
-        diameterZ: p.lz * 0.96, segments: 8
-      }, M.cena);
-      return m;
+  /* ============================================================
+     [G] 15/11 · BIBLIOTECA DE MODELOS 3D — seção 4 do prompt
+
+     Antes havia 6 formas e TUDO que não casava caía em "caixa":
+     papelão, metálica e organizadora apareciam como o mesmo bloco.
+     Agora cada tipo tem geometria própria, montada de peças e
+     fundida numa malha só (MergeMeshes com multi-material) para
+     continuar instanciável — o galpão tem centenas de posições, e
+     instância é o que segura o quadro.
+
+     REGRA QUE NÃO MUDA: a cor de ocupação continua mandando no
+     CORPO da peça, porque ela é dado do sistema. O tipo controla a
+     FORMA e a cor dos DETALHES (borda, ripa, pé, flange, aba) —
+     que é onde o olho reconhece o objeto sem perder a leitura de
+     ocupação.
+     ============================================================ */
+
+  /* qualidade gráfica: quanto detalhe cada modelo recebe.
+     'baixo' volta ao bloco único, para máquina fraca e TV. */
+  M.qualidade = 'alto';
+  M.QUALIDADES = ['baixo', 'medio', 'alto'];
+  M.definirQualidade = function (q) {
+    if (M.QUALIDADES.indexOf(String(q)) < 0) return false;
+    if (M.qualidade === q) return true;
+    M.qualidade = String(q);
+    /* o cache de moldes mora no mesmo mapa dos materiais ("mat:") e
+       das placas ("placa:"). Só a GEOMETRIA depende da qualidade,
+       então derrubo só ela — material recriado à toa vaza memória. */
+    var fica = {};
+    for (var k in M.moldes) {
+      if (!Object.prototype.hasOwnProperty.call(M.moldes, k)) continue;
+      if (k.indexOf('mat:') === 0 || k.indexOf('placa:') === 0) fica[k] = M.moldes[k];
+      else if (M.moldes[k] && M.moldes[k].dispose) {
+        try { M.moldes[k].dispose(); } catch (e) {}
+      }
     }
+    M.moldes = fica;
+    return true;
+  };
+  function detalhado() { return M.qualidade === 'alto'; }
+  function medioOuMais() { return M.qualidade !== 'baixo'; }
+
+  /* tons naturais de cada tipo — usados SÓ nos detalhes */
+  var TOM_DO_TIPO = {
+    caixaPreta:     '#17181C',
+    caixaVazada:    '#1E242B',
+    caixaFechada:   '#20242A',
+    papelao:        '#8A6A43',
+    metalica:       '#98A1A9',
+    paleteMadeira:  '#A9793F',
+    paletePlastico: '#2E3B45',
+    tambor:         '#27384B',
+    bigBag:         '#CFC8B8',
+    bobina:         '#5A4639',
+    barra:          '#8C929A',
+    caixa:          '#6B726F'
   };
 
+  /* --------- ferramenta miúda de montagem --------- */
+  function cx(b, nome, w, h, d, x, y, z) {
+    var m = b.MeshBuilder.CreateBox(nome, {
+      width:  Math.max(Number(w) || 0, 0.004),
+      height: Math.max(Number(h) || 0, 0.004),
+      depth:  Math.max(Number(d) || 0, 0.004) }, M.cena);
+    m.position.x = x || 0; m.position.y = y || 0; m.position.z = z || 0;
+    return m;
+  }
+  function cil(b, nome, diam, alt, lados, x, y, z) {
+    var m = b.MeshBuilder.CreateCylinder(nome, {
+      diameter: Math.max(Number(diam) || 0, 0.004),
+      height:   Math.max(Number(alt) || 0, 0.004),
+      tessellation: lados || 14 }, M.cena);
+    m.position.x = x || 0; m.position.y = y || 0; m.position.z = z || 0;
+    return m;
+  }
+
+  /* --------- 1, 2 · CAIXA PLÁSTICA ABERTA (preta e vazada)
+
+     O modelo prioritário do prompt. NÃO é um bloco: é um caixote
+     de parede fina, com piso, quatro paredes, borda superior
+     reforçada, cantos arredondados e ripas de reforço. O topo fica
+     aberto, então dá para ver o interior e a espessura da parede. */
+  function caixaAberta(b, p, vazada) {
+    var corpo = [], det = [];
+    var esp = Math.min(p.lx, p.lz) * 0.075;
+    var baseY = -p.ly / 2;
+    var hPar = p.ly - esp;
+
+    corpo.push(cx(b, 'piso', p.lx - esp * 0.6, esp, p.lz - esp * 0.6,
+      0, baseY + esp / 2, 0));
+
+    if (!medioOuMais()) {
+      return { corpo: corpo.concat([cx(b, 'bloco', p.lx, p.ly, p.lz, 0, 0, 0)]),
+               detalhe: det };
+    }
+
+    if (!vazada) {
+      corpo.push(cx(b, 'pFrente', p.lx - esp * 2, hPar, esp,
+        0, baseY + esp + hPar / 2,  (p.lz - esp) / 2));
+      corpo.push(cx(b, 'pFundo',  p.lx - esp * 2, hPar, esp,
+        0, baseY + esp + hPar / 2, -(p.lz - esp) / 2));
+      corpo.push(cx(b, 'pEsq', esp, hPar, p.lz - esp * 2,
+        -(p.lx - esp) / 2, baseY + esp + hPar / 2, 0));
+      corpo.push(cx(b, 'pDir', esp, hPar, p.lz - esp * 2,
+         (p.lx - esp) / 2, baseY + esp + hPar / 2, 0));
+    } else {
+      /* parede vazada: ripas horizontais com vão entre elas */
+      var n = 3, hR = hPar / (n * 2 - 1);
+      for (var i = 0; i < n; i++) {
+        var yy = baseY + esp + hR / 2 + i * hR * 2;
+        corpo.push(cx(b, 'rF' + i, p.lx - esp * 2, hR, esp, 0, yy,  (p.lz - esp) / 2));
+        corpo.push(cx(b, 'rT' + i, p.lx - esp * 2, hR, esp, 0, yy, -(p.lz - esp) / 2));
+        corpo.push(cx(b, 'rE' + i, esp, hR, p.lz - esp * 2, -(p.lx - esp) / 2, yy, 0));
+        corpo.push(cx(b, 'rD' + i, esp, hR, p.lz - esp * 2,  (p.lx - esp) / 2, yy, 0));
+      }
+    }
+
+    /* borda superior reforçada — mais grossa que a parede */
+    var hB = p.ly * 0.085, yB = p.ly / 2 - hB / 2, eB = esp * 1.9;
+    det.push(cx(b, 'bF', p.lx, hB, eB, 0, yB,  (p.lz - eB) / 2));
+    det.push(cx(b, 'bT', p.lx, hB, eB, 0, yB, -(p.lz - eB) / 2));
+    det.push(cx(b, 'bE', eB, hB, p.lz - eB * 2, -(p.lx - eB) / 2, yB, 0));
+    det.push(cx(b, 'bD', eB, hB, p.lz - eB * 2,  (p.lx - eB) / 2, yB, 0));
+
+    if (!detalhado()) return { corpo: corpo, detalhe: det };
+
+    /* cantos arredondados: um cilindro em cada quina vertical */
+    var dC = esp * 2.4, quinas = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+    for (var q = 0; q < quinas.length; q++) {
+      det.push(cil(b, 'quina' + q, dC, p.ly, 10,
+        quinas[q][0] * (p.lx / 2 - dC / 2.5), 0,
+        quinas[q][1] * (p.lz / 2 - dC / 2.5)));
+    }
+    /* ripas verticais de reforço nas duas faces longas */
+    for (var r = 0; r < 2; r++) {
+      var xx = (-0.5 + (r + 0.5) / 2) * (p.lx * 0.62);
+      det.push(cx(b, 'vF' + r, esp * 0.9, p.ly * 0.66, esp * 0.6,
+        xx, -p.ly * 0.08,  p.lz / 2));
+      det.push(cx(b, 'vT' + r, esp * 0.9, p.ly * 0.66, esp * 0.6,
+        xx, -p.ly * 0.08, -p.lz / 2));
+    }
+    return { corpo: corpo, detalhe: det };
+  }
+
+  /* --------- 3 · CAIXA PLÁSTICA FECHADA: corpo + tampa com aba --------- */
+  function caixaFechada(b, p) {
+    var corpo = [], det = [];
+    var hTampa = p.ly * 0.12;
+    corpo.push(cx(b, 'corpo', p.lx * 0.97, p.ly - hTampa, p.lz * 0.97,
+      0, -hTampa / 2, 0));
+    if (!medioOuMais()) return { corpo: corpo, detalhe: det };
+
+    det.push(cx(b, 'tampa', p.lx, hTampa, p.lz, 0, p.ly / 2 - hTampa / 2, 0));
+    var eB = Math.min(p.lx, p.lz) * 0.07;
+    det.push(cx(b, 'abaF', p.lx, hTampa * 0.55, eB,
+      0, p.ly / 2 - hTampa, (p.lz - eB) / 2));
+    det.push(cx(b, 'abaT', p.lx, hTampa * 0.55, eB,
+      0, p.ly / 2 - hTampa, -(p.lz - eB) / 2));
+    if (!detalhado()) return { corpo: corpo, detalhe: det };
+    /* trava de fecho nas duas pontas */
+    det.push(cx(b, 'trava1', p.lx * 0.16, hTampa * 0.9, eB * 1.4,
+      -p.lx * 0.3, p.ly / 2 - hTampa * 1.1, p.lz / 2));
+    det.push(cx(b, 'trava2', p.lx * 0.16, hTampa * 0.9, eB * 1.4,
+       p.lx * 0.3, p.ly / 2 - hTampa * 1.1, p.lz / 2));
+    return { corpo: corpo, detalhe: det };
+  }
+
+  /* --------- 4 · CAIXA DE PAPELÃO: abas no topo e fita --------- */
+  function caixaPapelao(b, p) {
+    var corpo = [], det = [];
+    corpo.push(cx(b, 'corpo', p.lx, p.ly * 0.94, p.lz, 0, -p.ly * 0.03, 0));
+    if (!medioOuMais()) return { corpo: corpo, detalhe: det };
+
+    var hAba = p.ly * 0.06;
+    /* duas abas que se encontram no meio, levemente levantadas */
+    var a1 = cx(b, 'aba1', p.lx, hAba, p.lz * 0.52,
+      0, p.ly / 2 - hAba / 2, -p.lz * 0.24);
+    var a2 = cx(b, 'aba2', p.lx, hAba, p.lz * 0.52,
+      0, p.ly / 2 - hAba / 2,  p.lz * 0.24);
+    if (detalhado()) { a1.rotation.x = -0.05; a2.rotation.x = 0.05; }
+    det.push(a1); det.push(a2);
+    if (!detalhado()) return { corpo: corpo, detalhe: det };
+    /* fita de vedação atravessando a junta */
+    det.push(cx(b, 'fita', p.lx * 0.22, hAba * 0.5, p.lz,
+      0, p.ly / 2 + hAba * 0.15, 0));
+    return { corpo: corpo, detalhe: det };
+  }
+
+  /* --------- 5 · CAIXA METÁLICA: cantoneiras e puxá --------- */
+  function caixaMetalica(b, p) {
+    var corpo = [], det = [];
+    corpo.push(cx(b, 'corpo', p.lx * 0.96, p.ly * 0.9, p.lz * 0.96, 0, -p.ly * 0.05, 0));
+    if (!medioOuMais()) return { corpo: corpo, detalhe: det };
+
+    var e = Math.min(p.lx, p.lz) * 0.06;
+    det.push(cx(b, 'tampo', p.lx, p.ly * 0.1, p.lz, 0, p.ly * 0.45, 0));
+    if (!detalhado()) return { corpo: corpo, detalhe: det };
+    /* cantoneiras em L nas quatro quinas */
+    var qs = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+    for (var q = 0; q < qs.length; q++) {
+      det.push(cx(b, 'cantA' + q, e * 2.2, p.ly * 0.9, e,
+        qs[q][0] * (p.lx / 2 - e * 1.1), -p.ly * 0.05, qs[q][1] * (p.lz / 2 - e / 2)));
+      det.push(cx(b, 'cantB' + q, e, p.ly * 0.9, e * 2.2,
+        qs[q][0] * (p.lx / 2 - e / 2), -p.ly * 0.05, qs[q][1] * (p.lz / 2 - e * 1.1)));
+    }
+    /* puxadores laterais */
+    det.push(cx(b, 'puxE', e, p.ly * 0.1, p.lz * 0.34, -p.lx / 2, 0, 0));
+    det.push(cx(b, 'puxD', e, p.ly * 0.1, p.lz * 0.34,  p.lx / 2, 0, 0));
+    return { corpo: corpo, detalhe: det };
+  }
+
+  /* --------- 6 · PALETE DE MADEIRA: tábuas separadas, com vão --------- */
+  function paleteMadeira(b, p) {
+    var corpo = [], det = [];
+    var hPal = p.ly * 0.26;                     /* altura do estrado */
+    var baseY = -p.ly / 2;
+    var eT = hPal * 0.26;                       /* espessura da tábua */
+
+    /* a carga em cima: ESSA leva a cor de ocupação */
+    corpo.push(cx(b, 'carga', p.lx * 0.92, p.ly - hPal, p.lz * 0.92,
+      0, baseY + hPal + (p.ly - hPal) / 2, 0));
+
+    if (!medioOuMais()) {
+      det.push(cx(b, 'estrado', p.lx, hPal, p.lz, 0, baseY + hPal / 2, 0));
+      return { corpo: corpo, detalhe: det };
+    }
+
+    /* tábuas de cima, uma a uma, com vão entre elas */
+    var n = detalhado() ? 5 : 3;
+    for (var i = 0; i < n; i++) {
+      var zz = (-0.5 + (i + 0.5) / n) * p.lz;
+      det.push(cx(b, 'tab' + i, p.lx, eT, (p.lz / n) * 0.72,
+        0, baseY + hPal - eT / 2, zz));
+    }
+    /* longarinas no meio */
+    for (var j = 0; j < 3; j++) {
+      var xx = (-0.5 + (j + 0.5) / 3) * p.lx;
+      det.push(cx(b, 'long' + j, p.lx * 0.1, hPal - eT * 2, p.lz,
+        xx, baseY + hPal / 2, 0));
+    }
+    if (!detalhado()) return { corpo: corpo, detalhe: det };
+    /* tábuas de baixo */
+    for (var k = 0; k < 3; k++) {
+      var z2 = (-0.5 + (k + 0.5) / 3) * p.lz;
+      det.push(cx(b, 'baixo' + k, p.lx, eT, (p.lz / 3) * 0.55,
+        0, baseY + eT / 2, z2));
+    }
+    return { corpo: corpo, detalhe: det };
+  }
+
+  /* --------- 7 · PALETE PLÁSTICO: estrado inteiriço e nove pés --------- */
+  function paletePlastico(b, p) {
+    var corpo = [], det = [];
+    var hPal = p.ly * 0.22, baseY = -p.ly / 2;
+    var hPe = hPal * 0.6, hDeck = hPal - hPe;
+
+    corpo.push(cx(b, 'carga', p.lx * 0.92, p.ly - hPal, p.lz * 0.92,
+      0, baseY + hPal + (p.ly - hPal) / 2, 0));
+    det.push(cx(b, 'deck', p.lx, hDeck, p.lz, 0, baseY + hPe + hDeck / 2, 0));
+    if (!medioOuMais()) return { corpo: corpo, detalhe: det };
+
+    var passos = [-1, 0, 1];
+    for (var a = 0; a < 3; a++) {
+      for (var c = 0; c < 3; c++) {
+        det.push(cx(b, 'pe' + a + c, p.lx * 0.17, hPe, p.lz * 0.17,
+          passos[a] * (p.lx * 0.37), baseY + hPe / 2, passos[c] * (p.lz * 0.37)));
+      }
+    }
+    return { corpo: corpo, detalhe: det };
+  }
+
+  /* --------- 8 · TAMBOR E BOMBONA: anéis de rolagem e tampa --------- */
+  function tambor(b, p) {
+    var corpo = [], det = [];
+    var d = Math.min(p.lx, p.lz) * 0.92;
+    corpo.push(cil(b, 'casco', d, p.ly, 16, 0, 0, 0));
+    if (!medioOuMais()) return { corpo: corpo, detalhe: det };
+
+    det.push(cil(b, 'aro1', d * 1.05, p.ly * 0.07, 16, 0,  p.ly * 0.22, 0));
+    det.push(cil(b, 'aro2', d * 1.05, p.ly * 0.07, 16, 0, -p.ly * 0.22, 0));
+    if (!detalhado()) return { corpo: corpo, detalhe: det };
+    det.push(cil(b, 'tampo', d * 1.02, p.ly * 0.06, 16, 0, p.ly / 2 - p.ly * 0.03, 0));
+    det.push(cil(b, 'bujao', d * 0.18, p.ly * 0.05, 8,
+      d * 0.25, p.ly / 2 + p.ly * 0.005, 0));
+    return { corpo: corpo, detalhe: det };
+  }
+
+  /* --------- 9 · SACO E BIG BAG: corpo cônico e alças --------- */
+  function bigBag(b, p) {
+    var corpo = [], det = [];
+    var m = b.MeshBuilder.CreateCylinder('saco', {
+      diameterTop: Math.min(p.lx, p.lz) * 0.78,
+      diameterBottom: Math.min(p.lx, p.lz) * 0.98,
+      height: p.ly * 0.9, tessellation: 12 }, M.cena);
+    m.position.y = -p.ly * 0.05;
+    corpo.push(m);
+    if (!detalhado()) return { corpo: corpo, detalhe: det };
+
+    /* [G2] 15/11, depois do catálogo: as alças estavam em
+       x = 0.26·lx, mas o topo do saco tem raio 0.195·lx. Elas
+       nasciam FORA do saco e apareciam como cubinhos soltos no ar
+       — dá para ver na primeira foto do galpão. Agora ficam dentro
+       do raio do topo e descem o bastante para encostar nele. */
+    var rTopo = Math.min(p.lx, p.lz) * 0.78 / 2;
+    var topoY = -p.ly * 0.05 + p.ly * 0.9 / 2;
+    var hAlca = p.ly * 0.14;
+    var qs = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+    for (var q = 0; q < qs.length; q++) {
+      det.push(cx(b, 'alca' + q, p.lx * 0.055, hAlca, p.lz * 0.055,
+        qs[q][0] * rTopo * 0.62, topoY + hAlca * 0.22, qs[q][1] * rTopo * 0.62));
+    }
+    return { corpo: corpo, detalhe: det };
+  }
+
+  /* --------- 10 · BOBINA E CARRETEL: flanges e núcleo, deitada --------- */
+  function bobina(b, p) {
+    var corpo = [], det = [];
+    var dFl = Math.min(p.ly, p.lz) * 0.96;
+    var larg = p.lx * 0.86;
+
+    var rolo = cil(b, 'rolo', dFl * 0.78, larg * 0.84, 18, 0, 0, 0);
+    rolo.rotation.z = Math.PI / 2;
+    corpo.push(rolo);
+    if (!medioOuMais()) return { corpo: corpo, detalhe: det };
+
+    var f1 = cil(b, 'flange1', dFl, larg * 0.08, 18, -larg / 2, 0, 0);
+    var f2 = cil(b, 'flange2', dFl, larg * 0.08, 18,  larg / 2, 0, 0);
+    f1.rotation.z = Math.PI / 2; f2.rotation.z = Math.PI / 2;
+    det.push(f1); det.push(f2);
+    if (!detalhado()) return { corpo: corpo, detalhe: det };
+    var nuc = cil(b, 'nucleo', dFl * 0.22, larg * 1.04, 12, 0, 0, 0);
+    nuc.rotation.z = Math.PI / 2;
+    det.push(nuc);
+    return { corpo: corpo, detalhe: det };
+  }
+
+  /* --------- 11 · BARRAS, TUBOS E PERFIS: feixe amarrado --------- */
+  function feixeDeBarras(b, p) {
+    var corpo = [], det = [];
+    if (!medioOuMais()) {
+      corpo.push(cx(b, 'feixe', p.lx * 0.94, p.ly * 0.4, p.lz * 0.86, 0, -p.ly * 0.3, 0));
+      return { corpo: corpo, detalhe: det };
+    }
+    var d = Math.min(p.ly, p.lz) * 0.26;
+    var linhas = detalhado() ? 2 : 1, porLinha = detalhado() ? 4 : 3;
+    for (var L = 0; L < linhas; L++) {
+      for (var i = 0; i < porLinha; i++) {
+        var zz = (-0.5 + (i + 0.5) / porLinha) * (p.lz * 0.82);
+        var yy = -p.ly / 2 + d / 2 + L * d * 0.92;
+        var t = cil(b, 'barra' + L + i, d, p.lx * 0.94, 10, 0, yy, zz);
+        t.rotation.z = Math.PI / 2;
+        corpo.push(t);
+      }
+    }
+    if (!detalhado()) return { corpo: corpo, detalhe: det };
+    /* [G2] duas cintas de amarração. Antes eram mais altas e mais
+       fundas que o próprio feixe e apareciam como chapas soltas na
+       frente dele; agora abraçam o feixe, como cinta de verdade. */
+    var altoFeixe = d * linhas * 0.92, meioFeixe = -p.ly / 2 + altoFeixe / 2;
+    det.push(cx(b, 'cinta1', p.lx * 0.035, altoFeixe * 1.12, p.lz * 0.86,
+      -p.lx * 0.24, meioFeixe, 0));
+    det.push(cx(b, 'cinta2', p.lx * 0.035, altoFeixe * 1.12, p.lz * 0.86,
+       p.lx * 0.24, meioFeixe, 0));
+    return { corpo: corpo, detalhe: det };
+  }
+
+  /* bloco simples — o que as peças que não são posição usam */
+  function blocoSimples(b, p) {
+    return { corpo: [cx(b, 'bloco', p.lx, p.ly, p.lz, 0, 0, 0)], detalhe: [] };
+  }
+
+  var FORMAS = {
+    caixa:          function (b, p) { return blocoSimples(b, p); },
+    caixaPreta:     function (b, p) { return caixaAberta(b, p, false); },
+    caixaVazada:    function (b, p) { return caixaAberta(b, p, true); },
+    caixaFechada:   function (b, p) { return caixaFechada(b, p); },
+    papelao:        function (b, p) { return caixaPapelao(b, p); },
+    metalica:       function (b, p) { return caixaMetalica(b, p); },
+    paleteMadeira:  function (b, p) { return paleteMadeira(b, p); },
+    paletePlastico: function (b, p) { return paletePlastico(b, p); },
+    tambor:         function (b, p) { return tambor(b, p); },
+    bigBag:         function (b, p) { return bigBag(b, p); },
+    bobina:         function (b, p) { return bobina(b, p); },
+    barra:          function (b, p) { return feixeDeBarras(b, p); }
+  };
+  /* nomes antigos continuam valendo: nada que já chamava quebra */
+  FORMAS.pallet = FORMAS.paleteMadeira;
+  FORMAS.saco   = FORMAS.bigBag;
+
+  M.FORMAS = FORMAS;
+  M.TOM_DO_TIPO = TOM_DO_TIPO;
+
+  /* ------------------------------------------------------------
+     De que tipo é esta posição? Sai do cadastro, dos mesmos
+     campos de sempre (objeto / embalagem / tipoObjeto). NÃO é
+     deduzido da quantidade nem inventado.
+     ------------------------------------------------------------ */
   function formaDaPeca(peca) {
     if (peca.tipo !== 'posicao') return 'caixa';
     var d = peca.dado || {};
-    /* lp() mora no layout3d, não aqui. O motor é outro IIFE. */
     var bruto = d.objeto || d.embalagem || d.tipoObjeto || '';
     var t = String(bruto === null || bruto === undefined ? '' : bruto)
               .trim().toLowerCase();
     if (!t) return 'caixa';
-    if (t.indexOf('pallet') > -1 || t.indexOf('palete') > -1) return 'pallet';
+
+    var ePalete = t.indexOf('palete') > -1 || t.indexOf('pallet') > -1 ||
+                  t.indexOf('palet') > -1;
+    if (ePalete) {
+      return (t.indexOf('plástic') > -1 || t.indexOf('plastic') > -1)
+        ? 'paletePlastico' : 'paleteMadeira';
+    }
     if (t.indexOf('tambor') > -1 || t.indexOf('bombona') > -1 ||
-        t.indexOf('balde') > -1) return 'tambor';
+        t.indexOf('balde') > -1 || t.indexOf('barril') > -1) return 'tambor';
     if (t.indexOf('saco') > -1 || t.indexOf('saca') > -1 ||
-        t.indexOf('big bag') > -1) return 'saco';
+        t.indexOf('big bag') > -1 || t.indexOf('bigbag') > -1) return 'bigBag';
     if (t.indexOf('bobina') > -1 || t.indexOf('rolo') > -1 ||
         t.indexOf('carretel') > -1) return 'bobina';
     if (t.indexOf('barra') > -1 || t.indexOf('tubo') > -1 ||
-        t.indexOf('perfil') > -1 || t.indexOf('vergalh') > -1) return 'barra';
+        t.indexOf('perfil') > -1 || t.indexOf('vergalh') > -1 ||
+        t.indexOf('eletroduto') > -1) return 'barra';
+    if (t.indexOf('papelão') > -1 || t.indexOf('papelao') > -1 ||
+        t.indexOf('caixa de papel') > -1) return 'papelao';
+    if (t.indexOf('metálic') > -1 || t.indexOf('metalic') > -1 ||
+        t.indexOf('aço') > -1 || t.indexOf('ferro') > -1) return 'metalica';
+    if (t.indexOf('vazad') > -1 || t.indexOf('vazia') > -1 ||
+        t.indexOf('ventilad') > -1 || t.indexOf('furad') > -1) return 'caixaVazada';
+    if (t.indexOf('fechad') > -1 || t.indexOf('tampa') > -1 ||
+        t.indexOf('organizadora') > -1 || t.indexOf('herm') > -1) return 'caixaFechada';
+    if (t.indexOf('pret') > -1) return 'caixaPreta';
+    /* "caixa plástica" sem mais nada é o caixote preto do almoxarifado */
+    if (t.indexOf('plástic') > -1 || t.indexOf('plastic') > -1 ||
+        t.indexOf('caixa') > -1 || t.indexOf('gaveta') > -1) return 'caixaPreta';
     return 'caixa';
   }
+  M.formaDaPeca = formaDaPeca;
 
   /* [T] A PLACA DA RUA, COM A LETRA ESCRITA · seção 6
      "Identificação visual das ruas. Etiquetas e placas de endereço."
@@ -2756,29 +3144,39 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
     var chave = 'placa:' + peca.rotulo;
     if (M.moldes[chave]) return M.moldes[chave];
 
-    /* [P] 15/11, 11h — A PLACA, TERCEIRA TENTATIVA. E agora com a
-       causa certa.
+    /* [P2] 15/11, 16h — A PLACA, QUARTA TENTATIVA, E ESTA EU MEDI.
 
-       Primeiro ela era uma CAIXA: a textura ia nas seis faces e a
-       de trás saía espelhada — "A AUЯ".
+       Histórico das três que falharam, para ninguém repetir:
+         1. CAIXA: a textura ia nas seis faces, o verso saía
+            espelhado — "A AUЯ".
+         2. BILLBOARD: achei que girar com a câmera resolveria.
+            Não resolveu, e ele viu de novo.
+         3. Plano DOUBLESIDE com backUVs espelhada em x. Parecia o
+            jeito canônico, mas o texto saiu de CABEÇA PARA BAIXO,
+            e ele viu pela terceira vez.
 
-       Então eu troquei por um plano com BILLBOARD, achando que
-       girar com a câmera resolveria. Não resolveu: o billboard
-       orienta o plano pelo lado de trás, e o texto continuou
-       invertido. Tentativa minha, errada, e ele viu de novo.
+       O erro das três foi o mesmo: eu deduzia a orientação em vez
+       de olhar. Desta vez renderizei sete variantes com uma marca
+       vermelha no canto superior esquerdo da textura e fotografei
+       cada uma pela frente e pelo verso. O que as fotos mostraram:
 
-       Agora é o jeito canônico do Babylon, sem adivinhação: um
-       plano de DUAS FACES, com a UV da face de trás espelhada no
-       eixo horizontal (backUVs x invertido). A frente lê certo
-       porque é o desenho; o verso lê certo porque a UV dele está
-       espelhada — como placa de rua de verdade, de chapa dupla.
-       Sem billboard: assim ela não gira, não deita e não inverte. */
-    var placa = b.MeshBuilder.CreatePlane('placa_' + peca.rotulo, {
-      width: peca.lx, height: peca.ly,
-      sideOrientation: b.Mesh.DOUBLESIDE,
-      frontUVs: new b.Vector4(0, 0, 1, 1),
-      backUVs:  new b.Vector4(1, 0, 0, 1)
-    }, M.cena);
+         a) A DynamicTexture chega com o V invertido: o canvas
+            desenha com y para baixo e o plano lê v para cima.
+            Sem vScale = -1 o texto sai de cabeça para baixo.
+            ESSA era a causa do que ele reclamou duas vezes.
+         b) DOUBLESIDE com backUVs espelhada acerta UMA face e
+            erra a outra, qualquer que seja a combinação.
+
+       A construção que leu certo DOS DOIS LADOS na foto é a mesma
+       de uma placa de rua de verdade: DUAS CHAPAS costas com
+       costas, cada uma com a sua face para fora, fundidas numa
+       malha só para continuar instanciável. Nenhuma UV espelhada,
+       nada a deduzir — cada face é uma frente.                   */
+    var chapaA = b.MeshBuilder.CreatePlane('placa_' + peca.rotulo + '_a',
+      { width: peca.lx, height: peca.ly }, M.cena);
+    var chapaB = b.MeshBuilder.CreatePlane('placa_' + peca.rotulo + '_b',
+      { width: peca.lx, height: peca.ly }, M.cena);
+    chapaB.rotation.y = Math.PI;
 
     var mat = new b.StandardMaterial('m_placa_' + peca.rotulo, M.cena);
     mat.diffuseColor = cor3('#1E3A5F');
@@ -2795,11 +3193,24 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
         c.textAlign = 'center'; c.textBaseline = 'middle';
         c.fillText('RUA ' + String(peca.rotulo), 128, 68);
         t.update(false);
+        /* [P2] o V invertido: medido na foto, não deduzido */
+        t.vScale = -1;
+        t.vOffset = 1;
         mat.diffuseTexture = t;
         mat.emissiveColor = cor3('#3A4A5F');
       }
     } catch (e) {}
     mat.freeze();            /* a placa nunca muda depois de pintada */
+    chapaA.material = mat;
+    chapaB.material = mat;
+
+    var placa = b.Mesh.MergeMeshes([chapaA, chapaB], true, true,
+      undefined, false, false);
+    if (!placa) {            /* se a fusão falhar, NÃO fico sem placa */
+      placa = chapaA;
+      try { chapaB.dispose(); } catch (e2) {}
+    }
+    placa.name = 'placa_' + peca.rotulo;
     placa.material = mat;
     placa.isVisible = false;
     placa.isPickable = false;
@@ -2812,19 +3223,56 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
     if (peca.tipo === 'placaRua' && peca.rotulo) return placaDeRua(peca);
     var forma = formaDaPeca(peca);
     var chave = [peca.tipo, forma, peca.lx.toFixed(3), peca.ly.toFixed(3),
-                 peca.lz.toFixed(3), peca.cor].join('|');
+                 peca.lz.toFixed(3), peca.cor, M.qualidade].join('|');
     if (M.moldes[chave]) return M.moldes[chave];
 
     var fab = FORMAS[forma] || FORMAS.caixa;
-    var corpo = fab(b, peca);
-    corpo.name = 'molde_' + peca.tipo + '_' + forma;
+    var partes = fab(b, peca);
+
+    /* compatibilidade: forma antiga que devolvia UMA malha */
+    if (partes && partes.getClassName) partes = { corpo: [partes], detalhe: [] };
+    if (!partes || !partes.corpo || !partes.corpo.length) {
+      partes = { corpo: [b.MeshBuilder.CreateBox('f_bloco',
+        { width: peca.lx, height: peca.ly, depth: peca.lz }, M.cena)], detalhe: [] };
+    }
 
     var acab = ACABAMENTO[peca.tipo] || {};
     if (peca.tipo === 'posicao' && forma !== 'caixa') {
       acab = ACABAMENTO[forma] || acab;
     }
-    corpo.material = material('m_' + peca.tipo + '_' + forma + '_' + peca.cor,
+
+    /* o CORPO leva a cor de ocupação — dado do sistema, não aparência */
+    var matCorpo = material('m_' + peca.tipo + '_' + forma + '_' + peca.cor,
       peca.cor, acab);
+    var i;
+    for (i = 0; i < partes.corpo.length; i++) partes.corpo[i].material = matCorpo;
+
+    /* o DETALHE leva o tom natural do tipo: é ele que faz a caixa
+       preta parecer caixa preta sem apagar a leitura de ocupação */
+    var todas = partes.corpo.slice();
+    if (partes.detalhe && partes.detalhe.length) {
+      var matDet = material('m_det_' + forma, TOM_DO_TIPO[forma] || '#6B726F', acab);
+      for (i = 0; i < partes.detalhe.length; i++) {
+        partes.detalhe[i].material = matDet;
+        todas.push(partes.detalhe[i]);
+      }
+    }
+
+    var corpo;
+    if (todas.length === 1) {
+      corpo = todas[0];
+    } else {
+      /* funde tudo numa malha só, preservando os dois materiais, para
+         a peça continuar instanciável (centenas de posições) */
+      corpo = b.Mesh.MergeMeshes(todas, true, true, undefined, false, true);
+      if (!corpo) {
+        /* se a fusão falhar eu NÃO deixo a tela sem peça */
+        corpo = b.MeshBuilder.CreateBox('f_bloco',
+          { width: peca.lx, height: peca.ly, depth: peca.lz }, M.cena);
+        corpo.material = matCorpo;
+      }
+    }
+    corpo.name = 'molde_' + peca.tipo + '_' + forma;
     corpo.isVisible = false;                 /* o molde não aparece */
     corpo.isPickable = false;
     M.moldes[chave] = corpo;
@@ -3089,7 +3537,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var C = {
     nome: 'CONSTRUTOR3D',
-    versao: '6.5.0',
+    versao: '6.6.0',
     aberto: false,
     projeto: null,
     /* o galpão real fica guardado enquanto o projeto está na tela,
@@ -3768,7 +4216,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   'use strict';
 
   var APP = {
-    versao: '6.5.0',
+    versao: '6.6.0',
     montagem: null,
     locais: [],
     carregando: false,
@@ -3860,7 +4308,9 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
      ============================================================ */
   APP.TIPOS_ARMAZENAMENTO = [
     ['', '— não informado —'],
-    ['caixa plástica', 'caixa plástica'],
+    ['caixa plástica preta', 'caixa plástica preta'],
+    ['caixa plástica vazada', 'caixa plástica vazada (bin)'],
+    ['caixa plástica fechada', 'caixa plástica fechada (com tampa)'],
     ['caixa organizadora', 'caixa organizadora'],
     ['caixa de papelão', 'caixa de papelão'],
     ['caixa metálica', 'caixa metálica'],
@@ -5870,7 +6320,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
      Salvar o arquivo não é publicar, e publicar não é o
      navegador ter recebido.
      ============================================================ */
-  APP.VERSAO = '6.5.0';
+  APP.VERSAO = '6.6.0';
   APP.COMPILADO = '2026-11-15';
   APP.CARIMBO = 'ALMOXA 3D ' + APP.VERSAO + ' · ' + APP.COMPILADO;
 
@@ -6522,6 +6972,35 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
       bm.setAttribute('aria-pressed', el.hidden ? 'false' : 'true');
       if (!el.hidden) APP.pintarMinimapa(APP.rotaCalculada());
     });
+
+    /* [G] 15/11 · qualidade gráfica. Trocar o nível derruba o cache
+       de geometria e redesenha com o MESMO dado — nenhuma informação
+       muda, só quanto detalhe cada peça tem. */
+    var bq = $('v_qualidade');
+    if (bq) {
+      try {
+        var guardada = raiz.localStorage && raiz.localStorage.getItem('almoxa3d:qualidade');
+        if (guardada && raiz.MOTOR3D && raiz.MOTOR3D.definirQualidade(guardada)) {
+          bq.value = guardada;
+        } else if (raiz.MOTOR3D) {
+          bq.value = raiz.MOTOR3D.qualidade;
+        }
+      } catch (e) { if (raiz.MOTOR3D) bq.value = raiz.MOTOR3D.qualidade; }
+
+      bq.addEventListener('change', function () {
+        if (!raiz.MOTOR3D || !raiz.MOTOR3D.definirQualidade(bq.value)) {
+          bq.value = raiz.MOTOR3D ? raiz.MOTOR3D.qualidade : 'alto';
+          return;
+        }
+        try {
+          if (raiz.localStorage)
+            raiz.localStorage.setItem('almoxa3d:qualidade', bq.value);
+        } catch (e2) {}
+        if (APP.montagem && raiz.MOTOR3D.desenhar) {
+          raiz.MOTOR3D.desenhar(APP.montagem);
+        }
+      });
+    }
 
     /* [V] a versão fica sempre na barra, e clicar abre o painel */
     APP.pintarVersao();
