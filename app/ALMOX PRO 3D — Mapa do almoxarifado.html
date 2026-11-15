@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>ALMOX PRO 3D 6.1.1 · 15/11</title>
+<title>ALMOX PRO 3D 6.2.0 · 15/11</title>
 <style>
 /* ALMOXA 3D · almoxa3d.css · 08/11/2026
    Responsivo de verdade (seção 11): no celular o painel vira
@@ -1849,7 +1849,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   }
 
   raiz.LAYOUT3D = {
-    VERSAO: '6.1.1',
+    VERSAO: '6.2.0',
     MEDIDAS: MEDIDAS,
     CORES: CORES,
     organizar: organizar,
@@ -1951,7 +1951,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var A = {
     nome: 'API3D',
-    versao: '6.1.1',
+    versao: '6.2.0',
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
     chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
     origemDaChave: 'nenhuma (fase 1)',
@@ -2364,7 +2364,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var M = {
     nome: 'MOTOR3D',
-    versao: '6.1.1',
+    versao: '6.2.0',
     engine: null,
     cena: null,
     camera: null,
@@ -2452,6 +2452,24 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   /* ----------------------------------------------------------
      MATERIAIS E MOLDES
      ---------------------------------------------------------- */
+  /* [R] 15/11 — ACABAMENTO.
+     Antes todo material tinha o mesmo brilho chapado, e o galpão
+     ficava com cara de papel. Agora cada tipo de peça tem o
+     acabamento do material que ele representa: ferro reflete um
+     pouco, papelão não reflete quase nada, plástico reflete mais.
+     É a mesma geometria — muda só como a luz pega. */
+  var ACABAMENTO = {
+    piso:       { brilho: '#0A0A0A', ambiente: '#FFFFFF' },
+    estrutura:  { brilho: '#5A6472', ambiente: '#9AA3AE' },  /* ferro pintado */
+    montante:   { brilho: '#5A6472', ambiente: '#9AA3AE' },
+    longarina:  { brilho: '#5A6472', ambiente: '#9AA3AE' },
+    prateleira: { brilho: '#3A4350', ambiente: '#AAB2BD' },
+    posicao:    { brilho: '#2E3238', ambiente: '#FFFFFF' },  /* caixa */
+    pallet:     { brilho: '#14100A', ambiente: '#C8B28A' },  /* madeira */
+    tambor:     { brilho: '#7A8290', ambiente: '#FFFFFF' },  /* metal */
+    saco:       { brilho: '#0C0C0C', ambiente: '#E8E4DA' }   /* ráfia */
+  };
+
   function material(nome, hex, opcoes) {
     opcoes = opcoes || {};
     var b = B();
@@ -2460,6 +2478,8 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
     var mat = new b.StandardMaterial(nome, M.cena);
     mat.diffuseColor = cor3(hex);
     mat.specularColor = cor3(opcoes.brilho || '#2A2A2A');
+    mat.specularPower = opcoes.dureza || 48;
+    if (opcoes.ambiente) mat.ambientColor = cor3(opcoes.ambiente);
     if (opcoes.emissivo) mat.emissiveColor = cor3(opcoes.emissivo);
     mat.freeze();
     M.moldes[chave] = mat;
@@ -2467,21 +2487,80 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   }
 
   /** um molde por combinação de tamanho+cor; o resto vira instância */
+  /* [R] BIBLIOTECA DE OBJETOS · seção 3 do prompt de 15/11
+
+     O que está guardado numa posição nem sempre é uma caixa: pode
+     ser pallet, tambor ou saco. A FORMA vem do dado — do campo
+     "objeto" ou "embalagem" do cadastro de localização. Quando o
+     cadastro não diz, fica caixa, que é o caso comum.
+
+     NÃO invento o tipo a partir da quantidade nem do nome do
+     material: isso seria desenhar uma informação que ninguém
+     cadastrou, e aí o mapa passaria a afirmar coisas. Sem o campo,
+     caixa. */
+  var FORMAS = {
+    caixa: function (b, p) {
+      return b.MeshBuilder.CreateBox('f_caixa',
+        { width: p.lx, height: p.ly, depth: p.lz }, M.cena);
+    },
+    pallet: function (b, p) {
+      /* achatado e largo, como pallet carregado fica */
+      return b.MeshBuilder.CreateBox('f_pallet',
+        { width: p.lx, height: p.ly * 0.55, depth: p.lz }, M.cena);
+    },
+    tambor: function (b, p) {
+      return b.MeshBuilder.CreateCylinder('f_tambor', {
+        diameter: Math.min(p.lx, p.lz) * 0.92,
+        height: p.ly, tessellation: 16
+      }, M.cena);
+    },
+    saco: function (b, p) {
+      /* saco não tem quina: esfera achatada */
+      var m = b.MeshBuilder.CreateSphere('f_saco', {
+        diameterX: p.lx * 0.96, diameterY: p.ly * 0.88,
+        diameterZ: p.lz * 0.96, segments: 8
+      }, M.cena);
+      return m;
+    }
+  };
+
+  function formaDaPeca(peca) {
+    if (peca.tipo !== 'posicao') return 'caixa';
+    var d = peca.dado || {};
+    /* lp() mora no layout3d, não aqui. O motor é outro IIFE. */
+    var bruto = d.objeto || d.embalagem || d.tipoObjeto || '';
+    var t = String(bruto === null || bruto === undefined ? '' : bruto)
+              .trim().toLowerCase();
+    if (!t) return 'caixa';
+    if (t.indexOf('pallet') > -1 || t.indexOf('palete') > -1) return 'pallet';
+    if (t.indexOf('tambor') > -1 || t.indexOf('bombona') > -1 ||
+        t.indexOf('balde') > -1) return 'tambor';
+    if (t.indexOf('saco') > -1 || t.indexOf('saca') > -1 ||
+        t.indexOf('big bag') > -1) return 'saco';
+    return 'caixa';
+  }
+
   function molde(peca) {
     var b = B();
-    var chave = [peca.tipo, peca.lx.toFixed(3), peca.ly.toFixed(3),
+    var forma = formaDaPeca(peca);
+    var chave = [peca.tipo, forma, peca.lx.toFixed(3), peca.ly.toFixed(3),
                  peca.lz.toFixed(3), peca.cor].join('|');
     if (M.moldes[chave]) return M.moldes[chave];
 
-    var caixa = b.MeshBuilder.CreateBox('molde_' + peca.tipo, {
-      width: peca.lx, height: peca.ly, depth: peca.lz
-    }, M.cena);
-    caixa.material = material('m_' + peca.tipo + '_' + peca.cor, peca.cor,
-      { brilho: peca.tipo === 'piso' ? '#0A0A0A' : '#303030' });
-    caixa.isVisible = false;                 /* o molde não aparece */
-    caixa.isPickable = false;
-    M.moldes[chave] = caixa;
-    return caixa;
+    var fab = FORMAS[forma] || FORMAS.caixa;
+    var corpo = fab(b, peca);
+    corpo.name = 'molde_' + peca.tipo + '_' + forma;
+
+    var acab = ACABAMENTO[peca.tipo] || {};
+    if (peca.tipo === 'posicao' && forma !== 'caixa') {
+      acab = ACABAMENTO[forma] || acab;
+    }
+    corpo.material = material('m_' + peca.tipo + '_' + forma + '_' + peca.cor,
+      peca.cor, acab);
+    corpo.isVisible = false;                 /* o molde não aparece */
+    corpo.isPickable = false;
+    M.moldes[chave] = corpo;
+    return corpo;
   }
 
   /* ----------------------------------------------------------
@@ -2741,7 +2820,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var C = {
     nome: 'CONSTRUTOR3D',
-    versao: '6.1.1',
+    versao: '6.2.0',
     aberto: false,
     projeto: null,
     /* o galpão real fica guardado enquanto o projeto está na tela,
@@ -3420,7 +3499,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   'use strict';
 
   var APP = {
-    versao: '6.1.1',
+    versao: '6.2.0',
     montagem: null,
     locais: [],
     carregando: false,
@@ -5091,7 +5170,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
      Salvar o arquivo não é publicar, e publicar não é o
      navegador ter recebido.
      ============================================================ */
-  APP.VERSAO = '6.1.1';
+  APP.VERSAO = '6.2.0';
   APP.COMPILADO = '2026-11-15';
   APP.CARIMBO = 'ALMOXA 3D ' + APP.VERSAO + ' · ' + APP.COMPILADO;
 
