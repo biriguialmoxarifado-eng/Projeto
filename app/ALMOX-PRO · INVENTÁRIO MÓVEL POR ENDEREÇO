@@ -1,0 +1,1110 @@
+/* ============================================================
+   ALMOX-PRO · INVENTÁRIO MÓVEL POR ENDEREÇO   ·  AP_INVENTARIO.gs
+   14/11/2026  ·  fase 4 do ALMOXA 3D V2, seções 7, 8, 9 e 12
+   ------------------------------------------------------------
+   POR QUE ESTE ARQUIVO EXISTE
+
+   A fase 4 pede coisa que o Core não tem: atividade de inventário
+   atribuída a um funcionário, validação do QR contra o endereço
+   esperado, contagem física com divergência e linha do tempo por
+   posição e por funcionário. Eu procurei nos módulos que o
+   ALMOX PRO chama hoje e não existe nenhum deles.
+
+   O QUE EU NÃO FIZ, DE PROPÓSITO
+
+   · NÃO me chamo "inventario". Esse módulo JÁ EXISTE no seu Core
+     (listar, contar, divergencias, sugestoes) e cinco telas do
+     sistema dependem dele. Publicar um AP_Modulo_inventario aqui
+     atropelaria o seu. Este módulo se chama "invmovel".
+   · NÃO me chamo "atividades". Esse também já existe.
+   · NÃO uso a aba ALMOXA_ATIVIDADES (6 linhas) nem a
+     ALMOXA_INVENTARIOS. Elas são dos módulos que já existem. Pegar
+     aba de outro módulo emprestada é como gravar na gaveta alheia.
+   · NÃO crio aba sozinho. Em operação normal este arquivo só lê e
+     grava no que já existe. Para criar as abas há uma função
+     separada, AP_INV_INSTALAR, que o senhor roda sabendo o que
+     está fazendo, e que diz exatamente o que criou.
+   · NÃO apago linha. Nunca. Cancelar é status.
+   · NÃO mexo no saldo do estoque. A seção 9 é clara: "Uma contagem
+     não deverá alterar automaticamente o saldo oficial sem a
+     autorização exigida pelo Core."
+   · NÃO acredito no navegador. Quem é o usuário e o que ele pode
+     fazer é decidido aqui, pela sessão, como manda a seção 12.
+
+   AS TRÊS ABAS QUE ELE USA
+     ALMOXA_INV_ATIVIDADES  — uma linha por atividade
+     ALMOXA_INV_CONTAGENS   — uma linha por posição conferida
+     ALMOXA_INV_EVENTOS     — a linha do tempo, seção 8
+
+   COMO INSTALAR
+     1. Cole este arquivo no projeto do Apps Script (Script, não HTML).
+     2. Rode AP_INV_DIAGNOSTICO  → ele diz o que falta.
+     3. Rode AP_INV_INSTALAR     → cria só o que falta, e informa.
+     4. Publique nova versão.
+   ============================================================ */
+
+var AP_INV_CFG = {
+  abaAtividades: 'ALMOXA_INV_ATIVIDADES',
+  abaContagens:  'ALMOXA_INV_CONTAGENS',
+  abaEventos:    'ALMOXA_INV_EVENTOS',
+
+  colunasAtividades: ['id', 'tipo', 'galpao', 'rua', 'estante', 'prateleira',
+    'posicoes', 'quantasPosicoes', 'responsavel', 'responsavelId', 'prazo',
+    'instrucoes', 'status', 'criadaPor', 'criadaEm', 'iniciadaEm',
+    'concluidaEm', 'confirmadaPor', 'observacao'],
+
+  colunasContagens: ['id', 'atividadeId', 'codigo', 'rua', 'estante',
+    'prateleira', 'posicao', 'qrLido', 'saldoSistema', 'qtdEncontrada',
+    'diferenca', 'resultado', 'observacao', 'ocorrencia', 'fotos',
+    'quem', 'quemId', 'quando', 'operacaoId', 'sessaoId', 'status'],
+
+  colunasEventos: ['id', 'quando', 'atividadeId', 'codigo', 'quem', 'quemId',
+    'evento', 'detalhe'],
+
+  /* seção 7, etapa 4: os resultados possíveis de uma conferência.
+     Nenhum deles é inventado na hora — a lista é fechada. */
+  resultados: ['CONFERIDO', 'DIVERGENCIA_POSITIVA', 'DIVERGENCIA_NEGATIVA',
+    'MATERIAL_NAO_CADASTRADO', 'MATERIAL_ENDERECO_INCORRETO', 'POSICAO_VAZIA',
+    'POSICAO_BLOQUEADA', 'MATERIAL_DANIFICADO', 'SEM_SALDO_PARA_COMPARAR'],
+
+  tipos: ['COMPLETO', 'ROTATIVO', 'RUA', 'ESTANTE', 'PRATELEIRA', 'POSICAO'],
+
+  statusAtividade: ['ABERTA', 'EM_EXECUCAO', 'CONCLUIDA', 'CONFIRMADA', 'CANCELADA'],
+
+  tetoLeitura: 20000,
+  /* o prefixo do QR que o mapa 3D já imprime nas etiquetas */
+  prefixoQr: 'ALMOXA:LOC:'
+};
+
+
+/* ============================================================
+   1. FERRAMENTA MIÚDA
+   ============================================================ */
+
+function AP_INV_txt_(v) { return v == null ? '' : String(v).trim(); }
+
+function AP_INV_num_(v) {
+  if (v === '' || v === null || v === undefined) return null;
+  if (typeof v === 'number') return isFinite(v) ? v : null;
+  var t = String(v).trim().replace(/\s/g, '');
+  if (!t) return null;
+  if (t.indexOf(',') > -1 && t.indexOf('.') > -1) t = t.replace(/\./g, '').replace(',', '.');
+  else if (t.indexOf(',') > -1) t = t.replace(',', '.');
+  var n = Number(t);
+  return isFinite(n) ? n : null;
+}
+
+function AP_INV_normal_(v) {
+  return AP_INV_txt_(v).toUpperCase()
+    .replace(/[ÁÀÂÃÄ]/g, 'A').replace(/[ÉÈÊË]/g, 'E').replace(/[ÍÌÎÏ]/g, 'I')
+    .replace(/[ÓÒÔÕÖ]/g, 'O').replace(/[ÚÙÛÜ]/g, 'U').replace(/Ç/g, 'C')
+    .replace(/[^A-Z0-9]/g, '');
+}
+
+function AP_INV_agora_() {
+  try {
+    return Utilities.formatDate(new Date(), Session.getScriptTimeZone(),
+      'yyyy-MM-dd HH:mm:ss');
+  } catch (e) { return new Date().toISOString(); }
+}
+
+function AP_INV_planilha_() {
+  try { return SpreadsheetApp.getActive(); } catch (e) { return null; }
+}
+
+function AP_INV_ok_(dados, extra) {
+  var r = { ok: true, dados: dados };
+  if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) r[k] = extra[k];
+  return r;
+}
+
+function AP_INV_erro_(codigo, mensagem, extra) {
+  var r = { ok: false, codigo: codigo, mensagem: mensagem };
+  if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) r[k] = extra[k];
+  return r;
+}
+
+/* um id que não se repete, sem depender de contador em planilha */
+function AP_INV_id_(prefixo) {
+  var d = new Date();
+  function dd(n, q) { var s = String(n); while (s.length < (q || 2)) s = '0' + s; return s; }
+  return prefixo + '-' + d.getFullYear() + dd(d.getMonth() + 1) + dd(d.getDate()) +
+    '-' + dd(d.getHours()) + dd(d.getMinutes()) + dd(d.getSeconds()) +
+    '-' + dd(Math.floor(Math.random() * 10000), 4);
+}
+
+
+/* ============================================================
+   2. AS ABAS — achadas, nunca criadas em operação normal
+   ============================================================ */
+
+function AP_INV_aba_(nome) {
+  var ss = AP_INV_planilha_();
+  if (!ss) return null;
+  try { return ss.getSheetByName(nome); } catch (e) { return null; }
+}
+
+function AP_INV_ler_(nome) {
+  var aba = AP_INV_aba_(nome);
+  if (!aba) return { existe: false, colunas: [], linhas: [], aba: null };
+  var ultima = aba.getLastRow(), colunas = aba.getLastColumn();
+  if (ultima < 1 || colunas < 1) {
+    return { existe: true, colunas: [], linhas: [], aba: aba };
+  }
+  var quantas = Math.min(ultima - 1, AP_INV_CFG.tetoLeitura);
+  var cab = aba.getRange(1, 1, 1, colunas).getValues()[0].map(AP_INV_txt_);
+  var linhas = quantas > 0
+    ? aba.getRange(2, 1, quantas, colunas).getValues()
+    : [];
+  return { existe: true, colunas: cab, linhas: linhas, aba: aba,
+           truncado: (ultima - 1) > quantas };
+}
+
+function AP_INV_col_(colunas, nome) {
+  var alvo = AP_INV_normal_(nome);
+  for (var i = 0; i < colunas.length; i++) {
+    if (AP_INV_normal_(colunas[i]) === alvo) return i;
+  }
+  return -1;
+}
+
+/* transforma uma linha num objeto, usando o cabeçalho real */
+function AP_INV_objeto_(colunas, linha, numeroDaLinha) {
+  var o = { __linha: numeroDaLinha };
+  for (var i = 0; i < colunas.length; i++) {
+    if (!colunas[i]) continue;
+    o[colunas[i]] = AP_INV_txt_(linha[i]);
+  }
+  return o;
+}
+
+/* grava um objeto respeitando o cabeçalho que existe na aba */
+function AP_INV_gravar_(nome, objeto) {
+  var lido = AP_INV_ler_(nome);
+  if (!lido.existe) {
+    return AP_INV_erro_('ABA_NAO_EXISTE',
+      'A aba "' + nome + '" não existe. Rode AP_INV_INSTALAR antes de usar ' +
+      'o inventário móvel. Eu não crio aba sozinho.');
+  }
+  if (!lido.colunas.length) {
+    return AP_INV_erro_('ABA_SEM_CABECALHO',
+      'A aba "' + nome + '" existe mas está sem cabeçalho. Rode AP_INV_INSTALAR.');
+  }
+  var linha = [];
+  for (var i = 0; i < lido.colunas.length; i++) {
+    var c = lido.colunas[i];
+    linha.push(objeto[c] !== undefined ? objeto[c] : '');
+  }
+  var n = lido.aba.getLastRow() + 1;
+  lido.aba.getRange(n, 1, 1, linha.length).setValues([linha]);
+  SpreadsheetApp.flush();
+  return AP_INV_ok_({ linha: n });
+}
+
+
+/* ============================================================
+   3. QUEM ESTÁ FALANDO — decidido aqui, não pelo navegador
+   (seção 12: "Não confiar em informações de usuário ou permissões
+   enviadas apenas pelo navegador.")
+   ============================================================ */
+
+function AP_INV_quem_(sessao) {
+  var s = sessao || {};
+  /* 1 · a sessão que o Core montou */
+  var nome = AP_INV_txt_(s.nome) || AP_INV_txt_(s.usuario) || AP_INV_txt_(s.email);
+  var id = AP_INV_txt_(s.id) || AP_INV_txt_(s.usuarioId) || AP_INV_txt_(s.matricula);
+  /* 2 · quem o Apps Script diz que está executando */
+  if (!nome) {
+    try { nome = AP_INV_txt_(Session.getActiveUser().getEmail()); } catch (e) {}
+  }
+  return { nome: nome || '(não identificado)', id: id || '' };
+}
+
+/* o payload PODE dizer quem é, mas isso não vale como identidade:
+   serve só para comparar com a sessão e recusar quando discordam */
+function AP_INV_conferirIdentidade_(payload, sessao) {
+  var eu = AP_INV_quem_(sessao);
+  var diz = AP_INV_txt_((payload || {}).quem);
+  if (diz && eu.nome !== '(não identificado)' &&
+      AP_INV_normal_(diz) !== AP_INV_normal_(eu.nome)) {
+    return AP_INV_erro_('IDENTIDADE_NAO_CONFERE',
+      'A tela disse que quem está conferindo é "' + diz + '", mas a sessão ' +
+      'do Core é de "' + eu.nome + '". Não registro conferência em nome de ' +
+      'outra pessoa.');
+  }
+  return null;
+}
+
+
+/* ============================================================
+   4. O SALDO DO SISTEMA — pedido a quem já sabe
+   ============================================================ */
+
+/* Não tenho cadastro de saldo próprio e não vou inventar um.
+   Pergunto ao módulo "locais", que é quem o ALMOX PRO já usa.
+   Se ele não responder, o saldo fica DESCONHECIDO — nunca zero.
+   ("Nunca transformar erro de banco em valor zero.") */
+function AP_INV_saldoDaPosicao_(codigo) {
+  var fn = null;
+  try { fn = AP_Modulo_locais; } catch (e) { fn = null; }
+  if (typeof fn !== 'function') {
+    return { conhecido: false, motivo: 'o módulo "locais" não existe neste projeto' };
+  }
+  var r;
+  try { r = fn('listar', {}, {}); } catch (e) {
+    return { conhecido: false, motivo: 'o módulo "locais" recusou: ' + e };
+  }
+  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (e2) { r = null; } }
+  if (!r || r.ok === false) {
+    return { conhecido: false,
+             motivo: 'o módulo "locais" recusou: ' + ((r && r.mensagem) || 'sem resposta') };
+  }
+  var lista = r.dados || r.lista || [];
+  if (Object.prototype.toString.call(lista) !== '[object Array]') {
+    return { conhecido: false, motivo: 'o módulo "locais" respondeu sem lista' };
+  }
+  var alvo = AP_INV_normal_(codigo);
+  for (var i = 0; i < lista.length; i++) {
+    var l = lista[i];
+    if (AP_INV_normal_(l.codigo) !== alvo) continue;
+    var itens = l.itens;
+    if (itens === undefined && Object.prototype.toString.call(l.ocupacao) === '[object Array]') {
+      itens = l.ocupacao.length;
+    }
+    var n = AP_INV_num_(itens);
+    return { conhecido: n !== null, saldo: n, status: AP_INV_txt_(l.status),
+             registro: l, motivo: n === null ? 'a posição existe mas não traz saldo' : '' };
+  }
+  return { conhecido: false, naoCadastrada: true,
+           motivo: 'o endereço ' + codigo + ' não está no cadastro de localizações' };
+}
+
+
+/* ============================================================
+   5. A LINHA DO TEMPO — seção 8
+   ============================================================ */
+
+function AP_INV_evento_(atividadeId, codigo, evento, detalhe, sessao) {
+  var eu = AP_INV_quem_(sessao);
+  return AP_INV_gravar_(AP_INV_CFG.abaEventos, {
+    id: AP_INV_id_('EV'),
+    quando: AP_INV_agora_(),
+    atividadeId: AP_INV_txt_(atividadeId),
+    codigo: AP_INV_txt_(codigo),
+    quem: eu.nome, quemId: eu.id,
+    evento: AP_INV_txt_(evento),
+    detalhe: AP_INV_txt_(detalhe)
+  });
+}
+
+
+/* ============================================================
+   6. ETAPA 1 — O GESTOR CRIA A ATIVIDADE (seção 7)
+   ============================================================ */
+
+function AP_INV_criarAtividade(payload, sessao) {
+  var p = payload || {};
+  var eu = AP_INV_quem_(sessao);
+
+  var tipo = AP_INV_normal_(p.tipo) || 'POSICAO';
+  if (AP_INV_CFG.tipos.indexOf(tipo) === -1) {
+    return AP_INV_erro_('TIPO_DESCONHECIDO',
+      'Tipo de inventário "' + AP_INV_txt_(p.tipo) + '" não existe. ' +
+      'Os que existem: ' + AP_INV_CFG.tipos.join(', ') + '.');
+  }
+
+  var posicoes = p.posicoes;
+  if (Object.prototype.toString.call(posicoes) !== '[object Array]') {
+    posicoes = AP_INV_txt_(posicoes) ? AP_INV_txt_(posicoes).split(/[;,\s]+/) : [];
+  }
+  posicoes = posicoes.map(AP_INV_txt_).filter(function (c) { return !!c; });
+  if (!posicoes.length) {
+    return AP_INV_erro_('SEM_POSICOES',
+      'A atividade precisa de pelo menos uma posição. Criar atividade vazia ' +
+      'daria uma tarefa que ninguém consegue executar.');
+  }
+
+  /* posição repetida na mesma atividade seria contada duas vezes */
+  var vistos = {}, repetidas = [];
+  var limpas = [];
+  for (var i = 0; i < posicoes.length; i++) {
+    var k = AP_INV_normal_(posicoes[i]);
+    if (vistos[k]) { repetidas.push(posicoes[i]); continue; }
+    vistos[k] = 1;
+    limpas.push(posicoes[i]);
+  }
+
+  var responsavel = AP_INV_txt_(p.responsavel);
+  if (!responsavel) {
+    return AP_INV_erro_('SEM_RESPONSAVEL',
+      'A atividade precisa de um responsável. Sem isso não há a quem ela ' +
+      'aparecer no celular, e a rastreabilidade da seção 8 fica sem dono.');
+  }
+
+  var id = AP_INV_id_('ATV');
+  var reg = {
+    id: id, tipo: tipo,
+    galpao: AP_INV_txt_(p.galpao),
+    rua: AP_INV_txt_(p.rua), estante: AP_INV_txt_(p.estante),
+    prateleira: AP_INV_txt_(p.prateleira),
+    posicoes: limpas.join(';'),
+    quantasPosicoes: limpas.length,
+    responsavel: responsavel,
+    responsavelId: AP_INV_txt_(p.responsavelId),
+    prazo: AP_INV_txt_(p.prazo),
+    instrucoes: AP_INV_txt_(p.instrucoes),
+    status: 'ABERTA',
+    criadaPor: eu.nome, criadaEm: AP_INV_agora_(),
+    iniciadaEm: '', concluidaEm: '', confirmadaPor: '',
+    observacao: repetidas.length
+      ? 'posições repetidas foram descartadas: ' + repetidas.join(', ')
+      : ''
+  };
+
+  var g = AP_INV_gravar_(AP_INV_CFG.abaAtividades, reg);
+  if (!g.ok) return g;
+
+  /* seção 12: confirmar a persistência relendo, não presumir */
+  var conferida = AP_INV_acharAtividade_(id);
+  if (!conferida) {
+    return AP_INV_erro_('NAO_CONFIRMOU',
+      'Escrevi a atividade na linha ' + g.dados.linha + ', mas ao reler não a ' +
+      'encontrei. NÃO considere criada.');
+  }
+
+  AP_INV_evento_(id, '', 'ATIVIDADE_CRIADA',
+    tipo + ' com ' + limpas.length + ' posição(ões) para ' + responsavel, sessao);
+
+  return AP_INV_ok_(conferida, {
+    observacao: 'confirmada por releitura na linha ' + conferida.__linha,
+    repetidasDescartadas: repetidas
+  });
+}
+
+function AP_INV_acharAtividade_(id) {
+  var lido = AP_INV_ler_(AP_INV_CFG.abaAtividades);
+  if (!lido.existe || !lido.colunas.length) return null;
+  var ci = AP_INV_col_(lido.colunas, 'id');
+  if (ci < 0) return null;
+  var alvo = AP_INV_normal_(id);
+  for (var i = 0; i < lido.linhas.length; i++) {
+    if (AP_INV_normal_(lido.linhas[i][ci]) === alvo) {
+      return AP_INV_objeto_(lido.colunas, lido.linhas[i], i + 2);
+    }
+  }
+  return null;
+}
+
+function AP_INV_listarAtividades(payload) {
+  var p = payload || {};
+  var lido = AP_INV_ler_(AP_INV_CFG.abaAtividades);
+  if (!lido.existe) {
+    return AP_INV_erro_('ABA_NAO_EXISTE',
+      'A aba "' + AP_INV_CFG.abaAtividades + '" não existe. Rode AP_INV_INSTALAR. ' +
+      'Lista vazia aqui diria que não há atividades, e isso seria outra coisa.');
+  }
+  if (!lido.colunas.length) return AP_INV_ok_([], { aba: AP_INV_CFG.abaAtividades });
+
+  var quem = AP_INV_normal_(p.responsavel);
+  var status = AP_INV_normal_(p.status);
+  var saida = [];
+  for (var i = 0; i < lido.linhas.length; i++) {
+    var o = AP_INV_objeto_(lido.colunas, lido.linhas[i], i + 2);
+    if (!AP_INV_txt_(o.id)) continue;
+    if (quem && AP_INV_normal_(o.responsavel) !== quem) continue;
+    if (status && AP_INV_normal_(o.status) !== status) continue;
+    if (!p.incluirCanceladas && AP_INV_normal_(o.status) === 'CANCELADA') continue;
+    o.listaDePosicoes = AP_INV_txt_(o.posicoes)
+      ? AP_INV_txt_(o.posicoes).split(';') : [];
+    saida.push(o);
+  }
+  return AP_INV_ok_(saida, { aba: AP_INV_CFG.abaAtividades,
+                             truncado: !!lido.truncado });
+}
+
+
+/* ============================================================
+   7. ETAPA 2 e 3 — O FUNCIONÁRIO ABRE E LÊ O QR (seção 7)
+   ============================================================ */
+
+/* o que o leitor devolveu vira endereço. Aceita tanto o QR que o
+   mapa imprime (ALMOXA:LOC:A-01-1-A) quanto o código digitado. */
+function AP_INV_codigoDoQr_(lido) {
+  var t = AP_INV_txt_(lido);
+  if (!t) return '';
+  var pre = AP_INV_CFG.prefixoQr;
+  if (t.toUpperCase().indexOf(pre.toUpperCase()) === 0) {
+    return AP_INV_txt_(t.substring(pre.length));
+  }
+  return t;
+}
+
+/* A REGRA MAIS IMPORTANTE DESTA FASE, seção 7 etapa 3:
+   "Não permitir que uma leitura de QR de uma posição seja
+    registrada como conferência de outra."                      */
+function AP_INV_validarQr(payload, sessao) {
+  var p = payload || {};
+  var atividade = AP_INV_acharAtividade_(AP_INV_txt_(p.atividadeId));
+  if (!atividade) {
+    return AP_INV_erro_('ATIVIDADE_NAO_ENCONTRADA',
+      'Não achei a atividade ' + AP_INV_txt_(p.atividadeId) + '.');
+  }
+  if (AP_INV_normal_(atividade.status) === 'CANCELADA') {
+    return AP_INV_erro_('ATIVIDADE_CANCELADA', 'Esta atividade foi cancelada.');
+  }
+  if (AP_INV_normal_(atividade.status) === 'CONFIRMADA') {
+    return AP_INV_erro_('ATIVIDADE_CONFIRMADA',
+      'Esta atividade já foi confirmada. Conferir de novo exige uma atividade nova.');
+  }
+
+  /* o funcionário tem de ser o responsável */
+  var eu = AP_INV_quem_(sessao);
+  if (eu.nome !== '(não identificado)' &&
+      AP_INV_normal_(atividade.responsavel) !== AP_INV_normal_(eu.nome)) {
+    return AP_INV_erro_('NAO_E_SEU',
+      'Esta atividade é de ' + atividade.responsavel + '. Quem está logado é ' +
+      eu.nome + '. Conferência de inventário fica com quem recebeu a tarefa.');
+  }
+
+  var lido = AP_INV_codigoDoQr_(p.qr || p.codigoLido);
+  if (!lido) {
+    return AP_INV_erro_('QR_VAZIO', 'Não veio nada do leitor.');
+  }
+
+  var daAtividade = AP_INV_txt_(atividade.posicoes)
+    ? AP_INV_txt_(atividade.posicoes).split(';') : [];
+  var normalizadas = daAtividade.map(AP_INV_normal_);
+  var ondeEsta = normalizadas.indexOf(AP_INV_normal_(lido));
+
+  if (ondeEsta === -1) {
+    AP_INV_evento_(atividade.id, lido, 'QR_FORA_DA_ATIVIDADE',
+      'leu ' + lido + ', que não está nesta atividade', sessao);
+    return AP_INV_erro_('QR_FORA_DA_ATIVIDADE',
+      'O código lido foi ' + lido + ', e esse endereço NÃO faz parte desta ' +
+      'atividade. Não registro a leitura de uma posição como conferência de ' +
+      'outra.', { lido: lido, daAtividade: daAtividade });
+  }
+
+  /* o esperado, quando a tela diz qual está esperando */
+  var esperado = AP_INV_txt_(p.esperado);
+  if (esperado && AP_INV_normal_(esperado) !== AP_INV_normal_(lido)) {
+    AP_INV_evento_(atividade.id, lido, 'QR_DIFERENTE_DO_ESPERADO',
+      'esperava ' + esperado + ', leu ' + lido, sessao);
+    return AP_INV_erro_('QR_DIFERENTE_DO_ESPERADO',
+      'A tela estava no endereço ' + esperado + ' e o leitor trouxe ' + lido +
+      '. São posições diferentes.', { esperado: esperado, lido: lido });
+  }
+
+  /* já foi conferida nesta atividade? */
+  var jaFeita = AP_INV_contagemDe_(atividade.id, lido);
+
+  var saldo = AP_INV_saldoDaPosicao_(lido);
+
+  AP_INV_evento_(atividade.id, lido, 'QR_VALIDADO', '', sessao);
+
+  return AP_INV_ok_({
+    atividadeId: atividade.id,
+    codigo: lido,
+    posicaoNaAtividade: ondeEsta + 1,
+    totalDaAtividade: daAtividade.length,
+    jaConferida: !!jaFeita,
+    contagemAnterior: jaFeita || null,
+    saldoSistema: saldo.conhecido ? saldo.saldo : null,
+    saldoConhecido: !!saldo.conhecido,
+    porQueSemSaldo: saldo.conhecido ? '' : saldo.motivo,
+    posicaoNaoCadastrada: !!saldo.naoCadastrada,
+    statusDaPosicao: saldo.status || ''
+  });
+}
+
+function AP_INV_contagemDe_(atividadeId, codigo) {
+  var lido = AP_INV_ler_(AP_INV_CFG.abaContagens);
+  if (!lido.existe || !lido.colunas.length) return null;
+  var ca = AP_INV_col_(lido.colunas, 'atividadeId');
+  var cc = AP_INV_col_(lido.colunas, 'codigo');
+  var cs = AP_INV_col_(lido.colunas, 'status');
+  if (ca < 0 || cc < 0) return null;
+  var a = AP_INV_normal_(atividadeId), c = AP_INV_normal_(codigo);
+  for (var i = lido.linhas.length - 1; i >= 0; i--) {
+    if (AP_INV_normal_(lido.linhas[i][ca]) !== a) continue;
+    if (AP_INV_normal_(lido.linhas[i][cc]) !== c) continue;
+    if (cs >= 0 && AP_INV_normal_(lido.linhas[i][cs]) === 'CANCELADA') continue;
+    return AP_INV_objeto_(lido.colunas, lido.linhas[i], i + 2);
+  }
+  return null;
+}
+
+function AP_INV_porOperacao_(operacaoId) {
+  var op = AP_INV_txt_(operacaoId);
+  if (!op) return null;
+  var lido = AP_INV_ler_(AP_INV_CFG.abaContagens);
+  if (!lido.existe || !lido.colunas.length) return null;
+  var co = AP_INV_col_(lido.colunas, 'operacaoId');
+  if (co < 0) return null;
+  for (var i = 0; i < lido.linhas.length; i++) {
+    if (AP_INV_txt_(lido.linhas[i][co]) === op) {
+      return AP_INV_objeto_(lido.colunas, lido.linhas[i], i + 2);
+    }
+  }
+  return null;
+}
+
+
+/* ============================================================
+   8. ETAPA 4 e 5 — A CONTAGEM E A CONFIRMAÇÃO (seção 7)
+   ============================================================ */
+
+/* decide o resultado comparando saldo e contagem. Quando não há
+   saldo conhecido, o resultado NÃO é "conferido": é
+   SEM_SALDO_PARA_COMPARAR. Dizer 100% conferido sem ter com o que
+   comparar seria mentira — e a seção 8 avisa justamente isso. */
+function AP_INV_resultado_(saldo, encontrado, marcado) {
+  /* 14/11 — AP_INV_normal_ tira o "_", e a lista de resultados TEM
+     "_". Eu comparava um contra o outro e a situação marcada pelo
+     funcionário nunca entrava: material danificado virava
+     "conferido". Agora comparo normalizado contra normalizado. */
+  var m = AP_INV_normal_(marcado);
+  var conhecido = '';
+  for (var i = 0; i < AP_INV_CFG.resultados.length; i++) {
+    if (AP_INV_normal_(AP_INV_CFG.resultados[i]) === m) {
+      conhecido = AP_INV_CFG.resultados[i]; break;
+    }
+  }
+  /* situação de campo marcada pelo funcionário manda: ele está
+     olhando a prateleira, eu não. Divergência e "conferido" não
+     entram aqui — esses dois saem da comparação, logo abaixo. */
+  if (conhecido && conhecido.indexOf('DIVERGENCIA') === -1 &&
+      conhecido !== 'CONFERIDO') {
+    return conhecido;
+  }
+
+  if (!saldo.conhecido) return 'SEM_SALDO_PARA_COMPARAR';
+  if (encontrado === null) return 'SEM_SALDO_PARA_COMPARAR';
+  var dif = encontrado - saldo.saldo;
+  if (dif === 0) return 'CONFERIDO';
+  return dif > 0 ? 'DIVERGENCIA_POSITIVA' : 'DIVERGENCIA_NEGATIVA';
+}
+
+function AP_INV_registrarContagem(payload, sessao) {
+  var p = payload || {};
+
+  var problema = AP_INV_conferirIdentidade_(p, sessao);
+  if (problema) return problema;
+
+  /* IDEMPOTÊNCIA (seção 12): a mesma operação, mandada duas vezes
+     — rede ruim, dedo duplo —, não vira duas contagens. */
+  var repetida = AP_INV_porOperacao_(p.operacaoId);
+  if (repetida) {
+    return AP_INV_ok_(repetida, {
+      repetida: true,
+      observacao: 'esta operação já tinha sido registrada na linha ' +
+        repetida.__linha + '. Não gravei de novo.'
+    });
+  }
+
+  var atividade = AP_INV_acharAtividade_(AP_INV_txt_(p.atividadeId));
+  if (!atividade) {
+    return AP_INV_erro_('ATIVIDADE_NAO_ENCONTRADA',
+      'Não achei a atividade ' + AP_INV_txt_(p.atividadeId) + '.');
+  }
+  if (AP_INV_normal_(atividade.status) === 'CONFIRMADA') {
+    return AP_INV_erro_('ATIVIDADE_CONFIRMADA',
+      'Esta atividade já foi confirmada e fechada.');
+  }
+  if (AP_INV_normal_(atividade.status) === 'CANCELADA') {
+    return AP_INV_erro_('ATIVIDADE_CANCELADA', 'Esta atividade foi cancelada.');
+  }
+
+  /* o QR manda: a conferência é da posição que foi LIDA */
+  var codigo = AP_INV_codigoDoQr_(p.qr || p.codigo);
+  if (!codigo) return AP_INV_erro_('SEM_CODIGO', 'Não veio o endereço conferido.');
+
+  var daAtividade = AP_INV_txt_(atividade.posicoes)
+    ? AP_INV_txt_(atividade.posicoes).split(';').map(AP_INV_normal_) : [];
+  if (daAtividade.indexOf(AP_INV_normal_(codigo)) === -1) {
+    return AP_INV_erro_('FORA_DA_ATIVIDADE',
+      'O endereço ' + codigo + ' não faz parte desta atividade.');
+  }
+
+  var encontrada = AP_INV_num_(p.qtdEncontrada);
+  if (encontrada === null && !AP_INV_txt_(p.resultado)) {
+    return AP_INV_erro_('SEM_CONTAGEM',
+      'Não veio a quantidade encontrada nem uma situação de campo. ' +
+      'Gravar conferência sem nenhum dos dois seria registro vazio.');
+  }
+  if (encontrada !== null && encontrada < 0) {
+    return AP_INV_erro_('CONTAGEM_NEGATIVA',
+      'Quantidade encontrada negativa (' + encontrada + ') não existe no físico.');
+  }
+
+  var saldo = AP_INV_saldoDaPosicao_(codigo);
+  var resultado = AP_INV_resultado_(saldo, encontrada, p.resultado);
+  var diferenca = (saldo.conhecido && encontrada !== null)
+    ? (encontrada - saldo.saldo) : '';
+
+  var eu = AP_INV_quem_(sessao);
+  var reg = {
+    id: AP_INV_id_('CTG'),
+    atividadeId: atividade.id,
+    codigo: codigo,
+    rua: AP_INV_txt_(p.rua), estante: AP_INV_txt_(p.estante),
+    prateleira: AP_INV_txt_(p.prateleira), posicao: AP_INV_txt_(p.posicao),
+    qrLido: AP_INV_txt_(p.qr || ''),
+    saldoSistema: saldo.conhecido ? saldo.saldo : '',
+    qtdEncontrada: encontrada === null ? '' : encontrada,
+    diferenca: diferenca,
+    resultado: resultado,
+    observacao: AP_INV_txt_(p.observacao),
+    ocorrencia: AP_INV_txt_(p.ocorrencia),
+    /* fotos: só a referência que a tela mandou. Imagem não entra em
+       célula de planilha, e eu não invento depósito de arquivo. */
+    fotos: AP_INV_txt_(p.fotos),
+    quem: eu.nome, quemId: eu.id,
+    quando: AP_INV_agora_(),
+    operacaoId: AP_INV_txt_(p.operacaoId) || AP_INV_id_('OP'),
+    sessaoId: AP_INV_txt_((sessao || {}).sessaoId),
+    status: 'ATIVA'
+  };
+
+  var g = AP_INV_gravar_(AP_INV_CFG.abaContagens, reg);
+  if (!g.ok) return g;
+
+  /* confirma relendo: seção 12 */
+  var conferida = AP_INV_porOperacao_(reg.operacaoId);
+  if (!conferida) {
+    return AP_INV_erro_('NAO_CONFIRMOU',
+      'Escrevi a contagem na linha ' + g.dados.linha + ', mas ao reler não a ' +
+      'encontrei. NÃO considere registrada.');
+  }
+
+  /* a atividade sai de ABERTA na primeira contagem */
+  if (AP_INV_normal_(atividade.status) === 'ABERTA') {
+    AP_INV_mudarAtividade_(atividade.id,
+      { status: 'EM_EXECUCAO', iniciadaEm: AP_INV_agora_() });
+  }
+
+  AP_INV_evento_(atividade.id, codigo, 'CONTAGEM_REGISTRADA',
+    'resultado ' + resultado +
+    (saldo.conhecido ? (' · sistema ' + saldo.saldo + ', físico ' + encontrada) : ''),
+    sessao);
+
+  return AP_INV_ok_(conferida, {
+    resultado: resultado,
+    saldoConhecido: !!saldo.conhecido,
+    porQueSemSaldo: saldo.conhecido ? '' : saldo.motivo,
+    observacao: 'gravada e conferida por releitura na linha ' + conferida.__linha
+  });
+}
+
+function AP_INV_mudarAtividade_(id, campos) {
+  var lido = AP_INV_ler_(AP_INV_CFG.abaAtividades);
+  if (!lido.existe || !lido.colunas.length) return false;
+  var ci = AP_INV_col_(lido.colunas, 'id');
+  if (ci < 0) return false;
+  var alvo = AP_INV_normal_(id);
+  for (var i = 0; i < lido.linhas.length; i++) {
+    if (AP_INV_normal_(lido.linhas[i][ci]) !== alvo) continue;
+    for (var c in campos) if (campos.hasOwnProperty(c)) {
+      var col = AP_INV_col_(lido.colunas, c);
+      if (col >= 0) lido.aba.getRange(i + 2, col + 1).setValue(campos[c]);
+    }
+    SpreadsheetApp.flush();
+    return true;
+  }
+  return false;
+}
+
+function AP_INV_progresso(payload) {
+  var p = payload || {};
+  var atividade = AP_INV_acharAtividade_(AP_INV_txt_(p.atividadeId));
+  if (!atividade) {
+    return AP_INV_erro_('ATIVIDADE_NAO_ENCONTRADA', 'Não achei a atividade.');
+  }
+  var posicoes = AP_INV_txt_(atividade.posicoes)
+    ? AP_INV_txt_(atividade.posicoes).split(';') : [];
+  var feitas = [], faltam = [], divergentes = [];
+  for (var i = 0; i < posicoes.length; i++) {
+    var c = AP_INV_contagemDe_(atividade.id, posicoes[i]);
+    if (!c) { faltam.push(posicoes[i]); continue; }
+    feitas.push(c);
+    if (AP_INV_normal_(c.resultado).indexOf('DIVERGENCIA') === 0) divergentes.push(c);
+  }
+  return AP_INV_ok_({
+    atividade: atividade,
+    posicoes: posicoes,
+    feitas: feitas.length, faltam: faltam.length,
+    faltamQuais: faltam,
+    divergencias: divergentes.length,
+    divergentes: divergentes,
+    contagens: feitas,
+    completa: faltam.length === 0
+  });
+}
+
+/* ETAPA 5 — a confirmação é do Core, e só fecha se tudo foi feito */
+function AP_INV_confirmarAtividade(payload, sessao) {
+  var p = payload || {};
+  var pr = AP_INV_progresso(p);
+  if (!pr.ok) return pr;
+  var d = pr.dados;
+
+  if (AP_INV_normal_(d.atividade.status) === 'CONFIRMADA') {
+    return AP_INV_ok_(d.atividade, { repetida: true,
+      observacao: 'esta atividade já estava confirmada; não mexi nela de novo' });
+  }
+  if (!d.completa && !p.forcar) {
+    return AP_INV_erro_('FALTAM_POSICOES',
+      'Faltam ' + d.faltam + ' posição(ões) sem conferência: ' +
+      d.faltamQuais.slice(0, 8).join(', ') +
+      (d.faltamQuais.length > 8 ? '…' : '') +
+      '. Confirmar agora registraria como conferido o que ninguém olhou.',
+      { faltamQuais: d.faltamQuais });
+  }
+
+  var eu = AP_INV_quem_(sessao);
+  var mudou = AP_INV_mudarAtividade_(d.atividade.id, {
+    status: 'CONFIRMADA',
+    concluidaEm: AP_INV_agora_(),
+    confirmadaPor: eu.nome
+  });
+  if (!mudou) {
+    return AP_INV_erro_('NAO_CONFIRMOU', 'Não consegui atualizar a atividade.');
+  }
+
+  var relida = AP_INV_acharAtividade_(d.atividade.id);
+  if (!relida || AP_INV_normal_(relida.status) !== 'CONFIRMADA') {
+    return AP_INV_erro_('NAO_CONFIRMOU',
+      'Marquei como confirmada, mas ao reler ela diz "' +
+      ((relida && relida.status) || '?') + '". NÃO considere confirmada.');
+  }
+
+  AP_INV_evento_(d.atividade.id, '', 'ATIVIDADE_CONFIRMADA',
+    d.feitas + ' posição(ões), ' + d.divergencias + ' divergência(s)' +
+    (p.forcar && !d.completa ? ' — CONFIRMADA COM ' + d.faltam + ' PENDENTE(S)' : ''),
+    sessao);
+
+  return AP_INV_ok_(relida, {
+    feitas: d.feitas, divergencias: d.divergencias,
+    faltaram: d.faltam,
+    observacao: d.divergencias
+      ? 'confirmada com ' + d.divergencias + ' divergência(s). Ajuste de saldo ' +
+        'NÃO foi feito: isso depende do fluxo de aprovação do ALMOX PRO.'
+      : 'confirmada. Nenhum saldo foi alterado por esta operação.'
+  });
+}
+
+function AP_INV_cancelarAtividade(payload, sessao) {
+  var p = payload || {};
+  var a = AP_INV_acharAtividade_(AP_INV_txt_(p.atividadeId));
+  if (!a) return AP_INV_erro_('ATIVIDADE_NAO_ENCONTRADA', 'Não achei a atividade.');
+  if (!AP_INV_txt_(p.motivo)) {
+    return AP_INV_erro_('SEM_MOTIVO', 'Cancelar exige motivo escrito.');
+  }
+  AP_INV_mudarAtividade_(a.id, {
+    status: 'CANCELADA',
+    observacao: AP_INV_txt_(a.observacao) +
+      (AP_INV_txt_(a.observacao) ? ' | ' : '') + 'cancelada: ' + AP_INV_txt_(p.motivo)
+  });
+  var relida = AP_INV_acharAtividade_(a.id);
+  if (!relida || AP_INV_normal_(relida.status) !== 'CANCELADA') {
+    return AP_INV_erro_('NAO_CONFIRMOU', 'Não consegui confirmar o cancelamento.');
+  }
+  AP_INV_evento_(a.id, '', 'ATIVIDADE_CANCELADA', AP_INV_txt_(p.motivo), sessao);
+  return AP_INV_ok_(relida,
+    { observacao: 'a linha continua na planilha, com status CANCELADA' });
+}
+
+
+/* ============================================================
+   9. SEÇÃO 8 — RASTREABILIDADE
+   ============================================================ */
+
+function AP_INV_linhaDoTempo(payload) {
+  var p = payload || {};
+  var lido = AP_INV_ler_(AP_INV_CFG.abaEventos);
+  if (!lido.existe) {
+    return AP_INV_erro_('ABA_NAO_EXISTE',
+      'A aba "' + AP_INV_CFG.abaEventos + '" não existe. Rode AP_INV_INSTALAR.');
+  }
+  if (!lido.colunas.length) return AP_INV_ok_([]);
+
+  var porCodigo = AP_INV_normal_(p.codigo);
+  var porQuem = AP_INV_normal_(p.quem);
+  var porAtividade = AP_INV_normal_(p.atividadeId);
+  if (!porCodigo && !porQuem && !porAtividade) {
+    return AP_INV_erro_('SEM_FILTRO',
+      'Diga de quem ou de qual endereço o senhor quer a linha do tempo. ' +
+      'Despejar o histórico inteiro não ajuda ninguém.');
+  }
+
+  var saida = [];
+  for (var i = 0; i < lido.linhas.length; i++) {
+    var o = AP_INV_objeto_(lido.colunas, lido.linhas[i], i + 2);
+    if (porCodigo && AP_INV_normal_(o.codigo) !== porCodigo) continue;
+    if (porQuem && AP_INV_normal_(o.quem) !== porQuem) continue;
+    if (porAtividade && AP_INV_normal_(o.atividadeId) !== porAtividade) continue;
+    saida.push(o);
+  }
+  saida.sort(function (a, b) {
+    return AP_INV_txt_(a.quando) < AP_INV_txt_(b.quando) ? -1 : 1;
+  });
+  return AP_INV_ok_(saida, { quantos: saida.length });
+}
+
+/* o painel do funcionário, seção 8 */
+function AP_INV_painelDoFuncionario(payload) {
+  var p = payload || {};
+  var quem = AP_INV_normal_(p.quem);
+  if (!quem) return AP_INV_erro_('SEM_FUNCIONARIO', 'Diga de quem é o painel.');
+
+  var lido = AP_INV_ler_(AP_INV_CFG.abaContagens);
+  if (!lido.existe) {
+    return AP_INV_erro_('ABA_NAO_EXISTE',
+      'A aba "' + AP_INV_CFG.abaContagens + '" não existe. Rode AP_INV_INSTALAR.');
+  }
+  var posicoes = 0, divergencias = 0, conferidas = 0, semSaldo = 0;
+  var atividades = {};
+  for (var i = 0; i < lido.linhas.length; i++) {
+    var o = AP_INV_objeto_(lido.colunas, lido.linhas[i], i + 2);
+    if (AP_INV_normal_(o.quem) !== quem) continue;
+    if (AP_INV_normal_(o.status) === 'CANCELADA') continue;
+    posicoes++;
+    atividades[o.atividadeId] = 1;
+    var r = AP_INV_normal_(o.resultado);
+    if (r.indexOf('DIVERGENCIA') === 0) divergencias++;
+    else if (r === 'CONFERIDO') conferidas++;
+    else if (r === 'SEMSALDOPARACOMPARAR') semSaldo++;
+  }
+  var quantasAtividades = 0;
+  for (var k in atividades) if (atividades.hasOwnProperty(k)) quantasAtividades++;
+
+  return AP_INV_ok_({
+    quem: AP_INV_txt_(p.quem),
+    posicoesConferidas: posicoes,
+    atividades: quantasAtividades,
+    conferidas: conferidas,
+    divergencias: divergencias,
+    semSaldoParaComparar: semSaldo
+  }, {
+    /* seção 8, com todas as letras */
+    observacao: '"Conferido" quer dizer que o físico bateu com o saldo ' +
+      'registrado NAQUELE momento. Não quer dizer auditado por segunda ' +
+      'pessoa, nem que o estoque inteiro está correto.'
+  });
+}
+
+/* seção 9 — a tela de divergências */
+function AP_INV_divergencias(payload) {
+  var p = payload || {};
+  var lido = AP_INV_ler_(AP_INV_CFG.abaContagens);
+  if (!lido.existe) {
+    return AP_INV_erro_('ABA_NAO_EXISTE',
+      'A aba "' + AP_INV_CFG.abaContagens + '" não existe. Rode AP_INV_INSTALAR.');
+  }
+  if (!lido.colunas.length) return AP_INV_ok_([]);
+  var fQuem = AP_INV_normal_(p.quem), fRua = AP_INV_normal_(p.rua);
+  var fAtv = AP_INV_normal_(p.atividadeId), fTipo = AP_INV_normal_(p.resultado);
+  var saida = [];
+  for (var i = 0; i < lido.linhas.length; i++) {
+    var o = AP_INV_objeto_(lido.colunas, lido.linhas[i], i + 2);
+    if (AP_INV_normal_(o.status) === 'CANCELADA') continue;
+    var r = AP_INV_normal_(o.resultado);
+    if (r === 'CONFERIDO') continue;
+    if (fQuem && AP_INV_normal_(o.quem) !== fQuem) continue;
+    if (fRua && AP_INV_normal_(o.rua) !== fRua) continue;
+    if (fAtv && AP_INV_normal_(o.atividadeId) !== fAtv) continue;
+    if (fTipo && r !== fTipo) continue;
+    saida.push(o);
+  }
+  return AP_INV_ok_(saida, { quantos: saida.length,
+    observacao: 'Ajuste de saldo não acontece aqui: segue o fluxo de ' +
+                'aprovação do ALMOX PRO, como manda a seção 9.' });
+}
+
+
+/* ============================================================
+   10. O ROTEADOR
+   ============================================================ */
+
+function AP_INV_executar_(acao, payload, sessao) {
+  switch (String(acao || '')) {
+    case 'criarAtividade':    return AP_INV_criarAtividade(payload, sessao);
+    case 'listarAtividades':  return AP_INV_listarAtividades(payload);
+    case 'minhasAtividades':  return AP_INV_listarAtividades(payload);
+    case 'validarQr':         return AP_INV_validarQr(payload, sessao);
+    case 'registrarContagem': return AP_INV_registrarContagem(payload, sessao);
+    case 'progresso':         return AP_INV_progresso(payload);
+    case 'confirmar':         return AP_INV_confirmarAtividade(payload, sessao);
+    case 'cancelar':          return AP_INV_cancelarAtividade(payload, sessao);
+    case 'linhaDoTempo':      return AP_INV_linhaDoTempo(payload);
+    case 'painelFuncionario': return AP_INV_painelDoFuncionario(payload);
+    case 'divergencias':      return AP_INV_divergencias(payload);
+    case 'instalado':         return AP_INV_ok_(AP_INV_estadoDasAbas_());
+    default:
+      return AP_INV_erro_('ACAO_DESCONHECIDA',
+        'O módulo invmovel não tem a ação "' + acao + '".',
+        { acoes: ['criarAtividade', 'listarAtividades', 'minhasAtividades',
+                  'validarQr', 'registrarContagem', 'progresso', 'confirmar',
+                  'cancelar', 'linhaDoTempo', 'painelFuncionario',
+                  'divergencias', 'instalado'] });
+  }
+}
+
+/* o nome é invmovel, e não inventario, porque inventario JÁ EXISTE
+   no Core do Ismael e cinco telas dependem dele */
+function AP_Modulo_invmovel(acao, payload, sessao) {
+  try {
+    return AP_INV_executar_(acao, payload, sessao);
+  } catch (e) {
+    return AP_INV_erro_('ERRO_NO_MODULO',
+      'O módulo de inventário móvel quebrou: ' + ((e && e.message) || e));
+  }
+}
+
+/* porta direta, para o google.script.run */
+function AP_INVMOVEL_direto(texto) {
+  var req = {};
+  try { req = typeof texto === 'string' ? JSON.parse(texto) : (texto || {}); }
+  catch (e) {
+    return JSON.stringify(AP_INV_erro_('PEDIDO_ESTRANHO',
+      'Não entendi o pedido: ' + e));
+  }
+  return JSON.stringify(
+    AP_Modulo_invmovel(req.acao, req.payload, req.sessao));
+}
+
+
+/* ============================================================
+   11. INSTALAÇÃO — separada, e só quando o senhor mandar
+   ============================================================ */
+
+function AP_INV_estadoDasAbas_() {
+  var nomes = [AP_INV_CFG.abaAtividades, AP_INV_CFG.abaContagens, AP_INV_CFG.abaEventos];
+  var colunas = [AP_INV_CFG.colunasAtividades, AP_INV_CFG.colunasContagens,
+                 AP_INV_CFG.colunasEventos];
+  var estado = { completo: true, abas: {} };
+  for (var i = 0; i < nomes.length; i++) {
+    var lido = AP_INV_ler_(nomes[i]);
+    var faltando = [];
+    if (lido.existe && lido.colunas.length) {
+      for (var c = 0; c < colunas[i].length; c++) {
+        if (AP_INV_col_(lido.colunas, colunas[i][c]) < 0) faltando.push(colunas[i][c]);
+      }
+    }
+    estado.abas[nomes[i]] = {
+      existe: lido.existe,
+      temCabecalho: !!(lido.existe && lido.colunas.length),
+      linhas: lido.existe ? lido.linhas.length : 0,
+      colunasFaltando: faltando
+    };
+    if (!lido.existe || !lido.colunas.length || faltando.length) estado.completo = false;
+  }
+  return estado;
+}
+
+/** Cria as três abas do inventário móvel, SE faltarem, e acrescenta
+    colunas que faltem. NÃO apaga nada, NÃO renomeia nada e NÃO toca
+    em nenhuma outra aba. Rode à mão, uma vez. */
+function AP_INV_INSTALAR() {
+  var saida = { quando: AP_INV_agora_(), criadas: [], ajustadas: [],
+                jaEstavam: [], avisos: [] };
+  var ss = AP_INV_planilha_();
+  if (!ss) {
+    saida.avisos.push('NÃO HÁ PLANILHA ATIVA para este script.');
+    Logger.log(JSON.stringify(saida, null, 2));
+    return saida;
+  }
+
+  var planos = [
+    [AP_INV_CFG.abaAtividades, AP_INV_CFG.colunasAtividades],
+    [AP_INV_CFG.abaContagens,  AP_INV_CFG.colunasContagens],
+    [AP_INV_CFG.abaEventos,    AP_INV_CFG.colunasEventos]
+  ];
+
+  for (var i = 0; i < planos.length; i++) {
+    var nome = planos[i][0], quer = planos[i][1];
+    var aba = null;
+    try { aba = ss.getSheetByName(nome); } catch (e) { aba = null; }
+
+    if (!aba) {
+      aba = ss.insertSheet(nome);
+      aba.getRange(1, 1, 1, quer.length).setValues([quer]);
+      aba.setFrozenRows(1);
+      saida.criadas.push(nome + ' (' + quer.length + ' colunas)');
+      continue;
+    }
+
+    var ultimaCol = aba.getLastColumn();
+    var cab = ultimaCol > 0
+      ? aba.getRange(1, 1, 1, ultimaCol).getValues()[0].map(AP_INV_txt_) : [];
+    if (!cab.join('')) {
+      aba.getRange(1, 1, 1, quer.length).setValues([quer]);
+      aba.setFrozenRows(1);
+      saida.ajustadas.push(nome + ': estava sem cabeçalho, escrevi os ' +
+        quer.length + ' nomes de coluna');
+      continue;
+    }
+
+    var novas = [];
+    for (var c = 0; c < quer.length; c++) {
+      if (AP_INV_col_(cab, quer[c]) < 0) novas.push(quer[c]);
+    }
+    if (novas.length) {
+      /* acrescenta no fim; não mexe na ordem do que já existe */
+      aba.getRange(1, cab.length + 1, 1, novas.length).setValues([novas]);
+      saida.ajustadas.push(nome + ': acrescentei as colunas ' + novas.join(', '));
+    } else {
+      saida.jaEstavam.push(nome);
+    }
+  }
+
+  SpreadsheetApp.flush();
+  saida.estadoAgora = AP_INV_estadoDasAbas_();
+  saida.observacao = 'Nenhuma aba foi apagada, renomeada ou limpa. ' +
+    'Nenhuma outra aba da planilha foi tocada.';
+  Logger.log(JSON.stringify(saida, null, 2));
+  return saida;
+}
+
+
+/* ============================================================
+   12. DIAGNÓSTICO — só leitura
+   ============================================================ */
+
+function AP_INV_DIAGNOSTICO() {
+  var saida = { quando: AP_INV_agora_(), avisos: [] };
+  var ss = AP_INV_planilha_();
+  if (!ss) {
+    saida.avisos.push('NÃO HÁ PLANILHA ATIVA para este script.');
+    Logger.log(JSON.stringify(saida, null, 2));
+    return saida;
+  }
+  try { saida.planilha = ss.getName(); } catch (e) {}
+
+  saida.abasDoInventarioMovel = AP_INV_estadoDasAbas_();
+  if (!saida.abasDoInventarioMovel.completo) {
+    saida.avisos.push('Falta instalar: rode AP_INV_INSTALAR.');
+  }
+
+  /* não atropelei ninguém? */
+  saida.modulosQueJaExistem = {};
+  var checar = ['inventario', 'atividades', 'locais', 'estoque'];
+  for (var i = 0; i < checar.length; i++) {
+    var nf = 'AP_Modulo_' + checar[i];
+    var existe = false;
+    try { existe = typeof eval(nf) === 'function'; } catch (e) { existe = false; }
+    saida.modulosQueJaExistem[checar[i]] = existe;
+  }
+  saida.meuNome = 'invmovel';
+  saida.euSouOutroModulo = 'não publico AP_Modulo_inventario nem ' +
+    'AP_Modulo_atividades: esses são seus e cinco telas dependem deles';
+
+  /* o saldo vem do módulo locais; testo se ele responde */
+  var teste = AP_INV_saldoDaPosicao_('__TESTE_QUE_NAO_EXISTE__');
+  saida.saldoVemDe = teste.conhecido
+    ? 'módulo locais'
+    : ('não consegui ler saldo agora: ' + teste.motivo);
+
+  Logger.log(JSON.stringify(saida, null, 2));
+  return saida;
+}

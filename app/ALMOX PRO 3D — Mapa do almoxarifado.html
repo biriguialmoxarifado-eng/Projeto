@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>ALMOX PRO 3D 6.4.0 · 15/11</title>
+<title>ALMOX PRO 3D 6.5.0 · 15/11</title>
 <style>
 /* ALMOXA 3D · almoxa3d.css · 08/11/2026
    Responsivo de verdade (seção 11): no celular o painel vira
@@ -419,6 +419,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
       <button class="btn" id="v_construir">Construir estante</button>
       <button class="btn" id="v_rota" aria-pressed="false">Rota</button>
       <button class="btn" id="v_inv" aria-pressed="false">Inventário</button>
+      <button class="btn" id="v_rastreio" aria-pressed="false">Rastreio</button>
       <button class="btn" id="v_calor" aria-pressed="false" title="Mapa de calor">Calor</button>
       <button class="btn" id="v_explodir" aria-pressed="false" title="Separar os níveis">Explodir</button>
       <button class="btn" id="v_indicadores">Indicadores</button>
@@ -1849,7 +1850,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   }
 
   raiz.LAYOUT3D = {
-    VERSAO: '6.4.0',
+    VERSAO: '6.5.0',
     MEDIDAS: MEDIDAS,
     CORES: CORES,
     organizar: organizar,
@@ -1951,7 +1952,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var A = {
     nome: 'API3D',
-    versao: '6.4.0',
+    versao: '6.5.0',
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
     chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
     origemDaChave: 'nenhuma (fase 1)',
@@ -2364,7 +2365,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var M = {
     nome: 'MOTOR3D',
-    versao: '6.4.0',
+    versao: '6.5.0',
     engine: null,
     cena: null,
     camera: null,
@@ -2755,19 +2756,29 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
     var chave = 'placa:' + peca.rotulo;
     if (M.moldes[chave]) return M.moldes[chave];
 
-    /* [P] 15/11, 10h10 — A PLACA ESTAVA ESPELHADA.
-       Na tela do Ismael aparecia "A AUЯ". Eu fiz a placa como uma
-       CAIXA, e a caixa mostra a mesma textura nas seis faces: a de
-       trás aparece invertida, e era justamente a de trás que a
-       câmera pegava na vista padrão.
+    /* [P] 15/11, 11h — A PLACA, TERCEIRA TENTATIVA. E agora com a
+       causa certa.
 
-       Agora a placa é um PLANO que gira junto com a câmera no eixo
-       vertical — como placa de rua de verdade, que se lê de
-       qualquer lado do corredor e nunca de cabeça para baixo. */
+       Primeiro ela era uma CAIXA: a textura ia nas seis faces e a
+       de trás saía espelhada — "A AUЯ".
+
+       Então eu troquei por um plano com BILLBOARD, achando que
+       girar com a câmera resolveria. Não resolveu: o billboard
+       orienta o plano pelo lado de trás, e o texto continuou
+       invertido. Tentativa minha, errada, e ele viu de novo.
+
+       Agora é o jeito canônico do Babylon, sem adivinhação: um
+       plano de DUAS FACES, com a UV da face de trás espelhada no
+       eixo horizontal (backUVs x invertido). A frente lê certo
+       porque é o desenho; o verso lê certo porque a UV dele está
+       espelhada — como placa de rua de verdade, de chapa dupla.
+       Sem billboard: assim ela não gira, não deita e não inverte. */
     var placa = b.MeshBuilder.CreatePlane('placa_' + peca.rotulo, {
-      width: peca.lx, height: peca.ly
+      width: peca.lx, height: peca.ly,
+      sideOrientation: b.Mesh.DOUBLESIDE,
+      frontUVs: new b.Vector4(0, 0, 1, 1),
+      backUVs:  new b.Vector4(1, 0, 0, 1)
     }, M.cena);
-    placa.billboardMode = b.Mesh.BILLBOARDMODE_Y;
 
     var mat = new b.StandardMaterial('m_placa_' + peca.rotulo, M.cena);
     mat.diffuseColor = cor3('#1E3A5F');
@@ -2837,8 +2848,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
       inst.position = new b.Vector3(p.x, p.y, p.z);
       inst.isPickable = !!p.clicavel;
       inst.metadata = p;
-      /* [P] a placa da rua acompanha a câmera; o resto fica parado */
-      if (p.tipo === 'placaRua') inst.billboardMode = b.Mesh.BILLBOARDMODE_Y;
+      /* [P] a placa NÃO gira: duas faces, cada uma com a sua UV */
 
       if (M.sombra && p.tipo !== 'piso') {
         try { M.sombra.addShadowCaster(inst); } catch (e) { }
@@ -3079,7 +3089,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var C = {
     nome: 'CONSTRUTOR3D',
-    versao: '6.4.0',
+    versao: '6.5.0',
     aberto: false,
     projeto: null,
     /* o galpão real fica guardado enquanto o projeto está na tela,
@@ -3758,7 +3768,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   'use strict';
 
   var APP = {
-    versao: '6.4.0',
+    versao: '6.5.0',
     montagem: null,
     locais: [],
     carregando: false,
@@ -4804,6 +4814,174 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   /* ------------------------------------------------------------
      ETAPA 2 · as atividades do funcionário
      ------------------------------------------------------------ */
+  /* ============================================================
+     [RAST] 15/11 · RASTREIO POR COLABORADOR · seção 8
+     ------------------------------------------------------------
+     "Para quando a pessoa quiser saber onde ele tá, o que ele tá
+     fazendo, conseguir visualizar rastreio."
+
+     O que esta tela mostra, e é importante ser exato:
+
+       · ONDE ELE ESTEVE — cada endereço que ele conferiu, com a
+         hora. Isso é registro de operação, e existe.
+       · O QUE ELE FEZ — contagens, divergências, atividades.
+       · QUANDO — a linha do tempo, evento por evento.
+
+     O que ela NÃO mostra, e eu não vou fingir que mostra: onde a
+     pessoa está AGORA. Isso seria GPS, e GPS exige o aplicativo no
+     celular dela, autorização dela e um serviço que guarde a
+     posição. Nada disso existe hoje. O último endereço lido é o
+     mais perto disso que o sistema sabe de verdade — e é assim
+     que a tela chama: "última posição conferida", não
+     "localização atual".
+     ============================================================ */
+  APP.rastreio = { quem: '', painel: null, eventos: null, erro: null };
+
+  APP.pintarRastreio = function () {
+    APP.modoRastreio = true;
+    APP.titulo('Rastreio');
+
+    if (!APP.colaboradores.lista && !APP.colaboradores.erro &&
+        !APP.colaboradores.lendo) {
+      $('corpoPainel').innerHTML = '<div class="vazio">Lendo o cadastro…</div>';
+      APP.carregarColaboradores().then(function () {
+        if (APP.modoRastreio) APP.pintarRastreio();
+      });
+      return;
+    }
+
+    var h = '';
+    var c = APP.colaboradores;
+
+    if (c.lista && c.lista.length) {
+      h += '<div class="campo"><label for="rsQuem">Colaborador</label>' +
+        '<select id="rsQuem"><option value="">— escolha —</option>' +
+        c.lista.map(function (u) {
+          return '<option value="' + esc(u.nome) + '"' +
+            (APP.rastreio.quem === u.nome ? ' selected' : '') + '>' +
+            esc(u.nome + (u.matricula ? ' · ' + u.matricula : '')) + '</option>';
+        }).join('') + '</select></div>';
+    } else {
+      h += '<div class="aviso erro"><b>Não consegui ler o cadastro.</b><br>' +
+        esc((c.erro && c.erro.mensagem) || 'sem resposta') +
+        '<div class="small" style="margin-top:6px">Sem o cadastro eu não ' +
+        'tenho a lista de quem rastrear.</div></div>';
+    }
+
+    h += '<div id="rsCorpo"></div>' +
+      '<div class="sep"></div><button class="btn" id="rsSair">Voltar ao galpão</button>';
+
+    $('corpoPainel').innerHTML = h;
+
+    var sel = $('rsQuem');
+    if (sel) sel.addEventListener('change', function () {
+      APP.rastreio.quem = sel.value;
+      APP.carregarRastreio();
+    });
+    var sair = $('rsSair');
+    if (sair) sair.addEventListener('click', function () {
+      APP.modoRastreio = false;
+      APP.pintarResumo();
+    });
+
+    if (APP.rastreio.quem) APP.carregarRastreio();
+  };
+
+  APP.carregarRastreio = function () {
+    var cx = $('rsCorpo');
+    if (!cx) return;
+    if (!APP.rastreio.quem) { cx.innerHTML = ''; return; }
+    cx.innerHTML = '<div class="vazio">Lendo o que ele fez…</div>';
+
+    var quem = APP.rastreio.quem;
+    Promise.all([
+      APP.invChamar('painelFuncionario', { quem: quem }),
+      APP.invChamar('linhaDoTempo', { quem: quem })
+    ]).then(function (r) {
+      var painel = r[0], tempo = r[1];
+
+      if (painel.__semModulo || tempo.__semModulo) {
+        cx.innerHTML = APP.avisoSemInventario();
+        return;
+      }
+      if (!painel.ok && !tempo.ok) {
+        cx.innerHTML = '<div class="aviso erro"><b>Não consegui ler o rastreio.</b><br>' +
+          esc(painel.mensagem || tempo.mensagem || 'sem resposta') +
+          '<div class="small" style="margin-top:6px">Isto NÃO quer dizer que ' +
+          'ele não fez nada: quer dizer que não consegui ler.</div></div>';
+        return;
+      }
+
+      var h = '';
+      if (painel.ok) {
+        var d = painel.dados;
+        h += '<div class="numeros">' +
+          cartao(d.posicoesConferidas, 'posições') +
+          cartao(d.atividades, 'atividades') +
+          cartao(d.conferidas, 'sem divergência') +
+          cartao(d.divergencias, 'divergências') +
+        '</div>';
+        if (d.semSaldoParaComparar) {
+          h += '<div class="aviso">' + d.semSaldoParaComparar + ' conferência(s) ' +
+            'sem saldo para comparar — não entram como “conferido”.</div>';
+        }
+        h += '<div class="small" style="margin-bottom:10px;color:var(--texto-3)">' +
+          esc(painel.observacao || '') + '</div>';
+      }
+
+      var eventos = (tempo.ok && tempo.dados) || [];
+      /* o último endereço que ele leu: é o mais perto de "onde ele
+         está" que o sistema sabe de verdade */
+      var ultimo = null;
+      for (var i = eventos.length - 1; i >= 0; i--) {
+        if (eventos[i].codigo) { ultimo = eventos[i]; break; }
+      }
+      h += '<div class="sep"></div>' +
+        '<div class="linha"><span>Última posição conferida</span><b class="mono">' +
+          (ultimo ? esc(ultimo.codigo) : '—') + '</b></div>' +
+        '<div class="linha"><span>Quando</span><b>' +
+          (ultimo ? esc(ultimo.quando) : '—') + '</b></div>' +
+        '<div class="small" style="margin:4px 0 10px;color:var(--texto-3)">' +
+        'Isto é onde ele <b>esteve</b>, não onde ele está agora. ' +
+        'Localização ao vivo exigiria GPS pelo aplicativo, com autorização ' +
+        'dele — e isso não existe no sistema hoje.</div>';
+
+      if (ultimo) {
+        h += '<button class="btn" id="rsVerNoMapa" style="width:100%">' +
+          'Ver essa posição no mapa</button>';
+      }
+
+      if (!eventos.length) {
+        h += '<div class="vazio">Nenhum evento registrado para ' +
+          esc(quem) + '.</div>';
+      } else {
+        h += '<div class="sep"></div><b style="font-size:12.5px">Linha do tempo</b>' +
+          '<div class="tempo">';
+        for (var k = eventos.length - 1; k >= 0 && k > eventos.length - 41; k--) {
+          var e = eventos[k];
+          h += '<div class="tempoItem">' +
+            '<div class="tempoHora">' + esc(e.quando) + '</div>' +
+            '<div class="tempoTexto"><b>' + esc(e.evento) + '</b>' +
+              (e.codigo ? ' · <span class="mono">' + esc(e.codigo) + '</span>' : '') +
+              (e.detalhe ? '<div class="small">' + esc(e.detalhe) + '</div>' : '') +
+            '</div></div>';
+        }
+        h += '</div>';
+        if (eventos.length > 40) {
+          h += '<div class="small">mostrando os 40 mais recentes de ' +
+            eventos.length + '</div>';
+        }
+      }
+
+      cx.innerHTML = h;
+
+      var ver = $('rsVerNoMapa');
+      if (ver && ultimo) ver.addEventListener('click', function () {
+        try { raiz.MOTOR3D.selecionarPorCodigo(ultimo.codigo); } catch (e) {}
+      });
+    });
+  };
+
   APP.pintarInventario = function () {
     APP.modoInv = true;
     APP.titulo('Inventário móvel');
@@ -5692,7 +5870,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
      Salvar o arquivo não é publicar, e publicar não é o
      navegador ter recebido.
      ============================================================ */
-  APP.VERSAO = '6.4.0';
+  APP.VERSAO = '6.5.0';
   APP.COMPILADO = '2026-11-15';
   APP.CARIMBO = 'ALMOXA 3D ' + APP.VERSAO + ' · ' + APP.COMPILADO;
 
@@ -6349,6 +6527,19 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
     APP.pintarVersao();
     var bver = $('v_versao');
     if (bver) bver.addEventListener('click', function () { APP.pintarPublicacao(); });
+
+    /* [RAST] rastreio por colaborador */
+    var brs = $('v_rastreio');
+    if (brs) brs.addEventListener('click', function () {
+      if (APP.modoRastreio) {
+        APP.modoRastreio = false;
+        brs.setAttribute('aria-pressed', 'false');
+        APP.pintarResumo();
+      } else {
+        brs.setAttribute('aria-pressed', 'true');
+        APP.pintarRastreio();
+      }
+    });
 
     /* [F6] calor, explodir, indicadores, apresentação */
     var bc = $('v_calor');
