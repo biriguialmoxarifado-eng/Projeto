@@ -49,16 +49,37 @@ var AP_INV_CFG = {
   abaAtividades: 'ALMOXA_INV_ATIVIDADES',
   abaContagens:  'ALMOXA_INV_CONTAGENS',
   abaEventos:    'ALMOXA_INV_EVENTOS',
+  abaRotas:      'ALMOXA_INV_ROTAS',
 
+  /* [módulo 01 · 15/11] 'deposito' e 'prioridade' entram no fim: a
+     instalação acrescenta coluna que falta sem mexer na ordem do
+     que já existe, então nenhuma planilha em uso quebra. */
   colunasAtividades: ['id', 'tipo', 'galpao', 'rua', 'estante', 'prateleira',
     'posicoes', 'quantasPosicoes', 'responsavel', 'responsavelId', 'prazo',
     'instrucoes', 'status', 'criadaPor', 'criadaEm', 'iniciadaEm',
-    'concluidaEm', 'confirmadaPor', 'observacao'],
+    'concluidaEm', 'confirmadaPor', 'observacao', 'deposito', 'prioridade'],
 
+  /* 'rotaId' também entra no fim, pelo mesmo motivo */
   colunasContagens: ['id', 'atividadeId', 'codigo', 'rua', 'estante',
     'prateleira', 'posicao', 'qrLido', 'saldoSistema', 'qtdEncontrada',
     'diferenca', 'resultado', 'observacao', 'ocorrencia', 'fotos',
-    'quem', 'quemId', 'quando', 'operacaoId', 'sessaoId', 'status'],
+    'quem', 'quemId', 'quando', 'operacaoId', 'sessaoId', 'status', 'rotaId'],
+
+  /* A ROTA é um recorte da atividade: um punhado das posições dela,
+     em ordem, com um dono. NÃO guarda cadastro de material — isso
+     seria banco paralelo. O campo 'materiais' é um FILTRO opcional:
+     os códigos que o gestor quer que sejam conferidos naquele local.
+     A descrição, a unidade e o saldo continuam vindo do Core. */
+  colunasRotas: ['id', 'atividadeId', 'nome', 'ordem', 'deposito', 'rua',
+    'descricao', 'responsavel', 'responsavelId', 'posicoes', 'quantasPosicoes',
+    'materiais', 'prioridade', 'prazo', 'status', 'criadaEm', 'criadaPor',
+    'iniciadaEm', 'concluidaEm', 'observacao'],
+
+  /* os estados que a seção 4 do prompt pede, nessa ordem */
+  statusRota: ['NOVA', 'AGUARDANDO_INICIO', 'EM_ANDAMENTO', 'PENDENTE',
+    'COM_DIVERGENCIA', 'AGUARDANDO_APROVACAO', 'CONCLUIDA', 'CANCELADA'],
+
+  prioridades: ['BAIXA', 'NORMAL', 'ALTA', 'URGENTE'],
 
   colunasEventos: ['id', 'quando', 'atividadeId', 'codigo', 'quem', 'quemId',
     'evento', 'detalhe'],
@@ -427,6 +448,415 @@ function AP_INV_criarAtividade(payload, sessao) {
   });
 }
 
+/* ============================================================
+   6-B. MOTOR DE ROTAS — módulo 01, seções 3, 4 e 5
+   ------------------------------------------------------------
+   Uma ROTA é um recorte de uma atividade: algumas das posições
+   dela, em ordem, com um dono. Serve para o gestor dividir um
+   inventário grande entre pessoas, ou dar várias ruas à mesma
+   pessoa, sem criar uma atividade para cada pedaço.
+
+   TRÊS DECISÕES, e o porquê de cada uma:
+
+   1. A rota vive DENTRO de uma atividade. Não existe rota solta
+      (regra 6 do prompt: "não criar rotas sem vínculo com
+      atividades e responsáveis").
+
+   2. As posições da rota têm de estar entre as da atividade. Se
+      eu deixasse incluir qualquer endereço, uma rota mandaria o
+      funcionário conferir coisa fora do que foi autorizado — e a
+      regra 7 diz o contrário.
+
+   3. A rota NÃO guarda cadastro de material. Isso seria banco
+      paralelo (regra 4) e duplicação (regra 5). O campo
+      "materiais" é um FILTRO: os códigos que o gestor quer
+      conferidos ali. Descrição, unidade e saldo continuam vindo
+      do Core, na hora da execução.
+   ============================================================ */
+
+function AP_INV_listaDePosicoes_(bruto) {
+  var v = bruto;
+  if (Object.prototype.toString.call(v) !== '[object Array]') {
+    v = AP_INV_txt_(v) ? AP_INV_txt_(v).split(/[;,\s]+/) : [];
+  }
+  var vistos = {}, fora = [];
+  for (var i = 0; i < v.length; i++) {
+    var c = AP_INV_txt_(v[i]);
+    if (!c) continue;
+    var k = AP_INV_normal_(c);
+    if (vistos[k]) continue;
+    vistos[k] = 1;
+    fora.push(c);
+  }
+  return fora;
+}
+
+function AP_INV_acharRota_(id) {
+  var lido = AP_INV_ler_(AP_INV_CFG.abaRotas);
+  if (!lido.existe || !lido.colunas.length) return null;
+  var alvo = AP_INV_normal_(id);
+  if (!alvo) return null;
+  var ci = AP_INV_col_(lido.colunas, 'id');
+  if (ci < 0) return null;
+  for (var i = 0; i < lido.linhas.length; i++) {
+    if (AP_INV_normal_(lido.linhas[i][ci]) === alvo) {
+      return AP_INV_objeto_(lido.colunas, lido.linhas[i], i + 2);
+    }
+  }
+  return null;
+}
+
+function AP_INV_rotasDaAtividade_(atividadeId) {
+  var lido = AP_INV_ler_(AP_INV_CFG.abaRotas);
+  if (!lido.existe || !lido.colunas.length) return [];
+  var ca = AP_INV_col_(lido.colunas, 'atividadeId');
+  if (ca < 0) return [];
+  var alvo = AP_INV_normal_(atividadeId), fora = [];
+  for (var i = 0; i < lido.linhas.length; i++) {
+    if (AP_INV_normal_(lido.linhas[i][ca]) !== alvo) continue;
+    fora.push(AP_INV_objeto_(lido.colunas, lido.linhas[i], i + 2));
+  }
+  fora.sort(function (a, b) {
+    return (AP_INV_num_(a.ordem) || 0) - (AP_INV_num_(b.ordem) || 0);
+  });
+  return fora;
+}
+
+/* ETAPA 1 · o gestor cria a rota, no computador */
+function AP_INV_criarRota(payload, sessao) {
+  var p = payload || {};
+  var eu = AP_INV_quem_(sessao);
+
+  var atividadeId = AP_INV_txt_(p.atividadeId);
+  var atividade = AP_INV_acharAtividade_(atividadeId);
+  if (!atividade) {
+    return AP_INV_erro_('ATIVIDADE_NAO_ENCONTRADA',
+      'Não achei a atividade "' + atividadeId + '". Uma rota sem atividade ' +
+      'ficaria órfã: ninguém saberia de qual inventário ela faz parte.');
+  }
+  if (AP_INV_normal_(atividade.status) === 'CANCELADA') {
+    return AP_INV_erro_('ATIVIDADE_CANCELADA',
+      'A atividade ' + atividadeId + ' foi cancelada. Não crio rota nela.');
+  }
+
+  var nome = AP_INV_txt_(p.nome);
+  if (!nome) {
+    return AP_INV_erro_('SEM_NOME',
+      'A rota precisa de nome. É por ele que o funcionário a reconhece ' +
+      'no celular — "Rota 01 — Rua A — Ferragens".');
+  }
+
+  var responsavel = AP_INV_txt_(p.responsavel) || AP_INV_txt_(atividade.responsavel);
+  if (!responsavel) {
+    return AP_INV_erro_('SEM_RESPONSAVEL',
+      'A rota precisa de responsável. Sem dono ela não aparece no celular ' +
+      'de ninguém e não há a quem cobrar.');
+  }
+
+  var pedidas = AP_INV_listaDePosicoes_(p.posicoes);
+  if (!pedidas.length) {
+    return AP_INV_erro_('SEM_POSICOES',
+      'A rota precisa de pelo menos um local.');
+  }
+
+  /* as posições da rota têm de pertencer à atividade */
+  var daAtividade = AP_INV_listaDePosicoes_(atividade.posicoes);
+  var mapa = {};
+  for (var i = 0; i < daAtividade.length; i++) mapa[AP_INV_normal_(daAtividade[i])] = 1;
+  var foraDaAtividade = [], dentro = [];
+  for (var j = 0; j < pedidas.length; j++) {
+    if (mapa[AP_INV_normal_(pedidas[j])]) dentro.push(pedidas[j]);
+    else foraDaAtividade.push(pedidas[j]);
+  }
+  if (foraDaAtividade.length) {
+    return AP_INV_erro_('POSICAO_FORA_DA_ATIVIDADE',
+      'Estas posições não estão na atividade ' + atividadeId + ': ' +
+      foraDaAtividade.join(', ') + '. Não mando ninguém conferir endereço ' +
+      'que não foi autorizado. Inclua-as na atividade primeiro.',
+      { foraDaAtividade: foraDaAtividade, daAtividade: daAtividade });
+  }
+
+  /* a mesma posição em duas rotas seria contada duas vezes */
+  var jaRoteadas = {}, irmas = AP_INV_rotasDaAtividade_(atividadeId);
+  for (var r = 0; r < irmas.length; r++) {
+    if (AP_INV_normal_(irmas[r].status) === 'CANCELADA') continue;
+    var dela = AP_INV_listaDePosicoes_(irmas[r].posicoes);
+    for (var d = 0; d < dela.length; d++) {
+      jaRoteadas[AP_INV_normal_(dela[d])] = irmas[r].id;
+    }
+  }
+  var repetidas = [];
+  for (var k = 0; k < dentro.length; k++) {
+    var dono = jaRoteadas[AP_INV_normal_(dentro[k])];
+    if (dono) repetidas.push(dentro[k] + ' (já está na rota ' + dono + ')');
+  }
+  if (repetidas.length) {
+    return AP_INV_erro_('POSICAO_JA_EM_OUTRA_ROTA',
+      'Estas posições já pertencem a outra rota desta atividade: ' +
+      repetidas.join('; ') + '. Duas pessoas contando o mesmo endereço ' +
+      'geram duas contagens e uma divergência que não existe.',
+      { repetidas: repetidas });
+  }
+
+  var prioridade = AP_INV_normal_(p.prioridade) || 'NORMAL';
+  if (AP_INV_CFG.prioridades.indexOf(prioridade) === -1) {
+    return AP_INV_erro_('PRIORIDADE_DESCONHECIDA',
+      'Prioridade "' + AP_INV_txt_(p.prioridade) + '" não existe. As que ' +
+      'existem: ' + AP_INV_CFG.prioridades.join(', ') + '.');
+  }
+
+  var ordem = AP_INV_num_(p.ordem);
+  if (ordem === null) ordem = irmas.length + 1;
+
+  var id = AP_INV_id_('ROT');
+  var reg = {
+    id: id,
+    atividadeId: atividadeId,
+    nome: nome,
+    ordem: ordem,
+    deposito: AP_INV_txt_(p.deposito) || AP_INV_txt_(atividade.deposito),
+    rua: AP_INV_txt_(p.rua),
+    descricao: AP_INV_txt_(p.descricao),
+    responsavel: responsavel,
+    responsavelId: AP_INV_txt_(p.responsavelId) ||
+                   AP_INV_txt_(atividade.responsavelId),
+    posicoes: dentro.join(';'),
+    quantasPosicoes: dentro.length,
+    /* filtro opcional de material — NÃO é cadastro */
+    materiais: AP_INV_listaDePosicoes_(p.materiais).join(';'),
+    prioridade: prioridade,
+    prazo: AP_INV_txt_(p.prazo) || AP_INV_txt_(atividade.prazo),
+    status: 'NOVA',
+    criadaEm: AP_INV_agora_(),
+    criadaPor: eu.nome,
+    iniciadaEm: '', concluidaEm: '',
+    observacao: AP_INV_txt_(p.observacao)
+  };
+
+  var g = AP_INV_gravar_(AP_INV_CFG.abaRotas, reg);
+  if (!g.ok) return g;
+
+  var conferida = AP_INV_acharRota_(id);
+  if (!conferida) {
+    return AP_INV_erro_('NAO_CONFIRMOU',
+      'Escrevi a rota na linha ' + g.dados.linha + ', mas ao reler não a ' +
+      'encontrei. NÃO considere criada.');
+  }
+
+  AP_INV_evento_(atividadeId, '', 'ROTA_CRIADA',
+    nome + ' com ' + dentro.length + ' local(is) para ' + responsavel, sessao);
+
+  return AP_INV_ok_(conferida,
+    { observacao: 'confirmada por releitura na linha ' + conferida.__linha });
+}
+
+/* quanto de uma rota já foi feito — sai das CONTAGENS, não de um
+   contador guardado, que poderia divergir do que está gravado */
+function AP_INV_estadoDaRota_(rota) {
+  var posicoes = AP_INV_listaDePosicoes_(rota.posicoes);
+  var feitas = {}, divergentes = 0;
+  var lido = AP_INV_ler_(AP_INV_CFG.abaContagens);
+  if (lido.existe && lido.colunas.length) {
+    var cr = AP_INV_col_(lido.colunas, 'rotaId');
+    var ca = AP_INV_col_(lido.colunas, 'atividadeId');
+    var cc = AP_INV_col_(lido.colunas, 'codigo');
+    var cres = AP_INV_col_(lido.colunas, 'resultado');
+    var cst = AP_INV_col_(lido.colunas, 'status');
+    var naRota = {};
+    for (var q = 0; q < posicoes.length; q++) naRota[AP_INV_normal_(posicoes[q])] = 1;
+
+    for (var i = 0; i < lido.linhas.length; i++) {
+      var L = lido.linhas[i];
+      if (cst >= 0 && AP_INV_normal_(L[cst]) === 'CANCELADA') continue;
+      var codigo = cc >= 0 ? AP_INV_normal_(L[cc]) : '';
+      if (!naRota[codigo]) continue;
+      /* a contagem conta para esta rota se apontar para ela, ou se
+         ainda não existia rotaId e a atividade for a mesma */
+      var daRota = cr >= 0 && AP_INV_normal_(L[cr]) === AP_INV_normal_(rota.id);
+      var daAtividade = ca >= 0 &&
+        AP_INV_normal_(L[ca]) === AP_INV_normal_(rota.atividadeId) &&
+        (cr < 0 || !AP_INV_txt_(L[cr]));
+      if (!daRota && !daAtividade) continue;
+      feitas[codigo] = 1;
+      if (cres >= 0 && /DIVERGENCIA/.test(AP_INV_normal_(L[cres]))) divergentes++;
+    }
+  }
+  var faltam = [];
+  for (var z = 0; z < posicoes.length; z++) {
+    if (!feitas[AP_INV_normal_(posicoes[z])]) faltam.push(posicoes[z]);
+  }
+  return {
+    posicoes: posicoes,
+    quantas: posicoes.length,
+    feitas: posicoes.length - faltam.length,
+    faltam: faltam.length,
+    faltamQuais: faltam,
+    divergencias: divergentes,
+    completa: faltam.length === 0 && posicoes.length > 0
+  };
+}
+
+/* o status que a rota TEM de verdade, calculado do que está gravado.
+   Não invento "em andamento" para rota que ninguém tocou. */
+function AP_INV_statusDaRota_(rota, estado) {
+  var guardado = AP_INV_normal_(rota.status);
+  if (guardado === 'CANCELADA' || guardado === 'CONCLUIDA' ||
+      guardado === 'AGUARDANDO_APROVACAO') return guardado;
+  if (estado.completa) {
+    return estado.divergencias ? 'COM_DIVERGENCIA' : 'AGUARDANDO_APROVACAO';
+  }
+  if (estado.feitas > 0) {
+    return estado.divergencias ? 'COM_DIVERGENCIA' : 'EM_ANDAMENTO';
+  }
+  if (AP_INV_txt_(rota.iniciadaEm)) return 'EM_ANDAMENTO';
+  return guardado === 'AGUARDANDO_INICIO' ? 'AGUARDANDO_INICIO' : 'NOVA';
+}
+
+function AP_INV_rotaComProgresso_(rota) {
+  var estado = AP_INV_estadoDaRota_(rota);
+  var copia = {};
+  for (var k in rota) if (Object.prototype.hasOwnProperty.call(rota, k)) copia[k] = rota[k];
+  copia.statusCalculado = AP_INV_statusDaRota_(rota, estado);
+  copia.progresso = estado;
+  copia.porcento = estado.quantas
+    ? Math.round((estado.feitas / estado.quantas) * 100) : 0;
+  return copia;
+}
+
+/* ETAPA 2 · o gestor confere o que distribuiu */
+function AP_INV_listarRotas(payload) {
+  var p = payload || {};
+  var lido = AP_INV_ler_(AP_INV_CFG.abaRotas);
+  if (!lido.existe) {
+    return AP_INV_erro_('ABA_NAO_EXISTE',
+      'A aba "' + AP_INV_CFG.abaRotas + '" não existe. Rode AP_INV_INSTALAR. ' +
+      'NÃO devolvo lista vazia como se não houvesse rota nenhuma.');
+  }
+  if (!lido.colunas.length) {
+    return AP_INV_erro_('ABA_SEM_CABECALHO',
+      'A aba "' + AP_INV_CFG.abaRotas + '" está sem cabeçalho. Rode AP_INV_INSTALAR.');
+  }
+
+  var filtroAtv = AP_INV_normal_(p.atividadeId);
+  var filtroStatus = AP_INV_normal_(p.status);
+  var fora = [];
+  for (var i = 0; i < lido.linhas.length; i++) {
+    var o = AP_INV_objeto_(lido.colunas, lido.linhas[i], i + 2);
+    if (!AP_INV_txt_(o.id)) continue;
+    if (filtroAtv && AP_INV_normal_(o.atividadeId) !== filtroAtv) continue;
+    var com = AP_INV_rotaComProgresso_(o);
+    if (filtroStatus && AP_INV_normal_(com.statusCalculado) !== filtroStatus) continue;
+    fora.push(com);
+  }
+  fora.sort(function (a, b) {
+    var x = AP_INV_normal_(a.atividadeId).localeCompare(AP_INV_normal_(b.atividadeId));
+    if (x) return x;
+    return (AP_INV_num_(a.ordem) || 0) - (AP_INV_num_(b.ordem) || 0);
+  });
+  return AP_INV_ok_(fora, { quantas: fora.length, truncado: !!lido.truncado });
+}
+
+/* ETAPA 3 · o funcionário abre o celular e vê o que é dele.
+   Quem sou eu quem decide é a SESSÃO do Core, não o navegador. */
+function AP_INV_minhasRotas(payload, sessao) {
+  var eu = AP_INV_quem_(sessao);
+  if (eu.nome === '(não identificado)' && !eu.id) {
+    return AP_INV_erro_('SEM_SESSAO',
+      'Não sei quem está pedindo. Sem sessão do Core eu não mostro rota de ' +
+      'ninguém — isso daria acesso a atividade não autorizada.');
+  }
+  var todas = AP_INV_listarRotas(payload || {});
+  if (!todas.ok) return todas;
+
+  var meuNome = AP_INV_normal_(eu.nome), meuId = AP_INV_normal_(eu.id);
+  var minhas = [];
+  for (var i = 0; i < todas.dados.length; i++) {
+    var r = todas.dados[i];
+    var ehMinha =
+      (meuId && AP_INV_normal_(r.responsavelId) === meuId) ||
+      (meuNome && AP_INV_normal_(r.responsavel) === meuNome);
+    if (!ehMinha) continue;
+    if (AP_INV_normal_(r.statusCalculado) === 'CANCELADA') continue;
+    minhas.push(r);
+  }
+  return AP_INV_ok_(minhas, { quantas: minhas.length, quemSouEu: eu });
+}
+
+/* ETAPA 4 · começar a rota marca a hora, e nada mais */
+function AP_INV_iniciarRota(payload, sessao) {
+  var p = payload || {};
+  var rota = AP_INV_acharRota_(AP_INV_txt_(p.rotaId));
+  if (!rota) {
+    return AP_INV_erro_('ROTA_NAO_ENCONTRADA',
+      'Não achei a rota ' + AP_INV_txt_(p.rotaId) + '.');
+  }
+  if (AP_INV_normal_(rota.status) === 'CANCELADA') {
+    return AP_INV_erro_('ROTA_CANCELADA', 'Esta rota foi cancelada.');
+  }
+
+  var eu = AP_INV_quem_(sessao);
+  if (eu.nome !== '(não identificado)' &&
+      AP_INV_normal_(rota.responsavel) !== AP_INV_normal_(eu.nome) &&
+      (!eu.id || AP_INV_normal_(rota.responsavelId) !== AP_INV_normal_(eu.id))) {
+    return AP_INV_erro_('ROTA_DE_OUTRA_PESSOA',
+      'Esta rota é de ' + AP_INV_txt_(rota.responsavel) + '. Não inicio rota ' +
+      'em nome de outra pessoa.');
+  }
+
+  if (AP_INV_txt_(rota.iniciadaEm)) {
+    return AP_INV_ok_(AP_INV_rotaComProgresso_(rota),
+      { observacao: 'esta rota já havia sido iniciada em ' + rota.iniciadaEm });
+  }
+
+  var m = AP_INV_mudarRota_(rota.id,
+    { status: 'EM_ANDAMENTO', iniciadaEm: AP_INV_agora_() });
+  if (!m.ok) return m;
+
+  AP_INV_evento_(rota.atividadeId, '', 'ROTA_INICIADA',
+    AP_INV_txt_(rota.nome) + ' por ' + eu.nome, sessao);
+
+  var depois = AP_INV_acharRota_(rota.id);
+  if (!depois || !AP_INV_txt_(depois.iniciadaEm)) {
+    return AP_INV_erro_('NAO_CONFIRMOU',
+      'Marquei o início, mas ao reler a rota a hora não estava lá.');
+  }
+  return AP_INV_ok_(AP_INV_rotaComProgresso_(depois));
+}
+
+function AP_INV_mudarRota_(id, campos) {
+  var lido = AP_INV_ler_(AP_INV_CFG.abaRotas);
+  if (!lido.existe || !lido.colunas.length) {
+    return AP_INV_erro_('ABA_NAO_EXISTE', 'A aba de rotas não está pronta.');
+  }
+  var ci = AP_INV_col_(lido.colunas, 'id');
+  if (ci < 0) return AP_INV_erro_('SEM_COLUNA_ID', 'A aba de rotas não tem "id".');
+  var alvo = AP_INV_normal_(id);
+  for (var i = 0; i < lido.linhas.length; i++) {
+    if (AP_INV_normal_(lido.linhas[i][ci]) !== alvo) continue;
+    for (var c in campos) {
+      if (!Object.prototype.hasOwnProperty.call(campos, c)) continue;
+      var col = AP_INV_col_(lido.colunas, c);
+      if (col >= 0) lido.aba.getRange(i + 2, col + 1).setValue(campos[c]);
+    }
+    SpreadsheetApp.flush();
+    return AP_INV_ok_({ linha: i + 2 });
+  }
+  return AP_INV_erro_('ROTA_NAO_ENCONTRADA', 'Não achei a rota ' + id + '.');
+}
+
+/* ETAPA 5 · o progresso de uma rota, para a tela e para o painel */
+function AP_INV_progressoDaRota(payload) {
+  var p = payload || {};
+  var rota = AP_INV_acharRota_(AP_INV_txt_(p.rotaId));
+  if (!rota) {
+    return AP_INV_erro_('ROTA_NAO_ENCONTRADA',
+      'Não achei a rota ' + AP_INV_txt_(p.rotaId) + '.');
+  }
+  var com = AP_INV_rotaComProgresso_(rota);
+  var atividade = AP_INV_acharAtividade_(rota.atividadeId);
+  return AP_INV_ok_({ rota: com, atividade: atividade || null });
+}
+
 function AP_INV_acharAtividade_(id) {
   var lido = AP_INV_ler_(AP_INV_CFG.abaAtividades);
   if (!lido.existe || !lido.colunas.length) return null;
@@ -709,7 +1139,11 @@ function AP_INV_registrarContagem(payload, sessao) {
     quando: AP_INV_agora_(),
     operacaoId: AP_INV_txt_(p.operacaoId) || AP_INV_id_('OP'),
     sessaoId: AP_INV_txt_((sessao || {}).sessaoId),
-    status: 'ATIVA'
+    status: 'ATIVA',
+    /* [módulo 01] de qual rota veio esta contagem. Vazio quando a
+       contação foi feita direto pela atividade, sem rota — e o
+       cálculo de progresso trata os dois casos. */
+    rotaId: AP_INV_txt_(p.rotaId)
   };
 
   var g = AP_INV_gravar_(AP_INV_CFG.abaContagens, reg);
@@ -1007,6 +1441,11 @@ function AP_INV_executar_(acao, payload, sessao) {
     case 'progresso':         return AP_INV_progresso(payload);
     case 'confirmar':         return AP_INV_confirmarAtividade(payload, sessao);
     case 'cancelar':          return AP_INV_cancelarAtividade(payload, sessao);
+    case 'criarRota':         return AP_INV_criarRota(payload, sessao);
+    case 'listarRotas':       return AP_INV_listarRotas(payload);
+    case 'minhasRotas':       return AP_INV_minhasRotas(payload, sessao);
+    case 'iniciarRota':       return AP_INV_iniciarRota(payload, sessao);
+    case 'progressoDaRota':   return AP_INV_progressoDaRota(payload);
     case 'linhaDoTempo':      return AP_INV_linhaDoTempo(payload);
     case 'painelFuncionario': return AP_INV_painelDoFuncionario(payload);
     case 'divergencias':      return AP_INV_divergencias(payload);
@@ -1017,7 +1456,9 @@ function AP_INV_executar_(acao, payload, sessao) {
         { acoes: ['criarAtividade', 'listarAtividades', 'minhasAtividades',
                   'validarQr', 'registrarContagem', 'progresso', 'confirmar',
                   'cancelar', 'linhaDoTempo', 'painelFuncionario',
-                  'divergencias', 'instalado'] });
+                  'divergencias', 'instalado',
+                  'criarRota', 'listarRotas', 'minhasRotas', 'iniciarRota',
+                  'progressoDaRota'] });
   }
 }
 
@@ -1050,9 +1491,10 @@ function AP_INVMOVEL_direto(texto) {
    ============================================================ */
 
 function AP_INV_estadoDasAbas_() {
-  var nomes = [AP_INV_CFG.abaAtividades, AP_INV_CFG.abaContagens, AP_INV_CFG.abaEventos];
+  var nomes = [AP_INV_CFG.abaAtividades, AP_INV_CFG.abaContagens,
+               AP_INV_CFG.abaEventos, AP_INV_CFG.abaRotas];
   var colunas = [AP_INV_CFG.colunasAtividades, AP_INV_CFG.colunasContagens,
-                 AP_INV_CFG.colunasEventos];
+                 AP_INV_CFG.colunasEventos, AP_INV_CFG.colunasRotas];
   var estado = { completo: true, abas: {} };
   for (var i = 0; i < nomes.length; i++) {
     var lido = AP_INV_ler_(nomes[i]);
@@ -1287,10 +1729,11 @@ function AP_INV_INSTALAR() {
   var planos = [
     [AP_INV_CFG.abaAtividades, AP_INV_CFG.colunasAtividades],
     [AP_INV_CFG.abaContagens,  AP_INV_CFG.colunasContagens],
-    [AP_INV_CFG.abaEventos,    AP_INV_CFG.colunasEventos]
+    [AP_INV_CFG.abaEventos,    AP_INV_CFG.colunasEventos],
+    [AP_INV_CFG.abaRotas,      AP_INV_CFG.colunasRotas]
   ];
 
-  /* cada aba por conta própria: se uma falhar, as outras duas ainda
+  /* cada aba por conta própria: se uma falhar, as outras ainda
      são instaladas, e a falha diz em que etapa parou */
   for (var i = 0; i < planos.length; i++) {
     var r = AP_INV_instalarUmaAba_(ss, planos[i][0], planos[i][1]);
@@ -1529,7 +1972,8 @@ function AP_INV_DIAGNOSTICO_INSTALACAO() {
   var planos = [
     [AP_INV_CFG.abaAtividades, AP_INV_CFG.colunasAtividades],
     [AP_INV_CFG.abaContagens,  AP_INV_CFG.colunasContagens],
-    [AP_INV_CFG.abaEventos,    AP_INV_CFG.colunasEventos]
+    [AP_INV_CFG.abaEventos,    AP_INV_CFG.colunasEventos],
+    [AP_INV_CFG.abaRotas,      AP_INV_CFG.colunasRotas]
   ];
 
   for (var i = 0; i < planos.length; i++) {

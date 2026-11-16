@@ -322,6 +322,14 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   #barra>*{flex:none}
   .busca input{width:170px}
 }
+/* [EMBUTIDO] 15/11 — quando o ALMOXA CAMPO mostra o mapa dentro
+   dele, a barra de cima do aplicativo já diz onde a pessoa está.
+   Repetir "ALMOX PRO 3D" aqui só come altura, que é justamente o
+   que falta num celular. */
+body.embutido .marca{display:none}
+body.embutido #barra{padding:6px 8px}
+body.embutido #legenda{display:none}
+
 @media (max-width:860px){
   .marca small{display:none}
   .busca input{width:140px}
@@ -1881,7 +1889,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   }
 
   raiz.LAYOUT3D = {
-    VERSAO: '6.7.0',
+    VERSAO: '6.7.1',
     MEDIDAS: MEDIDAS,
     CORES: CORES,
     organizar: organizar,
@@ -1983,7 +1991,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var A = {
     nome: 'API3D',
-    versao: '6.7.0',
+    versao: '6.7.1',
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
     chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
     origemDaChave: 'nenhuma (fase 1)',
@@ -2396,7 +2404,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var M = {
     nome: 'MOTOR3D',
-    versao: '6.7.0',
+    versao: '6.7.1',
     engine: null,
     cena: null,
     camera: null,
@@ -3555,7 +3563,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 
   var C = {
     nome: 'CONSTRUTOR3D',
-    versao: '6.7.0',
+    versao: '6.7.1',
     aberto: false,
     projeto: null,
     /* o galpão real fica guardado enquanto o projeto está na tela,
@@ -4234,7 +4242,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
   'use strict';
 
   var APP = {
-    versao: '6.7.0',
+    versao: '6.7.1',
     montagem: null,
     locais: [],
     carregando: false,
@@ -6774,7 +6782,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
      Salvar o arquivo não é publicar, e publicar não é o
      navegador ter recebido.
      ============================================================ */
-  APP.VERSAO = '6.7.0';
+  APP.VERSAO = '6.7.1';
   APP.COMPILADO = '2026-11-15';
   APP.CARIMBO = 'ALMOXA 3D ' + APP.VERSAO + ' · ' + APP.COMPILADO;
 
@@ -7588,6 +7596,33 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
     } catch (e) {}
     try { return localStorage.getItem('almoxa3d:core') || ''; } catch (e) { return ''; }
   }
+
+  /* [EMBUTIDO] o aplicativo abre o mapa com &embutido=1 */
+  (function () {
+    try {
+      if (new URLSearchParams(location.search).get('embutido') === '1') {
+        document.body.classList.add('embutido');
+      }
+    } catch (e) {}
+  })();
+
+  /* [EMBUTIDO] 15/11 · O MAPA DIZ "CHEGUEI"
+     ------------------------------------------------------------
+     Quando o ALMOXA CAMPO mostra esta página dentro dele, ele não
+     consegue olhar aqui para dentro — página de outro endereço não
+     se deixa ler, e ainda bem. O evento "load" da moldura não serve
+     de sinal: o navegador dispara ele TAMBÉM quando mostra a
+     própria página de erro. Era assim que o aplicativo achava que
+     tinha carregado quando não tinha.
+
+     Então eu aviso. Uma linha, sem segredo nenhum dentro. */
+  (function () {
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ almoxa3d: 'pronto' }, '*');
+      }
+    } catch (e) {}
+  })();
 
   function comecar() {
     if (typeof BABYLON === 'undefined') {
