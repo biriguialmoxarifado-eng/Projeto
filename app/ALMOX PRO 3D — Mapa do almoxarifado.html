@@ -35,8 +35,23 @@
   } catch (e) {}
 })();
 </script>
-<title>ALMOX PRO 3D 6.9.1 · 16/11</title>
+<title>ALMOX PRO 3D 6.10.0 · 16/11</title>
 <style>
+/* [N5] 16/11 · a faixa da trilha, seção 5 */
+#trilha3d{position:absolute;left:50%;transform:translateX(-50%);
+  bottom:14px;z-index:7;display:flex;gap:8px;align-items:center;
+  background:rgba(12,20,34,.86);color:#EAF0F8;border-radius:12px;
+  padding:6px 8px;box-shadow:0 6px 22px rgba(0,0,0,.35);
+  max-width:calc(100% - 24px)}
+#trilha3d[hidden]{display:none}
+#trilha3d #tr_onde{font-size:13px;font-weight:600;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;padding:0 4px}
+#trilha3d .btn{padding:6px 10px;font-size:13px;white-space:nowrap}
+@media (max-width:620px){
+  #trilha3d{bottom:10px;gap:6px}
+  #trilha3d #tr_onde{font-size:12px;max-width:40vw}
+}
+
 /* ALMOXA 3D · almoxa3d.css · 08/11/2026
    Responsivo de verdade (seção 11): no celular o painel vira
    gaveta de baixo, e a tela 3D fica inteira para o dedo. */
@@ -447,6 +462,21 @@ body.embutido #legenda{display:none}
   <div id="cena">
     <canvas id="tela3d" touch-action="none"></canvas>
 
+    <!-- [N5] 16/11 · seção 5 · ONDE EU ESTOU, E COMO VOLTO
+         A seção 5 pede "botão de retornar" e "botão de visão
+         geral". No celular isso não é luxo: depois de aproximar
+         numa posição, quem olha perde a referência e não tem
+         tecla Esc para apertar.
+
+         A faixa fica escondida enquanto a câmera está no galpão
+         inteiro — não há para onde voltar, e faixa permanente
+         rouba altura, que no celular é o que falta. -->
+    <div id="trilha3d" hidden>
+      <button class="btn" id="tr_voltar" title="Subir um nível">◀ Voltar</button>
+      <span id="tr_onde"></span>
+      <button class="btn" id="tr_geral" title="Ver o galpão inteiro">Galpão</button>
+    </div>
+
     <!-- [F1] FASE 1 · barra superior organizada · seção 4 do V2.
          Os botões que já existiam continuam com o MESMO id, para não
          quebrar o wiring do app.js. O que entrou: seletor de ambiente,
@@ -479,6 +509,7 @@ body.embutido #legenda{display:none}
         <button class="btn" id="v_lateral" aria-pressed="false">De lado</button>
       </div>
 
+      <button class="btn" id="v_geral" title="Voltar a ver o galpão inteiro">Visão geral</button>
       <button class="btn" id="v_recarregar">Atualizar</button>
       <button class="btn" id="v_construir">Construir estante</button>
       <button class="btn" id="v_rota" aria-pressed="false"
@@ -837,6 +868,10 @@ body.embutido #legenda{display:none}
         for (var c = 0; c < cantos.length; c++) {
           pecas.push({
             tipo: 'montante', id: 'MONT-' + rua.nome + '-' + est.nome + '-' + c,
+            /* [N5] 16/11 — quem é o dono desta peça, em campo e não
+               dentro do id: filtrar por pedaço de texto quebra no dia
+               em que uma rua se chamar "RUA-A". */
+            rua: rua.nome, estante: est.nome,
             x: cantos[c][0], y: alturaEstante / 2, z: cantos[c][1],
             lx: M.montante, ly: alturaEstante, lz: M.montante,
             cor: CORES.estrutura, clicavel: false
@@ -852,6 +887,7 @@ body.embutido #legenda{display:none}
           pecas.push({
             tipo: 'prateleira', id: 'PRAT-' + rua.nome + '-' + est.nome + '-' + prat.nome,
             rotulo: prat.nome,
+            rua: rua.nome, estante: est.nome, prateleira: prat.nome,
             x: xRua + M.profundidade / 2, y: yNivel, z: z + compEstante / 2,
             lx: M.profundidade, ly: M.prateleira, lz: compEstante,
             cor: CORES.estrutura, clicavel: false
@@ -860,12 +896,14 @@ body.embutido #legenda{display:none}
           /* as duas longarinas da frente e do fundo */
           pecas.push({
             tipo: 'longarina', id: 'LONG-' + rua.nome + '-' + est.nome + '-' + prat.nome + '-F',
+            rua: rua.nome, estante: est.nome, prateleira: prat.nome,
             x: xRua, y: yNivel - M.prateleira, z: z + compEstante / 2,
             lx: M.longarina, ly: M.longarina, lz: compEstante,
             cor: CORES.estrutura, clicavel: false
           });
           pecas.push({
             tipo: 'longarina', id: 'LONG-' + rua.nome + '-' + est.nome + '-' + prat.nome + '-T',
+            rua: rua.nome, estante: est.nome, prateleira: prat.nome,
             x: xRua + M.profundidade, y: yNivel - M.prateleira, z: z + compEstante / 2,
             lx: M.longarina, ly: M.longarina, lz: compEstante,
             cor: CORES.estrutura, clicavel: false
@@ -1653,6 +1691,181 @@ body.embutido #legenda{display:none}
   }
 
   /* ============================================================
+     [N5] 16/11 · A APROXIMAÇÃO PROGRESSIVA · seção 5
+     ------------------------------------------------------------
+     Cinco níveis, do galpão até uma posição:
+
+       1 galpão     — tudo
+       2 rua        — as estantes daquela rua
+       3 estante    — uma estante inteira
+       4 prateleira — um nível de uma estante
+       5 posição    — um endereço só
+
+     Por que isto mora AQUI, e não no motor 3D: é conta. Peneirar
+     peças e calcular onde a câmera cabe não depende de placa de
+     vídeo, e por isso pode ser PROVADO no Node, caso a caso. O
+     motor só aplica o resultado. O enquadramento do galpão já
+     seguia esse caminho; os cinco níveis seguem o mesmo.
+
+     E repare que é o MESMO enquadramento() de sempre: ele só
+     precisa de um conjunto de peças. Peneirar as peças certas
+     era a única coisa que faltava.
+     ============================================================ */
+
+  /* o mínimo por nível, em metros. Sem isto a câmera entra dentro
+     da estante ao mirar uma posição de 40 cm — que é exatamente o
+     "não aproximar a ponto de atravessar" do prompt. */
+  /* Os dois mapas abaixo obedecem à MESMA regra, e ela é a alma
+     da seção 5: nenhum dos dois pode CRESCER da esquerda para a
+     direita. A caixa de um nível sempre cabe dentro da caixa do
+     nível de cima; se nem a folga nem o mínimo crescerem, descer
+     um degrau SEMPRE aproxima, em qualquer galpão.
+
+     Eu quebrei essa regra duas vezes, e as duas foram pegas pela
+     prova, não por mim:
+       · folga da prateleira maior que a da estante;
+       · mínimo da rua (7 m) maior que o do galpão (6 m) — num
+         galpão de uma estante só, olhar a rua AFASTAVA a câmera. */
+  var MINIMO_DO_NIVEL = {
+    galpao: 6, rua: 6, estante: 4.5, prateleira: 3, posicao: 2.2
+  };
+
+  /* nunca crescente da esquerda para a direita — o porquê está
+     escrito por extenso em enquadramentoDe(), onde a prova pegou */
+  var FOLGA_DO_NIVEL = {
+    galpao: 1.3, rua: 1.3, estante: 1.28, prateleira: 1.25, posicao: 1.2
+  };
+
+  function mesmoTexto_(a, b) {
+    if (a == null || b == null) return false;
+    return String(a).trim().toUpperCase() === String(b).trim().toUpperCase();
+  }
+
+  /* qual nível um alvo descreve. Não adivinha: lê o que veio. */
+  function nivelDoAlvo(alvo) {
+    var a = alvo || {};
+    if (a.codigo) return 'posicao';
+    if (a.posicao && a.rua && a.estante && a.prateleira) return 'posicao';
+    if (a.prateleira && a.rua && a.estante) return 'prateleira';
+    if (a.estante && a.rua) return 'estante';
+    if (a.rua) return 'rua';
+    return 'galpao';
+  }
+
+  /* as peças daquele pedaço do galpão. O piso nunca entra: ele
+     ocupa o galpão inteiro e estragaria qualquer enquadramento
+     menor que o galpão inteiro. */
+  function pecasDo(montagem, alvo) {
+    var todas = (montagem && montagem.pecas) || [];
+    var nivel = nivelDoAlvo(alvo);
+    var a = alvo || {};
+
+    if (nivel === 'galpao') {
+      var semPiso = [];
+      for (var g = 0; g < todas.length; g++) {
+        if (todas[g].tipo !== 'piso') semPiso.push(todas[g]);
+      }
+      return { nivel: 'galpao', pecas: semPiso, achou: semPiso.length > 0,
+               rotulo: 'galpão' };
+    }
+
+    var fora = [];
+    for (var i = 0; i < todas.length; i++) {
+      var p = todas[i];
+      if (p.tipo === 'piso') continue;
+      if (nivel === 'posicao') {
+        if (p.tipo !== 'posicao') continue;
+        if (a.codigo) { if (mesmoTexto_(p.codigo, a.codigo) || mesmoTexto_(p.id, a.codigo)) fora.push(p); continue; }
+        if (mesmoTexto_(p.rua, a.rua) && mesmoTexto_(p.estante, a.estante) &&
+            mesmoTexto_(p.prateleira, a.prateleira) && mesmoTexto_(p.posicao, a.posicao)) fora.push(p);
+        continue;
+      }
+      if (!mesmoTexto_(p.rua, a.rua)) continue;
+      if (nivel === 'rua') { fora.push(p); continue; }
+      if (!mesmoTexto_(p.estante, a.estante)) continue;
+      if (nivel === 'estante') { fora.push(p); continue; }
+      if (mesmoTexto_(p.prateleira, a.prateleira)) fora.push(p);
+    }
+
+    var rotulo = '';
+    if (nivel === 'rua') rotulo = 'rua ' + a.rua;
+    else if (nivel === 'estante') rotulo = 'rua ' + a.rua + ' · estante ' + a.estante;
+    else if (nivel === 'prateleira') rotulo = 'rua ' + a.rua + ' · est ' + a.estante +
+      ' · prat ' + a.prateleira;
+    else if (nivel === 'posicao') {
+      var ach = fora[0];
+      rotulo = a.codigo ? String(a.codigo)
+        : (ach ? (ach.codigo || ach.id) : 'posição');
+    }
+
+    return { nivel: nivel, pecas: fora, achou: fora.length > 0, rotulo: rotulo };
+  }
+
+  /* onde pôr a câmera para ver aquele pedaço.
+
+     Se o alvo não existe no galpão montado, isto devolve
+     achou:false e NÃO inventa um lugar. Mandar a câmera para o
+     meio do nada por causa de um endereço que não existe seria
+     pior que não fazer nada: quem olha pensaria que o endereço
+     está lá, vazio. */
+  function enquadramentoDe(montagem, alvo, opcoes) {
+    opcoes = opcoes || {};
+    var r = pecasDo(montagem, alvo);
+    if (!r.achou) {
+      return { achou: false, nivel: r.nivel, rotulo: r.rotulo,
+               quantas: 0, alvo: null, raio: 0 };
+    }
+    var minimo = opcoes.minimo > 0 ? opcoes.minimo
+               : (MINIMO_DO_NIVEL[r.nivel] || 6);
+    var e = enquadramento({ pecas: r.pecas }, {
+      fov: opcoes.fov, aspecto: opcoes.aspecto,
+      /* [N5] A FOLGA NÃO PODE CRESCER COM A PROFUNDIDADE.
+         Eu tinha escrito o contrário — folga maior nos níveis
+         fundos, para dar contexto em volta de um objeto pequeno —
+         e a prova pegou: a prateleira ficava a 5,03 m e a estante
+         a 4,50 m. Ou seja, descer um degrau AFASTAVA a câmera.
+
+         O motivo é geométrico e vale sempre: uma prateleira tem o
+         mesmo comprimento da estante, só menos altura. Com folga
+         maior, o raio dela passa o da estante.
+
+         Como a caixa de um nível sempre cabe dentro da caixa do
+         nível de cima, basta a folga NÃO crescer para a
+         aproximação ser garantida em qualquer galpão — e os
+         mínimos também diminuem, então o travamento preserva a
+         ordem. Quem dá contexto numa posição de 40 cm é o mínimo
+         de 2,2 m, não a folga. */
+      folga: opcoes.folga || FOLGA_DO_NIVEL[r.nivel] || 1.3,
+      minimo: minimo, maximo: opcoes.maximo
+    });
+    e.achou = true;
+    e.nivel = r.nivel;
+    e.rotulo = r.rotulo;
+    e.quantas = r.pecas.length;
+    /* o limite de chegar perto: nunca menor que o mínimo do nível,
+       senão o dedo do conferente empurra a câmera para dentro da
+       estante e ele perde a referência de onde está */
+    e.minimo = minimo;
+    return e;
+  }
+
+  /* o caminho de volta: de onde eu estou, para onde eu subo.
+     É o botão "voltar" da seção 5, e ele também é conta. */
+  function alvoAcimaDe(alvo) {
+    var a = alvo || {};
+    var nivel = nivelDoAlvo(a);
+    if (nivel === 'posicao') {
+      if (a.rua && a.estante && a.prateleira)
+        return { rua: a.rua, estante: a.estante, prateleira: a.prateleira };
+      return null;   /* só tinha o código: quem sobe é o motor, com a peça */
+    }
+    if (nivel === 'prateleira') return { rua: a.rua, estante: a.estante };
+    if (nivel === 'estante') return { rua: a.rua };
+    if (nivel === 'rua') return {};
+    return null;
+  }
+
+  /* ============================================================
      CONFERIR · o que está torto no cadastro de localizações
 
      Três regras que valem aqui e não se negociam:
@@ -1937,7 +2150,7 @@ body.embutido #legenda{display:none}
   }
 
   raiz.LAYOUT3D = {
-    VERSAO: '6.9.1',
+    VERSAO: '6.10.0',
     MEDIDAS: MEDIDAS,
     CORES: CORES,
     organizar: organizar,
@@ -1947,6 +2160,13 @@ body.embutido #legenda{display:none}
     situacaoDaPosicao: situacaoDaPosicao,
     caixaDe: caixaDe,
     enquadramento: enquadramento,
+    /* [N5] seção 5 · a aproximação progressiva, em conta pura */
+    pecasDo: pecasDo,
+    enquadramentoDe: enquadramentoDe,
+    nivelDoAlvo: nivelDoAlvo,
+    alvoAcimaDe: alvoAcimaDe,
+    MINIMO_DO_NIVEL: MINIMO_DO_NIVEL,
+    FOLGA_DO_NIVEL: FOLGA_DO_NIVEL,
     conferir: conferir,
     nomesDePosicao: nomesDePosicao,
     projetar: projetar,
@@ -2039,7 +2259,7 @@ body.embutido #legenda{display:none}
 
   var A = {
     nome: 'API3D',
-    versao: '6.9.1',
+    versao: '6.10.0',
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
     chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
     origemDaChave: 'nenhuma (fase 1)',
@@ -2531,7 +2751,7 @@ body.embutido #legenda{display:none}
 
   var M = {
     nome: 'MOTOR3D',
-    versao: '6.9.1',
+    versao: '6.10.0',
     engine: null,
     cena: null,
     camera: null,
@@ -2628,6 +2848,9 @@ body.embutido #legenda{display:none}
        e o galpão só existe quando um quadro foi renderizado. */
     var primeiroQuadro = false;
     M.engine.runRenderLoop(function () {
+      /* [N5] o passo da aproximação, contado em milissegundos e
+         não em quadros — o porquê está em M.aproximar */
+      try { passoDoPasseio(); } catch (e) {}
       cena.render();
       if (!primeiroQuadro) {
         primeiroQuadro = true;
@@ -2640,6 +2863,9 @@ body.embutido #legenda{display:none}
       }
     });
     raiz.addEventListener('resize', function () { M.engine.resize(); });
+
+    /* [N5] a vigia do dedo: animação para na hora em que ele toca */
+    try { ligarInterrupcaoDoDedo(canvas); } catch (e) {}
 
     cena.onPointerObservable.add(function (info) {
       if (info.type !== b.PointerEventTypes.POINTERPICK) return;
@@ -3641,6 +3867,198 @@ body.embutido #legenda{display:none}
     return e;
   };
 
+  /* ============================================================
+     [N5] 16/11 · A APROXIMAÇÃO, NO MOTOR · seção 5
+     ------------------------------------------------------------
+     A conta de ONDE a câmera vai está no LAYOUT3D e tem prova
+     própria. Aqui só acontece o movimento — e a decisão mais
+     importante daqui é saber PARAR.
+
+     "Interrupção segura da animação quando o usuário movimentar a
+     câmera" (seção 5). Animação que briga com o dedo de quem está
+     tentando olhar a prateleira é pior que animação nenhuma: a
+     tela fica puxando de volta e a pessoa desiste.
+     ============================================================ */
+  M.nivel = { atual: null, trilha: [], animando: false, passeio: null };
+
+  /* a curva: começa devagar, acelera, chega devagar. É o que faz
+     o olho acompanhar sem perder a referência de onde estava. */
+  function suavizar_(k) {
+    if (k <= 0) return 0;
+    if (k >= 1) return 1;
+    return k < 0.5 ? 4 * k * k * k
+                   : 1 - Math.pow(-2 * k + 2, 3) / 2;
+  }
+
+  function passoDoPasseio() {
+    var p = M.nivel.passeio;
+    if (!p || !M.camera) return;
+    var agora = (typeof performance !== 'undefined' && performance.now)
+      ? performance.now() : Date.now();
+    var k = p.ms > 0 ? (agora - p.t0) / p.ms : 1;
+    if (k > 1) k = 1;
+    var f = suavizar_(k);
+    var b2 = B();
+    M.camera.setTarget(new b2.Vector3(
+      p.deAlvo.x + (p.paraAlvo.x - p.deAlvo.x) * f,
+      p.deAlvo.y + (p.paraAlvo.y - p.deAlvo.y) * f,
+      p.deAlvo.z + (p.paraAlvo.z - p.deAlvo.z) * f));
+    M.camera.radius = p.deRaio + (p.paraRaio - p.deRaio) * f;
+    if (k >= 1) {
+      M.nivel.passeio = null;
+      M.nivel.animando = false;
+    }
+  }
+  M.passoDoPasseio = passoDoPasseio;
+
+  function pararAnimacaoDaCamera(porQue) {
+    if (!M.nivel.animando) return false;
+    M.nivel.animando = false;
+    M.nivel.passeio = null;          /* [N5] o passeio para junto */
+    try { M.cena.stopAnimation(M.camera); } catch (e) {}
+    M.nivel.interrompidaPor = porQue || 'o usuário';
+    return true;
+  }
+  M.pararAnimacaoDaCamera = pararAnimacaoDaCamera;
+
+  /* liga a vigia do dedo. Chamada uma vez, na criação da cena. */
+  function ligarInterrupcaoDoDedo(canvas) {
+    if (!canvas || canvas.__almoxaInterrompe) return;
+    canvas.__almoxaInterrompe = true;
+    var parar = function () { pararAnimacaoDaCamera('o dedo'); };
+    /* pointerdown pega dedo e mouse; wheel pega a rolagem do zoom */
+    canvas.addEventListener('pointerdown', parar, { passive: true });
+    canvas.addEventListener('wheel', parar, { passive: true });
+    canvas.addEventListener('touchstart', parar, { passive: true });
+  }
+  M.ligarInterrupcaoDoDedo = ligarInterrupcaoDoDedo;
+
+  /* o movimento em si. Devolve o que foi feito — e devolve
+     achou:false sem mexer na câmera quando o alvo não existe. */
+  M.aproximar = function (alvo, opcoes) {
+    opcoes = opcoes || {};
+    if (!M.camera || !M.montagem || !raiz.LAYOUT3D ||
+        !raiz.LAYOUT3D.enquadramentoDe) {
+      return { ok: false, motivo: 'o galpão ainda não está desenhado' };
+    }
+    var b = B();
+    var aspecto;
+    try { aspecto = M.engine.getAspectRatio(M.camera); } catch (e) {}
+    var e = raiz.LAYOUT3D.enquadramentoDe(M.montagem, alvo, {
+      fov: M.camera.fov, aspecto: aspecto,
+      folga: opcoes.folga, minimo: opcoes.minimo
+    });
+
+    if (!e.achou) {
+      /* NÃO mexo a câmera. Mandar ela para algum lugar por causa de
+         um endereço que não existe faria quem olha pensar que o
+         endereço está lá, só que vazio. */
+      return { ok: false, achou: false, nivel: e.nivel, rotulo: e.rotulo,
+               motivo: 'esse endereço não está no galpão desenhado' };
+    }
+
+    /* a trilha de volta, para o botão "voltar" */
+    if (!opcoes.semTrilha && M.nivel.atual) {
+      M.nivel.trilha.push(M.nivel.atual);
+      if (M.nivel.trilha.length > 12) M.nivel.trilha.shift();
+    }
+    M.nivel.atual = { alvo: alvo, nivel: e.nivel, rotulo: e.rotulo };
+
+    /* o limite de chegar perto acompanha o nível: assim nem a
+       animação nem o dedo entram dentro da estante */
+    M.camera.lowerRadiusLimit = Math.min(e.minimo, e.raio);
+
+    var destinoAlvo = new b.Vector3(e.alvo.x, e.alvo.y, e.alvo.z);
+    var ms = opcoes.ms != null ? opcoes.ms : 700;
+
+    if (ms <= 0 || opcoes.semAnimacao) {
+      pararAnimacaoDaCamera('um pedido sem animação');
+      M.camera.setTarget(destinoAlvo);
+      M.camera.radius = e.raio;
+      return { ok: true, achou: true, nivel: e.nivel, rotulo: e.rotulo,
+               raio: e.raio, alvo: e.alvo, animou: false };
+    }
+
+    pararAnimacaoDaCamera('uma aproximação nova');
+
+    /* [N5] O RELÓGIO DA ANIMAÇÃO É O RELÓGIO DE PAREDE
+       ------------------------------------------------------------
+       REGISTRO HONESTO DE UM ERRO MEU, porque ele quase virou
+       comentário mentiroso aqui dentro:
+
+       Primeiro fiz com a animação do próprio Babylon, que conta em
+       QUADROS. A prova pareceu mostrar que 900 ms viravam 180 ms, e
+       eu quase escrevi isso aqui como fato. Fui medir os dois
+       relógios da página lado a lado: batiam. O atrasado era o
+       setTimeout do PRÓPRIO TESTE, engasgado pela renderização —
+       as amostras estavam a 270 ms de distância, não a 45. A
+       animação do Babylon estava certa o tempo todo.
+
+       Então por que isto aqui ficou? Não por conserto, por
+       previsibilidade: contando em milissegundos, a duração
+       independe de quantos quadros a placa entrega, e eu consigo
+       MEDIR essa duração numa prova. Em quadros, ela dependeria da
+       máquina de quem está olhando — e não dá para provar o que
+       muda com o aparelho.                                      */
+    M.nivel.animando = true;
+    M.nivel.interrompidaPor = '';
+    M.nivel.passeio = {
+      t0: (typeof performance !== 'undefined' && performance.now
+             ? performance.now() : Date.now()),
+      ms: ms,
+      deAlvo: M.camera.target.clone(),
+      paraAlvo: destinoAlvo,
+      deRaio: M.camera.radius,
+      paraRaio: e.raio
+    };
+
+    return { ok: true, achou: true, nivel: e.nivel, rotulo: e.rotulo,
+             raio: e.raio, alvo: e.alvo, animou: true };
+  };
+
+  /* um degrau para cima. Sem trilha guardada, sobe pela conta. */
+  M.voltarUmNivel = function (opcoes) {
+    if (M.nivel.trilha.length) {
+      var de = M.nivel.trilha.pop();
+      return M.aproximar(de.alvo, Object.assign({ semTrilha: true }, opcoes || {}));
+    }
+    if (!M.nivel.atual) return { ok: false, motivo: 'já estou na visão geral' };
+    var acima = raiz.LAYOUT3D.alvoAcimaDe(M.nivel.atual.alvo);
+    if (!acima) {
+      /* alvo veio só com código: pego rua/estante/prateleira da peça */
+      var r = raiz.LAYOUT3D.pecasDo(M.montagem, M.nivel.atual.alvo);
+      var p = r.pecas && r.pecas[0];
+      if (p && p.rua) acima = { rua: p.rua, estante: p.estante,
+                                prateleira: p.prateleira };
+      else return { ok: false, motivo: 'já estou na visão geral' };
+    }
+    return M.aproximar(acima, Object.assign({ semTrilha: true }, opcoes || {}));
+  };
+
+  /* de volta ao galpão inteiro, do jeito que a tela abre */
+  M.visaoGeral = function (opcoes) {
+    M.nivel.trilha = [];
+    M.nivel.atual = null;
+    pararAnimacaoDaCamera('a visão geral');
+    var r = M.aproximar({}, Object.assign({ semTrilha: true }, opcoes || {}));
+    M.nivel.atual = null;
+    return r;
+  };
+
+  /* aproximar da peça que foi clicada, sem precisar saber o código */
+  M.aproximarDaMalha = function (malha, opcoes) {
+    var d = malha && malha.metadata;
+    if (!d) return { ok: false, motivo: 'essa peça não tem endereço' };
+    if (d.tipo === 'posicao') {
+      return M.aproximar(d.codigo ? { codigo: d.codigo }
+        : { rua: d.rua, estante: d.estante, prateleira: d.prateleira,
+            posicao: d.posicao }, opcoes);
+    }
+    if (d.rua && d.estante) return M.aproximar({ rua: d.rua, estante: d.estante }, opcoes);
+    if (d.rua) return M.aproximar({ rua: d.rua }, opcoes);
+    return { ok: false, motivo: 'essa peça não tem endereço' };
+  };
+
   M.visao = function (qual, galpao) {
     if (!M.camera) return;
     var a = { superior: [-Math.PI / 2, 0.02], frontal: [-Math.PI / 2, Math.PI / 2.1],
@@ -3705,7 +4123,7 @@ body.embutido #legenda{display:none}
 
   var C = {
     nome: 'CONSTRUTOR3D',
-    versao: '6.9.1',
+    versao: '6.10.0',
     aberto: false,
     projeto: null,
     /* o galpão real fica guardado enquanto o projeto está na tela,
@@ -4384,7 +4802,7 @@ body.embutido #legenda{display:none}
   'use strict';
 
   var APP = {
-    versao: '6.9.1',
+    versao: '6.10.0',
     montagem: null,
     locais: [],
     carregando: false,
@@ -7162,7 +7580,7 @@ body.embutido #legenda{display:none}
      Salvar o arquivo não é publicar, e publicar não é o
      navegador ter recebido.
      ============================================================ */
-  APP.VERSAO = '6.9.1';
+  APP.VERSAO = '6.10.0';
   APP.COMPILADO = '2026-11-15';
   APP.CARIMBO = 'ALMOXA 3D ' + APP.VERSAO + ' · ' + APP.COMPILADO;
 
@@ -7614,7 +8032,45 @@ body.embutido #legenda{display:none}
       return;
     }
 
-    raiz.MOTOR3D.aoSelecionar = function (p) { APP.pintarPosicao(p); };
+    /* [N5] 16/11 · clicar numa posição APROXIMA, além de abrir o
+       painel. É o nível 5 da seção 5, e é o movimento que
+       transforma "achei na lista" em "estou olhando para ela". */
+    raiz.MOTOR3D.aoSelecionar = function (p) {
+      APP.pintarPosicao(p);
+      if (p) {
+        try {
+          raiz.MOTOR3D.aproximar(p.codigo ? { codigo: p.codigo }
+            : { rua: p.rua, estante: p.estante,
+                prateleira: p.prateleira, posicao: p.posicao });
+        } catch (e) {}
+      }
+      APP.pintarTrilha();
+    };
+
+    /* a faixa de "onde eu estou" se redesenha a cada movimento */
+    APP.pintarTrilha = function () {
+      var faixa = $('trilha3d');
+      if (!faixa) return;
+      var n = raiz.MOTOR3D && raiz.MOTOR3D.nivel;
+      if (!n || !n.atual) { faixa.hidden = true; return; }
+      faixa.hidden = false;
+      var onde = $('tr_onde');
+      if (onde) onde.textContent = n.atual.rotulo || n.atual.nivel;
+    };
+
+    (function ligarTrilha() {
+      var voltar = $('tr_voltar'), geral = $('tr_geral'), geral2 = $('v_geral');
+      if (voltar) voltar.addEventListener('click', function () {
+        try { raiz.MOTOR3D.voltarUmNivel(); } catch (e) {}
+        APP.pintarTrilha();
+      });
+      function paraOGalpao() {
+        try { raiz.MOTOR3D.visaoGeral(); } catch (e) {}
+        APP.pintarTrilha();
+      }
+      if (geral) geral.addEventListener('click', paraOGalpao);
+      if (geral2) geral2.addEventListener('click', paraOGalpao);
+    })();
 
     /* os botões de visão */
     var visoes = ['perspectiva', 'superior', 'frontal', 'lateral'];
@@ -7717,7 +8173,10 @@ body.embutido #legenda{display:none}
       $('corpoPainel').querySelectorAll('[data-ir]'), function (el) {
         el.addEventListener('click', function () {
           var cod = el.getAttribute('data-ir');
+          /* [N5] achar na lista e não ir até lá é meio caminho. O
+             selecionarPorCodigo chama o aoSelecionar, que aproxima. */
           try { raiz.MOTOR3D.selecionarPorCodigo(cod); } catch (e) {}
+          try { if (APP.pintarTrilha) APP.pintarTrilha(); } catch (e) {}
         });
       });
   };
