@@ -449,7 +449,8 @@ body.embutido #legenda{display:none}
 
       <button class="btn" id="v_recarregar">Atualizar</button>
       <button class="btn" id="v_construir">Construir estante</button>
-      <button class="btn" id="v_rota" aria-pressed="false">Rota</button>
+      <button class="btn" id="v_rota" aria-pressed="false"
+              title="Traçar um caminho de separação nesta tela, para você seguir agora">Caminho na tela</button>
       <button class="btn" id="v_frente" aria-pressed="false"
               title="Montar frente de serviço para um colaborador">Frente de serviço</button>
       <button class="btn" id="v_acomp" aria-pressed="false"
@@ -1899,7 +1900,7 @@ body.embutido #legenda{display:none}
   }
 
   raiz.LAYOUT3D = {
-    VERSAO: '6.8.0',
+    VERSAO: '6.8.1',
     MEDIDAS: MEDIDAS,
     CORES: CORES,
     organizar: organizar,
@@ -2001,7 +2002,7 @@ body.embutido #legenda{display:none}
 
   var A = {
     nome: 'API3D',
-    versao: '6.8.0',
+    versao: '6.8.1',
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
     chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
     origemDaChave: 'nenhuma (fase 1)',
@@ -2414,7 +2415,7 @@ body.embutido #legenda{display:none}
 
   var M = {
     nome: 'MOTOR3D',
-    versao: '6.8.0',
+    versao: '6.8.1',
     engine: null,
     cena: null,
     camera: null,
@@ -3573,7 +3574,7 @@ body.embutido #legenda{display:none}
 
   var C = {
     nome: 'CONSTRUTOR3D',
-    versao: '6.8.0',
+    versao: '6.8.1',
     aberto: false,
     projeto: null,
     /* o galpão real fica guardado enquanto o projeto está na tela,
@@ -4252,7 +4253,7 @@ body.embutido #legenda{display:none}
   'use strict';
 
   var APP = {
-    versao: '6.8.0',
+    versao: '6.8.1',
     montagem: null,
     locais: [],
     carregando: false,
@@ -4933,10 +4934,23 @@ body.embutido #legenda{display:none}
     var r = APP.redesenharRota();
     var h = '';
 
-    h += '<div class="aviso" style="margin:0 0 12px"><b>A rota vive nesta tela.</b> ' +
-      'O Core ainda não tem serviço de rota nem de atividade, e eu não invento ' +
-      'endpoint. Fechar a página perde a sequência. Gravar e atribuir a um ' +
-      'funcionário é a fase 4.</div>';
+    /* [15/11] ESTE RECADO ESTAVA VENCIDO, e foi ele que confundiu.
+       Dizia "o Core ainda não tem serviço de rota nem de atividade" —
+       verdade quando foi escrito, mentira depois que o motor de rotas
+       entrou no AP_INVENTARIO.gs. Ele olhou os dois botões e não
+       soube qual era o certo, com razão: um deles mentia.
+
+       Agora os dois dizem o que são, e um aponta para o outro. */
+    h += '<div class="aviso azul" style="margin:0 0 12px">' +
+      '<b>Isto é um caminho para VOCÊ seguir agora.</b> ' +
+      'Ele vive nesta tela: serve para montar a ordem de uma separação e ' +
+      'enxergar o trajeto no galpão. Fechar a página perde a sequência, e ' +
+      'ele NÃO vai para o celular de ninguém.' +
+      '<div class="small" style="margin-top:6px">Para <b>distribuir trabalho ' +
+      'a uma pessoa</b> — escolher ruas, estantes e níveis, pôr um ' +
+      'responsável e publicar no servidor — use <b>Frente de serviço</b>. ' +
+      'O que sai de lá aparece em <b>Minhas atividades</b> no ALMOXA CAMPO.' +
+      '</div></div>';
 
     h += '<div class="campo"><label for="rTipo">Tipo da rota</label>' +
       '<select id="rTipo">' +
@@ -5595,8 +5609,14 @@ body.embutido #legenda{display:none}
     for (nv in niveis) if (niveis.hasOwnProperty(nv)) nomesDeNivel.push(nv);
     nomesDeNivel.sort();
 
-    var h = '<div class="small" style="margin-bottom:10px">' +
-      'Monte o serviço de uma pessoa marcando onde ela vai trabalhar. ' +
+    var h = '<div class="aviso verde" style="margin:0 0 12px">' +
+      '<b>Isto vai para o celular da pessoa.</b> ' +
+      'Marque onde ela vai trabalhar, escolha o responsável e publique: o ' +
+      'serviço aparece em <b>Minhas atividades</b> no ALMOXA CAMPO dela.' +
+      '<div class="small" style="margin-top:6px">Se o que você quer é só ' +
+      'traçar um caminho para seguir agora, sem mandar para ninguém, use ' +
+      '<b>Caminho na tela</b>.</div></div>' +
+      '<div class="small" style="margin-bottom:10px">' +
       'Desmarcar é o jeito de tirar: se a madeira fica na estante 03 e ela ' +
       'não entra nesta frente, deixe a 03 desmarcada.</div>';
 
@@ -5898,7 +5918,15 @@ body.embutido #legenda{display:none}
             'No celular, ' + esc(nome) + ' abre o <b>ALMOXA CAMPO</b> e toca em ' +
             '<b>Minhas atividades</b> na tela inicial. As rotas aparecem lá ' +
             'sozinhas — ele não precisa pedir nada a ninguém.</div>' : '') +
-          '</div>';
+          '</div>' +
+          (ok ? '<div id="frConferindo" class="small">Conferindo o que o ' +
+            'celular dele vai enxergar…</div>' : '');
+
+        /* [15/11] NÃO basta o Core dizer "gravei". Eu releio pela MESMA
+           porta que o celular dele usa, com a sessão dele, e mostro o
+           que voltou. Se aqui aparecer e no celular não, o problema
+           deixou de ser a publicação — e isso já é meio caminho. */
+        if (ok) APP.conferirNoCelularDele(id, nome, atividadeId);
       }
       proxima();
     });
@@ -6068,6 +6096,50 @@ body.embutido #legenda{display:none}
       var bt = $('v_acomp');
       if (bt) bt.setAttribute('aria-pressed', 'false');
       APP.pintarResumo();
+    });
+  };
+
+  /* relê pela porta do celular: listarRotas filtrado pela atividade,
+     e confere se o responsável gravado é mesmo quem foi escolhido */
+  APP.conferirNoCelularDele = function (idPessoa, nomePessoa, atividadeId) {
+    APP.invChamar('listarRotas', { atividadeId: atividadeId }).then(function (r) {
+      var el = $('frConferindo');
+      if (!el) return;
+      if (!r || !r.ok) {
+        el.innerHTML = '<div class="aviso amarelo"><b>Publiquei, mas não ' +
+          'consegui reler para conferir.</b>' + esc((r && r.mensagem) || '') +
+          '<div class="small">Abra <b>Acompanhar</b> para ver o estado atual.</div>' +
+          '</div>';
+        return;
+      }
+      var rotas = r.dados || [];
+      var dela = [];
+      for (var i = 0; i < rotas.length; i++) {
+        var x = rotas[i];
+        var meu = (idPessoa && String(x.responsavelId || '').trim() === String(idPessoa)) ||
+          (nomePessoa && String(x.responsavel || '').trim().toUpperCase() ===
+            String(nomePessoa).trim().toUpperCase());
+        if (meu) dela.push(x);
+      }
+      if (!dela.length) {
+        el.innerHTML = '<div class="aviso erro"><b>Gravou, mas no nome de ' +
+          'outra pessoa.</b> Reli as rotas da atividade ' + esc(atividadeId) +
+          ' e nenhuma está com ' + esc(nomePessoa) + '. Assim ela NÃO vai ' +
+          'aparecer no celular dele.</div>';
+        return;
+      }
+      var locais = 0;
+      for (var k = 0; k < dela.length; k++) {
+        locais += Number((dela[k].progresso || {}).quantas) || 0;
+      }
+      el.innerHTML = '<div class="aviso verde"><b>Conferido na volta.</b> ' +
+        'Reli pela mesma porta que o celular dele usa: ' + dela.length +
+        ' rota(s) com ' + locais + ' local(is), no nome de ' + esc(nomePessoa) + '.' +
+        '<div class="small" style="margin-top:6px">Se mesmo assim não ' +
+        'aparecer no ALMOXA CAMPO, o problema não é a publicação: é a ' +
+        'sessão do celular (ele precisa entrar como ' + esc(nomePessoa) +
+        ') ou a implantação do Core, que pode estar servindo código antigo.' +
+        '</div></div>';
     });
   };
 
@@ -6959,7 +7031,7 @@ body.embutido #legenda{display:none}
      Salvar o arquivo não é publicar, e publicar não é o
      navegador ter recebido.
      ============================================================ */
-  APP.VERSAO = '6.8.0';
+  APP.VERSAO = '6.8.1';
   APP.COMPILADO = '2026-11-15';
   APP.CARIMBO = 'ALMOXA 3D ' + APP.VERSAO + ' · ' + APP.COMPILADO;
 
