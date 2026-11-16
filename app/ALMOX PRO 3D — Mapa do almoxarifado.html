@@ -1900,7 +1900,7 @@ body.embutido #legenda{display:none}
   }
 
   raiz.LAYOUT3D = {
-    VERSAO: '6.8.1',
+    VERSAO: '6.9.0',
     MEDIDAS: MEDIDAS,
     CORES: CORES,
     organizar: organizar,
@@ -2002,7 +2002,7 @@ body.embutido #legenda{display:none}
 
   var A = {
     nome: 'API3D',
-    versao: '6.8.1',
+    versao: '6.9.0',
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
     chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
     origemDaChave: 'nenhuma (fase 1)',
@@ -2111,7 +2111,86 @@ body.embutido #legenda{display:none}
      se lê token nenhum. Pede-se ao sistema que faça a chamada
      dele; o que trafega é o resultado.
      ------------------------------------------------------------ */
+  /* ============================================================
+     [PONTE] 15/11 · O MAPA DENTRO DO APLICATIVO NÃO TINHA SESSÃO
+     ------------------------------------------------------------
+     Quando o ALMOXA CAMPO mostra este mapa numa moldura, as duas
+     páginas são de origens diferentes. O mapa NÃO consegue alcançar
+     o API do aplicativo (o navegador barra, e ainda bem), então
+     ele caía no caminho de fora: montar o próprio envelope com o
+     endereço do /exec e NENHUMA SESSÃO. Resultado: o galpão dele
+     não carregava dentro do aplicativo.
+
+     A saída não é mandar a sessão para cá — isso seria uma segunda
+     sessão, e token em página de outro domínio é exatamente o que
+     não se faz. A saída é o mapa PEDIR, e quem executa ser o
+     aplicativo, com a sessão que ele já tem autenticada.
+
+     Cada pedido leva um número. A resposta volta com o mesmo
+     número, pela mesma janela. O mapa não guarda credencial
+     nenhuma, não sabe o token, e não tem como saber.
+     ============================================================ */
+  A.ponte = { ligada: false, proximo: 1, esperando: {}, origemPai: '' };
+
+  A.ligarPonte = function () {
+    if (A.ponte.ligada) return true;
+    var embutido = false;
+    try {
+      embutido = new URLSearchParams(location.search).get('embutido') === '1';
+    } catch (e) { embutido = false; }
+    if (!embutido) return false;
+    try { if (!window.parent || window.parent === window) return false; }
+    catch (e2) { return false; }
+
+    window.addEventListener('message', function (ev) {
+      var d = ev && ev.data;
+      if (!d || d.almoxa3d !== 'resposta') return;
+      /* só aceito resposta da janela que me mostrou */
+      try { if (ev.source !== window.parent) return; } catch (e3) { return; }
+      var espera = A.ponte.esperando[d.id];
+      if (!espera) return;
+      delete A.ponte.esperando[d.id];
+      clearTimeout(espera.relogio);
+      espera.entregar(d.r);
+    });
+
+    A.ponte.ligada = true;
+    A.origemDaPorta = 'o aplicativo, pela ponte';
+    return true;
+  };
+
+  A.pedirPelaPonte = function (modulo, acao, payload) {
+    return new Promise(function (resolve) {
+      var id = 'p' + (A.ponte.proximo++) + '-' + Date.now();
+      var relogio = setTimeout(function () {
+        delete A.ponte.esperando[id];
+        resolve({ ok: false, codigo: 'PONTE_SEM_RESPOSTA',
+          mensagem: 'O aplicativo não respondeu ao pedido ' +
+            modulo + '.' + acao + ' em 45 segundos.' });
+      }, 45000);
+      A.ponte.esperando[id] = { relogio: relogio, entregar: resolve };
+      try {
+        window.parent.postMessage({ almoxa3d: 'pedido', id: id,
+          modulo: modulo, acao: acao, payload: payload || {} }, '*');
+      } catch (e) {
+        clearTimeout(relogio);
+        delete A.ponte.esperando[id];
+        resolve({ ok: false, codigo: 'PONTE_FECHADA',
+          mensagem: 'Não consegui falar com o aplicativo: ' +
+            ((e && e.message) || e) });
+      }
+    });
+  };
+
   A.portaDoSistema = function () {
+    /* a ponte vem ANTES: dentro do aplicativo ela é a única porta
+       com sessão de verdade */
+    if (A.ligarPonte()) {
+      return function (modulo, acao, payload) {
+        return A.pedirPelaPonte(modulo, acao, payload);
+      };
+    }
+
     var janelas = [];
     try { if (window.parent && window.parent !== window) janelas.push(window.parent); } catch (e) {}
     try { if (window.opener) janelas.push(window.opener); } catch (e) {}
@@ -2415,7 +2494,7 @@ body.embutido #legenda{display:none}
 
   var M = {
     nome: 'MOTOR3D',
-    versao: '6.8.1',
+    versao: '6.9.0',
     engine: null,
     cena: null,
     camera: null,
@@ -3574,7 +3653,7 @@ body.embutido #legenda{display:none}
 
   var C = {
     nome: 'CONSTRUTOR3D',
-    versao: '6.8.1',
+    versao: '6.9.0',
     aberto: false,
     projeto: null,
     /* o galpão real fica guardado enquanto o projeto está na tela,
@@ -4253,7 +4332,7 @@ body.embutido #legenda{display:none}
   'use strict';
 
   var APP = {
-    versao: '6.8.1',
+    versao: '6.9.0',
     montagem: null,
     locais: [],
     carregando: false,
@@ -7031,7 +7110,7 @@ body.embutido #legenda{display:none}
      Salvar o arquivo não é publicar, e publicar não é o
      navegador ter recebido.
      ============================================================ */
-  APP.VERSAO = '6.8.1';
+  APP.VERSAO = '6.9.0';
   APP.COMPILADO = '2026-11-15';
   APP.CARIMBO = 'ALMOXA 3D ' + APP.VERSAO + ' · ' + APP.COMPILADO;
 
