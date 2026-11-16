@@ -3,7 +3,39 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>ALMOX PRO 3D 6.5.0 · 15/11</title>
+
+<!-- ===== [CHEGUEI] 16/11 · O MAPA AVISA ANTES DE BAIXAR O MOTOR =====
+     Este bloco é de propósito a PRIMEIRA coisa que roda nesta
+     página, e de propósito está ACIMA da linha que baixa o
+     Babylon.
+
+     Por que: o Babylon é um script bloqueante de 1,43 MB
+     comprimidos. Enquanto ele não chega, nada mais roda aqui
+     dentro. O aviso "cheguei" morava no fim do arquivo, então
+     ele só saía DEPOIS do motor inteiro. Medido num celular de
+     obra a 400 kbps: 29 895 ms. O ALMOXA CAMPO desiste em 12 s
+     e acusava falha num mapa que estava carregando bem.
+
+     Agora são dois avisos diferentes, porque são dois fatos
+     diferentes:
+       pronto    — a página chegou (isto aqui, imediato);
+       desenhado — o galpão apareceu (mais tarde, no 1º quadro).
+
+     Nada de segredo vai nestes avisos: só o fato e o tempo.
+     ================================================================ -->
+<script>
+(function () {
+  try {
+    if (!window.parent || window.parent === window) return;
+    window.__ALMOXA3D_T0 = Date.now();
+    window.parent.postMessage({ almoxa3d: 'pronto', fase: 'pagina' }, '*');
+    /* e digo também que o motor começou a vir, para o aplicativo
+       poder escrever "baixando o motor 3D" em vez de um aviso de erro */
+    window.parent.postMessage({ almoxa3d: 'motor', estado: 'baixando' }, '*');
+  } catch (e) {}
+})();
+</script>
+<title>ALMOX PRO 3D 6.9.1 · 16/11</title>
 <style>
 /* ALMOXA 3D · almoxa3d.css · 08/11/2026
    Responsivo de verdade (seção 11): no celular o painel vira
@@ -515,7 +547,12 @@ body.embutido #legenda{display:none}
      Versão travada de propósito: biblioteca que se atualiza
      sozinha quebra sistema em produção sem ninguém ter mexido.
      ========================================================= -->
-<script src="https://cdn.jsdelivr.net/npm/babylonjs@7.54.3/babylon.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/babylonjs@7.54.3/babylon.js"
+  onerror="try{if(window.parent&&window.parent!==window)window.parent.postMessage(
+    {almoxa3d:'motor-falhou',motivo:'a biblioteca do desenho 3D n\u00e3o baixou'},'*')}catch(e){}"
+  onload="try{if(window.parent&&window.parent!==window)window.parent.postMessage(
+    {almoxa3d:'motor',estado:'chegou',ms:(Date.now()-(window.__ALMOXA3D_T0||Date.now()))},'*')}catch(e){}"
+></script>
 
 <!-- ===== os quatro arquivos do módulo ======================
      No Apps Script, estas quatro linhas viram o conteúdo dos
@@ -1900,7 +1937,7 @@ body.embutido #legenda{display:none}
   }
 
   raiz.LAYOUT3D = {
-    VERSAO: '6.9.0',
+    VERSAO: '6.9.1',
     MEDIDAS: MEDIDAS,
     CORES: CORES,
     organizar: organizar,
@@ -2002,7 +2039,7 @@ body.embutido #legenda{display:none}
 
   var A = {
     nome: 'API3D',
-    versao: '6.9.0',
+    versao: '6.9.1',
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
     chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
     origemDaChave: 'nenhuma (fase 1)',
@@ -2494,7 +2531,7 @@ body.embutido #legenda{display:none}
 
   var M = {
     nome: 'MOTOR3D',
-    versao: '6.9.0',
+    versao: '6.9.1',
     engine: null,
     cena: null,
     camera: null,
@@ -2586,7 +2623,22 @@ body.embutido #legenda{display:none}
       M.sombra.bias = 0.0008;
     }
 
-    M.engine.runRenderLoop(function () { cena.render(); });
+    /* [CHEGUEI] 16/11 — "desenhei" é o primeiro QUADRO que sai,
+       não o "iniciei". Quem está esperando quer ver o galpão,
+       e o galpão só existe quando um quadro foi renderizado. */
+    var primeiroQuadro = false;
+    M.engine.runRenderLoop(function () {
+      cena.render();
+      if (!primeiroQuadro) {
+        primeiroQuadro = true;
+        try {
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ almoxa3d: 'desenhado',
+              ms: (Date.now() - (window.__ALMOXA3D_T0 || Date.now())) }, '*');
+          }
+        } catch (e) {}
+      }
+    });
     raiz.addEventListener('resize', function () { M.engine.resize(); });
 
     cena.onPointerObservable.add(function (info) {
@@ -3653,7 +3705,7 @@ body.embutido #legenda{display:none}
 
   var C = {
     nome: 'CONSTRUTOR3D',
-    versao: '6.9.0',
+    versao: '6.9.1',
     aberto: false,
     projeto: null,
     /* o galpão real fica guardado enquanto o projeto está na tela,
@@ -4332,7 +4384,7 @@ body.embutido #legenda{display:none}
   'use strict';
 
   var APP = {
-    versao: '6.9.0',
+    versao: '6.9.1',
     montagem: null,
     locais: [],
     carregando: false,
@@ -7110,7 +7162,7 @@ body.embutido #legenda{display:none}
      Salvar o arquivo não é publicar, e publicar não é o
      navegador ter recebido.
      ============================================================ */
-  APP.VERSAO = '6.9.0';
+  APP.VERSAO = '6.9.1';
   APP.COMPILADO = '2026-11-15';
   APP.CARIMBO = 'ALMOXA 3D ' + APP.VERSAO + ' · ' + APP.COMPILADO;
 
@@ -7973,6 +8025,15 @@ body.embutido #legenda{display:none}
          painel nunca eram ligados, e a página virava um aviso só.
          O Babylon é o DESENHO; a casca não depende dele. Então
          ligo a casca, aviso o que falta, e paro só o 3D. */
+      /* [CHEGUEI] 16/11 — o aplicativo não tem como olhar aqui para
+         dentro. Se o desenho não vai acontecer, eu digo. Calado seria
+         pior: ele ficaria esperando um galpão que não vem. */
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ almoxa3d: 'motor-falhou',
+            motivo: 'a biblioteca do desenho 3D n\u00e3o carregou nesta rede' }, '*');
+        }
+      } catch (e) {}
       try { window.APP3D.ligarControlesDaFase1(); } catch (e) {}
       try {
         window.APP3D.conexao('caido', '3D não iniciou',
