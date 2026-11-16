@@ -1,0 +1,61 @@
+{
+  "name": "ALMOXA CAMPO",
+  "short_name": "ALMOXA",
+  "description": "Almoxarifado em campo: recebimento, inventário, crachá e mapa 3D do galpão. A fonte dos dados é o ALMOX PRO.",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "start_url": "./ALMOXA_CAMPO.html",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#0B1E3D",
+  "theme_color": "#0B1E3D",
+  "categories": ["business", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "./icons/icone-64.png",
+      "sizes": "64x64",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icone-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icone-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icone-192-recortavel.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "./icons/icone-512-recortavel.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Minhas atividades",
+      "short_name": "Atividades",
+      "url": "./ALMOXA_CAMPO.html#atividades",
+      "icons": [{ "src": "./icons/icone-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Mapa 3D do galpão",
+      "short_name": "Mapa 3D",
+      "url": "./ALMOXA_CAMPO.html#mapa3d",
+      "icons": [{ "src": "./icons/icone-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
