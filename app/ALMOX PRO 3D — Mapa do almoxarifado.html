@@ -290,6 +290,14 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--fundo);
 #app.apresentando #minimapa{display:none}
 
 /* [V] o carimbo de versão, sempre visível */
+/* [ACOMP] 15/11 — etiquetas de situação no painel de acompanhamento.
+   O .pino existente colore uma bolinha filha; estas colorem o texto. */
+.pino.verde{background:#EDF9F1;border-color:#B6DCC4;color:#1F6B41}
+.pino.amarelo{background:#FEF8EC;border-color:#F0D8A8;color:#7A5B18}
+.pino.vermelho{background:#FDF1F0;border-color:#F2C3BF;color:#8A2B23}
+.pino.azul{background:#F1F6FD;border-color:#BBD3F2;color:#1C4E8F}
+.pino.cinza{background:#F6F8FA;border-color:#D9DEE6;color:#4A5568}
+
 .pino.versao{cursor:pointer;font-variant-numeric:tabular-nums;font-weight:700;
   letter-spacing:.02em}
 .pino.versao::before{content:"v";opacity:.5;margin-right:1px;font-weight:600}
@@ -444,6 +452,8 @@ body.embutido #legenda{display:none}
       <button class="btn" id="v_rota" aria-pressed="false">Rota</button>
       <button class="btn" id="v_frente" aria-pressed="false"
               title="Montar frente de serviço para um colaborador">Frente de serviço</button>
+      <button class="btn" id="v_acomp" aria-pressed="false"
+              title="Quem começou, quem está onde, o que falta">Acompanhar</button>
       <button class="btn" id="v_inv" aria-pressed="false">Inventário</button>
       <button class="btn" id="v_rastreio" aria-pressed="false">Rastreio</button>
       <button class="btn" id="v_calor" aria-pressed="false" title="Mapa de calor">Calor</button>
@@ -1889,7 +1899,7 @@ body.embutido #legenda{display:none}
   }
 
   raiz.LAYOUT3D = {
-    VERSAO: '6.7.1',
+    VERSAO: '6.8.0',
     MEDIDAS: MEDIDAS,
     CORES: CORES,
     organizar: organizar,
@@ -1991,7 +2001,7 @@ body.embutido #legenda{display:none}
 
   var A = {
     nome: 'API3D',
-    versao: '6.7.1',
+    versao: '6.8.0',
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
     chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
     origemDaChave: 'nenhuma (fase 1)',
@@ -2404,7 +2414,7 @@ body.embutido #legenda{display:none}
 
   var M = {
     nome: 'MOTOR3D',
-    versao: '6.7.1',
+    versao: '6.8.0',
     engine: null,
     cena: null,
     camera: null,
@@ -3563,7 +3573,7 @@ body.embutido #legenda{display:none}
 
   var C = {
     nome: 'CONSTRUTOR3D',
-    versao: '6.7.1',
+    versao: '6.8.0',
     aberto: false,
     projeto: null,
     /* o galpão real fica guardado enquanto o projeto está na tela,
@@ -4242,7 +4252,7 @@ body.embutido #legenda{display:none}
   'use strict';
 
   var APP = {
-    versao: '6.7.1',
+    versao: '6.8.0',
     montagem: null,
     locais: [],
     carregando: false,
@@ -5894,6 +5904,173 @@ body.embutido #legenda{display:none}
     });
   };
 
+  /* ============================================================
+     [ACOMP] 15/11 · PAINEL DE ACOMPANHAMENTO — módulo 01, seção 10
+     ------------------------------------------------------------
+     "eu deveria mostrar também quando a pessoa entrar na atividade,
+      ela já vai aparecer aqui para mim ver se a pessoa iniciou"
+
+     É isto: o gestor olha a tela e sabe em que pé está cada um,
+     sem telefonar para ninguém.
+
+     De onde sai cada número, para ninguém achar que é estimativa:
+       · "começou" é a hora que o próprio Core gravou quando a
+         pessoa tocou em começar no celular (iniciadaEm);
+       · "feitas" e "faltam" são contados das CONTAGENS gravadas,
+         não de um contador à parte que poderia divergir;
+       · a situação é calculada do que está gravado, e por isso uma
+         rota que ninguém tocou aparece como NOVA, e não como
+         "em andamento" só porque foi distribuída.
+
+     NÃO há GPS aqui. "Último endereço conferido" é o último que a
+     pessoa registrou — não é onde ela está agora, e a tela diz isso
+     com todas as letras.
+     ============================================================ */
+
+  APP.pintarAcompanhamento = function () {
+    APP.titulo('Acompanhamento');
+    $('corpoPainel').innerHTML = '<div class="vazio">Lendo o que foi distribuído…</div>';
+
+    APP.invChamar('listarRotas', {}).then(function (r) {
+      if (!r.ok) {
+        $('corpoPainel').innerHTML =
+          (r.__semModulo ? APP.avisoSemInventario() : APP.invErro(r, 'ler as rotas')) +
+          '<div class="sep"></div><button class="btn" id="acSair">Voltar ao galpão</button>';
+        APP.ligarSairAcomp();
+        return;
+      }
+
+      var rotas = r.dados || [];
+      if (!rotas.length) {
+        $('corpoPainel').innerHTML =
+          '<div class="vazio">Nenhuma rota distribuída ainda.<br>' +
+          'Use <b>Frente de serviço</b> para montar a primeira.</div>' +
+          '<div class="sep"></div><button class="btn" id="acSair">Voltar ao galpão</button>';
+        APP.ligarSairAcomp();
+        return;
+      }
+
+      /* agrupa por pessoa: é assim que o gestor pensa */
+      var porPessoa = {}, ordem = [];
+      for (var i = 0; i < rotas.length; i++) {
+        var x = rotas[i];
+        var quem = String(x.responsavel || '(sem dono)').trim();
+        if (!porPessoa[quem]) { porPessoa[quem] = []; ordem.push(quem); }
+        porPessoa[quem].push(x);
+      }
+      ordem.sort();
+
+      /* o retrato geral, antes do detalhe */
+      var total = rotas.length, iniciadas = 0, concluidas = 0,
+          comDiv = 0, naoComecaram = 0, locais = 0, feitos = 0;
+      for (var k = 0; k < rotas.length; k++) {
+        var R = rotas[k], st = String(R.statusCalculado || '').toUpperCase();
+        var pg = R.progresso || {};
+        locais += Number(pg.quantas) || 0;
+        feitos += Number(pg.feitas) || 0;
+        if (String(R.iniciadaEm || '').trim()) iniciadas++; else naoComecaram++;
+        if (st === 'CONCLUIDA' || st === 'AGUARDANDO_APROVACAO') concluidas++;
+        if (st === 'COM_DIVERGENCIA') comDiv++;
+      }
+
+      var h = '<div class="numeros">' +
+        APP.cartaoNumero(total, 'rotas') +
+        APP.cartaoNumero(iniciadas, 'começaram') +
+        APP.cartaoNumero(naoComecaram, 'não começaram') +
+        APP.cartaoNumero(comDiv, 'com divergência') +
+        '</div>' +
+        '<div class="linha"><span>Locais conferidos</span><b>' +
+        feitos + ' de ' + locais + '</b></div>';
+
+      h += '<div class="sep"></div>';
+
+      for (var p = 0; p < ordem.length; p++) {
+        var quem2 = ordem[p], minhas = porPessoa[quem2];
+        var feitasP = 0, totalP = 0, comecouAlguma = false, ultimo = '';
+        for (var m = 0; m < minhas.length; m++) {
+          var g = minhas[m].progresso || {};
+          feitasP += Number(g.feitas) || 0;
+          totalP += Number(g.quantas) || 0;
+          if (String(minhas[m].iniciadaEm || '').trim()) {
+            comecouAlguma = true;
+            if (String(minhas[m].iniciadaEm) > ultimo) ultimo = String(minhas[m].iniciadaEm);
+          }
+        }
+
+        h += '<div class="cartao" style="margin-bottom:10px">' +
+          '<div class="linha"><span style="font-weight:700;font-size:14px">' +
+          esc(quem2) + '</span>' +
+          '<span>' + (comecouAlguma
+            ? '<span class="pino verde">começou</span>'
+            : '<span class="pino cinza">ainda não começou</span>') + '</span></div>' +
+          '<div class="small">' + minhas.length + ' rota(s) · ' +
+          feitasP + ' de ' + totalP + ' locais conferidos' +
+          (ultimo ? ' · começou às ' + esc(ultimo) : '') + '</div>';
+
+        for (var n = 0; n < minhas.length; n++) {
+          var Rx = minhas[n], pgx = Rx.progresso || {};
+          var stx = String(Rx.statusCalculado || '').toUpperCase();
+          var cor = stx === 'CONCLUIDA' ? 'verde'
+                  : stx === 'COM_DIVERGENCIA' ? 'vermelho'
+                  : stx === 'EM_ANDAMENTO' ? 'amarelo'
+                  : stx === 'AGUARDANDO_APROVACAO' ? 'azul' : 'cinza';
+          h += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--borda)">' +
+            '<div class="linha"><span>' + esc(Rx.nome) + '</span>' +
+            '<span class="pino ' + cor + '">' +
+            esc(stx.replace(/_/g, ' ').toLowerCase()) + '</span></div>' +
+            '<div class="small">' +
+            (Number(pgx.feitas) || 0) + ' de ' + (Number(pgx.quantas) || 0) +
+            ' locais · ' + (Number(Rx.porcento) || 0) + '%' +
+            /* [ACOMP] nada de <b> aqui: dentro do cartão o <b> é
+               título e sai do tamanho de um número grande */
+            (Number(pgx.divergencias)
+              ? ' · <span style="color:#8A2B23;font-weight:700">' +
+                pgx.divergencias + ' divergência(s)</span>' : '') +
+            (String(Rx.prazo || '').trim() ? ' · prazo ' + esc(Rx.prazo) : '') +
+            '</div>';
+
+          if (pgx.faltamQuais && pgx.faltamQuais.length) {
+            var mostra = pgx.faltamQuais.slice(0, 6).join(', ');
+            h += '<div class="small" style="opacity:.75">falta: ' + esc(mostra) +
+              (pgx.faltamQuais.length > 6
+                ? ' e mais ' + (pgx.faltamQuais.length - 6) : '') + '</div>';
+          }
+          h += '</div>';
+        }
+        h += '</div>';
+      }
+
+      h += '<div class="aviso azul"><b>O que estes números são</b>' +
+        '"Começou" é a hora que o Core gravou quando a pessoa tocou em começar ' +
+        'no celular. "Conferidos" sai das contagens gravadas, uma a uma. ' +
+        'Não há GPS: eu sei o que foi registrado, não onde a pessoa está agora.' +
+        '</div>';
+
+      h += '<div class="sep"></div>' +
+        '<button class="btn" id="acAtualizar">Atualizar</button> ' +
+        '<button class="btn" id="acSair">Voltar ao galpão</button>';
+
+      $('corpoPainel').innerHTML = h;
+      var ba = $('acAtualizar');
+      if (ba) ba.addEventListener('click', function () { APP.pintarAcompanhamento(); });
+      APP.ligarSairAcomp();
+    });
+  };
+
+  APP.cartaoNumero = function (n, rotulo) {
+    return '<div class="cartao"><b>' + n + '</b><small>' + esc(rotulo) + '</small></div>';
+  };
+
+  APP.ligarSairAcomp = function () {
+    var b = $('acSair');
+    if (b) b.addEventListener('click', function () {
+      APP.modoAcomp = false;
+      var bt = $('v_acomp');
+      if (bt) bt.setAttribute('aria-pressed', 'false');
+      APP.pintarResumo();
+    });
+  };
+
   APP.pintarInventario = function () {
     APP.modoInv = true;
     APP.titulo('Inventário móvel');
@@ -6782,7 +6959,7 @@ body.embutido #legenda{display:none}
      Salvar o arquivo não é publicar, e publicar não é o
      navegador ter recebido.
      ============================================================ */
-  APP.VERSAO = '6.7.1';
+  APP.VERSAO = '6.8.0';
   APP.COMPILADO = '2026-11-15';
   APP.CARIMBO = 'ALMOXA 3D ' + APP.VERSAO + ' · ' + APP.COMPILADO;
 
@@ -7528,6 +7705,19 @@ body.embutido #legenda{display:none}
         APP.modoFrente = true;
         bf.setAttribute('aria-pressed', 'true');
         APP.pintarFrente();
+      }
+    });
+
+    var ba2 = $('v_acomp');
+    if (ba2) ba2.addEventListener('click', function () {
+      if (APP.modoAcomp) {
+        APP.modoAcomp = false;
+        ba2.setAttribute('aria-pressed', 'false');
+        APP.pintarResumo();
+      } else {
+        APP.modoAcomp = true;
+        ba2.setAttribute('aria-pressed', 'true');
+        APP.pintarAcompanhamento();
       }
     });
 
