@@ -35,7 +35,7 @@
   } catch (e) {}
 })();
 </script>
-<title>ALMOX PRO 3D 6.10.0 · 16/11</title>
+<title>ALMOX PRO 3D 6.11.0 · 16/11</title>
 <style>
 /* [N5] 16/11 · a faixa da trilha, seção 5 */
 #trilha3d{position:absolute;left:50%;transform:translateX(-50%);
@@ -2150,7 +2150,7 @@ body.embutido #legenda{display:none}
   }
 
   raiz.LAYOUT3D = {
-    VERSAO: '6.10.0',
+    VERSAO: '6.11.0',
     MEDIDAS: MEDIDAS,
     CORES: CORES,
     organizar: organizar,
@@ -2259,7 +2259,7 @@ body.embutido #legenda{display:none}
 
   var A = {
     nome: 'API3D',
-    versao: '6.10.0',
+    versao: '6.11.0',
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
     chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
     origemDaChave: 'nenhuma (fase 1)',
@@ -2751,7 +2751,7 @@ body.embutido #legenda{display:none}
 
   var M = {
     nome: 'MOTOR3D',
-    versao: '6.10.0',
+    versao: '6.11.0',
     engine: null,
     cena: null,
     camera: null,
@@ -4123,7 +4123,7 @@ body.embutido #legenda{display:none}
 
   var C = {
     nome: 'CONSTRUTOR3D',
-    versao: '6.10.0',
+    versao: '6.11.0',
     aberto: false,
     projeto: null,
     /* o galpão real fica guardado enquanto o projeto está na tela,
@@ -4802,7 +4802,7 @@ body.embutido #legenda{display:none}
   'use strict';
 
   var APP = {
-    versao: '6.10.0',
+    versao: '6.11.0',
     montagem: null,
     locais: [],
     carregando: false,
@@ -5037,6 +5037,265 @@ body.embutido #legenda{display:none}
     });
   };
 
+  /* ============================================================
+     [P5] 16/11 · O QUE ESTÁ NESTA POSIÇÃO · seção 5
+     ------------------------------------------------------------
+     O cadastro de localizações diz QUANTO está guardado
+     (ocupacao) e QUANTOS SKUs diferentes (itens). Não diz QUAIS.
+
+     Para dizer quais, eu preciso ligar o catálogo ao endereço — e
+     eu não sei com que nome o seu Core guarda esse vínculo. Em vez
+     de chutar um nome e mostrar "nenhum material aqui" numa
+     prateleira cheia, eu PROCURO entre os nomes possíveis e digo
+     qual funcionou. Se nenhum funcionar, digo isso e mostro as
+     colunas que vieram — e aí a própria tela vira o diagnóstico.
+     ============================================================ */
+  APP.ESTOQUE = { itens: null, reservas: null, em: 0, erro: '', campoDoLocal: '',
+                  colunasVistas: [], buscando: false };
+  var ESTOQUE_VALIDADE_MS = 120000;
+
+  /* os nomes com que um item pode apontar para o endereço dele */
+  var CAMPOS_DE_LOCAL = ['local', 'locais', 'endereco', 'endereço', 'codigoLocal',
+                         'localizacao', 'localização', 'posicao', 'posição',
+                         'enderecamento', 'end', 'codigoEndereco'];
+
+  function listaDe_(d) {
+    if (!d) return [];
+    if (d.length !== undefined) return d;
+    if (d.itens && d.itens.length !== undefined) return d.itens;
+    if (d.lista && d.lista.length !== undefined) return d.lista;
+    if (d.dados && d.dados.length !== undefined) return d.dados;
+    return [];
+  }
+
+  APP.carregarEstoque = function (forcar) {
+    var agora = Date.now();
+    if (!forcar && APP.ESTOQUE.itens && (agora - APP.ESTOQUE.em) < ESTOQUE_VALIDADE_MS) {
+      return Promise.resolve(APP.ESTOQUE);
+    }
+    if (APP.ESTOQUE.buscando) return APP.ESTOQUE.buscando;
+
+    var porta = raiz.API3D;
+    if (!porta || !porta.chamar) {
+      APP.ESTOQUE.erro = 'o adaptador do Core não está ligado nesta página';
+      return Promise.resolve(APP.ESTOQUE);
+    }
+
+    APP.ESTOQUE.buscando = Promise.all([
+      porta.chamar('estoque', 'listar', {})['catch'](function (e) {
+        return { ok: false, mensagem: String(e && e.message || e) }; }),
+      porta.chamar('reservas', 'listar', {})['catch'](function (e) {
+        return { ok: false, mensagem: String(e && e.message || e) }; })
+    ]).then(function (duas) {
+      var re = duas[0], rr = duas[1];
+      var falhas = [];
+
+      if (re && re.ok) {
+        APP.ESTOQUE.itens = listaDe_(re.dados);
+      } else {
+        /* consulta que falhou NÃO vira lista vazia: lista vazia
+           diria "não há material", e o que houve foi que eu não
+           consegui perguntar. */
+        APP.ESTOQUE.itens = null;
+        falhas.push('estoque: ' + ((re && re.mensagem) || 'sem resposta'));
+      }
+
+      if (rr && rr.ok) APP.ESTOQUE.reservas = listaDe_(rr.dados);
+      else {
+        APP.ESTOQUE.reservas = null;
+        falhas.push('reservas: ' + ((rr && rr.mensagem) || 'sem resposta'));
+      }
+
+      APP.ESTOQUE.erro = falhas.join(' · ');
+      APP.ESTOQUE.em = Date.now();
+      APP.ESTOQUE.buscando = false;
+
+      /* descobre, UMA vez, com que nome o item aponta para o local */
+      APP.descobrirCampoDoLocal();
+      return APP.ESTOQUE;
+    });
+    return APP.ESTOQUE.buscando;
+  };
+
+  /* Qual campo do item carrega o endereço? Testo contra os códigos
+     de local que o mapa JÁ desenhou — se os valores de um campo
+     batem com endereços reais, é esse campo. Isso é medição, não
+     adivinhação. */
+  APP.descobrirCampoDoLocal = function () {
+    APP.ESTOQUE.campoDoLocal = '';
+    APP.ESTOQUE.colunasVistas = [];
+    var itens = APP.ESTOQUE.itens;
+    if (!itens || !itens.length) return '';
+    APP.ESTOQUE.colunasVistas = Object.keys(itens[0]);
+
+    var enderecos = {};
+    (APP.posicoesCarregadas ? APP.posicoesCarregadas() : []).forEach(function (p) {
+      var c = String(p.codigo || '').trim().toUpperCase();
+      if (c) enderecos[c] = 1;
+    });
+    if (!Object.keys(enderecos).length) return '';
+
+    var melhor = '', melhorAcertos = 0;
+    for (var i = 0; i < CAMPOS_DE_LOCAL.length; i++) {
+      var campo = CAMPOS_DE_LOCAL[i];
+      if (!(campo in itens[0])) continue;
+      var acertos = 0;
+      for (var k = 0; k < itens.length; k++) {
+        var v = String(itens[k][campo] == null ? '' : itens[k][campo])
+                  .trim().toUpperCase();
+        if (v && enderecos[v]) acertos++;
+      }
+      if (acertos > melhorAcertos) { melhorAcertos = acertos; melhor = campo; }
+    }
+    APP.ESTOQUE.campoDoLocal = melhorAcertos > 0 ? melhor : '';
+    APP.ESTOQUE.acertosDoCampo = melhorAcertos;
+    return APP.ESTOQUE.campoDoLocal;
+  };
+
+  function num_(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+  function txt_(v) { return v == null ? '' : String(v).trim(); }
+
+  APP.skuDe = function (it) {
+    return txt_(it.sku || it.codigo || it.id || it.produto);
+  };
+
+  /* o que está guardado neste endereço, segundo o catálogo */
+  APP.materiaisDoLocal = function (codigo) {
+    var cod = txt_(codigo).toUpperCase();
+    var E = APP.ESTOQUE;
+    if (!E.itens) return { ok: false, motivo: E.erro || 'o catálogo não foi lido' };
+    if (!E.campoDoLocal) {
+      return { ok: false, semVinculo: true,
+               colunas: E.colunasVistas,
+               motivo: 'nenhuma coluna do catálogo aponta para endereço' };
+    }
+    var achados = [];
+    for (var i = 0; i < E.itens.length; i++) {
+      var v = txt_(E.itens[i][E.campoDoLocal]).toUpperCase();
+      if (v && v === cod) achados.push(E.itens[i]);
+    }
+    return { ok: true, itens: achados, campo: E.campoDoLocal };
+  };
+
+  /* quanto deste material está reservado */
+  APP.reservadoDe = function (sku) {
+    var E = APP.ESTOQUE;
+    if (!E.reservas) return null;          /* null = não sei, ≠ zero */
+    var s = txt_(sku).toUpperCase(), total = 0, achou = false;
+    for (var i = 0; i < E.reservas.length; i++) {
+      var r = E.reservas[i];
+      var rs = txt_(r.sku || r.codigo || r.produto || r.item).toUpperCase();
+      if (rs !== s) continue;
+      var est = txt_(r.situacao || r.status).toUpperCase();
+      if (est && /CANCELAD|ATENDID|ENTREGUE|CONCLU/.test(est)) continue;
+      achou = true;
+      total += num_(r.qtd !== undefined ? r.qtd : (r.quantidade || 0));
+    }
+    return achou ? total : 0;
+  };
+
+  /* todos os endereços onde este material aparece */
+  APP.enderecosDoMaterial = function (sku) {
+    var E = APP.ESTOQUE;
+    if (!E.itens || !E.campoDoLocal) return null;
+    var s = txt_(sku).toUpperCase(), fora = [];
+    for (var i = 0; i < E.itens.length; i++) {
+      if (txt_(APP.skuDe(E.itens[i])).toUpperCase() !== s) continue;
+      var l = txt_(E.itens[i][E.campoDoLocal]);
+      if (l) fora.push({ local: l, item: E.itens[i] });
+    }
+    return fora;
+  };
+
+  /* [P5] 16/11 · o pedaço do painel que fala do material */
+  APP.preencherMaterialDoPainel = function (p) {
+    var onde = $('p5material');
+    if (!onde || !p) return;
+
+    APP.carregarEstoque().then(function (E) {
+      onde = $('p5material');
+      if (!onde) return;                     /* ele já clicou noutra coisa */
+
+      if (!E.itens) {
+        onde.innerHTML = '<b>Não consegui consultar o estoque</b><br>' +
+          esc(E.erro || 'o Core não respondeu') +
+          '<br><br>Por isso eu <b>não</b> posso dizer que esta posição está ' +
+          'vazia. Posso dizer que não consegui perguntar — são coisas ' +
+          'diferentes, e confundir as duas vira contagem errada.';
+        return;
+      }
+
+      var r = APP.materiaisDoLocal(p.codigo);
+
+      if (r.semVinculo) {
+        /* a tela vira o diagnóstico: digo o que recebi */
+        onde.innerHTML = '<b>O catálogo não diz em que endereço cada item está</b>' +
+          '<br>Li ' + E.itens.length + ' itens do estoque, e nenhuma coluna deles ' +
+          'aponta para um endereço do galpão.' +
+          '<br><br><span class="semfonte">colunas que vieram: ' +
+          esc((r.colunas || []).join(', ')) + '</span>' +
+          '<br><br>Com o nome da coluna certa, este painel passa a mostrar o ' +
+          'material, o saldo e a reserva de cada posição.';
+        return;
+      }
+      if (!r.ok) {
+        onde.innerHTML = '<b>Não consegui ligar o estoque a este endereço</b><br>' +
+          esc(r.motivo || '');
+        return;
+      }
+
+      if (!r.itens.length) {
+        onde.innerHTML = 'Nenhum item do catálogo aponta para <b>' +
+          esc(p.codigo) + '</b>.' +
+          (p.itens > 0
+            ? '<br><br>Mas o cadastro de localizações diz que há <b>' + p.itens +
+              '</b> aqui. Os dois discordam, e quem decide qual está certo é uma ' +
+              'conferência física — eu só mostro a discordância.'
+            : '');
+        return;
+      }
+
+      var h = '<b class="small">MATERIAL NESTA POSIÇÃO</b>';
+      r.itens.forEach(function (it) {
+        var sku = APP.skuDe(it);
+        var saldo = (it.estoqueAtual !== undefined) ? it.estoqueAtual
+                  : (it.saldo !== undefined ? it.saldo : null);
+        var res = APP.reservadoDe(sku);
+        var disp = (saldo !== null && res !== null) ? (Number(saldo) - Number(res)) : null;
+        var outros = APP.enderecosDoMaterial(sku) || [];
+
+        h += '<div class="achado" style="cursor:default">' +
+          '<b>' + esc(String(it.descricao || it.item || it.nome || sku)) + '</b>' +
+          '<span>código ' + esc(sku) +
+          (it.unidade ? ' · ' + esc(String(it.unidade)) : '') +
+          (it.codigoBarras || it.barras || it.ean
+            ? ' · barras ' + esc(String(it.codigoBarras || it.barras || it.ean))
+            : '') + '</span>' +
+          '<span>saldo físico: <b>' +
+            (saldo !== null ? esc(String(saldo)) : '<span class="semfonte">não veio</span>') +
+          '</b> · reservado: <b>' +
+            (res !== null ? esc(String(res)) : '<span class="semfonte">não sei</span>') +
+          '</b> · disponível: <b>' +
+            (disp !== null ? esc(String(disp)) : '<span class="semfonte">—</span>') +
+          '</b></span>' +
+          (outros.length > 1
+            ? '<span>está também em ' + (outros.length - 1) + ' outro(s) endereço(s): ' +
+              esc(outros.filter(function (o) {
+                return String(o.local).toUpperCase() !==
+                       String(p.codigo).toUpperCase(); })
+                .map(function (o) { return o.local; }).join(', ')) + '</span>'
+            : '') +
+          '</div>';
+      });
+      if (E.reservas === null) {
+        h += '<div class="semfonte">a consulta de reservas não respondeu, então ' +
+             '"disponível" não pôde ser calculado</div>';
+      }
+      onde.className = '';
+      onde.innerHTML = h;
+    });
+  };
+
   APP.pintarPosicao = function (p) {
     if (!p) { APP.pintarResumo(); return; }
     var rot = ROTULO[p.situacao] || ROTULO.VAZIA;
@@ -5074,19 +5333,47 @@ body.embutido #legenda{display:none}
       return '<span class="semfonte">não integrado' +
              (oQue ? ' · ' + oQue : '') + '</span>';
     }
+    /* [P5] 16/11 · OCUPAÇÃO E CAPACIDADE, do próprio cadastro
+       ------------------------------------------------------------
+       Estes números já vinham em locais.listar e eu não mostrava:
+       ocupacao (quanto está guardado) e percentual (já calculado
+       pelo sistema). É a seção 10 do prompt — e o próprio prompt
+       avisa: "Não inventar capacidade quando o cadastro não
+       possuir esse dado." Então sem capacidade, sem percentual. */
+    var cap = (d.capacidade !== undefined && d.capacidade !== null &&
+               d.capacidade !== '') ? Number(d.capacidade) : null;
+    var ocup = (d.ocupacao !== undefined && d.ocupacao !== null &&
+                d.ocupacao !== '') ? Number(d.ocupacao) : null;
+    var pct = (d.percentual !== undefined && d.percentual !== null &&
+               d.percentual !== '') ? Number(d.percentual)
+             : (cap > 0 && ocup !== null ? (ocup / cap) * 100 : null);
+
     html +=
-      '<div class="linha"><span>Divisão</span><b>' +
-        (d.divisao || d.divisão ? esc(d.divisao || d.divisão) : semFonte('')) + '</b></div>' +
-      '<div class="linha"><span>Saldo atual</span><b>' +
-        semFonte('estoque') + '</b></div>' +
-      '<div class="linha"><span>Última movimentação</span><b>' +
-        semFonte('movimentações') + '</b></div>' +
-      '<div class="linha"><span>Último inventário</span><b>' +
-        semFonte('inventário') + '</b></div>' +
-      '<div class="linha"><span>Responsável pela conferência</span><b>' +
-        semFonte('fase 4') + '</b></div>' +
-      '<div class="linha"><span>Histórico do endereço</span><b>' +
+      '<div class="linha"><span>Quantidade guardada</span><b>' +
+        (ocup !== null ? ocup : semFonte('o cadastro n\u00e3o trouxe')) + '</b></div>' +
+      '<div class="linha"><span>Ocupa\u00e7\u00e3o</span><b>' +
+        (pct !== null ? pct.toFixed(0) + '%' :
+          (cap === null ? semFonte('capacidade n\u00e3o cadastrada')
+                        : semFonte(''))) + '</b></div>' +
+      '<div class="linha"><span>Divis\u00e3o</span><b>' +
+        (d.divisao || d.divisão ? esc(d.divisao || d.divisão) : semFonte('')) + '</b></div>';
+
+    /* [P5] O MATERIAL QUE EST\u00c1 AQUI \u2014 ou o motivo de eu n\u00e3o saber */
+    html += '<div id="p5material" class="vazio">consultando o estoque\u2026</div>';
+
+    html +=
+      '<div class="linha"><span>\u00daltima movimenta\u00e7\u00e3o</span><b>' +
+        semFonte('movimenta\u00e7\u00f5es') + '</b></div>' +
+      '<div class="linha"><span>\u00daltimo invent\u00e1rio</span><b>' +
+        semFonte('invent\u00e1rio') + '</b></div>' +
+      '<div class="linha"><span>Respons\u00e1vel pela confer\u00eancia</span><b>' +
         semFonte('fase 4') + '</b></div>';
+
+    /* [P5] a consulta ao estoque acontece DEPOIS de pintar: o
+       painel aparece na hora e o pedaço do material se preenche
+       quando o Core responder. Tela que trava esperando servidor
+       é tela que ele fecha. */
+    setTimeout(function () { APP.preencherMaterialDoPainel(p); }, 0);
 
     if (p.itens > 0) {
       html += '<div class="vazio">Esta posição tem <b>' + p.itens + '</b> material(is) ' +
@@ -7580,7 +7867,7 @@ body.embutido #legenda{display:none}
      Salvar o arquivo não é publicar, e publicar não é o
      navegador ter recebido.
      ============================================================ */
-  APP.VERSAO = '6.10.0';
+  APP.VERSAO = '6.11.0';
   APP.COMPILADO = '2026-11-15';
   APP.CARIMBO = 'ALMOXA 3D ' + APP.VERSAO + ' · ' + APP.COMPILADO;
 
