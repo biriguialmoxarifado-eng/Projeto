@@ -60,7 +60,7 @@ window.paramDoMapa = function (nome) {
   } catch (e) {}
 })();
 </script>
-<title>ALMOX PRO 3D 7.10.0 · 18/11</title>
+<title>ALMOX PRO 3D 7.11.0 · 18/11</title>
 <style>
 /* [B2.2] 17/11 · o cartão de um material na busca */
 .cartaoBusca{border:1px solid var(--borda);border-radius:12px;
@@ -512,6 +512,22 @@ body.embutido #legenda{display:none}
 .c_quando.c_velho{color:#f0a93b;opacity:1}
 .c_clic{cursor:pointer;border-radius:8px;padding:4px 6px;margin:0 -6px}
 .c_clic:hover{background:rgba(255,255,255,.06)}
+
+/* [SA\u00daDE 18/11] o painel de sa\u00fade dos motores */
+.sd_motor{border:1px solid rgba(255,255,255,.09);border-radius:10px;
+  padding:10px 12px;margin-bottom:10px;background:rgba(255,255,255,.02)}
+.sd_cab{display:flex;justify-content:space-between;align-items:center;gap:8px;
+  margin-bottom:8px}
+.sd_pino{font-size:10px;padding:2px 8px;border-radius:20px;border:1px solid;
+  white-space:nowrap;text-transform:lowercase}
+.sd_linha{display:flex;justify-content:space-between;gap:10px;font-size:11px;
+  padding:3px 0;border-bottom:1px dotted rgba(255,255,255,.06)}
+.sd_linha span{color:var(--texto-3);flex:0 0 auto}
+.sd_linha code{font-size:10px;text-align:right;word-break:break-word}
+.sd_erro{margin-top:8px;font-size:11px}
+.sd_acop{margin-top:8px;padding:6px 8px;border-left:2px solid #f0a93b;
+  background:rgba(240,169,59,.07);color:var(--texto-3)}
+.sd_testar{width:100%;margin-top:10px}
 </style>
 <!--
   ALMOXA 3D · index.html · 08/11/2026
@@ -1101,6 +1117,8 @@ body.ed_ligado #app{grid-template-columns:var(--lateral) minmax(0,1fr);
       <button class="btn" id="v_calor" aria-pressed="false" title="Mapa de calor">Calor</button>
       <button class="btn" id="v_explodir" aria-pressed="false" title="Separar os níveis">Explodir</button>
       <button class="btn" id="v_indicadores">Indicadores</button>
+      <button class="btn" id="v_saude"
+              title="Estado de cada motor: arquivo, versão, conexão e último teste">Saúde</button>
       <button class="btn" id="v_apresentar" aria-pressed="false" title="Visualização limpa">Apresentar</button>
       <button class="btn" id="v_minimapa" aria-pressed="false" title="Planta de cima">Minimapa</button>
       <button class="btn" id="v_telacheia" aria-pressed="false"
@@ -9350,7 +9368,7 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
   }
 
   raiz.LAYOUT3D = {
-    VERSAO: '7.10.0',
+    VERSAO: '7.11.0',
     MEDIDAS: MEDIDAS,
     CORES: CORES,
     organizar: organizar,
@@ -9463,7 +9481,7 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
 
   var A = {
     nome: 'API3D',
-    versao: '7.10.0',
+    versao: '7.11.0',
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
     chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
     origemDaChave: 'nenhuma (fase 1)',
@@ -9927,6 +9945,370 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
 
 })(typeof window !== 'undefined' ? window : globalThis);
 
+</script>
+<script>
+/* ===== desenho3d.js ===== */
+/* ============================================================
+   DESENHO3D  ·  1.0.0  ·  18/11/2026
+   NAVIGATION 3D — a rota desenhada dentro do galpão
+   ------------------------------------------------------------
+   É o que a imagem de referência mostra: a linha do caminho
+   atravessando os corredores, e um círculo numerado em cada
+   parada — com visto nas que já foram conferidas.
+
+   A conta já existia inteira:
+     · LAYOUT3D.rota  → o caminho pelos corredores e os pontos
+     · ROTA3D.pintura → o estado e a cor de cada posição
+   O que faltava era desenhar. Este motor só desenha.
+
+   ------------------------------------------------------------
+   DUAS DECISÕES, E O PORQUÊ
+
+   1. O NÚMERO É DESENHADO EM TEXTURA, NÃO EM HTML.
+      Um rótulo em HTML por cima do canvas precisa ser
+      reposicionado a cada quadro, e numa rota de 40 paradas
+      isso é 40 contas de projeção por quadro — no celular, é
+      o que derruba os fps. Em textura, a placa é um objeto da
+      cena e a câmera cuida dela sozinha.
+
+   2. A LINHA FICA RENTE AO CHÃO, NÃO NO AR.
+      Linha alta atravessa prateleira e confunde: parece que o
+      caminho passa por dentro do ferro. Rente ao chão ela se
+      lê como o que é — o caminho que os pés fazem.
+   ============================================================ */
+(function (raiz) {
+  'use strict';
+
+  var D = { nome: 'DESENHO3D', versao: '1.0.0' };
+
+  function texto(v) { return v === null || v === undefined ? '' : String(v); }
+  function num(v) {
+    if (v === null || v === undefined || v === '') return null;
+    var n = Number(v);
+    return isFinite(n) ? n : null;
+  }
+  function lista(v) {
+    return Object.prototype.toString.call(v) === '[object Array]' ? v : [];
+  }
+
+  /* a que altura cada coisa fica */
+  D.ALTURA_LINHA = 0.06;    /* rente ao chão */
+  D.ALTURA_PLACA = 1.35;    /* na altura dos olhos de quem anda */
+  D.TAMANHO_PLACA = 0.9;
+
+  /* ============================================================
+     1 · OS PONTOS DA LINHA
+     ------------------------------------------------------------
+     Puro: entra o caminho em {x,z}, sai a lista em 3D. Roda em
+     teste, sem Babylon.
+     ============================================================ */
+  D.pontosDaLinha = function (caminho, altura) {
+    var y = num(altura);
+    if (y === null) y = D.ALTURA_LINHA;
+    var cru = lista(caminho);
+    var fora = [];
+    for (var i = 0; i < cru.length; i++) {
+      var p = cru[i] || {};
+      var x = num(p.x), z = num(p.z);
+      /* ponto sem coordenada não vira (0,0): some, e eu conto
+         quantos sumiram para quem chamar poder dizer isso. */
+      if (x === null || z === null) continue;
+      /* ponto repetido em seguida é desperdício de vértice */
+      var ult = fora[fora.length - 1];
+      if (ult && ult.x === x && ult.z === z) continue;
+      fora.push({ x: x, y: y, z: z });
+    }
+    return { ok: fora.length >= 2, pontos: fora,
+             descartados: cru.length - fora.length,
+             porqueNao: fora.length >= 2 ? '' :
+               'uma linha precisa de pelo menos dois pontos; o caminho ' +
+               'tinha ' + fora.length + ' aproveitável(is).' };
+  };
+
+  /* ============================================================
+     2 · O RÓTULO DE CADA PARADA
+     ------------------------------------------------------------
+     O que vai escrito no círculo, e de que cor. O visto só
+     aparece em quem está conferida — e uma parada divergente
+     leva o sinal de atenção, não o visto.
+     ============================================================ */
+  D.SINAIS = {
+    conferida:  { marca: '✓', titulo: 'conferida' },
+    divergente: { marca: '!',      titulo: 'conferida com divergência' },
+    pendente:   { marca: '',       titulo: 'ainda não conferida' },
+    fora:       { marca: '',       titulo: 'não faz parte desta rota' }
+  };
+
+  D.DO_LAYOUT = {
+    CONCLUIDO:    'conferida',
+    FEITA:        'conferida',
+    CONFERIDA:    'conferida',
+    DIVERGENCIA:  'divergente',
+    DIVERGENTE:   'divergente',
+    SEMATIVIDADE: 'fora',
+    ATUAL:        'pendente',   /* está nela agora; ainda não conferiu */
+    PENDENTE:     'pendente'
+  };
+
+  D.rotuloDe = function (ponto, estadoDoRota) {
+    var p = ponto || {};
+    var ordem = num(p.ordem);
+    var estado = texto(estadoDoRota || '').toLowerCase();
+    if (!D.SINAIS[estado]) {
+      /* [18/11] O LAYOUT3D TEM VOCABULÁRIO PRÓPRIO, e eu não o
+         conhecia: ele usa CONCLUIDO, ATUAL, DIVERGENCIA e
+         SEMATIVIDADE. Eu traduzia só FEITA — que ele nunca
+         manda — então toda parada conferida aparecia como
+         pendente, sem visto. O teste pegou.
+
+         ATUAL é a parada onde a pessoa está AGORA: ainda não
+         foi conferida, então não leva visto. */
+      estado = D.DO_LAYOUT[texto(p.estado).toUpperCase()] || 'pendente';
+    }
+    var sinal = D.SINAIS[estado];
+    return {
+      numero: ordem === null ? '?' : String(ordem),
+      marca: sinal.marca,
+      estado: estado,
+      titulo: sinal.titulo,
+      cor: texto(p.cor) ||
+           ((raiz.ROTA3D && raiz.ROTA3D.ESTADOS[estado])
+              ? raiz.ROTA3D.ESTADOS[estado].cor : '#f0a93b'),
+      codigo: texto(p.codigo)
+    };
+  };
+
+  /* onde a placa fica: acima do ponto de acesso do corredor,
+     não em cima da prateleira — senão ela some dentro do ferro */
+  D.posicaoDaPlaca = function (ponto, altura) {
+    var p = ponto || {};
+    var a = p.acesso || p.posicaoNoGalpao || {};
+    var x = num(a.x), z = num(a.z);
+    if (x === null || z === null) return null;
+    var y = num(altura);
+    if (y === null) y = D.ALTURA_PLACA;
+    return { x: x, y: y, z: z };
+  };
+
+  /* ============================================================
+     3 · O PLANO DE DESENHO · tudo decidido antes de tocar no 3D
+     ------------------------------------------------------------
+     Esta função não desenha: ela diz o que seria desenhado.
+     Assim o teste confere o desenho inteiro sem navegador, e o
+     desenho de verdade vira uma volta de laço burra.
+     ============================================================ */
+  D.planoDe = function (rota, pintura) {
+    if (!rota || !rota.ok) {
+      return { ok: false,
+               motivo: (rota && rota.erros && rota.erros.length)
+                 ? rota.erros.join(' ')
+                 : 'não há rota calculada para desenhar.' };
+    }
+    var linha = D.pontosDaLinha(rota.caminho);
+    var pontos = lista(rota.pontos);
+    var placas = [];
+    var semLugar = [];
+
+    for (var i = 0; i < pontos.length; i++) {
+      var p = pontos[i];
+      var onde = D.posicaoDaPlaca(p);
+      if (!onde) { semLugar.push(texto(p.codigo)); continue; }
+      var estado = '';
+      if (pintura && pintura.ok && pintura.posicoes &&
+          pintura.posicoes[texto(p.codigo).toUpperCase()]) {
+        estado = pintura.posicoes[texto(p.codigo).toUpperCase()].estado;
+      }
+      var r = D.rotuloDe(p, estado);
+      placas.push({ posicao: onde, rotulo: r, codigo: texto(p.codigo) });
+    }
+
+    return {
+      ok: true,
+      linha: linha,
+      placas: placas,
+      quantas: placas.length,
+      semLugar: semLugar,
+      /* endereços que a rota pediu e o galpão não tem: isso
+         aparece escrito, não some */
+      naoAchados: lista(rota.naoAchados).slice(),
+      distancia: num(rota.distancia)
+    };
+  };
+
+  /* ============================================================
+     4 · O DESENHO · a única parte que precisa de Babylon
+     ============================================================ */
+  D.pecas = { linha: null, placas: [] };
+
+  function B() { return raiz.BABYLON; }
+
+  D.apagar = function () {
+    try {
+      if (D.pecas.linha) { D.pecas.linha.dispose(); D.pecas.linha = null; }
+      for (var i = 0; i < D.pecas.placas.length; i++) {
+        try { D.pecas.placas[i].dispose(); } catch (e) {}
+      }
+      D.pecas.placas = [];
+    } catch (e2) {}
+    return true;
+  };
+
+  function corDe(hex) {
+    var b = B();
+    try { return b.Color3.FromHexString(texto(hex) || '#f0a93b'); }
+    catch (e) { return new b.Color3(0.94, 0.66, 0.23); }
+  }
+
+  /* uma placa redonda com o número dentro */
+  function fazerPlaca(cena, item, indice) {
+    var b = B();
+    var tam = D.TAMANHO_PLACA;
+    var plano = b.MeshBuilder.CreatePlane('rota_placa_' + indice,
+      { width: tam, height: tam }, cena);
+    plano.position = new b.Vector3(item.posicao.x, item.posicao.y, item.posicao.z);
+    /* a placa sempre encara a câmera: é o que faz o número ser
+       legível de qualquer ângulo, como na imagem */
+    plano.billboardMode = b.Mesh.BILLBOARDMODE_ALL;
+    plano.isPickable = false;
+
+    var tex = new b.DynamicTexture('rota_tex_' + indice,
+      { width: 128, height: 128 }, cena, true);
+    tex.hasAlpha = true;
+    var ctx = tex.getContext();
+    ctx.clearRect(0, 0, 128, 128);
+
+    /* o círculo */
+    ctx.beginPath();
+    ctx.arc(64, 64, 52, 0, Math.PI * 2);
+    ctx.fillStyle = item.rotulo.estado === 'pendente' ? '#15202e' : item.rotulo.cor;
+    ctx.fill();
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = item.rotulo.cor;
+    ctx.stroke();
+
+    /* o número */
+    ctx.fillStyle = item.rotulo.estado === 'pendente' ? item.rotulo.cor : '#0d1420';
+    ctx.font = 'bold 56px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(item.rotulo.numero, 64, 62);
+
+    /* o visto, num canto, para não cobrir o número */
+    if (item.rotulo.marca) {
+      ctx.beginPath();
+      ctx.arc(104, 104, 22, 0, Math.PI * 2);
+      ctx.fillStyle = item.rotulo.cor;
+      ctx.fill();
+      ctx.fillStyle = '#0d1420';
+      ctx.font = 'bold 28px sans-serif';
+      ctx.fillText(item.rotulo.marca, 104, 106);
+    }
+    tex.update();
+
+    var mat = new b.StandardMaterial('rota_mat_' + indice, cena);
+    mat.diffuseTexture = tex;
+    mat.opacityTexture = tex;
+    mat.emissiveColor = new b.Color3(1, 1, 1);
+    mat.disableLighting = true;
+    mat.backFaceCulling = false;
+    plano.material = mat;
+    return plano;
+  }
+
+  D.desenhar = function (cena, rota, pintura) {
+    if (!B() || !cena) {
+      return { ok: false, motivo: 'não há cena 3D nesta página.' };
+    }
+    var plano = D.planoDe(rota, pintura);
+    if (!plano.ok) { D.apagar(); return plano; }
+
+    D.apagar();
+
+    /* a linha */
+    if (plano.linha.ok) {
+      var b = B();
+      var vet = plano.linha.pontos.map(function (p) {
+        return new b.Vector3(p.x, p.y, p.z);
+      });
+      try {
+        /* [18/11] a linha sa\u00eda fina demais na foto: some contra o
+           piso escuro. Duas linhas rentes, uma de cada lado, leem
+           como um rastro e n\u00e3o custam quase nada \u2014 s\u00e3o 2 malhas,
+           n\u00e3o 2 por parada. */
+        D.pecas.linha = b.MeshBuilder.CreateLines('rota_linha',
+          { points: vet }, cena);
+        D.pecas.linha.color = corDe('#6cc0ff');
+        D.pecas.linha.isPickable = false;
+        for (var g = -1; g <= 1; g += 2) {
+          var lado = vet.map(function (v) {
+            return new b.Vector3(v.x + g * 0.07, v.y, v.z + g * 0.07);
+          });
+          var ml = b.MeshBuilder.CreateLines('rota_linha_b' + g,
+            { points: lado }, cena);
+          ml.color = corDe('#3a86d6');
+          ml.isPickable = false;
+          D.pecas.placas.push(ml);   /* some junto no apagar */
+        }
+      } catch (e) {
+        return { ok: false, motivo: 'não consegui desenhar a linha: ' +
+                 ((e && e.message) || e) };
+      }
+    }
+
+    /* as placas numeradas */
+    var feitas = 0;
+    for (var i = 0; i < plano.placas.length; i++) {
+      try {
+        D.pecas.placas.push(fazerPlaca(cena, plano.placas[i], i));
+        feitas++;
+      } catch (e2) {}
+    }
+
+    return {
+      ok: true,
+      linhaDesenhada: !!D.pecas.linha,
+      placasDesenhadas: feitas,
+      placasPedidas: plano.placas.length,
+      naoAchados: plano.naoAchados,
+      distancia: plano.distancia,
+      /* se alguma placa não saiu, isso é dito — não fica a
+         diferença muda entre pedidas e desenhadas */
+      aviso: feitas < plano.placas.length
+        ? (plano.placas.length - feitas) + ' placa(s) não foram desenhadas.'
+        : ''
+    };
+  };
+
+  D.diagnostico = function () {
+    return {
+      motor: D.nome, versao: D.versao,
+      linhaNaTela: !!D.pecas.linha,
+      placasNaTela: D.pecas.placas.length,
+      alturaLinha: D.ALTURA_LINHA,
+      alturaPlaca: D.ALTURA_PLACA
+    };
+  };
+
+  D.registrar = function (core) {
+    var c = core || raiz.CORE3D;
+    if (!c || typeof c.registrarMotor !== 'function') return false;
+    var r = c.registrarMotor('navegacao', {
+      nome: 'Navegação 3D (rota desenhada)',
+      versao: D.versao,
+      arquivo: 'desenho3d.js',
+      /* não fala com o Core: desenha o que outro motor leu */
+      endpoints: [],
+      dependencias: ['cena', 'rotas'],
+      iniciar: function () { return true; },
+      diagnostico: function () { return D.diagnostico(); }
+    });
+    return !!(r && r.ok);
+  };
+
+  raiz.DESENHO3D = D;
+  if (typeof module !== 'undefined' && module.exports) module.exports = D;
+
+})(typeof window !== 'undefined' ? window : globalThis);
 </script>
 <script>
 /* ===== rota3d.js ===== */
@@ -12457,7 +12839,27 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
       estado: 'REGISTRADO',
       erro: '',
       msParaIniciar: 0,
-      registradoEm: Date.now()
+      registradoEm: Date.now(),
+
+      /* ============================================================
+         [3.1 · 18/11] OS QUATRO CAMPOS QUE A PARTE 3.1 PEDE
+         ------------------------------------------------------------
+         A PARTE 3.1 lista onze campos por motor; o registro tinha
+         sete. Estes são os quatro que faltavam.
+
+         O `estado` de cima NÃO muda: ele diz se o motor SUBIU, e
+         1.063 provas dependem dele. O `conexao` abaixo é outra
+         coisa — diz se o motor FALA COM O CORE. Um motor pode
+         estar INICIADO e DESCONECTADO ao mesmo tempo, e até hoje
+         a tela não sabia dizer isso.
+         ============================================================ */
+      arquivo: texto(motor.arquivo) || '',
+      endpoints: motor.endpoints || [],
+      conexao: 'DESCONECTADO',
+      /* DESCONECTADO até que uma leitura ou gravação de verdade
+         prove o contrário. Começar em CONECTADO seria afirmar o
+         que ninguém verificou. */
+      ultimoTeste: null
     };
     return { ok: true, id: id };
   };
@@ -12471,7 +12873,12 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
       id: id, nome: texto(nome) || id, versao: '—',
       dependencias: [], acoplamentos: [], motor: null,
       estado: 'AUSENTE', erro: texto(porque),
-      msParaIniciar: 0, registradoEm: Date.now()
+      msParaIniciar: 0, registradoEm: Date.now(),
+      /* [3.1 \u00b7 18/11] os campos novos valem AQUI TAMB\u00c9M. Sem isto,
+         um motor ausente ficava com conexao `undefined`, e o painel
+         contava um estado chamado "undefined" \u2014 que n\u00e3o \u00e9 estado. */
+      arquivo: '', endpoints: [],
+      conexao: 'DESCONECTADO', ultimoTeste: null
     };
     return true;
   };
@@ -12740,19 +13147,104 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
     return a;
   };
 
+  /* ============================================================
+     [3.1 · 18/11] O ESTADO DE CONEXÃO E O TESTE DE VERDADE
+     ------------------------------------------------------------
+     Os seis estados que a PARTE 3.1 pede. Eles respondem outra
+     pergunta que os estados de partida: não "subiu?", e sim
+     "fala com o Core?".
+     ============================================================ */
+  C.CONEXAO = {
+    CONECTADO:              'respondeu ao Core na última tentativa',
+    DESCONECTADO:           'não falou com o Core ainda, ou parou de falar',
+    INICIALIZANDO:          'tentando agora',
+    ERRO:                   'tentou e o Core recusou ou falhou',
+    AGUARDANDO_DEPENDENCIA: 'não tenta porque falta um motor de que precisa',
+    TESTADO:               'fez uma leitura ou gravação REAL contra o Core e deu certo'
+  };
+
+  C.marcarConexao = function (id, estado, porque) {
+    var f = C.motores[texto(id)];
+    if (!f) return { ok: false, codigo: 'MOTOR_DESCONHECIDO' };
+    if (!C.CONEXAO[texto(estado)]) {
+      return { ok: false, codigo: 'ESTADO_INVALIDO',
+               mensagem: 'Estado de conexão "' + texto(estado) + '" não existe. ' +
+                         'Use: ' + Object.keys(C.CONEXAO).join(', ') + '.' };
+    }
+    f.conexao = texto(estado);
+    if (porque !== undefined) f.erro = texto(porque);
+    C.publicar('CONEXAO_MUDOU', { motor: id, conexao: f.conexao });
+    return { ok: true, id: id, conexao: f.conexao };
+  };
+
+  /* O TESTADO é a sua regra 28 virada em estado de máquina:
+     "não considerar um motor concluído apenas porque seu arquivo
+     foi criado". Aqui, só vira TESTADO quem foi à rede e voltou. */
+  C.registrarTeste = function (id, r) {
+    var f = C.motores[texto(id)];
+    if (!f) return { ok: false, codigo: 'MOTOR_DESCONHECIDO' };
+    r = r || {};
+    var deuCerto = r.ok === true;
+    f.ultimoTeste = {
+      quando: Date.now(),
+      rota: texto(r.rota),
+      ok: deuCerto,
+      ms: Number(r.ms) || 0,
+      /* a mensagem do Core vai inteira: resumir erro é perder
+         justamente a parte que conserta */
+      mensagem: texto(r.mensagem),
+      codigo: texto(r.codigo)
+    };
+    f.conexao = deuCerto ? 'TESTADO' : 'ERRO';
+    if (!deuCerto) f.erro = texto(r.mensagem) || texto(r.codigo) || 'o teste falhou';
+    C.publicar('MOTOR_TESTADO', { motor: id, ok: deuCerto, rota: f.ultimoTeste.rota });
+    return { ok: true, id: id, conexao: f.conexao, teste: f.ultimoTeste };
+  };
+
+  /* quanto tempo faz do último teste — para a tela não mostrar
+     um "testado" de três dias atrás como se fosse de agora */
+  C.idadeDoTeste = function (id, agoraMs) {
+    var f = C.motores[texto(id)];
+    if (!f || !f.ultimoTeste) return null;
+    var a = Number(agoraMs);
+    if (!isFinite(a)) a = Date.now();
+    return Math.max(0, a - f.ultimoTeste.quando);
+  };
+
+  /* os motores que PODEM ser testados: quem não declarou endpoint
+     não tem o que testar, e isso é dito em vez de dar erro. */
+  C.testaveis = function () {
+    var fora = [];
+    Object.keys(C.motores).forEach(function (id) {
+      var f = C.motores[id];
+      if (f.endpoints && f.endpoints.length) fora.push(id);
+    });
+    return fora;
+  };
+
   C.diagnostico = function () {
     var ids = Object.keys(C.motores);
     var porEstado = {};
+    var porConexao = {};
     var lista = ids.map(function (id) {
       var f = C.motores[id];
       porEstado[f.estado] = (porEstado[f.estado] || 0) + 1;
+      porConexao[f.conexao] = (porConexao[f.conexao] || 0) + 1;
       return {
         id: f.id, nome: f.nome, versao: f.versao, estado: f.estado,
         ms: f.msParaIniciar, erro: f.erro,
         dependencias: f.dependencias.slice(),
         acoplamentos: f.acoplamentos.slice(),
         faltando: C.faltando(id),
-        metodos: C.metodosDe(id)
+        metodos: C.metodosDe(id),
+        /* [3.1 · 18/11] os campos novos */
+        arquivo: f.arquivo,
+        endpoints: (f.endpoints || []).slice(),
+        conexao: f.conexao,
+        conexaoDiz: C.CONEXAO[f.conexao] || '',
+        ultimoTeste: f.ultimoTeste,
+        idadeDoTeste: C.idadeDoTeste(id),
+        podeTestar: !!(f.endpoints && f.endpoints.length)
       };
     });
     return {
@@ -12760,6 +13252,8 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
               ciclos: C.ciclos || [] },
       total: ids.length,
       porEstado: porEstado,
+      porConexao: porConexao,
+      testaveis: C.testaveis(),
       motores: lista,
       erros: C.erros.slice(-10),
       eventos: C.historicoDeEventos.slice(-10),
@@ -19486,7 +19980,7 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
      Salvar o arquivo não é publicar, e publicar não é o
      navegador ter recebido.
      ============================================================ */
-  APP.VERSAO = '7.10.0';
+  APP.VERSAO = '7.11.0';
   APP.COMPILADO = '2026-11-15';
   APP.CARIMBO = 'ALMOXA 3D ' + APP.VERSAO + ' · ' + APP.COMPILADO;
 
@@ -20020,6 +20514,12 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
     });
     var rec = $('v_recarregar');
     if (rec) rec.addEventListener('click', function () { APP.carregar(); });
+
+    /* [SA\u00daDE 18/11] o painel de sa\u00fade dos motores \u00b7 FASE 2 */
+    var bsd = $('v_saude');
+    if (bsd) bsd.addEventListener('click', function () {
+      if (raiz.SAUDE3D) raiz.SAUDE3D.abrir();
+    });
 
     /* o construtor de galpão · seção 4, etapa 1 */
     var con = $('v_construir');
@@ -21138,6 +21638,209 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
      Ele dizia que n\u00e3o existia rota de movimenta\u00e7\u00f5es no Core. A
      rota existe, est\u00e1 em ALMOXA_PRO_Modulos_Operacao.gs, e eu
      tenho esse arquivo desde o primeiro dia. Agora ele pergunta. */
+  /* ============================================================
+     [SA\u00daDE 18/11] O PAINEL DE SA\u00daDE DOS MOTORES \u00b7 FASE 2
+     ------------------------------------------------------------
+     A PARTE 3.1 pede onze campos por motor. Esta tela mostra os
+     onze. E o bot\u00e3o TESTAR faz uma leitura DE VERDADE contra o
+     Core, pela ponte, e grava o resultado no registro.
+
+     Um motor s\u00f3 vira TESTADO assim. \u00c9 a regra 28 dele \u2014 "n\u00e3o
+     considerar um motor conclu\u00eddo apenas porque seu arquivo foi
+     criado" \u2014 virada em bot\u00e3o.
+     ============================================================ */
+  var SAUDE3D = { testando: {}, versao: '1.0.0' };
+  raiz.SAUDE3D = SAUDE3D;
+
+  SAUDE3D.cartao = function (n, rotulo) {
+    return '<div class="c_bloco' + (n ? '' : ' c_vazio') + '"><b>' + n +
+           '</b><span>' + rotulo + '</span></div>';
+  };
+
+  SAUDE3D.corDaConexao = function (c) {
+    if (c === 'TESTADO')   return '#45b36b';
+    if (c === 'CONECTADO') return '#4aa3f0';
+    if (c === 'ERRO')      return '#e05b4b';
+    if (c === 'INICIALIZANDO') return '#f0a93b';
+    return '#5a6b84';
+  };
+
+  SAUDE3D.quandoFoi = function (ms) {
+    if (ms === null || ms === undefined) return 'nunca testado';
+    var s = Math.round(ms / 1000);
+    if (s < 60) return 'testado h\u00e1 ' + s + ' s';
+    var m = Math.round(s / 60);
+    if (m < 60) return 'testado h\u00e1 ' + m + (m === 1 ? ' minuto' : ' minutos');
+    var h = Math.round(m / 60);
+    return 'testado h\u00e1 ' + h + (h === 1 ? ' hora' : ' horas');
+  };
+
+  /* O TESTE DE VERDADE. Pega o primeiro endpoint declarado do
+     motor e faz uma LEITURA por ele. N\u00e3o grava nada: testar
+     escrevendo no estoque de algu\u00e9m seria absurdo. */
+  SAUDE3D.testar = function (id) {
+    var core = raiz.CORE3D;
+    var f = core && core.motores[id];
+    if (!f) return Promise.resolve({ ok: false, mensagem: 'motor desconhecido' });
+    if (!f.endpoints || !f.endpoints.length) {
+      return Promise.resolve({ ok: false,
+        mensagem: 'este motor n\u00e3o declarou endpoint: n\u00e3o h\u00e1 o que testar. ' +
+                  'Isso N\u00c3O quer dizer que ele est\u00e1 com defeito \u2014 quer dizer ' +
+                  'que ele n\u00e3o fala com o Core.' });
+    }
+    var P = raiz.ALMOX3DBridge;
+    if (!P) return Promise.resolve({ ok: false, mensagem: 'a ponte n\u00e3o est\u00e1 carregada' });
+
+    var rota = f.endpoints[0];
+    var partes = rota.split('.');
+    SAUDE3D.testando[id] = true;
+    core.marcarConexao(id, 'INICIALIZANDO');
+    SAUDE3D.pintar();
+
+    var t0 = Date.now();
+    return P.ler(partes[0], partes[1], {}, { revalidar: true }).then(function (r) {
+      delete SAUDE3D.testando[id];
+      core.registrarTeste(id, { ok: !!(r && r.ok), rota: rota,
+                                ms: Date.now() - t0,
+                                codigo: (r && r.codigo) || '',
+                                mensagem: (r && r.mensagem) || '' });
+      SAUDE3D.pintar();
+      return r;
+    }, function (e) {
+      delete SAUDE3D.testando[id];
+      core.registrarTeste(id, { ok: false, rota: rota, ms: Date.now() - t0,
+                                codigo: 'ERRO_PONTE',
+                                mensagem: String((e && e.message) || e) });
+      SAUDE3D.pintar();
+      return { ok: false };
+    });
+  };
+
+  SAUDE3D.testarTodos = function () {
+    var core = raiz.CORE3D;
+    if (!core) return Promise.resolve(0);
+    var ids = core.testaveis();
+    var i = 0;
+    function proximo() {
+      if (i >= ids.length) return Promise.resolve(ids.length);
+      var id = ids[i++];
+      return SAUDE3D.testar(id).then(proximo);
+    }
+    return proximo();
+  };
+
+  SAUDE3D.abrir = function () {
+    SAUDE3D.aberto = true;
+    SAUDE3D.pintar();
+  };
+  SAUDE3D.fechar = function () { SAUDE3D.aberto = false; };
+
+  SAUDE3D.pintar = function () {
+    var alvo = $('corpoPainel');
+    if (!alvo || !raiz.CORE3D) return;
+    /* [SA\u00daDE] eu tinha escrito APP.telaAtual aqui, que N\u00c3O
+       existe neste arquivo. Sinal pr\u00f3prio, ligado ao abrir. */
+    if (!SAUDE3D.aberto) return;
+    var d = raiz.CORE3D.diagnostico();
+
+    var h = '<div class="sd_topo">' +
+      /* [SA\u00daDE] eu usava APP.cartaoNumero aqui. O APP N\u00c3O existe
+         neste escopo \u2014 a CENTRAL \u00e9 outro bloco. Monto os n\u00fameros
+         com o que existe aqui dentro. */
+      '<div class="numeros">' +
+        SAUDE3D.cartao(d.total, 'motores') +
+        SAUDE3D.cartao(d.porEstado.INICIADO || 0, 'iniciados') +
+        SAUDE3D.cartao(d.porConexao.TESTADO || 0, 'testados') +
+        SAUDE3D.cartao(d.porConexao.ERRO || 0, 'com erro') +
+      '</div>' +
+      '<div class="small" style="margin:6px 0 10px;color:var(--texto-3)">' +
+        '<b>Iniciado</b> quer dizer que o motor subiu. <b>Testado</b> quer ' +
+        'dizer que ele falou com o Core de verdade. S\u00e3o coisas diferentes, ' +
+        'e um motor pode estar iniciado e nunca ter falado com ningu\u00e9m.' +
+      '</div>' +
+      '<button class="btn primario" id="sd_todos" style="width:100%">' +
+        'Testar todos os que falam com o Core (' + d.testaveis.length + ')' +
+      '</button></div>';
+
+    for (var i = 0; i < d.motores.length; i++) {
+      var m = d.motores[i];
+      var cor = SAUDE3D.corDaConexao(m.conexao);
+      var testando = !!SAUDE3D.testando[m.id];
+      h += '<div class="sd_motor">' +
+        '<div class="sd_cab">' +
+          '<b>' + esc(m.nome) + '</b>' +
+          '<span class="sd_pino" style="background:' + cor + '22;color:' + cor +
+            ';border-color:' + cor + '55">' +
+            esc(testando ? 'testando\u2026' : m.conexao.replace(/_/g, ' ').toLowerCase()) +
+          '</span>' +
+        '</div>' +
+        '<div class="sd_linha"><span>arquivo</span><code>' +
+          esc(m.arquivo || '\u2014') + '</code></div>' +
+        '<div class="sd_linha"><span>vers\u00e3o</span><code>' + esc(m.versao) + '</code></div>' +
+        '<div class="sd_linha"><span>partida</span><code>' + esc(m.estado) +
+          (m.ms ? ' \u00b7 ' + m.ms + ' ms' : '') + '</code></div>' +
+        '<div class="sd_linha"><span>depende de</span><code>' +
+          esc(m.dependencias.length ? m.dependencias.join(', ') : 'nada') + '</code></div>' +
+        '<div class="sd_linha"><span>endpoints</span><code>' +
+          esc(m.endpoints.length ? m.endpoints.join(', ') : 'nenhum') + '</code></div>' +
+        '<div class="sd_linha"><span>\u00faltimo teste</span><code>' +
+          esc(SAUDE3D.quandoFoi(m.idadeDoTeste)) + '</code></div>';
+
+      if (m.ultimoTeste && !m.ultimoTeste.ok) {
+        h += '<div class="aviso erro sd_erro">' + esc(m.ultimoTeste.codigo) + ': ' +
+             esc(m.ultimoTeste.mensagem || 'sem mensagem') + '</div>';
+      } else if (m.erro) {
+        h += '<div class="aviso amarelo sd_erro">' + esc(m.erro) + '</div>';
+      }
+
+      /* [18/11] O ACOPLAMENTO VEM DE DUAS FORMAS, e eu assumi s\u00f3
+         uma. Motores antigos declaram um TEXTO ("CENARIO3D embrulha
+         MOTOR3D.desenhar"); os novos declaram um objeto com estado,
+         o_que e porque. Lendo tudo como objeto, o texto virava uma
+         caixa laranja vazia com um ponto dentro \u2014 uma acusa\u00e7\u00e3o
+         sem acusa\u00e7\u00e3o. A foto mostrou. */
+      if (m.acoplamentos && m.acoplamentos.length) {
+        for (var a = 0; a < m.acoplamentos.length; a++) {
+          var ac = m.acoplamentos[a];
+          var corpo = '';
+          if (typeof ac === 'string') {
+            corpo = esc(ac);
+          } else if (ac && (ac.estado || ac.o_que || ac.porque)) {
+            corpo = (ac.estado ? '<b>' + esc(ac.estado) + '</b> \u00b7 ' : '') +
+                    esc(ac.o_que || '') +
+                    (ac.porque ? '<br>' + esc(ac.porque) : '');
+          }
+          /* vazio n\u00e3o vira caixa */
+          if (corpo) h += '<div class="small sd_acop">' + corpo + '</div>';
+        }
+      }
+
+      h += m.podeTestar
+        ? '<button class="btn sd_testar" data-motor="' + esc(m.id) + '"' +
+          (testando ? ' disabled' : '') + '>Testar agora</button>'
+        : '<div class="small" style="color:var(--texto-3);margin-top:8px">' +
+          'este motor n\u00e3o fala com o Core \u2014 n\u00e3o h\u00e1 o que testar</div>';
+      h += '</div>';
+    }
+
+    alvo.innerHTML = h;
+    var tit = $('tituloPainel');
+    if (tit) tit.firstChild.nodeValue = 'Sa\u00fade dos motores';
+
+    var bt = $('sd_todos');
+    if (bt) bt.addEventListener('click', function () {
+      bt.disabled = true;
+      bt.textContent = 'testando\u2026';
+      SAUDE3D.testarTodos().then(function () { SAUDE3D.pintar(); });
+    });
+    var nos = alvo.querySelectorAll('.sd_testar');
+    for (var k = 0; k < nos.length; k++) {
+      nos[k].addEventListener('click', function () {
+        SAUDE3D.testar(this.getAttribute('data-motor'));
+      });
+    }
+  };
+
   C.painelMovimentacoes = function () {
     var c = $('c_movCorpo'); if (!c || !P()) return;
     c.innerHTML = '<div class="c_esperando">lendo as movimenta\u00e7\u00f5es\u2026</div>';
@@ -21268,9 +21971,16 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
       }
     } catch (e) {}
 
+    /* [18/11] AQUI MOSTRAVA C.versao \u2014 a vers\u00e3o do m\u00f3dulo CENTRAL,
+       congelada em 7.7.0 desde que ele foi escrito. Quem l\u00ea o
+       rodap\u00e9 entende "a vers\u00e3o do sistema", e ficava vendo uma
+       vers\u00e3o quatro entregas atrasada. A da p\u00e1gina \u00e9 a do API3D. */
     var vr = $('c_versaoRodape');
-    if (vr) vr.textContent = 'v ' + C.versao +
-      (raiz.ALMOX3DBridge ? ' \u00b7 ponte ' + raiz.ALMOX3DBridge.versao : '');
+    if (vr) {
+      var vp = (raiz.API3D && raiz.API3D.versao) || C.versao;
+      vr.textContent = 'v ' + vp +
+        (raiz.ALMOX3DBridge ? ' \u00b7 ponte ' + raiz.ALMOX3DBridge.versao : '');
+    }
 
     [['c_verEquipe','equipe'],['c_verRotas','rotas'],['c_verIndic','mapa3d']]
       .forEach(function (par) {
@@ -22057,7 +22767,9 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
 
     /* ---- MOTOR 02 · CENA 3D ---- */
     reg('cena', {
-      nome: 'Cena 3D', versao: raiz.MOTOR3D.versao || '?',
+      nome: 'Cena 3D',
+        arquivo: 'mapa3d.html · MOTOR3D',
+        endpoints: [], versao: raiz.MOTOR3D.versao || '?',
       dependencias: [],
       acoplamentos: ['CENARIO3D embrulha MOTOR3D.desenhar para construir o pr\u00e9dio'],
       iniciar: function () { return !!raiz.MOTOR3D.cena; },
@@ -22071,7 +22783,9 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
 
     /* ---- MOTOR 05 · CÂMERA + MOTOR 04 · NAVEGAÇÃO ---- */
     if (raiz.CAMERA3D) reg('camera', {
-      nome: 'C\u00e2mera e navega\u00e7\u00e3o', versao: raiz.CAMERA3D.versao,
+      nome: 'C\u00e2mera e navega\u00e7\u00e3o',
+        arquivo: 'camera3d.js',
+        endpoints: [], versao: raiz.CAMERA3D.versao,
       dependencias: ['cena'],
       acoplamentos: ['mexe direto em MOTOR3D.camera, sem passar pelo CORE'],
       iniciar: function () { return raiz.CAMERA3D.ligar(raiz.MOTOR3D) !== false; },
@@ -22086,7 +22800,9 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
 
     /* ---- MOTOR 06 · ENDEREÇAMENTO ---- */
     reg('enderecamento', {
-      nome: 'Endere\u00e7amento', versao: raiz.LAYOUT3D.versao || raiz.LAYOUT3D.VERSAO || '?',
+      nome: 'Endere\u00e7amento',
+        arquivo: 'mapa3d.html · LAYOUT3D',
+        endpoints: [], versao: raiz.LAYOUT3D.versao || raiz.LAYOUT3D.VERSAO || '?',
       dependencias: [],
       iniciar: function () { return typeof raiz.LAYOUT3D.montar === 'function'; },
       metodos: {
@@ -22103,7 +22819,9 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
 
     /* ---- MOTOR 06b · EDITOR DE GALPÃO ---- */
     if (raiz.EDITOR3D) reg('editor', {
-      nome: 'Editor de galp\u00e3o', versao: raiz.EDITOR3D.versao,
+      nome: 'Editor de galp\u00e3o',
+        arquivo: 'editor3d.js',
+        endpoints: ["locais.salvar"], versao: raiz.EDITOR3D.versao,
       dependencias: ['enderecamento', 'cena'],
       iniciar: function () { return true; },
       metodos: {
@@ -22116,7 +22834,9 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
 
     /* ---- MOTOR 15 · SINCRONIZAÇÃO + 18 · CACHE + 12 · OPERAÇÕES ---- */
     if (raiz.ALMOX3DBridge) reg('sincronizacao', {
-      nome: 'Sincroniza\u00e7\u00e3o com o Core', versao: raiz.ALMOX3DBridge.versao,
+      nome: 'Sincroniza\u00e7\u00e3o com o Core',
+        arquivo: 'almox3dbridge.js',
+        endpoints: ["locais.listar"], versao: raiz.ALMOX3DBridge.versao,
       dependencias: [],
       iniciar: function () { return true; },
       metodos: {
@@ -22131,7 +22851,9 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
 
     /* ---- MOTOR 19 · SEGURANÇA ---- */
     if (raiz.API3D) reg('seguranca', {
-      nome: 'Sess\u00e3o e permiss\u00f5es', versao: raiz.API3D.versao,
+      nome: 'Sess\u00e3o e permiss\u00f5es',
+        arquivo: 'mapa3d.html · API3D',
+        endpoints: ["permissoes.verificar"], versao: raiz.API3D.versao,
       dependencias: [],
       acoplamentos: ['a chave vem do ALMOX PRO em tempo de execu\u00e7\u00e3o, nunca gravada'],
       iniciar: function () { return true; },
@@ -22145,7 +22867,9 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
     /* ---- MOTOR 07 · ESTOQUE + 09 · BUSCA + 08 · SELEÇÃO ---- */
     if (raiz.APP3D) {
       reg('estoque', {
-        nome: 'Estoque', versao: raiz.APP3D.VERSAO || '?',
+        nome: 'Estoque',
+        arquivo: 'mapa3d.html · APP3D',
+        endpoints: ["estoque.listar", "estoque.item"], versao: raiz.APP3D.VERSAO || '?',
         dependencias: ['sincronizacao'],
         acoplamentos: ['vive dentro do APP3D, que \u00e9 a tela \u2014 ainda n\u00e3o \u00e9 arquivo pr\u00f3prio'],
         iniciar: function () { return typeof raiz.APP3D.carregarEstoque === 'function'; },
@@ -22157,7 +22881,9 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
         }
       });
       reg('busca', {
-        nome: 'Busca global', versao: raiz.APP3D.VERSAO || '?',
+        nome: 'Busca global',
+        arquivo: 'mapa3d.html · APP3D',
+        endpoints: [], versao: raiz.APP3D.VERSAO || '?',
         dependencias: ['estoque', 'enderecamento'],
         iniciar: function () { return typeof raiz.APP3D.buscarMaterial === 'function'; },
         metodos: {
@@ -22166,7 +22892,9 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
         }
       });
       reg('selecao', {
-        nome: 'Sele\u00e7\u00e3o', versao: raiz.APP3D.VERSAO || '?',
+        nome: 'Sele\u00e7\u00e3o',
+        arquivo: 'mapa3d.html · MOTOR3D',
+        endpoints: [], versao: raiz.APP3D.VERSAO || '?',
         dependencias: ['cena'],
         iniciar: function () { return typeof raiz.MOTOR3D.selecionarPorCodigo === 'function'; },
         metodos: {
@@ -22180,7 +22908,9 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
         }
       });
       reg('ocupacao', {
-        nome: 'Ocupa\u00e7\u00e3o', versao: raiz.LAYOUT3D.versao || raiz.LAYOUT3D.VERSAO || '?',
+        nome: 'Ocupa\u00e7\u00e3o',
+        arquivo: 'mapa3d.html · LAYOUT3D',
+        endpoints: [], versao: raiz.LAYOUT3D.versao || raiz.LAYOUT3D.VERSAO || '?',
         dependencias: ['enderecamento'],
         iniciar: function () { return typeof raiz.LAYOUT3D.calor === 'function'; },
         metodos: {
@@ -22199,8 +22929,31 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
          Os nomes de campo vieram do ALMOXA CAMPO 57, c\u00f3digo dele.
          O \u00fanico acoplamento n\u00e3o confirmado \u00e9 o FORMATO de
          criarRota, e ele est\u00e1 declarado. */
+      /* ---- NAVEGA\u00c7\u00c3O 3D \u00b7 a rota desenhada no galp\u00e3o ---- */
+      if (raiz.DESENHO3D) reg('navegacao', {
+        nome: 'Navega\u00e7\u00e3o 3D (rota desenhada)',
+        arquivo: 'desenho3d.js',
+        endpoints: [],
+        versao: raiz.DESENHO3D.versao,
+        dependencias: ['cena', 'rotas'],
+        iniciar: function () { return true; },
+        metodos: {
+          desenhar: function (a) {
+            return raiz.DESENHO3D.desenhar(raiz.MOTOR3D.cena, a && a.rota,
+                                           a && a.pintura);
+          },
+          apagar: function () { return raiz.DESENHO3D.apagar(); },
+          plano: function (a) {
+            return raiz.DESENHO3D.planoDe(a && a.rota, a && a.pintura);
+          },
+          diagnostico: function () { return raiz.DESENHO3D.diagnostico(); }
+        }
+      });
+
       if (raiz.ROTA3D) reg('rotas', {
-        nome: 'Rotas e acompanhamento', versao: raiz.ROTA3D.versao,
+        nome: 'Rotas e acompanhamento',
+        arquivo: 'rota3d.js',
+        endpoints: ["invmovel.listarRotas", "invmovel.progressoDaRota"], versao: raiz.ROTA3D.versao,
         dependencias: [],
         acoplamentos: [
           { o_que: 'invmovel.criarRota (formato dos campos)',
@@ -22221,7 +22974,9 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
         }
       });
       if (raiz.GPS3D) reg('gps', {
-        nome: 'Posi\u00e7\u00e3o do aparelho (GPS)', versao: raiz.GPS3D.versao,
+        nome: 'Posi\u00e7\u00e3o do aparelho (GPS)',
+        arquivo: 'gps3d.js',
+        endpoints: [], versao: raiz.GPS3D.versao,
         dependencias: [],
         acoplamentos: [
           { o_que: 'ponte de localiza\u00e7\u00e3o do aplicativo Android',
@@ -22244,7 +22999,9 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
         }
       });
       reg('relatorios', {
-        nome: 'Relat\u00f3rios', versao: (raiz.RELATORIOS3D && raiz.RELATORIOS3D.versao) ||
+        nome: 'Relat\u00f3rios',
+        arquivo: 'relatorios3d.js',
+        endpoints: ["locais.semLocalizacao", "estoque.movimentacoes"], versao: (raiz.RELATORIOS3D && raiz.RELATORIOS3D.versao) ||
                                      raiz.APP3D.VERSAO || '?',
         dependencias: ['ocupacao', 'sincronizacao'],
         iniciar: function () { return !!raiz.RELATORIOS3D; },
@@ -22261,7 +23018,9 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
 
     /* ---- MOTOR 14 · INTERFACE + 10 · FILTROS + 13 · MOBILE ---- */
     if (raiz.CENTRAL) reg('interface', {
-      nome: 'Interface e filtros', versao: raiz.CENTRAL.versao,
+      nome: 'Interface e filtros',
+        arquivo: 'mapa3d.html · CENTRAL',
+        endpoints: [], versao: raiz.CENTRAL.versao,
       dependencias: ['cena'],
       iniciar: function () { return true; },
       metodos: {
@@ -22278,7 +23037,9 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
     /* ---- os que a seção 4 pede e ainda NÃO existem ---- */
     /* ---- MOTOR 03 \u00b7 CARREGAMENTO (era AUSENTE at\u00e9 a 7.7.0) ---- */
     if (raiz.CARREGAMENTO3D) reg('carregamento', {
-      nome: 'Carregamento e qualidade', versao: raiz.CARREGAMENTO3D.versao,
+      nome: 'Carregamento e qualidade',
+        arquivo: 'carregamento3d.js',
+        endpoints: [], versao: raiz.CARREGAMENTO3D.versao,
       dependencias: ['cena'],
       acoplamentos: ['liga e desliga malhas do MOTOR3D por fora'],
       iniciar: function () { return raiz.CARREGAMENTO3D.ligar(raiz.MOTOR3D, K) !== false; },
@@ -22293,7 +23054,9 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
       'download a escalonar. Carregar POSI\u00c7\u00d5ES sob demanda ainda n\u00e3o foi feito.');
     /* ---- MOTOR 12 \u00b7 OPERA\u00c7\u00d5ES (era AUSENTE at\u00e9 a 7.7.0) ---- */
     if (raiz.OPERACOES3D) reg('operacoes', {
-      nome: 'Opera\u00e7\u00f5es', versao: raiz.OPERACOES3D.versao,
+      nome: 'Opera\u00e7\u00f5es',
+        arquivo: 'operacoes3d.js',
+        endpoints: ["invmovel.registrarContagem"], versao: raiz.OPERACOES3D.versao,
       dependencias: ['sincronizacao', 'seguranca'],
       iniciar: function () { return true; },
       metodos: {
@@ -22424,6 +23187,14 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
       ul.appendChild(li);
       $('dg_entrar').addEventListener('click', function () {
         pintar(); $('diag').setAttribute('data-aberto', '1');
+      });
+      /* [SA\u00daDE 18/11] a tela da FASE 2, ao lado do diagn\u00f3stico */
+      var li2 = document.createElement('li');
+      li2.innerHTML = '<button type="button" id="sd_entrar">' +
+        '<span class="c_ic">\u2714</span><span class="c_rotulo">Sa\u00fade</span></button>';
+      ul.appendChild(li2);
+      $('sd_entrar').addEventListener('click', function () {
+        if (raiz.SAUDE3D) raiz.SAUDE3D.abrir();
       });
     }
     var f = $('dg_fechar');
