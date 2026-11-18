@@ -60,7 +60,7 @@ window.paramDoMapa = function (nome) {
   } catch (e) {}
 })();
 </script>
-<title>ALMOX PRO 3D 7.8.0 · 18/11</title>
+<title>ALMOX PRO 3D 7.10.0 · 18/11</title>
 <style>
 /* [B2.2] 17/11 · o cartão de um material na busca */
 .cartaoBusca{border:1px solid var(--borda);border-radius:12px;
@@ -504,6 +504,14 @@ body.embutido #legenda{display:none}
 .construtor .cod.mais { background: var(--fundo-2); color: var(--texto-3); border-color: var(--borda); }
 .construtor button[disabled] { opacity: .5; cursor: not-allowed; }
 
+
+/* [ROTA 18/11] as notas dos pain\u00e9is de acompanhamento */
+.c_pequeno{font-size:11px;line-height:1.45;color:var(--texto-3)}
+.c_nota{margin-top:8px;padding-top:7px;border-top:1px solid rgba(255,255,255,.07)}
+.c_quando{margin-top:6px;font-size:10px;color:var(--texto-3);opacity:.85}
+.c_quando.c_velho{color:#f0a93b;opacity:1}
+.c_clic{cursor:pointer;border-radius:8px;padding:4px 6px;margin:0 -6px}
+.c_clic:hover{background:rgba(255,255,255,.06)}
 </style>
 <!--
   ALMOXA 3D · index.html · 08/11/2026
@@ -9342,7 +9350,7 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
   }
 
   raiz.LAYOUT3D = {
-    VERSAO: '7.8.0',
+    VERSAO: '7.10.0',
     MEDIDAS: MEDIDAS,
     CORES: CORES,
     organizar: organizar,
@@ -9455,7 +9463,7 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
 
   var A = {
     nome: 'API3D',
-    versao: '7.8.0',
+    versao: '7.10.0',
     url: '',              /* a do /exec, quando rodando fora do Apps Script */
     chave: '',            /* SÓ na memória. Nunca escrita, nunca gravada. */
     origemDaChave: 'nenhuma (fase 1)',
@@ -9919,6 +9927,645 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
 
 })(typeof window !== 'undefined' ? window : globalThis);
 
+</script>
+<script>
+/* ===== rota3d.js ===== */
+/* ============================================================
+   ROTA3D  ·  1.0.0  ·  18/11/2026
+   MOTOR 19 — ROTAS E ACOMPANHAMENTO AO VIVO
+   ------------------------------------------------------------
+   O pedido dele, em 18/11:
+
+     "vai ter que criar um motor para isso, a parte de criação
+      de rota, onde que cria e onde eu consigo ver em tempo real
+      onde as pessoas estão trabalhando"
+
+   ------------------------------------------------------------
+   NADA AQUI FOI INVENTADO. DE ONDE VEIO CADA NOME.
+
+   Eu não tenho o módulo invmovel do Core. Mas eu tenho uma
+   coisa melhor do que chute: o ALMOXA CAMPO 57 — o aplicativo
+   DELE — já conversa com essas rotas todo dia. Então eu fui ler
+   o código dele e copiei os nomes de lá, campo por campo:
+
+     invmovel.minhasRotas      {}            → dados: [rota]
+     invmovel.listarRotas      {}            → todas as rotas
+     invmovel.progressoDaRota  {rotaId}      → dados:{rota,atividade}
+     invmovel.iniciarRota      {rotaId}
+     invmovel.quemSou          {}            → dados: quem o Core acha que sou
+     invmovel.registrarContagem {atividadeId, rotaId, qr,
+                                 qtdEncontrada, observacao, operacaoId}
+
+   E a forma de uma rota, lida do mesmo lugar:
+
+     id · nome · descricao · atividadeId · status · statusCalculado
+     deposito · quantasPosicoes · prioridade · prazo · iniciadaEm
+     progresso: { feitas, quantas, divergencias,
+                  posicoes:[codigos na ordem],
+                  faltamQuais:[codigos ainda não conferidos] }
+
+   O QUE EU **NÃO** TENHO: o formato de invmovel.criarRota. O
+   nome da ação está na lista de permitidas, mas nem o aplicativo
+   dele nem o desktop chamam essa ação — então os campos eu NÃO
+   sei. Está marcado PENDENTE e a criação não finge que gravou:
+   ela manda, mostra o que o Core respondeu, e para por aí.
+
+   ------------------------------------------------------------
+   SOBRE "TEMPO REAL"
+
+   Apps Script não empurra evento; quem pergunta é o navegador.
+   Então "ao vivo" aqui significa: eu pergunto de novo a cada
+   poucos segundos e DIGO NA TELA de quando é o dado. Chamar de
+   tempo real o que tem vinte segundos de atraso seria mentir
+   com cara de painel.
+   ============================================================ */
+(function (raiz) {
+  'use strict';
+
+  var R = { nome: 'ROTA3D', versao: '1.0.0' };
+
+  function texto(v) { return v === null || v === undefined ? '' : String(v); }
+  function num(v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v === 'boolean') return null;
+    var n = Number(v);
+    return isFinite(n) ? n : null;
+  }
+  function cima(v) { return texto(v).trim().toUpperCase(); }
+  function lista(v) {
+    return Object.prototype.toString.call(v) === '[object Array]' ? v : [];
+  }
+
+  /* ============================================================
+     1 · O CONTRATO, COM PROCEDÊNCIA
+     ------------------------------------------------------------
+     Cada rota diz de onde eu tirei o formato dela. Quem ler isto
+     daqui a seis meses precisa saber o que é lido e o que é
+     suposto — inclusive eu.
+     ============================================================ */
+  R.CONTRATO = {
+    'invmovel.minhasRotas': {
+      pedido: {}, confirmado: true,
+      origem: 'ALMOXA CAMPO 57, código dele: api("invmovel","minhasRotas",{})',
+      devolve: 'dados: lista de rotas do usuário da sessão'
+    },
+    'invmovel.listarRotas': {
+      pedido: {}, confirmado: true,
+      origem: 'ALMOXA CAMPO 57, usado quando a lista do usuário vem vazia, ' +
+              'para separar "não há rotas" de "as rotas são de outra pessoa"',
+      devolve: 'dados: todas as rotas'
+    },
+    'invmovel.progressoDaRota': {
+      pedido: { rotaId: 'o id da rota' }, confirmado: true,
+      origem: 'ALMOXA CAMPO 57, TELAS.rota',
+      devolve: 'dados: { rota, atividade }'
+    },
+    'invmovel.iniciarRota': {
+      pedido: { rotaId: 'o id da rota' }, confirmado: true,
+      origem: 'ALMOXA CAMPO 57, botão "Começar esta rota"',
+      devolve: 'ok'
+    },
+    'invmovel.quemSou': {
+      pedido: {}, confirmado: true,
+      origem: 'ALMOXA CAMPO 57, usado para explicar lista vazia',
+      devolve: 'dados: quem o Core entende que é a sessão'
+    },
+    'invmovel.criarRota': {
+      pedido: 'PENDENTE DE CONFIRMAÇÃO', confirmado: false,
+      origem: 'o NOME está na lista de ações permitidas do aplicativo dele. ' +
+              'Os CAMPOS, não: nem o ALMOXA CAMPO nem o desktop chamam esta ' +
+              'ação, então eu não tenho de onde ler o formato.',
+      devolve: 'desconhecido'
+    },
+    'invmovel.painelFuncionario': {
+      pedido: 'PENDENTE DE CONFIRMAÇÃO', confirmado: false,
+      origem: 'nome permitido, formato não lido em lugar nenhum',
+      devolve: 'desconhecido'
+    },
+    'invmovel.linhaDoTempo': {
+      pedido: 'PENDENTE DE CONFIRMAÇÃO', confirmado: false,
+      origem: 'nome permitido, formato não lido em lugar nenhum',
+      devolve: 'desconhecido'
+    }
+  };
+
+  R.confirmadas = function () {
+    var fora = [];
+    for (var k in R.CONTRATO) {
+      if (R.CONTRATO[k].confirmado) fora.push(k);
+    }
+    return fora.sort();
+  };
+  R.pendentes = function () {
+    var fora = [];
+    for (var k in R.CONTRATO) {
+      if (!R.CONTRATO[k].confirmado) fora.push(k);
+    }
+    return fora.sort();
+  };
+
+  /* ============================================================
+     2 · OS QUATRO ESTADOS DE UMA POSIÇÃO NA ROTA
+     ------------------------------------------------------------
+     É o que a seção 4 da auditoria pediu: a rota acesa no galpão,
+     com quatro cores. O estado NÃO é inventado: ele sai do
+     faltamQuais e do posicoes que o próprio Core manda.
+     ============================================================ */
+  R.ESTADOS = {
+    pendente:   { rotulo: 'ainda não conferida', cor: '#f0a93b', ordem: 1 },
+    conferida:  { rotulo: 'conferida',           cor: '#45b36b', ordem: 2 },
+    divergente: { rotulo: 'conferida com divergência', cor: '#e05b4b', ordem: 3 },
+    fora:       { rotulo: 'não faz parte desta rota', cor: '#5a6b84', ordem: 4 }
+  };
+
+  /* divergentes: o Core manda o NÚMERO de divergências, não quais.
+     Então eu só chamo de divergente a posição que vier numa lista
+     explícita. Pintar de vermelho por adivinhação seria acusar
+     uma prateleira que ninguém acusou. */
+  R.estadoDaPosicao = function (codigo, prog) {
+    var c = cima(codigo);
+    if (!c || !prog || !prog.ok) return 'fora';
+    if (prog.divergentes && prog.divergentes[c]) return 'divergente';
+    if (prog.daRota && prog.daRota[c]) {
+      return prog.faltam && prog.faltam[c] ? 'pendente' : 'conferida';
+    }
+    return 'fora';
+  };
+
+  /* ============================================================
+     3 · NORMALIZAR UMA ROTA
+     ------------------------------------------------------------
+     Os nomes de campo são os dele. O que eu acrescento é o
+     percentual — e ele NÃO vira 0 quando o total é desconhecido.
+     ============================================================ */
+  R.normalizarRota = function (x) {
+    if (!x || typeof x !== 'object') return null;
+    var pg = x.progresso || {};
+    var feitas = num(pg.feitas);
+    var quantas = num(pg.quantas);
+    if (quantas === null) quantas = num(x.quantasPosicoes);
+
+    return {
+      id: texto(x.id),
+      nome: texto(x.nome) || '(rota sem nome)',
+      descricao: texto(x.descricao),
+      atividadeId: texto(x.atividadeId),
+      /* o app dele prefere statusCalculado quando existe */
+      status: cima(x.statusCalculado) || cima(x.status) || 'SEM STATUS',
+      deposito: texto(x.deposito),
+      prioridade: texto(x.prioridade),
+      prazo: texto(x.prazo),
+      iniciadaEm: texto(x.iniciadaEm),
+      responsavel: texto(x.responsavel || x.colaborador || x.usuario || x.dono),
+      feitas: feitas,
+      quantas: quantas,
+      divergencias: num(pg.divergencias),
+      /* percentual NULO quando não dá para calcular — nunca zero,
+         porque zero por cento é uma afirmação sobre o trabalho e
+         "não sei quantas são" não é. */
+      pct: (feitas !== null && quantas !== null && quantas > 0)
+             ? Math.round(feitas / quantas * 100) : null,
+      emAndamento: !!texto(x.iniciadaEm) ||
+                   /ANDAMENTO|INICIAD|EM_CURSO/.test(cima(x.statusCalculado) + cima(x.status)),
+      concluida: /CONCLU|FINALIZ|ENCERRAD/.test(cima(x.statusCalculado) + cima(x.status))
+    };
+  };
+
+  R.normalizarLista = function (resposta) {
+    if (!resposta || !resposta.ok) {
+      return { ok: false,
+        motivo: 'a rota invmovel.minhasRotas/listarRotas não respondeu' +
+                (resposta && resposta.mensagem ? ' (' + resposta.mensagem + ')' : '') +
+                '. Lista vazia aqui seria dizer que não há rotas, e o que ' +
+                'há é que eu não consegui perguntar.' };
+    }
+    var cru = lista(resposta.dados).length ? lista(resposta.dados)
+                                           : lista(resposta.itens);
+    var rotas = [];
+    for (var i = 0; i < cru.length; i++) {
+      var r = R.normalizarRota(cru[i]);
+      if (r) rotas.push(r);
+    }
+    return { ok: true, rotas: rotas, total: rotas.length };
+  };
+
+  /* ============================================================
+     4 · O PROGRESSO DE UMA ROTA · com as posições na ordem
+     ============================================================ */
+  R.normalizarProgresso = function (resposta) {
+    if (!resposta || !resposta.ok) {
+      return { ok: false,
+        motivo: 'a rota invmovel.progressoDaRota não respondeu' +
+                (resposta && resposta.mensagem ? ' (' + resposta.mensagem + ')' : '') };
+    }
+    var d = resposta.dados || {};
+    var rota = d.rota || {};
+    var pg = rota.progresso || {};
+
+    var ordem = [], daRota = {};
+    var cruPos = lista(pg.posicoes);
+    for (var i = 0; i < cruPos.length; i++) {
+      var c = cima(cruPos[i]);
+      if (!c) continue;
+      ordem.push(c);
+      daRota[c] = i + 1;             /* guarda a ORDEM, 1-based */
+    }
+
+    var faltam = {};
+    var cruFaltam = lista(pg.faltamQuais);
+    for (var j = 0; j < cruFaltam.length; j++) {
+      var f = cima(cruFaltam[j]);
+      if (f) faltam[f] = true;
+    }
+
+    /* o Core manda o número de divergências, não quais. Se um dia
+       mandar a lista, eu já leio — sem inventar enquanto não vier. */
+    var divergentes = {};
+    var cruDiv = lista(pg.divergentesQuais || pg.divergenciasQuais);
+    for (var k = 0; k < cruDiv.length; k++) {
+      var dd = cima(cruDiv[k]);
+      if (dd) divergentes[dd] = true;
+    }
+
+    var base = R.normalizarRota(rota) || {};
+    return {
+      ok: true,
+      rota: base,
+      atividade: d.atividade || {},
+      ordem: ordem,
+      daRota: daRota,
+      faltam: faltam,
+      divergentes: divergentes,
+      /* quantas divergências existem, sem dizer onde */
+      quantasDivergencias: num(pg.divergencias),
+      sabeQuaisDivergem: cruDiv.length > 0,
+      feitas: base.feitas,
+      quantas: base.quantas !== null ? base.quantas : (ordem.length || null),
+      pct: base.pct
+    };
+  };
+
+  /* a próxima posição que falta, na ordem da rota: é "onde a
+     pessoa está trabalhando agora", até onde o Core sabe. */
+  R.proximaPendente = function (prog) {
+    if (!prog || !prog.ok) return '';
+    for (var i = 0; i < prog.ordem.length; i++) {
+      if (prog.faltam[prog.ordem[i]]) return prog.ordem[i];
+    }
+    return '';
+  };
+
+  /* as cores de cada posição, prontas para o mapa acender */
+  R.pintura = function (prog) {
+    if (!prog || !prog.ok) return { ok: false, motivo: prog && prog.motivo };
+    var fora = {};
+    for (var i = 0; i < prog.ordem.length; i++) {
+      var c = prog.ordem[i];
+      var e = R.estadoDaPosicao(c, prog);
+      fora[c] = { estado: e, cor: R.ESTADOS[e].cor, ordem: i + 1,
+                  rotulo: R.ESTADOS[e].rotulo };
+    }
+    return { ok: true, posicoes: fora, total: prog.ordem.length };
+  };
+
+  /* ============================================================
+     5 · MONTAR UMA ROTA · a ordem de caminhada
+     ------------------------------------------------------------
+     Ordenar por rua, depois estante, e serpenteando: na rua A
+     sobe, na rua B desce. Quem já andou em galpão sabe por quê —
+     terminar a rua e voltar andando até o começo da próxima é
+     caminhada paga sem conferência nenhuma.
+     ============================================================ */
+  R.pedacosDoCodigo = function (codigo) {
+    var c = cima(codigo);
+    var p = c.split('-');
+    return {
+      codigo: c,
+      rua: p[0] || '',
+      estante: p[1] || '',
+      prateleira: p[2] || '',
+      posicao: p[3] || ''
+    };
+  };
+
+  function chaveNumerica(v) {
+    var n = num(v);
+    return n === null ? texto(v) : n;
+  }
+
+  R.ordenar = function (codigos) {
+    var itens = [];
+    var vistos = {};
+    var cru = lista(codigos);
+    for (var i = 0; i < cru.length; i++) {
+      var p = R.pedacosDoCodigo(cru[i]);
+      if (!p.codigo) continue;
+      /* repetido na rota é desperdício de caminhada, não erro:
+         tiro em silêncio e digo quantos tirei. */
+      if (vistos[p.codigo]) continue;
+      vistos[p.codigo] = true;
+      itens.push(p);
+    }
+
+    var ruas = {};
+    for (var j = 0; j < itens.length; j++) {
+      (ruas[itens[j].rua] = ruas[itens[j].rua] || []).push(itens[j]);
+    }
+    var nomesDeRua = Object.keys(ruas).sort();
+
+    var saida = [];
+    for (var k = 0; k < nomesDeRua.length; k++) {
+      var doRua = ruas[nomesDeRua[k]];
+      doRua.sort(function (a, b) {
+        var ea = chaveNumerica(a.estante), eb = chaveNumerica(b.estante);
+        if (ea < eb) return -1; if (ea > eb) return 1;
+        var pa = chaveNumerica(a.prateleira), pb = chaveNumerica(b.prateleira);
+        if (pa < pb) return -1; if (pa > pb) return 1;
+        var sa = chaveNumerica(a.posicao), sb = chaveNumerica(b.posicao);
+        if (sa < sb) return -1; if (sa > sb) return 1;
+        return 0;
+      });
+      /* SERPENTE: rua de índice ímpar vem ao contrário */
+      if (k % 2 === 1) doRua.reverse();
+      for (var m = 0; m < doRua.length; m++) saida.push(doRua[m].codigo);
+    }
+    return {
+      ok: true,
+      codigos: saida,
+      quantas: saida.length,
+      repetidosRemovidos: cru.length - saida.length,
+      ruas: nomesDeRua
+    };
+  };
+
+  /* o rascunho da rota, antes de ir ao Core */
+  R.rascunho = function (dados) {
+    dados = dados || {};
+    var ord = R.ordenar(dados.codigos);
+    var problemas = [];
+    if (!texto(dados.nome).trim()) {
+      problemas.push('a rota precisa de um nome, senão quem recebe no ' +
+                     'celular vê "(rota sem nome)" e não sabe o que é');
+    }
+    if (!ord.quantas) {
+      problemas.push('a rota está vazia: escolha pelo menos uma posição');
+    }
+    if (!texto(dados.responsavel).trim()) {
+      problemas.push('a rota precisa de um responsável, senão ela não ' +
+                     'aparece em "minhas atividades" de ninguém');
+    }
+    return {
+      ok: problemas.length === 0,
+      problemas: problemas,
+      nome: texto(dados.nome).trim(),
+      descricao: texto(dados.descricao).trim(),
+      responsavel: texto(dados.responsavel).trim(),
+      atividadeId: texto(dados.atividadeId).trim(),
+      deposito: texto(dados.deposito).trim(),
+      prioridade: texto(dados.prioridade).trim(),
+      prazo: texto(dados.prazo).trim(),
+      codigos: ord.codigos,
+      quantas: ord.quantas,
+      repetidosRemovidos: ord.repetidosRemovidos,
+      ruas: ord.ruas
+    };
+  };
+
+  /* ============================================================
+     6 · O ENVIO · e a confissão de que o formato é suposto
+     ------------------------------------------------------------
+     Eu monto o corpo com os nomes que o RESTO do invmovel usa
+     (nome, descricao, responsavel, atividadeId, posicoes...).
+     É o palpite mais informado que existe — e continua sendo
+     palpite. Por isso vai declarado, e o resultado do Core é
+     mostrado cru.
+     ============================================================ */
+  R.paraCriar = function (rascunho) {
+    if (!rascunho || !rascunho.ok) {
+      return { ok: false, problemas: (rascunho && rascunho.problemas) || ['rascunho vazio'] };
+    }
+    return {
+      ok: true,
+      rota: 'invmovel.criarRota',
+      formatoConfirmado: false,
+      aviso: 'os NOMES dos campos abaixo são deduzidos do resto do módulo ' +
+             'invmovel, não lidos da rota criarRota — que eu não tenho. Se o ' +
+             'Core recusar por nome de campo, a resposta dele aparece inteira ' +
+             'na tela e os nomes se corrigem numa linha.',
+      corpo: {
+        nome: rascunho.nome,
+        descricao: rascunho.descricao,
+        responsavel: rascunho.responsavel,
+        atividadeId: rascunho.atividadeId,
+        deposito: rascunho.deposito,
+        prioridade: rascunho.prioridade,
+        prazo: rascunho.prazo,
+        posicoes: rascunho.codigos.slice(),
+        quantasPosicoes: rascunho.quantas
+      }
+    };
+  };
+
+  /* o que fazer com a resposta: NUNCA dizer "criada" sem o Core
+     confirmar, e nunca engolir a recusa. */
+  R.lerCriacao = function (resposta) {
+    if (!resposta) {
+      return { ok: false, criada: false,
+               motivo: 'não houve resposta do Core. A rota NÃO foi criada — ' +
+                       'ou foi, e eu não sei. Confira em "todas as rotas" ' +
+                       'antes de mandar de novo.' };
+    }
+    if (!resposta.ok) {
+      return { ok: false, criada: false,
+               codigo: texto(resposta.codigo),
+               motivo: texto(resposta.mensagem) || 'o Core recusou sem dizer o motivo.',
+               respostaCrua: resposta,
+               dicaDeCampo: /campo|field|param|obrigat/i.test(texto(resposta.mensagem))
+                 ? 'a recusa fala em campo: é provável que os nomes que eu ' +
+                   'supus não sejam os que esta rota espera. Me mande esta ' +
+                   'frase inteira e eu acerto os nomes.'
+                 : '' };
+    }
+    var d = resposta.dados || {};
+    var id = texto(d.id || d.rotaId || (d.rota && d.rota.id));
+    if (!id) {
+      /* ok sem id não é confirmação de gravação */
+      return { ok: true, criada: false,
+               motivo: 'o Core respondeu ok, mas não devolveu o id da rota. ' +
+                       'Sem id eu não consigo afirmar que ela ficou gravada. ' +
+                       'Procure em "todas as rotas" antes de criar de novo.',
+               respostaCrua: resposta };
+    }
+    return { ok: true, criada: true, id: id,
+             mensagem: 'o Core confirmou com o id ' + id + '.' };
+  };
+
+  /* ============================================================
+     7 · QUEM ESTÁ TRABALHANDO ONDE · o painel ao vivo
+     ------------------------------------------------------------
+     Montado a partir da lista de rotas. Uma pessoa aparece aqui
+     quando tem rota iniciada e não concluída. "Onde ela está" é
+     a próxima posição pendente da rota dela — e isso é dito com
+     essa palavra, porque é o que o Core sabe: a última etiqueta
+     lida, não a pessoa no corredor.
+     ============================================================ */
+  R.equipe = function (resultado, progressos) {
+    if (!resultado || !resultado.ok) {
+      return { ok: false,
+        motivo: (resultado && resultado.motivo) ||
+                'não consegui ler as rotas, então não sei quem está em campo. ' +
+                'Zero pessoas aqui seria dizer que ninguém está trabalhando.' };
+    }
+    progressos = progressos || {};
+    var pessoas = {}, ordem = [];
+
+    for (var i = 0; i < resultado.rotas.length; i++) {
+      var r = resultado.rotas[i];
+      if (!r.emAndamento || r.concluida) continue;
+      var quem = r.responsavel || '(sem responsável)';
+      if (!pessoas[quem]) {
+        pessoas[quem] = { pessoa: quem, rotas: [], feitas: 0, quantas: 0,
+                          onde: '', desde: '', temTotal: false };
+        ordem.push(quem);
+      }
+      var p = pessoas[quem];
+      p.rotas.push({ id: r.id, nome: r.nome, pct: r.pct,
+                     feitas: r.feitas, quantas: r.quantas });
+      if (r.feitas !== null) p.feitas += r.feitas;
+      if (r.quantas !== null) { p.quantas += r.quantas; p.temTotal = true; }
+      if (!p.desde && r.iniciadaEm) p.desde = r.iniciadaEm;
+
+      var prog = progressos[r.id];
+      if (!p.onde && prog && prog.ok) {
+        var prox = R.proximaPendente(prog);
+        if (prox) p.onde = prox;
+      }
+    }
+
+    var fora = [];
+    for (var j = 0; j < ordem.length; j++) {
+      var q = pessoas[ordem[j]];
+      q.pct = q.temTotal && q.quantas > 0
+                ? Math.round(q.feitas / q.quantas * 100) : null;
+      q.ondeDito = q.onde
+        ? 'última etiqueta pendente: ' + q.onde
+        : 'o Core não diz em qual posição ela está agora';
+      fora.push(q);
+    }
+    fora.sort(function (a, b) { return texto(a.pessoa).localeCompare(texto(b.pessoa)); });
+    return { ok: true, pessoas: fora, quantas: fora.length };
+  };
+
+  /* ============================================================
+     8 · O RESUMO DAS ROTAS · o painel de baixo
+     ============================================================ */
+  R.resumo = function (resultado) {
+    if (!resultado || !resultado.ok) {
+      return { ok: false,
+        motivo: (resultado && resultado.motivo) ||
+                'não consegui ler as rotas. 0% aqui seria uma afirmação ' +
+                'sobre o trabalho do dia, e eu não a tenho.' };
+    }
+    var concluidas = 0, andamento = 0, pendentes = 0;
+    var feitas = 0, quantas = 0, comTotal = 0, divergencias = 0;
+
+    for (var i = 0; i < resultado.rotas.length; i++) {
+      var r = resultado.rotas[i];
+      if (r.concluida) concluidas++;
+      else if (r.emAndamento) andamento++;
+      else pendentes++;
+      if (r.feitas !== null) feitas += r.feitas;
+      if (r.quantas !== null) { quantas += r.quantas; comTotal++; }
+      if (r.divergencias !== null) divergencias += r.divergencias;
+    }
+    return {
+      ok: true,
+      total: resultado.rotas.length,
+      concluidas: concluidas, emAndamento: andamento, pendentes: pendentes,
+      posicoesFeitas: feitas,
+      posicoesTotal: quantas,
+      divergencias: divergencias,
+      /* percentual só quando TODAS as rotas disseram o total delas;
+         senão o número seria sobre um universo que eu não conheço */
+      pct: (comTotal === resultado.rotas.length && quantas > 0)
+             ? Math.round(feitas / quantas * 100) : null,
+      pctParcial: comTotal !== resultado.rotas.length,
+      porQueSemPct: (comTotal === resultado.rotas.length && quantas > 0) ? '' :
+        (resultado.rotas.length === 0
+          ? 'não há rotas para somar'
+          : (comTotal + ' de ' + resultado.rotas.length + ' rotas disseram ' +
+             'quantas posições têm. Eu não mostro um percentual que não ' +
+             'cobre o galpão inteiro.'))
+    };
+  };
+
+  /* ============================================================
+     9 · A IDADE DO DADO · "ao vivo" com hora marcada
+     ============================================================ */
+  R.INTERVALO_MS = 20000;
+
+  R.idade = function (quando, agora) {
+    var q = num(quando);
+    var a = num(agora);
+    if (a === null) a = Date.now();
+    if (q === null) {
+      return { ok: false, texto: 'nunca atualizado nesta tela' };
+    }
+    var ms = Math.max(0, a - q);
+    var s = Math.round(ms / 1000);
+    var t;
+    if (s < 5) t = 'agora mesmo';
+    else if (s < 60) t = 'há ' + s + ' segundos';
+    else {
+      var min = Math.round(s / 60);
+      t = 'há ' + min + (min === 1 ? ' minuto' : ' minutos');
+    }
+    return { ok: true, ms: ms, segundos: s, texto: 'atualizado ' + t,
+             /* passou de três intervalos sem atualizar: a tela não
+                pode continuar parecendo viva */
+             velho: ms > R.INTERVALO_MS * 3 };
+  };
+
+  /* ============================================================
+     10 · DIAGNÓSTICO E REGISTRO NO CORE
+     ============================================================ */
+  R.diagnostico = function () {
+    return {
+      motor: R.nome, versao: R.versao,
+      rotasConfirmadas: R.confirmadas(),
+      rotasPendentes: R.pendentes(),
+      intervaloMs: R.INTERVALO_MS,
+      estados: Object.keys(R.ESTADOS),
+      aviso: 'o Apps Script não empurra evento: "ao vivo" aqui é pergunta ' +
+             'repetida a cada ' + Math.round(R.INTERVALO_MS / 1000) + ' s, ' +
+             'e a tela mostra de quando é o dado.'
+    };
+  };
+
+  R.registrar = function (core) {
+    var c = core || raiz.CORE3D;
+    if (!c || typeof c.registrarMotor !== 'function') return false;
+    var r = c.registrarMotor('rotas', {
+      nome: 'Rotas e acompanhamento',
+      versao: R.versao,
+      dependencias: [],
+      acoplamentos: [
+        { o_que: 'invmovel.criarRota',
+          estado: 'NAO_CONFIRMADO',
+          porque: 'o nome da ação é permitido, mas o formato dos campos não ' +
+                  'foi lido em lugar nenhum: nem no ALMOXA CAMPO nem no ' +
+                  'desktop. A criação manda e mostra a resposta crua.' }
+      ],
+      iniciar: function () { return true; },
+      diagnostico: function () { return R.diagnostico(); }
+    });
+    return !!(r && r.ok);
+  };
+
+  raiz.ROTA3D = R;
+  if (typeof module !== 'undefined' && module.exports) module.exports = R;
+
+})(typeof window !== 'undefined' ? window : globalThis);
 </script>
 <script>
 /* ===== gps3d.js ===== */
@@ -10778,16 +11425,58 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
   };
 
   /* ---------- 5. movimentações ---------- */
-  R.movimentacoes = function () {
-    /* NÃO INVENTAR. Não existe, nos arquivos que eu tenho do Core,
-       rota que devolva movimentações. Zerar seria dizer que não
-       houve movimento, o que é diferente de não saber. */
-    return { ok: false, naoIntegrado: true,
-      motivo: 'não existe, nos arquivos do Core que eu tenho, uma rota que ' +
-              'devolva as movimentações (transferências, consolidações, ' +
-              'bloqueios). Quando ela existir, ou quando você me disser o nome ' +
-              'dela, este relatório enche. Zero aqui seria dizer que não houve ' +
-              'movimento — e o que há é que eu não sei.' };
+  /* [MOV 18/11] EU ESTAVA ERRADO, E POR MESES.
+     Esta função devolvia naoIntegrado dizendo que "não existe, nos
+     arquivos do Core que eu tenho, uma rota que devolva as
+     movimentações". A rota existe:
+
+       estoque.movimentacoes({ sku?, limite? })
+         → { ok:true, dados:[ ...da mais recente ] }
+
+     e está em ALMOXA_PRO_Modulos_Operacao.gs, arquivo que eu tenho
+     desde o primeiro dia. Eu declarei ausência sem procurar direito,
+     e a frase soava cuidadosa — o que é pior, porque passava
+     confiança. Fica corrigido.
+
+     O cuidado ORIGINAL continua: resposta que falha não vira zero. */
+  R.movimentacoes = function (resposta) {
+    if (resposta === undefined || resposta === null) {
+      return { ok: false,
+        motivo: 'o relatório não recebeu a resposta de estoque.movimentacoes. ' +
+                'A rota existe no Core; quem não perguntou fui eu. Zero aqui ' +
+                'seria dizer que não houve movimento, e o que há é que eu não ' +
+                'perguntei.' };
+    }
+    if (!resposta.ok) {
+      return { ok: false,
+        motivo: 'a rota estoque.movimentacoes não respondeu' +
+                (resposta.mensagem ? ' (' + resposta.mensagem + ')' : '') +
+                '. Isso NÃO quer dizer que não houve movimento.' };
+    }
+    var crua = resposta.itens || resposta.dados || [];
+    var porTipo = {};
+    var linhas = [];
+    for (var i = 0; i < crua.length; i++) {
+      var m = crua[i] || {};
+      var tipo = texto(m.tipo || m.operacao).toUpperCase() || 'SEM TIPO';
+      porTipo[tipo] = (porTipo[tipo] || 0) + 1;
+      linhas.push({
+        quando: texto(m.data || m.quando || m.criadoEm),
+        tipo: tipo,
+        sku: texto(m.sku || m.codigo || m.item),
+        descricao: texto(m.descricao || m.produto),
+        qtd: num(m.qtd !== undefined ? m.qtd : m.quantidade),
+        documento: texto(m.documento),
+        obra: texto(m.obra),
+        quem: texto(m.usuario || m.responsavel || m.quem),
+        /* o saldo depois da movimentação, quando o Core guardar */
+        saldoDepois: num(m.saldoDepois !== undefined ? m.saldoDepois : m.saldo)
+      });
+    }
+    return { ok: true, total: linhas.length, porTipo: porTipo, linhas: linhas,
+             /* o Core corta em 200 por padrão: dizer isso evita que
+                alguém leia este total como "o movimento do dia". */
+             podeEstarCortado: linhas.length >= 200 };
   };
 
   /* ---------- 6. inventários ---------- */
@@ -10885,7 +11574,7 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
       porEndereco:   R.porEndereco(fontes.itens, fontes.campoDoLocal),
       vazios:        R.vazios(fontes.posicoes),
       semLocal:      R.semLocal(fontes.semLocal),
-      movimentacoes: R.movimentacoes(),
+      movimentacoes: R.movimentacoes(fontes.movimentacoes),
       inventarios:   R.inventarios(fontes.inventarios),
       divergencias:  R.divergencias(fontes.divergencias)
     };
@@ -11076,12 +11765,24 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
       campos: ['sku', 'qtd', 'origem', 'destino'],
       oque: 'tira de um endereço e põe em outro.',
       pendencia:
-        'Transferência é uma saída seguida de uma entrada. A rota ' +
-        'estoque.saida do Core recebe { sku, qtd, documento } e NÃO carrega ' +
-        'identificador de operação. Se a rede cair entre a saída e a ' +
-        'entrada, repetir dá baixa duas vezes — e o material fica fora do ' +
-        'saldo sem ninguém ver. Para liberar: o módulo estoque precisa ' +
-        'aceitar opchave na saída, como já aceita na entrada.',
+        /* [MOV 18/11] texto corrigido, estado MANTIDO. A auditoria
+           desta manhã recomendou passar para PARCIAL; ao implementar
+           eu li o módulo inteiro e o motivo do bloqueio ficou MAIS
+           forte: `opchave` não aparece nenhuma vez no estoque. Não
+           afrouxo trava de saldo oficial por análise minha. */
+        'Transferência mexe no saldo oficial de dois endereços. O ' +
+        'estoque.movimentar JÁ reconhece o tipo TRANSFERENCIA — isso ' +
+        'existe e eu conferi no fonte. O que não existe é trava contra ' +
+        'repetição: a palavra "opchave" não aparece nenhuma vez no ' +
+        'módulo estoque do Core. O AP_Core_withLock que está lá protege ' +
+        'de duas gravações ao mesmo tempo, não de a mesma gravação vir ' +
+        'duas vezes. Com 4G de galpão, timeout e segundo toque são o ' +
+        'normal, não a exceção. ' +
+        '[corrigido em 18/11] eu dizia aqui que a entrada já aceitava ' +
+        'opchave. Não aceita. Para liberar: o movimentar precisa gravar ' +
+        'e conferir uma chave de operação, como o ' +
+        'invmovel.registrarContagem já faz com operacaoId e devolve ' +
+        'repetida:true. O padrão certo já existe no seu sistema.',
       conferir: function (d) {
         var p = [];
         if (!texto(d.sku)) p.push('Falta o material.');
@@ -11250,9 +11951,30 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
       var d = r.dados || {};
       var pode = (d.pode === true) || (d.permitido === true) || (d === true);
       if (!pode) {
+        /* [RECUSA · 18/11] A frase antiga dizia "este perfil não
+           pode locais.salvar" mesmo quando NÃO HAVIA perfil nenhum
+           — a tela estava como "não identificado". Ele leu isso
+           como defeito, e com razão: a frase acusava um perfil que
+           não existe, em vez de dizer que falta entrar.
+
+           O Core respondeu certo. Quem estava errado era eu, ao
+           contar o que ele respondeu. */
+        var semPerfil = !texto(perfil).trim();
+        if (semPerfil) {
+          return { ok: false, codigo: 'SEM_PERMISSAO',
+            semIdentificacao: true,
+            mensagem: 'Você está como NÃO IDENTIFICADO nesta tela, então o ' +
+              'Core não tem perfil nenhum para consultar e recusa por ' +
+              'padrão — que é o certo da parte dele. Entre com o seu ' +
+              'usuário no ALMOX PRO e volte: a ação é ' +
+              op.permissao.modulo + '.' + op.permissao.acao + '.' };
+        }
         return { ok: false, codigo: 'SEM_PERMISSAO',
-                 mensagem: 'O Core respondeu que este perfil não pode ' +
-                   op.permissao.modulo + '.' + op.permissao.acao + '.' };
+                 perfilRecusado: texto(perfil),
+                 mensagem: 'O Core respondeu que o perfil "' + texto(perfil) +
+                   '" não pode ' + op.permissao.modulo + '.' +
+                   op.permissao.acao + '. Isso é liberação de perfil no ' +
+                   'ALMOX PRO, não defeito do mapa.' };
       }
       return { ok: true };
     });
@@ -12857,7 +13579,30 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
        abaixo eu li no AP_INVENTARIO.gs — não são inventadas. */
     'invmovel.listarAtividades': { validade: 20000, oque: 'quem está em atividade' },
     'invmovel.listarRotas':      { validade: 20000, oque: 'as rotas de inventário' },
-    'invmovel.progresso':        { validade: 20000, oque: 'o progresso das rotas' }
+    'invmovel.progresso':        { validade: 20000, oque: 'o progresso das rotas' },
+    /* [ROTA 18/11] estas duas eu li no código do ALMOXA CAMPO 57,
+       o aplicativo dele: TELAS.rota chama progressoDaRota com
+       {rotaId}, e invPorQueVazioAntigo chama listarRotas. Faltava
+       declarar progressoDaRota aqui — sem isso a ponte respondia
+       ROTA_NAO_DECLARADA e a rota não acendia no galpão. */
+    /* [MOV 18/11] EU ESTAVA ERRADO. Durante meses este painel e o
+       relatório diziam que não existia rota de movimentações "nos
+       arquivos do Core que eu tenho". A rota está em
+       ALMOXA_PRO_Modulos_Operacao.gs, arquivo que eu tenho desde o
+       primeiro dia:
+
+         case 'movimentacoes': { var movs = AP_Data_rows(...);
+           if (payload.sku) movs = movs.filter(...);
+           movs.sort(mais recente primeiro);
+           return { ok:true, dados: movs.slice(0, payload.limite||200) }; }
+
+       Eu declarei ausência sem procurar direito. Fica corrigido. */
+    'estoque.movimentacoes':     { validade: 15000,
+                                   oque: 'as movimentações gravadas, da mais recente' },
+    'invmovel.progressoDaRota':  { validade: 10000,
+                                   oque: 'as posições de uma rota e quais faltam' },
+    'invmovel.quemSou':          { validade: 60000,
+                                   oque: 'quem o Core entende que é esta sessão' }
   };
 
   /* ============================================================
@@ -12903,17 +13648,41 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
     'invmovel.registrarContagem': { aceitaOpchave: true, campoDaChave: 'operacaoId',
                          oque: 'registrar contagem de inventário' },
 
-    'estoque.entrada': { aceitaOpchave: true,       campoDaChave: 'opchave',
-                         oque: 'entrada de material' },
+    /* [MOV 18/11] ERA `true`, E ERA MENTIRA.
+       Eu li o ALMOXA_PRO_Modulos_Operacao.gs inteiro: a palavra
+       `opchave` aparece ZERO vezes. Nem a entrada nem a saída
+       carregam identificador de operação; o `movimentar` tem
+       AP_Core_withLock, que protege de simultaneidade, não de
+       repetição.
+
+       Com `true`, a ponte mandava, no timeout: "Repita com a MESMA
+       opchave — assim, se já tiver entrado, não entra de novo."
+       Seguir esse conselho dá entrada em dobro no saldo oficial.
+
+       Eu NÃO bloqueio a entrada: ela funciona, é usada todo dia, e
+       bloquear seria atualização destrutiva. O que muda é parar de
+       prometer o que não existe. */
+    'estoque.entrada': { aceitaOpchave: 'NAO_RESPEITADA',
+                         campoDaChave: 'opchave',
+                         oque: 'entrada de material',
+                         porqueNaoProtege:
+                           'o módulo estoque do Core não lê opchave em ' +
+                           'nenhuma rota — eu conferi no fonte. A chave segue ' +
+                           'junto para o dia em que ele ler, e serve aqui no ' +
+                           'navegador para esta tela não mandar duas vezes. ' +
+                           'Mas ela NÃO protege contra repetição no servidor.' },
     'estoque.saida':   {
       aceitaOpchave: false, campoDaChave: 'opchave',
       oque: 'saída de material',
       porqueRecusada:
-        'A rota estoque.saida do Core recebe { sku, qtd, documento } e não ' +
-        'carrega identificador único da operação. Se a rede cair entre o ' +
+        'A rota estoque.saida do Core repassa { sku, qtd, tipo, documento, ' +
+        'centro, obra, patrimonio, destino, responsavel } ao movimentar, e ' +
+        'NENHUM desses campos identifica a operação. Se a rede cair entre o ' +
         'pedido e a resposta, repetir dá baixa duas vezes no saldo oficial. ' +
-        'Para liberar: o módulo estoque precisa aceitar opchave na saída, ' +
-        'como já aceita na entrada.'
+        '[corrigido em 18/11] eu dizia aqui que a entrada já aceitava ' +
+        'opchave. Não aceita: a palavra não existe no módulo estoque. ' +
+        'Para liberar: o movimentar precisa gravar e conferir uma chave de ' +
+        'operação, como o invmovel.registrarContagem já faz com operacaoId.'
     }
   };
 
@@ -13263,9 +14032,17 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
              um lado nem para o outro. */
           r.situacao = 'INDEFINIDA';
           r.confirmadoPeloCore = false;
-          r.mensagem = 'O Core não respondeu a tempo. A operação PODE ter sido ' +
-                       'gravada. Repita com a MESMA opchave (' + opchave + ') — ' +
-                       'assim, se já tiver entrado, não entra de novo.';
+          /* [MOV 18/11] o conselho agora depende de o Core RESPEITAR a
+             chave. Mandar repetir numa rota que ignora opchave é
+             mandar gravar duas vezes. */
+          r.mensagem = (regra.aceitaOpchave === true)
+            ? 'O Core não respondeu a tempo. A operação PODE ter sido ' +
+              'gravada. Repita com a MESMA opchave (' + opchave + ') — ' +
+              'assim, se já tiver entrado, não entra de novo.'
+            : 'O Core não respondeu a tempo. A operação PODE ter sido ' +
+              'gravada, e esta rota NÃO tem trava de repetição no ' +
+              'servidor: repetir agora pode gravar duas vezes. ' +
+              'CONFIRA O SALDO do item antes de tentar de novo.';
           operacoes[opchave] = { situacao: 'INDEFINIDA', quando: agora() };
         } else {
           r.situacao = 'RECUSADA';
@@ -13278,6 +14055,11 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
             'A trava contra duplicidade desta rota foi aplicada aqui no ' +
             'navegador. Se o Core também respeita opchave em ' + rota + ' ' +
             'é PENDENTE DE CONFIRMAÇÃO — falta o fonte do módulo.';
+        } else if (regra.aceitaOpchave === 'NAO_RESPEITADA') {
+          /* aqui não é dúvida: é fato conferido no fonte. */
+          r.avisoDeProtecao =
+            'A trava contra duplicidade desta rota existe SÓ aqui no ' +
+            'navegador. ' + (regra.porqueNaoProtege || '');
         }
 
         r.opchave = opchave;
@@ -14546,6 +15328,36 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
       } catch (e) {}
     }
     return M.acesas.length;
+  };
+
+  /* [ROTA 18/11] acender GRUPOS de cores de uma vez.
+     O acenderVarias existente apaga tudo e pinta de UMA cor s\u00f3 —
+     perfeito para busca, imposs\u00edvel para rota, que tem quatro
+     estados ao mesmo tempo. Este aqui acende por grupo e s\u00f3
+     apaga no come\u00e7o, uma vez. */
+  M.acenderPorCor = function (mapaDeCores) {
+    M.apagarTodas();
+    var b = B();
+    if (!M.realce) {
+      M.realce = new b.HighlightLayer('realce', M.cena, { blurHorizontalSize: 0.6 });
+    }
+    var quantas = 0;
+    for (var codigo in (mapaDeCores || {})) {
+      var m = M.porCodigo[codigo];
+      if (!m) continue;                 /* posi\u00e7\u00e3o fora do desenho */
+      try {
+        M.realce.addMesh(m.sourceMesh || m, cor3(mapaDeCores[codigo] || '#E8731A'));
+        M.acesas.push(m);
+        quantas++;
+      } catch (e) {}
+    }
+    /* o que foi aceso n\u00e3o pode sumir por economia de desenho */
+    try {
+      if (raiz.CARREGAMENTO3D && raiz.CARREGAMENTO3D.fixar) {
+        raiz.CARREGAMENTO3D.fixar(Object.keys(mapaDeCores || {}));
+      }
+    } catch (e2) {}
+    return quantas;
   };
 
   M.apagarTodas = function () {
@@ -18674,7 +19486,7 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
      Salvar o arquivo não é publicar, e publicar não é o
      navegador ter recebido.
      ============================================================ */
-  APP.VERSAO = '7.8.0';
+  APP.VERSAO = '7.10.0';
   APP.COMPILADO = '2026-11-15';
   APP.CARIMBO = 'ALMOXA 3D ' + APP.VERSAO + ' · ' + APP.COMPILADO;
 
@@ -20122,73 +20934,249 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
     }).join('') + '</div>';
   };
 
+  /* ============================================================
+     [ROTA 18/11] OS DOIS PAIN\u00c9IS DE BAIXO, REFEITOS
+     ------------------------------------------------------------
+     Eles liam `situacao || status`. O campo que o Core DELE manda
+     \u00e9 `statusCalculado` \u2014 isso est\u00e1 no c\u00f3digo do ALMOXA CAMPO 57,
+     e eu li de l\u00e1. Com o campo errado, toda rota caía em
+     "pendentes": n\u00famero errado com cara de n\u00famero certo, que \u00e9 o
+     pior tipo de n\u00famero.
+
+     E o percentual contava ROTAS conclu\u00eddas chamando de progresso.
+     Agora conta POSI\u00c7\u00d5ES conferidas, e some quando nem todas as
+     rotas disseram quantas t\u00eam.
+     ============================================================ */
+
+  C.rotasVivas = { quando: null, lista: null, progressos: {},
+                   relogio: null, pessoaAberta: '' };
+
+  C.lerRotas = function () {
+    if (!P() || !raiz.ROTA3D) return Promise.resolve(null);
+    /* REVALIDAR SEMPRE. A ponte guarda esta leitura por 20 s e o
+       relógio também bate de 20 em 20: na borda, o painel pegaria
+       a resposta guardada e escreveria "atualizado agora mesmo"
+       em cima de dado velho. Painel de acompanhamento que mente
+       sobre a idade do dado é pior do que painel vazio. */
+    return P().lerLista('invmovel', 'listarRotas', {}, { revalidar: true })
+      .then(function (r) {
+      /* a ponte devolve itens; o ROTA3D entende os dois nomes */
+      var resultado = raiz.ROTA3D.normalizarLista(
+        r && r.ok ? { ok: true, dados: r.itens || r.dados || [] } : r);
+      C.rotasVivas.lista = resultado;
+      C.rotasVivas.quando = Date.now();
+      return resultado;
+    });
+  };
+
+  C.idadeDita = function () {
+    if (!raiz.ROTA3D) return '';
+    var id = raiz.ROTA3D.idade(C.rotasVivas.quando);
+    return '<div class="c_quando' + (id.velho ? ' c_velho' : '') + '">' +
+           esc(id.texto) + (id.velho ? ' \u2014 pode estar parado' : '') + '</div>';
+  };
+
   C.painelEquipe = function () {
     var c = $('c_equipeCorpo'); if (!c || !P()) return;
-    c.innerHTML = '<div class="c_esperando">perguntando ao m\u00f3dulo de invent\u00e1rio\u2026</div>';
-    P().lerLista('invmovel', 'listarAtividades', {}).then(function (r) {
-      if (!r.ok) { c.innerHTML = falhou(r); return; }
-      var ativos = (r.itens || []).filter(function (a) {
-        var s = String(a.situacao || a.status || '').toUpperCase();
-        return s.indexOf('ANDAMENTO') > -1 || s.indexOf('INICIAD') > -1 || s === 'ABERTA';
-      });
+    if (!raiz.ROTA3D) { c.innerHTML = '<div class="c_esperando">motor de rotas ' +
+      'n\u00e3o carregado nesta p\u00e1gina</div>'; return; }
+    if (!C.rotasVivas.lista) {
+      c.innerHTML = '<div class="c_esperando">perguntando as rotas\u2026</div>';
+    }
+    C.lerRotas().then(function (lista) {
+      var eq = raiz.ROTA3D.equipe(lista, C.rotasVivas.progressos);
       var conta = $('c_equipeConta');
-      if (conta) conta.textContent = '(' + ativos.length + ')';
-      if (!ativos.length) {
-        c.innerHTML = '<div class="c_esperando">ningu\u00e9m em atividade agora</div>';
+      if (!eq.ok) {
+        if (conta) conta.textContent = '';
+        c.innerHTML = '<div class="aviso amarelo c_pequeno">' + esc(eq.motivo) +
+                      '</div>' + C.idadeDita();
         return;
       }
-      c.innerHTML = ativos.slice(0, 8).map(function (a) {
-        var onde = a.endereco || a.local || a.rota || '';
-        return '<div class="c_pessoa"><span class="c_av2"></span>' +
-          '<span class="c_quem"><b>' + esc(a.colaborador || a.usuario || a.nome || '\u2014') +
-          '</b><span>' + esc(a.tipo || a.atividade || a.descricao || '') + '</span></span>' +
-          (onde ? '<span class="c_onde">\u25c9 ' + esc(onde) + '</span>' : '') + '</div>';
-      }).join('');
+      if (conta) conta.textContent = '(' + eq.quantas + ')';
+      if (!eq.quantas) {
+        c.innerHTML = '<div class="c_esperando">ningu\u00e9m com rota iniciada ' +
+          'agora</div>' + C.idadeDita();
+        return;
+      }
+      c.innerHTML = eq.pessoas.slice(0, 8).map(function (p) {
+        return '<div class="c_pessoa c_clic" data-pessoa="' + esc(p.pessoa) + '">' +
+          '<span class="c_av2"></span>' +
+          '<span class="c_quem"><b>' + esc(p.pessoa) + '</b><span>' +
+          esc(p.rotas.length + ' rota(s)') +
+          (p.pct === null ? '' : ' \u00b7 ' + p.pct + '%') +
+          (p.desde ? ' \u00b7 desde ' + esc(p.desde) : '') +
+          '</span></span>' +
+          (p.onde ? '<span class="c_onde">\u25c9 ' + esc(p.onde) + '</span>' : '') +
+          '</div>';
+      }).join('') +
+      '<div class="c_pequeno c_nota">\u25c9 \u00e9 a <b>\u00faltima etiqueta pendente</b> ' +
+      'da rota, n\u00e3o onde a pessoa est\u00e1 agora. Clique num nome para acender ' +
+      'a rota dela no galp\u00e3o.</div>' + C.idadeDita();
+
+      var nos = c.querySelectorAll('[data-pessoa]');
+      for (var k = 0; k < nos.length; k++) {
+        nos[k].addEventListener('click', function () {
+          C.acenderDaPessoa(this.getAttribute('data-pessoa'));
+        });
+      }
     });
   };
 
   C.painelRotas = function () {
     var c = $('c_rotasCorpo'); if (!c || !P()) return;
-    c.innerHTML = '<div class="c_esperando">perguntando as rotas\u2026</div>';
-    P().lerLista('invmovel', 'listarRotas', {}).then(function (r) {
-      if (!r.ok) { c.innerHTML = falhou(r); return; }
-      var rotas = r.itens || [];
-      if (!rotas.length) {
-        c.innerHTML = '<div class="c_esperando">nenhuma rota cadastrada</div>';
+    if (!raiz.ROTA3D) { c.innerHTML = '<div class="c_esperando">motor de rotas ' +
+      'n\u00e3o carregado</div>'; return; }
+    if (!C.rotasVivas.lista) {
+      c.innerHTML = '<div class="c_esperando">perguntando as rotas\u2026</div>';
+    }
+    C.lerRotas().then(function (lista) {
+      var s = raiz.ROTA3D.resumo(lista);
+      if (!s.ok) {
+        c.innerHTML = '<div class="aviso amarelo c_pequeno">' + esc(s.motivo) +
+                      '</div>' + C.idadeDita();
         return;
       }
-      var feitas = 0, andando = 0, pendentes = 0;
-      rotas.forEach(function (x) {
-        var s = String(x.situacao || x.status || '').toUpperCase();
-        if (s.indexOf('CONCLU') > -1 || s.indexOf('FINALIZ') > -1) feitas++;
-        else if (s.indexOf('ANDAMENTO') > -1 || s.indexOf('INICIAD') > -1) andando++;
-        else pendentes++;
-      });
-      var pct = rotas.length ? Math.round(feitas / rotas.length * 100) : 0;
+      if (!s.total) {
+        c.innerHTML = '<div class="c_esperando">nenhuma rota distribu\u00edda ' +
+          'ainda</div>' + C.idadeDita();
+        return;
+      }
+      var temPct = s.pct !== null;
       c.innerHTML =
         '<div style="display:flex;align-items:center;gap:10px">' +
-          '<span class="c_pct">' + pct + '%</span>' +
+          '<span class="c_pct">' + (temPct ? s.pct + '%' : '\u2014') + '</span>' +
           '<div style="flex:1;min-width:0">' +
-            '<div class="c_barra"><i style="width:' + pct + '%"></i></div>' +
+            '<div class="c_barra"><i style="width:' +
+              (temPct ? s.pct : 0) + '%"></i></div>' +
             '<div class="c_rotaNums">' +
-              '<span>Conclu\u00eddas <b>' + feitas + '</b></span>' +
-              '<span>Em andamento <b>' + andando + '</b></span>' +
-              '<span>Pendentes <b>' + pendentes + '</b></span>' +
+              '<span>Conclu\u00eddas <b>' + s.concluidas + '</b></span>' +
+              '<span>Em andamento <b>' + s.emAndamento + '</b></span>' +
+              '<span>Pendentes <b>' + s.pendentes + '</b></span>' +
             '</div>' +
           '</div>' +
-        '</div>';
+        '</div>' +
+        '<div class="c_pequeno c_nota">' +
+          (temPct
+            ? esc(s.posicoesFeitas + ' de ' + s.posicoesTotal +
+                  ' posi\u00e7\u00f5es conferidas')
+            : '<b>sem percentual:</b> ' + esc(s.porQueSemPct)) +
+          (s.divergencias ? ' \u00b7 ' + s.divergencias + ' diverg\u00eancia(s)' : '') +
+        '</div>' + C.idadeDita();
     });
   };
 
+  /* ----------------------------------------------------------
+     ACENDER A ROTA DE UMA PESSOA, COM AS QUATRO CORES
+     ---------------------------------------------------------- */
+  C.acenderDaPessoa = function (pessoa) {
+    if (!raiz.ROTA3D || !C.rotasVivas.lista || !C.rotasVivas.lista.ok) return;
+    C.rotasVivas.pessoaAberta = pessoa;
+    var minhas = C.rotasVivas.lista.rotas.filter(function (r) {
+      return r.responsavel === pessoa && r.emAndamento && !r.concluida;
+    });
+    if (!minhas.length) return;
+
+    var cores = {}, lidas = 0;
+    function terminou() {
+      if (lidas < minhas.length) return;
+      try {
+        var n = raiz.MOTOR3D.acenderPorCor(cores);
+        var legenda = $('c_equipeCorpo');
+        if (legenda) {
+          var extra = document.createElement('div');
+          extra.className = 'c_pequeno c_nota';
+          extra.innerHTML = '<b>' + esc(pessoa) + '</b>: ' + n +
+            ' posi\u00e7\u00e3o(\u00f5es) acesa(s) de ' + Object.keys(cores).length +
+            ' na rota. ' +
+            '<span style="color:' + raiz.ROTA3D.ESTADOS.conferida.cor + '">\u25a0</span> conferida ' +
+            '<span style="color:' + raiz.ROTA3D.ESTADOS.pendente.cor + '">\u25a0</span> a conferir' +
+            (Object.keys(cores).length > n
+              ? '<br>as que faltam n\u00e3o existem no galp\u00e3o desenhado.' : '');
+          legenda.appendChild(extra);
+        }
+      } catch (e) {}
+    }
+
+    for (var i = 0; i < minhas.length; i++) {
+      (function (rota) {
+        P().ler('invmovel', 'progressoDaRota', { rotaId: rota.id })
+          .then(function (r) {
+            var prog = raiz.ROTA3D.normalizarProgresso(
+              r && r.ok ? { ok: true, dados: r.dados || r.itens } : r);
+            if (prog.ok) {
+              C.rotasVivas.progressos[rota.id] = prog;
+              var p = raiz.ROTA3D.pintura(prog);
+              if (p.ok) {
+                for (var cod in p.posicoes) cores[cod] = p.posicoes[cod].cor;
+              }
+            }
+            lidas++; terminou();
+          }, function () { lidas++; terminou(); });
+      })(minhas[i]);
+    }
+  };
+
+  /* ----------------------------------------------------------
+     O RELÓGIO · "ao vivo" é pergunta repetida, e dita
+     ---------------------------------------------------------- */
+  C.acompanharAoVivo = function (ligar) {
+    if (C.rotasVivas.relogio) {
+      clearInterval(C.rotasVivas.relogio);
+      C.rotasVivas.relogio = null;
+    }
+    if (ligar === false) return false;
+    C.rotasVivas.relogio = setInterval(function () {
+      /* aba escondida n\u00e3o gasta chamada nem bateria */
+      try { if (document.hidden) return; } catch (e) {}
+      C.painelEquipe();
+      C.painelRotas();
+    }, (raiz.ROTA3D && raiz.ROTA3D.INTERVALO_MS) || 20000);
+    return true;
+  };
+
+  /* [MOV 18/11] ESTE PAINEL ESTAVA MENTINDO POR OMISS\u00c3O.
+     Ele dizia que n\u00e3o existia rota de movimenta\u00e7\u00f5es no Core. A
+     rota existe, est\u00e1 em ALMOXA_PRO_Modulos_Operacao.gs, e eu
+     tenho esse arquivo desde o primeiro dia. Agora ele pergunta. */
   C.painelMovimentacoes = function () {
-    var c = $('c_movCorpo'); if (!c) return;
-    c.innerHTML = naoIntegrado('Movimenta\u00e7\u00f5es de hoje',
-      'N\u00e3o existe, nos arquivos que eu tenho do Core, uma rota que ' +
-      'devolva as movimenta\u00e7\u00f5es do dia (transfer\u00eancias, consolida\u00e7\u00f5es, ' +
-      'bloqueios, invent\u00e1rios). Assim que ela existir ou voc\u00ea me disser ' +
-      'o nome dela, este painel enche. Na refer\u00eancia aparecem 12, 3, 1 e ' +
-      '5 \u2014 aqueles n\u00fameros s\u00e3o do desenho, n\u00e3o do seu almoxarifado, ' +
-      'e eu n\u00e3o vou repeti-los aqui.');
+    var c = $('c_movCorpo'); if (!c || !P()) return;
+    c.innerHTML = '<div class="c_esperando">lendo as movimenta\u00e7\u00f5es\u2026</div>';
+    P().lerLista('estoque', 'movimentacoes', { limite: 50 },
+                 { revalidar: true }).then(function (r) {
+      if (!r.ok) {
+        /* falha N\u00c3O vira zero: a frase diz o que houve */
+        c.innerHTML = '<div class="aviso amarelo c_pequeno">' +
+          esc(r.mensagem || 'o Core n\u00e3o respondeu as movimenta\u00e7\u00f5es') +
+          '</div>';
+        return;
+      }
+      var movs = r.itens || [];
+      if (!movs.length) {
+        c.innerHTML = '<div class="c_esperando">nenhuma movimenta\u00e7\u00e3o ' +
+          'gravada ainda</div>';
+        return;
+      }
+      /* conta por tipo, com o nome que o Core gravou */
+      var porTipo = {}, ordem = [];
+      for (var i = 0; i < movs.length; i++) {
+        var t = String(movs[i].tipo || movs[i].operacao || '\u2014').toUpperCase();
+        if (!porTipo[t]) { porTipo[t] = 0; ordem.push(t); }
+        porTipo[t]++;
+      }
+      ordem.sort(function (a, b) { return porTipo[b] - porTipo[a]; });
+      var blocos = ordem.slice(0, 4).map(function (t) {
+        return '<div class="c_bloco"><b>' + porTipo[t] + '</b><span>' +
+               esc(t.toLowerCase()) + '</span></div>';
+      }).join('');
+      var ultima = movs[0] || {};
+      c.innerHTML = '<div class="c_nums4">' + blocos + '</div>' +
+        '<div class="c_pequeno c_nota">' + movs.length +
+        ' movimenta\u00e7\u00e3o(\u00f5es) lidas, da mais recente. \u00daltima: ' +
+        esc(String(ultima.sku || ultima.item || '\u2014')) +
+        (ultima.data ? ' em ' + esc(String(ultima.data)) : '') +
+        '.<br>Vem de <b>estoque.movimentacoes</b> \u2014 s\u00e3o as linhas ' +
+        'gravadas no seu almoxarifado, n\u00e3o n\u00fameros de desenho.</div>';
+    });
   };
 
   /* ----------------------------------------------------------
@@ -21207,6 +22195,31 @@ if(typeof window!=="undefined"){window.BABYLON=BABYLON;}
          ponte do aparelho fica DECLARADO como n\u00e3o confirmado,
          porque o cat\u00e1logo PONTE_CONHECIDOS do ALMOXA CAMPO, hoje,
          n\u00e3o lista getLocation nem getAddress. */
+      /* ---- MOTOR 19 \u00b7 ROTAS E ACOMPANHAMENTO ----
+         Os nomes de campo vieram do ALMOXA CAMPO 57, c\u00f3digo dele.
+         O \u00fanico acoplamento n\u00e3o confirmado \u00e9 o FORMATO de
+         criarRota, e ele est\u00e1 declarado. */
+      if (raiz.ROTA3D) reg('rotas', {
+        nome: 'Rotas e acompanhamento', versao: raiz.ROTA3D.versao,
+        dependencias: [],
+        acoplamentos: [
+          { o_que: 'invmovel.criarRota (formato dos campos)',
+            estado: 'NAO_CONFIRMADO',
+            porque: 'o mapa j\u00e1 manda este corpo hoje e o Core aceita ou ' +
+                    'recusa; eu n\u00e3o tenho o .gs para conferir nome por nome.' }
+        ],
+        iniciar: function () { return true; },
+        metodos: {
+          lista:     function (a) { return raiz.ROTA3D.normalizarLista(a && a.resposta); },
+          progresso: function (a) { return raiz.ROTA3D.normalizarProgresso(a && a.resposta); },
+          equipe:    function (a) { return raiz.ROTA3D.equipe(a && a.lista, a && a.progressos); },
+          resumo:    function (a) { return raiz.ROTA3D.resumo(a && a.lista); },
+          pintura:   function (a) { return raiz.ROTA3D.pintura(a && a.progresso); },
+          ordenar:   function (a) { return raiz.ROTA3D.ordenar(a && a.codigos); },
+          contrato:  function () { return raiz.ROTA3D.CONTRATO; },
+          diagnostico: function () { return raiz.ROTA3D.diagnostico(); }
+        }
+      });
       if (raiz.GPS3D) reg('gps', {
         nome: 'Posi\u00e7\u00e3o do aparelho (GPS)', versao: raiz.GPS3D.versao,
         dependencias: [],
