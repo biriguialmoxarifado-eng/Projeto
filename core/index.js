@@ -9,7 +9,7 @@
  * - Controle de dependências.
  * - Comunicação por eventos.
  * - Diagnóstico de saúde.
- * - Contratos de sessão, autorização e auditoria.
+ * - Coordenação de sessão, autorização e auditoria.
  *
  * Não contém regras de estoque, compras ou inventário.
  */
@@ -44,7 +44,6 @@ class EventBus {
     }
 
     this.listeners.get(name).add(callback);
-
     return () => this.off(name, callback);
   }
 
@@ -94,12 +93,15 @@ class EventBus {
     );
 
     return {
-      delivered: results.filter(r => r.status === 'fulfilled').length,
+      delivered: results.filter(
+        result => result.status === 'fulfilled'
+      ).length,
+
       errors: results
-        .filter(r => r.status === 'rejected')
-        .map(r => ({
+        .filter(result => result.status === 'rejected')
+        .map(result => ({
           code: 'EVENT_HANDLER_FAILED',
-          message: r.reason?.message || 'Falha desconhecida.'
+          message: result.reason?.message || 'Falha desconhecida.'
         }))
     };
   }
@@ -155,14 +157,20 @@ class AlmoxaCore {
       );
     }
 
-    if (initialize !== undefined && typeof initialize !== 'function') {
+    if (
+      initialize !== undefined &&
+      typeof initialize !== 'function'
+    ) {
       throw new CoreError(
         'INVALID_INITIALIZER',
         'initialize precisa ser uma função.'
       );
     }
 
-    if (healthcheck !== undefined && typeof healthcheck !== 'function') {
+    if (
+      healthcheck !== undefined &&
+      typeof healthcheck !== 'function'
+    ) {
       throw new CoreError(
         'INVALID_HEALTHCHECK',
         'healthcheck precisa ser uma função.'
@@ -171,7 +179,9 @@ class AlmoxaCore {
 
     if (
       !Array.isArray(dependencies) ||
-      dependencies.some(dep => typeof dep !== 'string' || !dep.trim())
+      dependencies.some(
+        dep => typeof dep !== 'string' || !dep.trim()
+      )
     ) {
       throw new CoreError(
         'INVALID_DEPENDENCIES',
@@ -207,7 +217,9 @@ class AlmoxaCore {
   }
 
   listModules() {
-    return [...this.modules.keys()].map(id => this.getModule(id));
+    return [...this.modules.keys()].map(
+      id => this.getModule(id)
+    );
   }
 
   async start() {
@@ -246,7 +258,11 @@ class AlmoxaCore {
         for (const id of [...pending]) {
           const module = this.modules.get(id);
 
-          if (module.dependencies.every(dep => ordered.includes(dep))) {
+          if (
+            module.dependencies.every(
+              dep => ordered.includes(dep)
+            )
+          ) {
             ordered.push(id);
             pending.delete(id);
             progressed = true;
@@ -276,7 +292,8 @@ class AlmoxaCore {
           }
 
           module.status = 'initialized';
-          module.initializedAt = this.options.clock().toISOString();
+          module.initializedAt =
+            this.options.clock().toISOString();
           module.lastError = null;
 
         } catch (error) {
@@ -308,7 +325,9 @@ class AlmoxaCore {
   }
 
   async stop() {
-    for (const module of [...this.modules.values()].reverse()) {
+    for (
+      const module of [...this.modules.values()].reverse()
+    ) {
       if (module.status === 'initialized') {
         module.status = 'stopped';
       }
@@ -329,7 +348,10 @@ class AlmoxaCore {
     for (const module of this.modules.values()) {
       let status = module.status;
 
-      if (module.healthcheck && module.status === 'initialized') {
+      if (
+        module.healthcheck &&
+        module.status === 'initialized'
+      ) {
         try {
           if (await module.healthcheck() === false) {
             status = 'unhealthy';
@@ -356,9 +378,11 @@ class AlmoxaCore {
       system: 'ALMOXA PRO',
       coreVersion: CORE_VERSION,
       started: this.started,
+
       status: degraded
         ? 'degraded'
         : this.started ? 'healthy' : 'stopped',
+
       modules,
       timestamp: this.options.clock().toISOString()
     };
@@ -380,6 +404,9 @@ class AlmoxaCore {
     return this.events.emitAsync(name, payload);
   }
 
+  /**
+   * Valida o token pelo Session Manager.
+   */
   async getSession(token) {
     if (
       !this.options.sessionProvider ||
@@ -391,7 +418,8 @@ class AlmoxaCore {
       );
     }
 
-    const result = await this.options.sessionProvider.validate(token);
+    const result =
+      await this.options.sessionProvider.validate(token);
 
     if (
       !result ||
@@ -407,21 +435,83 @@ class AlmoxaCore {
     return result.session;
   }
 
-    return this.options.sessionProvider.getActiveSession(sessionId);
+  /**
+   * Fluxo completo de sessão e autorização.
+   */
+  async authorizeSession(token, permission) {
+    let session = null;
+    let failure = null;
+
+    try {
+      session = await this.getSession(token);
+
+      if (
+        !this.options.authorizationProvider ||
+        typeof this.options.authorizationProvider.authorize !== 'function'
+      ) {
+        throw new CoreError(
+          'AUTHORIZATION_PROVIDER_NOT_CONFIGURED',
+          'Provedor de autorização não configurado ou inválido.'
+        );
+      }
+
+      const allowed =
+        await this.options.authorizationProvider.authorize(
+          session,
+          permission
+        );
+
+      if (allowed !== true) {
+        throw new CoreError(
+          'ACCESS_DENIED',
+          'Ação não autorizada.',
+          { permission }
+        );
+      }
+
+    } catch (error) {
+      failure = error;
+    }
+
+    await this.audit({
+      action: failure
+        ? 'ACCESS_DENIED'
+        : 'ACCESS_GRANTED',
+
+      userId: session?.userId || null,
+      role: session?.role || null,
+      permission,
+      allowed: !failure,
+      errorCode: failure?.code || null
+    });
+
+    if (failure) {
+      throw failure;
+    }
+
+    return true;
   }
 
+  /**
+   * Autorização para contexto já validado.
+   * Para token de usuário, usar authorizeSession().
+   */
   async authorize(context, permission) {
-    if (!this.options.authorizationProvider) {
+    if (
+      !this.options.authorizationProvider ||
+      typeof this.options.authorizationProvider.authorize !== 'function'
+    ) {
       throw new CoreError(
         'AUTHORIZATION_PROVIDER_NOT_CONFIGURED',
         'Provedor de autorização não configurado.'
       );
     }
 
-    const allowed = await this.options.authorizationProvider.authorize(
-      context,
-      permission
-    );
+    const allowed =
+      await this.options.authorizationProvider.authorize(
+        context,
+        permission
+      );
 
     if (allowed !== true) {
       throw new CoreError(
@@ -434,6 +524,9 @@ class AlmoxaCore {
     return true;
   }
 
+  /**
+   * Registro de auditoria.
+   */
   async audit(entry) {
     if (
       !this.options.auditProvider ||
