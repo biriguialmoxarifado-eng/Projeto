@@ -3,9 +3,7 @@
 /**
  * ALMOXA PRO V2
  * Gerenciador central de autorizações.
- *
- * A autenticação e a validação da sessão
- * devem acontecer antes desta camada.
+ * Status padronizado em MAIÚSCULO.
  */
 
 class AuthorizationManager {
@@ -27,7 +25,7 @@ class AuthorizationManager {
   }
 
   can(session, permission) {
-    if (!session || session.status !== 'active') {
+    if (!session || session.status !== 'ACTIVE') {
       return false;
     }
 
