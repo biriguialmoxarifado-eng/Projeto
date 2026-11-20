@@ -106,3 +106,4 @@ class AuthorizationManager {
 module.exports = {
   AuthorizationManager
 };
+
