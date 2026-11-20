@@ -24,10 +24,12 @@ class AuthorizationManager {
     this.permissions.set(role, new Set(permissions));
   }
 
-  can(session, permission) {
-    if (!session || session.status !== 'ACTIVE') {
-      return false;
-    }
+ if (
+  !session ||
+  String(session.status || '').toUpperCase() !== 'ACTIVE'
+) {
+  return false;
+}
 
     if (!session.userId || !session.role) {
       return false;
