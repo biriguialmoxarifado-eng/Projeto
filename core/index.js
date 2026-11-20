@@ -380,13 +380,32 @@ class AlmoxaCore {
     return this.events.emitAsync(name, payload);
   }
 
-  async getSession(sessionId) {
-    if (!this.options.sessionProvider) {
+  async getSession(token) {
+    if (
+      !this.options.sessionProvider ||
+      typeof this.options.sessionProvider.validate !== 'function'
+    ) {
       throw new CoreError(
         'SESSION_PROVIDER_NOT_CONFIGURED',
-        'Provedor de sessão não configurado.'
+        'Provedor de sessão não configurado ou inválido.'
       );
     }
+
+    const result = await this.options.sessionProvider.validate(token);
+
+    if (
+      !result ||
+      result.valid !== true ||
+      !result.session
+    ) {
+      throw new CoreError(
+        'SESSION_INVALID',
+        'Sessão inválida ou não autorizada.'
+      );
+    }
+
+    return result.session;
+  }
 
     return this.options.sessionProvider.getActiveSession(sessionId);
   }
