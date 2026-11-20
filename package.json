@@ -1,11 +1,11 @@
 {
   "name": "app",
   "version": "1.0.0",
-  "description": "",
+  "description": "ALMOXA PRO V2",
   "main": "index.js",
   "scripts": {
- "test": "node tests/core.test.js && node tests/session-manager.test.js"
-},
+    "test": "node tests/core.test.js && node tests/session-manager.test.js && node tests/authorization-manager.test.js"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
