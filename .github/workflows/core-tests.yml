@@ -1,0 +1,30 @@
+name: ALMOXA PRO - Testes do Core
+
+on:
+  push:
+    branches:
+      - arquitetura-v2
+  pull_request:
+    branches:
+      - arquitetura-v2
+  workflow_dispatch:
+
+jobs:
+  validar:
+    name: Validar estrutura e testes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Executar testes do Core
+        run: npm test
