@@ -1,120 +1,132 @@
 
 'use strict';
 
-const assert = require('node:assert/strict');
-
-const {
-  GoogleSheetsProvider,
-  GoogleSheetsProviderError
-} = require('../adapters/google-sheets-provider');
-
-async function run() {
-  const originalFetch = global.fetch;
-  const requests = [];
-
-  try {
-    // Simula a resposta do Google para testar o contrato.
-    global.fetch = async (url, options) => {
-      requests.push({
-        url,
-        options,
-        body: JSON.parse(options.body)
-      });
-
-      return {
-        ok: true,
-        status: 200,
-        async json() {
-          return {
-            success: true,
-            data: {
-              status: 'ok',
-              provider: 'google-sheets'
-            }
-          };
-        }
-      };
-    };
-
-    const provider = new GoogleSheetsProvider({
-      url: 'https://example.com/google-script',
-      token: 'TEST_TOKEN'
-    });
-
-    // 1. Verifica conexão
-    const connection = await provider.connect();
-
-    assert.equal(connection.connected, true);
-    assert.equal(provider.connected, true);
-
-    // 2. Verifica consulta de saúde
-    const health = await provider.healthCheck();
-
-    assert.equal(health.status, 'ok');
-
-    // 3. Verifica envio de consulta por ID
-    await provider.findById('materiais', '123');
-
-    const readRequest = requests[2];
-
-    assert.equal(readRequest.body.action, 'findById');
-    assert.equal(readRequest.body.payload.table, 'materiais');
-    assert.equal(readRequest.body.payload.id, '123');
-
-    // 4. Verifica envio de inserção
-    await provider.insert('materiais', {
-      nome: 'Material de teste'
-    });
-
-    const insertRequest = requests[3];
-
-    assert.equal(insertRequest.body.action, 'insert');
-    assert.equal(
-      insertRequest.body.payload.data.nome,
-      'Material de teste'
-    );
-
-    // 5. Verifica token e URL
-    assert.equal(
-      requests[0].body.token,
-      'TEST_TOKEN'
-    );
-
-    assert.equal(
-      requests[0].url,
-      'https://example.com/google-script'
-    );
-
-    // 6. Verifica desconexão
-    await provider.disconnect();
-
-    assert.equal(provider.connected, false);
-
-    // 7. Verifica configuração ausente
-    const invalidProvider = new GoogleSheetsProvider({
-      url: '',
-      token: ''
-    });
-
-    await assert.rejects(
-      () => invalidProvider.healthCheck(),
-      GoogleSheetsProviderError
-    );
-
-    console.log(
-      'ALMOXA PRO V2 — GOOGLE SHEETS PROVIDER: TESTES APROVADOS.'
-    );
-
-  } finally {
-    global.fetch = originalFetch;
+class GoogleSheetsProviderError extends Error {
+  constructor(code, message, details = null) {
+    super(message);
+    this.name = 'GoogleSheetsProviderError';
+    this.code = code;
+    this.details = details;
   }
 }
 
-run().catch(error => {
-  console.error(
-    'FALHA NO TESTE GOOGLE SHEETS PROVIDER:',
-    error
-  );
+class GoogleSheetsProvider {
+  constructor(options = {}) {
+    this.url = options.url || process.env.AL
+MOXA_API_URL || '';
+    this.key = options.key || process.env.ALMOXA_API_KEY || '';
+    this.session = options.session || process.env.ALMOXA_SESSION || '';
+    this.connected = false;
+  }
 
-  process.exitCode = 1;
-});
+  validateConfig() {
+    if (!this.url) {
+      throw new GoogleSheetsProviderError(
+        'API_URL_REQUIRED',
+        'Configure ALMOXA_API_URL.'
+      );
+    }
+
+    if (!this.key) {
+      throw new GoogleSheetsProviderError(
+        'API_KEY_REQUIRED',
+        'Configure ALMOXA_API_KEY.'
+      );
+    }
+
+    if (!this.session) {
+      throw new GoogleSheetsProviderError(
+        'SESSION_REQUIRED',
+        'Configure uma sessão autenticada em ALMOXA_SESSION.'
+      );
+    }
+  }
+
+  async request(action, payload = {}) {
+    this.validateConfig();
+
+    const response = await fetch(this.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        ponte: 'ALMOXA',
+        chave: this.key,
+        modulo: 'database',
+        acao: action,
+        payload,
+        sessao: this.session,
+        origem: 'ALMOXA_PRO_V2'
+      })
+    });
+
+    if (!response.ok) {
+      throw new GoogleSheetsProviderError(
+        'HTTP_ERROR',
+        `API respondeu HTTP ${response.status}.`
+      );
+    }
+
+    let result;
+
+    try {
+      result = await response.json();
+    } catch {
+      throw new GoogleSheetsProviderError(
+        'INVALID_RESPONSE',
+        'A API não retornou JSON válido.'
+      );
+    }
+
+    if (!result || result.ok !== true) {
+      throw new GoogleSheetsProviderError(
+        result?.codigo || 'API_OPERATION_FAILED',
+        result?.mensagem || 'A API recusou a operação.',
+        result
+      );
+    }
+
+    return result.dados;
+  }
+
+  async connect() {
+    const data = await this.request('diagnostico');
+    this.connected = true;
+
+    return {
+      connected: true,
+      spreadsheet: data.spreadsheet,
+      provider: 'google-sheets'
+    };
+  }
+
+  async healthCheck() {
+    const data = await this.request('diagnostico');
+
+    return {
+      status: 'ok',
+      provider: 'google-sheets',
+      spreadsheet: data.spreadsheet,
+      sheets: data.sheets
+    };
+  }
+
+  async writeTestRecord(record) {
+    return this.request('teste.gravar', { record });
+  }
+
+  async readTestRecord(id) {
+    return this.request('teste.ler', { id });
+  }
+
+  async disconnect() {
+    this.connected = false;
+    return { connected: false };
+  }
+}
+
+module.exports = {
+  GoogleSheetsProvider,
+  GoogleSheetsProviderError
+};
