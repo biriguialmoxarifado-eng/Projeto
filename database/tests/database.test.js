@@ -11,7 +11,7 @@ const {
 const {
   DataLayer,
   DATA_LAYER_VERSION
-} = require('../database/data-layer');
+} = require('../data-layer');
 
 async function run() {
   const state = {
