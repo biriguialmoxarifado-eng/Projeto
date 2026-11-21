@@ -294,6 +294,23 @@ function APIX_rotear_(req) {
       token: req.sessao
     })));
   }
+
+  /* [DATABASE] Banco central — porta única */
+  if (req.modulo === 'database') {
+    if (typeof AP_DB_direto !== 'function') {
+      return APIX_erro_(
+        'DATABASE_ROUTER_AUSENTE',
+        'O módulo DATABASE não foi carregado.'
+      );
+    }
+
+    return APIX_padronizar_(AP_DB_direto(JSON.stringify({
+      acao: req.acao,
+      payload: req.payload,
+      sessao: req.sessao,
+      token: req.sessao
+    })));
+  }
   /* [v5] JUNTAR CADASTROS REPETIDOS.
      Existe porque o módulo de usuários tem duas regras que se
      contradizem: mandando a matrícula ele diz "já existe" (achando o
