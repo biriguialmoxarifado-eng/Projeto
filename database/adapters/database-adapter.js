@@ -2,13 +2,9 @@
 'use strict';
 
 /**
- * ALMOXA PRO V2
- * DATABASE ADAPTER
- *
- * Contrato padrão de comunicação com o banco.
- * Não contém regras de negócio.
- *
- * Preparado para futura implementação PostgreSQL.
+ * ALMOXA PRO V2 — DATABASE ADAPTER
+ * Contrato entre a Data Layer e o provedor concreto de banco.
+ * Retorna dados crus e propaga falhas. A Data Layer padroniza as respostas.
  */
 
 class DatabaseAdapterError extends Error {
@@ -23,216 +19,122 @@ class DatabaseAdapterError extends Error {
 class DatabaseAdapter {
   constructor(provider) {
     if (!provider || typeof provider !== 'object') {
-      throw new DatabaseAdapterError(
-        'PROVIDER_REQUIRED',
-        'O provedor de banco de dados é obrigatório.'
-      );
+      throw new DatabaseAdapterError('PROVIDER_REQUIRED', 'O provedor de banco de dados é obrigatório.');
     }
-
     this.provider = provider;
     this.connected = false;
   }
 
+  async call(method, ...args) {
+    if (typeof this.provider[method] !== 'function') {
+      throw new DatabaseAdapterError(
+        'PROVIDER_METHOD_NOT_IMPLEMENTED',
+        `O provedor não implementa ${method}().`,
+        { method }
+      );
+    }
+
+    const result = await this.provider[method](...args);
+
+    if (result && typeof result === 'object' && result.success === false) {
+      const detail = result.error;
+      const message =
+        (detail && typeof detail === 'object' && detail.message) ||
+        (typeof detail === 'string' ? detail : 'O provedor informou falha na operação.');
+      throw new DatabaseAdapterError('PROVIDER_OPERATION_FAILED', message, detail || result);
+    }
+
+    return result;
+  }
+
   async connect() {
-    return this.execute('connect', async () => {
-      await this.provider.connect();
-      this.connected = true;
-      return { connected: true };
-    });
+    const result = await this.call('connect');
+    this.connected = true;
+    return result ?? { connected: true };
   }
 
   async disconnect() {
-    return this.execute('disconnect', async () => {
-      if (typeof this.provider.disconnect === 'function') {
-        await this.provider.disconnect();
-      }
-
+    if (typeof this.provider.disconnect === 'function') {
+      const result = await this.call('disconnect');
       this.connected = false;
-      return { connected: false };
-    });
+      return result ?? { connected: false };
+    }
+    this.connected = false;
+    return { connected: false };
   }
 
   async healthCheck() {
-    return this.execute('healthCheck', async () => {
-      const result = await this.provider.healthCheck();
-      return {
-        status: 'healthy',
-        database: result
-      };
-    });
+    return this.call('healthCheck');
   }
 
   async findById(table, id) {
     this.validateTable(table);
     this.validateId(id);
-
-    return this.execute('findById', () =>
-      this.provider.findById(table, id)
-    );
+    return this.call('findById', table, id);
   }
 
   async findMany(table, filters = {}, options = {}) {
     this.validateTable(table);
-
-    if (
-      !filters ||
-      typeof filters !== 'object' ||
-      Array.isArray(filters)
-    ) {
-      throw new DatabaseAdapterError(
-        'INVALID_FILTERS',
-        'Filtros inválidos.'
-      );
+    if (!filters || typeof filters !== 'object' || Array.isArray(filters)) {
+      throw new DatabaseAdapterError('INVALID_FILTERS', 'Filtros inválidos.');
     }
-
     const page = Math.max(1, Number(options.page) || 1);
-    const limit = Math.min(
-      200,
-      Math.max(1, Number(options.limit) || 50)
-    );
-
-    return this.execute('findMany', () =>
-      this.provider.findMany(table, filters, {
-        ...options,
-        page,
-        limit
-      })
-    );
+    const limit = Math.min(200, Math.max(1, Number(options.limit) || 50));
+    return this.call('findMany', table, filters, { ...options, page, limit });
   }
 
   async insert(table, data, options = {}) {
     this.validateTable(table);
     this.validateData(data);
-
-    return this.execute('insert', () =>
-      this.provider.insert(table, data, options)
-    );
+    return this.call('insert', table, data, options);
   }
 
   async insertMany(table, records, options = {}) {
     this.validateTable(table);
-
     if (!Array.isArray(records) || records.length === 0) {
-      throw new DatabaseAdapterError(
-        'INVALID_BATCH',
-        'O lote precisa conter registros.'
-      );
+      throw new DatabaseAdapterError('INVALID_BATCH', 'O lote precisa conter registros.');
     }
-
-    records.forEach(this.validateData);
-
-    return this.execute('insertMany', () => {
-      if (typeof this.provider.insertMany !== 'function') {
-        throw new DatabaseAdapterError(
-          'BATCH_NOT_SUPPORTED',
-          'O provedor não implementa gravação em lote.'
-        );
-      }
-
-      return this.provider.insertMany(table, records, options);
-    });
+    records.forEach(record => this.validateData(record));
+    return this.call('insertMany', table, records, options);
   }
 
   async update(table, id, data, options = {}) {
     this.validateTable(table);
     this.validateId(id);
     this.validateData(data);
-
-    return this.execute('update', () =>
-      this.provider.update(table, id, data, options)
-    );
+    return this.call('update', table, id, data, options);
   }
 
   async delete(table, id, options = {}) {
     this.validateTable(table);
     this.validateId(id);
-
-    return this.execute('delete', () =>
-      this.provider.delete(table, id, options)
-    );
+    return this.call('delete', table, id, options);
   }
 
   async transaction(callback) {
     if (typeof callback !== 'function') {
-      throw new DatabaseAdapterError(
-        'INVALID_TRANSACTION',
-        'Callback da transação inválido.'
-      );
+      throw new DatabaseAdapterError('INVALID_TRANSACTION', 'Callback da transação inválido.');
     }
-
-    if (typeof this.provider.transaction !== 'function') {
-      throw new DatabaseAdapterError(
-        'TRANSACTION_NOT_SUPPORTED',
-        'O provedor não suporta transações.'
-      );
-    }
-
-    return this.execute('transaction', () =>
-      this.provider.transaction(callback)
-    );
-  }
-
-  async execute(operation, callback) {
-    try {
-      const data = await callback();
-
-      return {
-        success: true,
-        operation,
-        data
-      };
-    } catch (error) {
-      return {
-        success: false,
-        operation,
-        error: {
-          code: error.code || 'DATABASE_ERROR',
-          message: error.message || 'Erro no banco de dados.'
-        }
-      };
-    }
+    return this.call('transaction', callback);
   }
 
   validateTable(table) {
-    if (
-      typeof table !== 'string' ||
-      !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(table)
-    ) {
-      throw new DatabaseAdapterError(
-        'INVALID_TABLE',
-        'Nome de tabela inválido.'
-      );
+    if (typeof table !== 'string' || !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(table)) {
+      throw new DatabaseAdapterError('INVALID_TABLE', 'Nome de tabela inválido.');
     }
   }
 
   validateId(id) {
-    if (
-      id === null ||
-      id === undefined ||
-      String(id).trim() === ''
-    ) {
-      throw new DatabaseAdapterError(
-        'INVALID_ID',
-        'Identificador obrigatório.'
-      );
+    if (id === null || id === undefined || String(id).trim() === '') {
+      throw new DatabaseAdapterError('INVALID_ID', 'Identificador obrigatório.');
     }
   }
 
   validateData(data) {
-    if (
-      !data ||
-      typeof data !== 'object' ||
-      Array.isArray(data)
-    ) {
-      throw new DatabaseAdapterError(
-        'INVALID_DATA',
-        'Os dados devem ser um objeto.'
-      );
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new DatabaseAdapterError('INVALID_DATA', 'Os dados devem ser um objeto.');
     }
   }
 }
 
-module.exports = {
-  DatabaseAdapter,
-  DatabaseAdapterError
-};
+module.exports = { DatabaseAdapter, DatabaseAdapterError };
