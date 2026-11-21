@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { createRuntime } = require('../../backend/runtime');
+const { GoogleSheetsProvider } = require('../adapters/google-sheets-provider');
 const { GoogleDriveProvider } = require('../adapters/google-drive-provider');
 
 const args = process.argv.slice(2);
@@ -20,18 +20,12 @@ async function validateDrive(fileId) {
   console.log('Leitura de metadados do Google Drive aprovada.');
 }
 
-async function validateSheets(write) {
-  const { diagnostics } = await createRuntime();
-  const connection = await diagnostics.probeRead();
-  assert.ok(connection.spreadsheet);
-  console.log('Leitura operacional via Google Sheets API aprovada.');
-
-  const sheet = process.env.ALMOXA_TEST_READ_SHEET;
-  if (sheet) {
-    const result = await diagnostics.readSheetPage(sheet);
-    assert.ok(result.headers.length);
-    console.log('Leitura paginada da aba aprovada.');
-  }
+async function validateSheets(testSpreadsheetId, write) {
+  const diagnostics = new GoogleSheetsProvider({ testSpreadsheetId, testOnly: true });
+  const start = performance.now();
+  await diagnostics.testRows();
+  console.log('Metadados e cabeçalhos de ALMOXA_TESTE_CORE validados em ' +
+    Math.round(performance.now() - start) + ' ms.');
 
   if (!write) return;
 
@@ -64,16 +58,10 @@ async function run() {
     return;
   }
 
-  const productionId = requireSetting('ALMOXA_SPREADSHEET_ID');
-  const testId = write ? requireSetting('ALMOXA_TEST_SPREADSHEET_ID') : null;
-  if (write && productionId && testId && productionId === testId) {
-    console.error('ALMOXA_TEST_SPREADSHEET_ID deve identificar uma planilha separada da operacional.');
-    process.exitCode = 1;
-    return;
-  }
-  if (process.exitCode) return;
+  const testId = requireSetting('ALMOXA_TEST_SHEET_ID');
+  if (!testId) return;
 
-  await validateSheets(write);
+  await validateSheets(testId, write);
   if (process.env.ALMOXA_TEST_DRIVE_FILE_ID) await validateDrive(process.env.ALMOXA_TEST_DRIVE_FILE_ID);
 }
 

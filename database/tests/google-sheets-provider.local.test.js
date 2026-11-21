@@ -7,7 +7,7 @@ const { createHandler } = require('../../backend/server');
 const { GoogleDriveProvider } = require('../adapters/google-drive-provider');
 const { GoogleSheetsProvider } = require('../adapters/google-sheets-provider');
 
-function fixture({ testSpreadsheetId = 'test-only', loseResponse = false } = {}) {
+function fixture({ testSpreadsheetId = 'test-only', loseResponse = false, testOnly = false, testTitle = 'ALMOXA_TESTE_CORE' } = {}) {
   const rows = [['ID', 'CRIADO_EM', 'ORIGEM', 'MENSAGEM']];
   const markers = new Set();
   const calls = [];
@@ -26,7 +26,7 @@ function fixture({ testSpreadsheetId = 'test-only', loseResponse = false } = {})
             const title = spreadsheetId === 'production' ? "Itens d'obra" : 'ALMOXA_TESTE_CONEXAO';
             return { data: {
               spreadsheetId,
-              properties: { title: 'ALMOXA' },
+              properties: { title: spreadsheetId === 'production' ? 'ALMOXA' : testTitle },
               sheets: [{ properties: { sheetId: 42, title } }]
             } };
           }
@@ -47,6 +47,7 @@ function fixture({ testSpreadsheetId = 'test-only', loseResponse = false } = {})
   const provider = new GoogleSheetsProvider({
     spreadsheetId: 'production',
     testSpreadsheetId,
+    testOnly,
     readAuth: auth(false),
     writeAuth: auth(true)
   });
@@ -177,4 +178,15 @@ test('oculta detalhes de autenticação e de erros do Drive', async () => {
   });
   const unavailable = new GoogleDriveProvider({ auth: { async getClient() { throw new Error('private'); } } });
   await assert.rejects(unavailable.readMetadata('file-1'), { code: 'GOOGLE_AUTH_FAILED' });
+});
+
+test('o modo isolado valida o título e nunca consulta o ID operacional', async () => {
+  const { provider, calls } = fixture({ testOnly: true });
+  await provider.testRows();
+  await provider.writeTestRecord(record);
+  assert.ok(calls.every(({ path }) => path.includes('/test-only')));
+  const invalid = fixture({ testOnly: true, testTitle: 'Outra planilha' });
+  await assert.rejects(invalid.provider.writeTestRecord(record), { code: 'TEST_TARGET_UNSAFE' });
+  assert.equal(invalid.calls.length, 1);
+  assert.equal(invalid.calls[0].method, 'GET');
 });

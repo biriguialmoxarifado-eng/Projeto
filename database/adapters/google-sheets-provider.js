@@ -19,6 +19,7 @@ class GoogleSheetsProvider {
   constructor(options = {}) {
     this.spreadsheetId = options.spreadsheetId ?? process.env.ALMOXA_SPREADSHEET_ID;
     this.testSpreadsheetId = options.testSpreadsheetId ?? process.env.ALMOXA_TEST_SPREADSHEET_ID;
+    this.testOnly = options.testOnly === true;
     this.readAuth = options.readAuth ?? new GoogleAuth({ scopes: [SCOPE + '.readonly'] });
     this.writeAuth = options.writeAuth ?? new GoogleAuth({ scopes: [SCOPE] });
     this.connected = false;
@@ -128,10 +129,16 @@ class GoogleSheetsProvider {
   }
 
   async testRows() {
-    this.validateId(this.spreadsheetId, 'ALMOXA_SPREADSHEET_ID');
-    this.validateId(this.testSpreadsheetId, 'ALMOXA_TEST_SPREADSHEET_ID');
+    if (!this.testOnly) this.validateId(this.spreadsheetId, 'ALMOXA_SPREADSHEET_ID');
+    this.validateId(this.testSpreadsheetId, 'ALMOXA_TEST_SHEET_ID');
     if (this.testSpreadsheetId === this.spreadsheetId) {
       throw new GoogleSheetsProviderError('TEST_TARGET_UNSAFE', 'A planilha de teste deve ser separada da operacional.');
+    }
+    if (this.testOnly) {
+      const metadata = await this.metadata(this.testSpreadsheetId);
+      if (metadata.spreadsheetId !== this.testSpreadsheetId || metadata.properties?.title !== 'ALMOXA_TESTE_CORE') {
+        throw new GoogleSheetsProviderError('TEST_TARGET_UNSAFE', 'O destino deve ser ALMOXA_TESTE_CORE.');
+      }
     }
     const range = encodeURIComponent(`'${TEST_SHEET}'!A:D`);
     const { values = [] } = await this.request(this.testSpreadsheetId, `/values/${range}?valueRenderOption=UNFORMATTED_VALUE`);
@@ -179,7 +186,8 @@ class GoogleSheetsProvider {
 
     const metadata = await this.metadata(this.testSpreadsheetId);
     const sheet = metadata.sheets?.find(item => item.properties.title === TEST_SHEET);
-    if (!sheet || metadata.spreadsheetId === this.spreadsheetId) {
+    if (!sheet || metadata.spreadsheetId === this.spreadsheetId ||
+        (this.testOnly && (metadata.spreadsheetId !== this.testSpreadsheetId || metadata.properties?.title !== 'ALMOXA_TESTE_CORE'))) {
       throw new GoogleSheetsProviderError('TEST_TARGET_UNSAFE', 'Destino de teste inválido.');
     }
     const { sheetId } = sheet.properties;

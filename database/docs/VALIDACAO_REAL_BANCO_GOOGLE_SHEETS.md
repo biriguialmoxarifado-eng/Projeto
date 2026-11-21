@@ -9,7 +9,7 @@ O backend usa Application Default Credentials (ADC). Habilite a Google Sheets AP
 | Planilha operacional que o Apps Script resolve em `AP_Config_getSpreadsheet_` | `ALMOXA_SPREADSHEET_ID` recebe o valor de `SPREADSHEET_ID` nas propriedades do script. Se estiver vazio, use o ID da planilha vinculada ao script. | Leitor na planilha |
 | Planilha exclusiva de teste, com a aba `ALMOXA_TESTE_CONEXAO` | `ALMOXA_TEST_SPREADSHEET_ID` recebe o ID dessa outra planilha. Preencha A1:D1 com `ID`, `CRIADO_EM`, `ORIGEM` e `MENSAGEM`. | Editor na planilha de teste |
 
-`npm run test:google` consulta os metadados operacionais e lê A1 da primeira aba pela Sheets API. O valor da célula fica fora do log. `npm run test:google -- --write` exige que a leitura operacional passe, grava um UUID na planilha de teste, relê os quatro campos, repete a gravação com o mesmo UUID e confirma a existência de uma única linha. A rotina rejeita o ID da planilha operacional como destino de teste.
+O comando npm run test:google usa ALMOXA_TEST_SHEET_ID e exige que os metadados retornem o mesmo ID e o título ALMOXA_TESTE_CORE. Prepare a aba ALMOXA_TESTE_CONEXAO com ID, CRIADO_EM, ORIGEM e MENSAGEM em A1:D1. O comando verifica metadados e células, registra o tempo e omite os valores. Use npm run test:google -- --write para gravar um UUID de teste, reler e repetir a gravação para verificar duplicidade. ALMOXA_SPREADSHEET_ID permanece como configuração do diagnóstico do backend, fora desse teste.
 
 Um intervalo nomeado com ID determinístico serve como marcador. Sheets aplica o marcador e o append no mesmo lote atômico. Preserve os marcadores enquanto os registros de teste estiverem em uso.
 
@@ -38,10 +38,10 @@ As planilhas guardam dados tabulares. O código de Document Engine, OCR, patrim�
 
 ## Leitura paginada de uma aba
 
-Defina ALMOXA_TEST_READ_SHEET com o nome exato de uma aba autorizada ao executar npm run test:google. O teste administra somente leituras por padrão e valida a primeira linha de cabeçalhos sem imprimir dados. No backend, readSheetPage recebe o nome da aba, startRow (padrão 2) e limit (padrão 50, máximo 100). A paginação segue posições físicas até o fim da grade e pode retornar páginas vazias. nextRow é nulo ao terminar a grade. A enumeração não fornece uma visão transacional de abas editadas durante a leitura.
+No backend, readSheetPage recebe o nome da aba, startRow (padrão 2) e limit (padrão 50, máximo 100). A paginação segue posições físicas até o fim da grade e pode retornar páginas vazias. nextRow é nulo ao terminar a grade. A enumeração não fornece uma visão transacional de abas editadas durante a leitura.
 
 ## Conferência de acesso ao Google Drive
 
 Habilite a Google Drive API no projeto Google Cloud da identidade ADC. Conceda à identidade acesso de leitor a um recurso de teste autorizado e configure seu ID em ALMOXA_TEST_DRIVE_FILE_ID. O comando npm run test:google também confirma que o recurso está ativo, sem imprimir seus metadados. O adaptador usa o escopo drive.metadata.readonly e aceita recursos em unidades compartilhadas. O teste cobre metadados. Download, upload e integração dos motores de documentos e fotos continuam pendentes.
 
-Execute npm run test:google -- --drive para validar apenas o Drive, independentemente da configuração do Sheets. Use npm run test:google para ler Sheets e, se o ID do Drive estiver definido, conferir também o recurso do Drive. Use npm run test:google -- --write para validar a gravação em planilha separada. O comando informa configurações ausentes antes de acessar a API e omite valores de configuração e conteúdo das respostas em caso de falha.
+Execute npm run test:google -- --drive para validar apenas o Drive, independentemente da configuração do Sheets. Use npm run test:google para ler a planilha de teste e, se o ID do Drive estiver definido, conferir também o recurso do Drive. Use npm run test:google -- --write para validar a gravação em planilha separada. O comando informa configurações ausentes antes de acessar a API e omite valores de configuração e conteúdo das respostas em caso de falha.
