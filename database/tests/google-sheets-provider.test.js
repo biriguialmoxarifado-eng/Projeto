@@ -4,17 +4,15 @@
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 
-const {
-  GoogleSheetsProvider
-} = require('../adapters/google-sheets-provider');
+const { createRuntime } = require('../../backend/runtime');
 
 async function run() {
-  const provider = new GoogleSheetsProvider();
-
-  const connection = await provider.connect();
-
-  assert.equal(connection.connected, true);
+  const { diagnostics } = await createRuntime();
+  const connection = await diagnostics.probeRead();
   assert.ok(connection.spreadsheet);
+  console.log('Leitura operacional via Google Sheets API aprovada.');
+
+  if (!process.argv.includes('--write')) return;
 
   const id = randomUUID();
 
@@ -25,22 +23,18 @@ async function run() {
     message: 'Teste real de conexão Google Sheets'
   };
 
-  const written = await provider.writeTestRecord(record);
+  const written = await diagnostics.writeTestRecord(record);
 
   assert.equal(written.id, id);
 
-  const read = await provider.readTestRecord(id);
-
-  assert.equal(read.id, id);
-  assert.equal(read.origin, record.origin);
-  assert.equal(read.message, record.message);
+  assert.deepEqual(await diagnostics.readTestRecord(id), record);
+  assert.deepEqual(await diagnostics.writeTestRecord(record), written);
+  assert.deepEqual(await diagnostics.readTestRecord(id), record);
 
   console.log('VALIDAÇÃO REAL GOOGLE SHEETS APROVADA.');
-  console.log('Planilha:', connection.spreadsheet);
-  console.log('UUID confirmado:', id);
 }
 
 run().catch(error => {
-  console.error('VALIDAÇÃO GOOGLE SHEETS FALHOU:', error.message);
+  console.error('VALIDAÇÃO GOOGLE SHEETS FALHOU:', error.code || 'VALIDATION_FAILED', error.message);
   process.exitCode = 1;
 });

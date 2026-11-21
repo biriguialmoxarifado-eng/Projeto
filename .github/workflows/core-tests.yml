@@ -1,5 +1,8 @@
 name: ALMOXA PRO - Testes do Core
 
+permissions:
+  contents: read
+
 on:
   push:
     branches:
@@ -21,10 +24,22 @@ jobs:
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Instalar dependências
         run: npm ci
 
       - name: Executar testes do Core
         run: npm test
+
+      - name: Empacotar backend da V2
+        if: github.ref == 'refs/heads/arquitetura-v2'
+        run: |
+          git archive --format=tar.gz --output=almoxa-backend.tar.gz HEAD backend core database security tests package.json package-lock.json
+
+      - name: Disponibilizar artefato para implantação
+        if: github.ref == 'refs/heads/arquitetura-v2'
+        uses: actions/upload-artifact@v4
+        with:
+          name: almoxa-backend-${{ github.sha }}
+          path: almoxa-backend.tar.gz

@@ -1,0 +1,111 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { test } = require('node:test');
+const { createRuntime } = require('../../backend/runtime');
+const { createHandler } = require('../../backend/server');
+const { GoogleSheetsProvider } = require('../adapters/google-sheets-provider');
+
+function fixture({ testSpreadsheetId = 'test-only', loseResponse = false } = {}) {
+  const rows = [['ID', 'CRIADO_EM', 'ORIGEM', 'MENSAGEM']];
+  const markers = new Set();
+  const calls = [];
+  const auth = writable => ({
+    async getClient() {
+      return {
+        async request({ url, method, data }) {
+          const path = new URL(url).pathname;
+          calls.push({ path, method });
+          if (path.includes('/values/')) {
+            const values = path.includes('/production/') ? [['Título']] : structuredClone(rows);
+            return { data: { values } };
+          }
+          if (method === 'GET') {
+            const spreadsheetId = path.split('/').at(-1);
+            const title = spreadsheetId === 'production' ? "Itens d'obra" : 'ALMOXA_TESTE_CONEXAO';
+            return { data: {
+              spreadsheetId,
+              properties: { title: 'ALMOXA' },
+              sheets: [{ properties: { sheetId: 42, title } }]
+            } };
+          }
+          assert.equal(writable, true);
+          assert.equal(path, '/v4/spreadsheets/test-only:batchUpdate');
+          const [marker, append] = data.requests;
+          const { namedRangeId } = marker.addNamedRange.namedRange;
+          if (markers.has(namedRangeId)) throw { response: { status: 400 } };
+          markers.add(namedRangeId);
+          assert.equal(append.appendCells.sheetId, 42);
+          rows.push(append.appendCells.rows[0].values.map(value => value.userEnteredValue.stringValue));
+          if (loseResponse) throw new Error('response lost');
+          return { data: {} };
+        }
+      };
+    }
+  });
+  const provider = new GoogleSheetsProvider({
+    spreadsheetId: 'production',
+    testSpreadsheetId,
+    readAuth: auth(false),
+    writeAuth: auth(true)
+  });
+  return { provider, rows, calls };
+}
+
+const record = { id: '12345', createdAt: '2026-11-21T10:00:00.000Z', origin: 'V2', message: '=literal' };
+
+test('o Core verifica o banco e o diagnóstico lê valores operacionais sem gravação', async () => {
+  const { provider, calls } = fixture();
+  const { core, diagnostics } = await createRuntime(provider);
+  assert.equal((await core.health()).status, 'healthy');
+  assert.deepEqual((await diagnostics.probeRead()).sheets, ["Itens d'obra"]);
+  assert.ok(calls.some(({ path }) => decodeURIComponent(path).endsWith("/values/'Itens d''obra'!A1")));
+  assert.ok(calls.every(({ method }) => method === 'GET'));
+});
+
+test('gravações concorrentes e retentativas deixam um único registro de teste', async () => {
+  const { provider, rows } = fixture({ loseResponse: true });
+  const written = await Promise.all([provider.writeTestRecord(record), provider.writeTestRecord(record)]);
+  assert.deepEqual(written, [{ id: record.id, row: 2 }, { id: record.id, row: 2 }]);
+  assert.deepEqual(await provider.writeTestRecord(record), written[0]);
+  assert.deepEqual(await provider.readTestRecord(record.id), record);
+  assert.equal(rows.length, 2);
+  await assert.rejects(provider.writeTestRecord({ ...record, message: 'outro' }), { code: 'TEST_RECORD_CONFLICT' });
+});
+
+test('bloqueia planilha operacional como destino antes de fazer qualquer chamada', async () => {
+  const { provider, calls } = fixture({ testSpreadsheetId: 'production' });
+  await assert.rejects(provider.writeTestRecord(record), { code: 'TEST_TARGET_UNSAFE' });
+  assert.equal(calls.length, 0);
+});
+
+test('o erro do Google não expõe cabeçalhos ou detalhes da autenticação', async () => {
+  const provider = new GoogleSheetsProvider({
+    spreadsheetId: 'production',
+    readAuth: { async getClient() {
+      return { async request() {
+        throw { response: { status: 403, data: { sensitive: 'private' } } };
+      } };
+    } }
+  });
+  await assert.rejects(provider.probeRead(), {
+    code: 'GOOGLE_SHEETS_HTTP_403',
+    message: 'Google Sheets respondeu HTTP 403.'
+  });
+});
+
+test('a API informa a revisão e o estado sem expor operações de banco', async () => {
+  const { core } = await createRuntime(new GoogleSheetsProvider({ spreadsheetId: '' }));
+  const handler = createHandler(core, 'test-revision');
+  const response = {
+    writeHead(status) { this.status = status; return this; },
+    end(body) { this.body = body; }
+  };
+  await handler({ method: 'GET', url: '/health' }, response);
+  assert.equal(response.status, 503);
+  assert.deepEqual(JSON.parse(response.body), {
+    status: 'degraded', coreVersion: '2.1.0', revision: 'test-revision'
+  });
+  await handler({ method: 'POST', url: '/database' }, response);
+  assert.equal(response.status, 404);
+});

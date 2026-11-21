@@ -1,11 +1,13 @@
-
 {
   "name": "app",
   "version": "1.0.0",
   "description": "ALMOXA PRO V2",
   "main": "core/index.js",
   "scripts": {
-    "test": "node tests/core.test.js && node tests/session-manager.test.js && node tests/authorization-manager.test.js && node database/tests/database.test.js"
+    "test": "node tests/core.test.js && node tests/session-manager.test.js && node tests/authorization-manager.test.js && node database/tests/database.test.js && node --test database/tests/google-sheets-provider.local.test.js tests/sqlite-diagnostics.test.js",
+    "start": "node backend/server.js",
+    "test:google": "node database/tests/google-sheets-provider.test.js",
+    "backup:diagnostics": "node backend/backup-diagnostics.js"
   },
   "keywords": [],
   "author": "",
@@ -14,5 +16,8 @@
   "devDependencies": {
     "@google/clasp": "^3.4.1",
     "@types/google-apps-script": "^2.0.13"
+  },
+  "dependencies": {
+    "google-auth-library": "10.5.0"
   }
 }

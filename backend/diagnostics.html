@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ALMOXA PRO · Diagnóstico da V2</title>
+<main>
+  <h1>Diagnóstico da V2</h1>
+  <p>Use registros de teste para verificar o banco independente.</p>
+  <form id="diagnostics" autocomplete="off">
+    <p><label>Token de acesso <input name="token" type="password" required></label></p>
+    <p><label>ID do registro <input name="id" maxlength="80"></label></p>
+    <p><label>Origem <input name="origin" value="diagnostico" maxlength="80"></label></p>
+    <p><label>Mensagem <textarea name="message" maxlength="2000"></textarea></label></p>
+    <p><label>Versão para atualização <input name="version" type="number" min="1"></label></p>
+    <button name="operation" value="create">Criar</button>
+    <button name="operation" value="read">Consultar</button>
+    <button name="operation" value="update">Atualizar</button>
+    <button name="operation" value="list">Listar</button>
+  </form>
+  <pre id="result" aria-live="polite"></pre>
+</main>
+<script src="/diagnostics-client.js" defer></script>
+</html>
