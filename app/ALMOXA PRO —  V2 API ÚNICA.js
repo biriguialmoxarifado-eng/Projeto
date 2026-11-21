@@ -1,11 +1,11 @@
 
-  /* [DATABASE] Rota do banco central */
-  if (req.modulo === 'database' && typeof AP_DB_direto === 'function') {
-    return APIX_padronizar_(AP_DB_direto(JSON.stringify({
-      acao: req.acao,
-      payload: req.payload,
-      sessao: req.sessao,
-      token: req.sessao
-    })));
-  }
-
+/**
+ * ALMOXA PRO — V2 API ÚNICA
+ *
+ * Arquivo preservado para histórico.
+ * A porta oficial está em:
+ * ALMOXA PRO — API ÚNICA.js
+ *
+ * A rota DATABASE deve ficar dentro de APIX_rotear_().
+ * Não inserir funções ou retornos de rota soltos neste arquivo.
+ */
