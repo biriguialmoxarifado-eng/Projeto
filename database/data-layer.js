@@ -3,19 +3,22 @@
 
 /**
  * ALMOXA PRO V2
- * DATA LAYER — Camada central de dados
+ * DATA LAYER 2.1
  *
- * Responsabilidades:
- * - Centralizar operações de dados.
- * - Validar entradas.
- * - Padronizar resultados e erros.
- * - Controlar transações através do adaptador.
- * - Evitar dependência de um banco específico.
+ * Camada central de acesso aos dados.
+ * Responsável por:
+ * - Leitura e gravação
+ * - Atualização e exclusão
+ * - Consultas paginadas
+ * - Operações em lote
+ * - Transações
+ * - Padronização de respostas
+ * - Tratamento de falhas
  *
  * Não contém regras de negócio dos motores.
  */
 
-const DATA_LAYER_VERSION = '2.0.0';
+const DATA_LAYER_VERSION = '2.1.0';
 
 class DataLayerError extends Error {
   constructor(code, message, details = null) {
@@ -40,146 +43,246 @@ class DataLayer {
   }
 
   async connect() {
-    if (typeof this.adapter.connect !== 'function') {
-      throw new DataLayerError(
-        'CONNECT_NOT_IMPLEMENTED',
-        'O adaptador não implementa connect().'
-      );
-    }
-
-    await this.adapter.connect();
-    this.connected = true;
-
-    return this.success({
-      version: DATA_LAYER_VERSION,
-      connected: true
-    });
-  }
-
-  async disconnect() {
-    if (typeof this.adapter.disconnect === 'function') {
-      await this.adapter.disconnect();
-    }
-
-    this.connected = false;
-    return this.success({ connected: false });
-  }
-
-  async healthCheck() {
     try {
-      if (typeof this.adapter.healthCheck !== 'function') {
+      if (typeof this.adapter.connect !== 'function') {
         throw new DataLayerError(
-          'HEALTHCHECK_NOT_IMPLEMENTED',
-          'O adaptador não implementa healthCheck().'
+          'CONNECT_NOT_IMPLEMENTED',
+          'O adaptador não implementa connect().'
         );
       }
 
-      const result = await this.adapter.healthCheck();
+      const result = await this.adapter.connect();
+      this.connected = true;
 
       return this.success({
-        version: DATA_LAYER_VERSION,
-        database: result
+        connected: true,
+        result
       });
+
     } catch (error) {
-      return this.failure(error);
+      this.connected = false;
+      return this.failure(error, 'connect');
     }
   }
 
-  async findById(table, id) {
-    this.validateTable(table);
-    this.validateId(id);
+  async disconnect() {
+    try {
+      if (typeof this.adapter.disconnect === 'function') {
+        await this.adapter.disconnect();
+      }
 
-    return this.execute('findById', () =>
-      this.adapter.findById(table, id)
-    );
+      this.connected = false;
+
+      return this.success({
+        connected: false
+      });
+
+    } catch (error) {
+      return this.failure(error, 'disconnect');
+    }
   }
 
-  async findMany(table, filters = {}, options = {}) {
-    this.validateTable(table);
-
-    if (!filters || typeof filters !== 'object' || Array.isArray(filters)) {
-      throw new DataLayerError(
-        'INVALID_FILTERS',
-        'Os filtros devem ser um objeto.'
+  async healthCheck() {
+    if (typeof this.adapter.healthCheck !== 'function') {
+      return this.failure(
+        new DataLayerError(
+          'HEALTHCHECK_NOT_IMPLEMENTED',
+          'O adaptador não implementa healthCheck().'
+        ),
+        'healthCheck'
       );
     }
 
-    const page = Math.max(1, Number(options.page) || 1);
-    const limit = Math.min(
-      200,
-      Math.max(1, Number(options.limit) || 50)
+    return this.execute(
+      'healthCheck',
+      () => this.adapter.healthCheck()
     );
+  }
 
-    return this.execute('findMany', () =>
-      this.adapter.findMany(table, filters, {
-        ...options,
-        page,
-        limit
-      })
-    );
+  async findById(table, id) {
+    try {
+      this.validateTable(table);
+      this.validateId(id);
+
+      return await this.execute(
+        'findById',
+        () => this.adapter.findById(table, id)
+      );
+
+    } catch (error) {
+      return this.failure(error, 'findById');
+    }
+  }
+
+  async findMany(table, filters = {}, options = {}) {
+    try {
+      this.validateTable(table);
+
+      if (
+        !filters ||
+        typeof filters !== 'object' ||
+        Array.isArray(filters)
+      ) {
+        throw new DataLayerError(
+          'INVALID_FILTERS',
+          'Os filtros devem ser um objeto.'
+        );
+      }
+
+      const page = Math.max(
+        1,
+        Number(options.page) || 1
+      );
+
+      const limit = Math.min(
+        200,
+        Math.max(1, Number(options.limit) || 50)
+      );
+
+      return await this.execute(
+        'findMany',
+        () => this.adapter.findMany(
+          table,
+          filters,
+          { ...options, page, limit }
+        )
+      );
+
+    } catch (error) {
+      return this.failure(error, 'findMany');
+    }
   }
 
   async insert(table, data, options = {}) {
-    this.validateTable(table);
-    this.validateData(data);
+    try {
+      this.validateTable(table);
+      this.validateData(data);
 
-    return this.execute('insert', () =>
-      this.adapter.insert(table, data, options)
-    );
+      return await this.execute(
+        'insert',
+        () => this.adapter.insert(table, data, options)
+      );
+
+    } catch (error) {
+      return this.failure(error, 'insert');
+    }
+  }
+
+  async insertMany(table, records, options = {}) {
+    try {
+      this.validateTable(table);
+
+      if (
+        !Array.isArray(records) ||
+        records.length === 0
+      ) {
+        throw new DataLayerError(
+          'INVALID_BATCH',
+          'O lote precisa conter registros.'
+        );
+      }
+
+      records.forEach(record => this.validateData(record));
+
+      if (typeof this.adapter.insertMany !== 'function') {
+        throw new DataLayerError(
+          'BATCH_NOT_SUPPORTED',
+          'O adaptador não implementa insertMany().'
+        );
+      }
+
+      return await this.execute(
+        'insertMany',
+        () => this.adapter.insertMany(
+          table,
+          records,
+          options
+        )
+      );
+
+    } catch (error) {
+      return this.failure(error, 'insertMany');
+    }
   }
 
   async update(table, id, data, options = {}) {
-    this.validateTable(table);
-    this.validateId(id);
-    this.validateData(data);
+    try {
+      this.validateTable(table);
+      this.validateId(id);
+      this.validateData(data);
 
-    return this.execute('update', () =>
-      this.adapter.update(table, id, data, options)
-    );
+      return await this.execute(
+        'update',
+        () => this.adapter.update(
+          table,
+          id,
+          data,
+          options
+        )
+      );
+
+    } catch (error) {
+      return this.failure(error, 'update');
+    }
   }
 
   async delete(table, id, options = {}) {
-    this.validateTable(table);
-    this.validateId(id);
+    try {
+      this.validateTable(table);
+      this.validateId(id);
 
-    return this.execute('delete', () =>
-      this.adapter.delete(table, id, options)
-    );
+      return await this.execute(
+        'delete',
+        () => this.adapter.delete(
+          table,
+          id,
+          options
+        )
+      );
+
+    } catch (error) {
+      return this.failure(error, 'delete');
+    }
   }
 
   async transaction(callback) {
     if (typeof callback !== 'function') {
-      throw new DataLayerError(
-        'INVALID_TRANSACTION',
-        'A transação precisa receber uma função.'
+      return this.failure(
+        new DataLayerError(
+          'INVALID_TRANSACTION',
+          'A transação precisa receber uma função.'
+        ),
+        'transaction'
       );
     }
 
     if (typeof this.adapter.transaction !== 'function') {
-      throw new DataLayerError(
-        'TRANSACTION_NOT_IMPLEMENTED',
-        'O adaptador ainda não implementa transações.'
+      return this.failure(
+        new DataLayerError(
+          'TRANSACTION_NOT_IMPLEMENTED',
+          'O adaptador ainda não implementa transações.'
+        ),
+        'transaction'
       );
     }
 
-    try {
-      const result = await this.adapter.transaction(callback);
-      return this.success(result);
-    } catch (error) {
-      return this.failure(error);
-    }
+    return this.execute(
+      'transaction',
+      () => this.adapter.transaction(callback)
+    );
   }
 
   async execute(operation, callback) {
     try {
-      const result = await callback();
+      const data = await callback();
 
       return this.success({
         operation,
-        data: result
+        data
       });
+
     } catch (error) {
-      return this.failure(error);
+      return this.failure(error, operation);
     }
   }
 
@@ -229,9 +332,10 @@ class DataLayer {
     };
   }
 
-  failure(error) {
+  failure(error, operation = null) {
     return {
       success: false,
+      operation,
       error: {
         code: error.code || 'DATA_LAYER_ERROR',
         message: error.message || 'Erro na camada de dados.',
