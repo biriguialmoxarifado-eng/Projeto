@@ -63,6 +63,41 @@ test('o Core verifica o banco e o diagnóstico lê valores operacionais sem grav
   assert.ok(calls.every(({ method }) => method === 'GET'));
 });
 
+test('lê cabeçalhos e páginas pela posição física, com aspas no nome e limite da grade', async () => {
+  const calls = [];
+  const provider = new GoogleSheetsProvider({
+    spreadsheetId: 'production',
+    readAuth: { async getClient() {
+      return { async request({ url, method }) {
+        assert.equal(method, 'GET');
+        const path = decodeURIComponent(new URL(url).pathname);
+        calls.push(path);
+        if (!path.includes('/values/')) return { data: { sheets: [
+          { properties: { title: "Itens d'obra", gridProperties: { rowCount: 5 } } }
+        ] } };
+        const suffix = path.split('!').at(-1);
+        const values = { '1:1': [['ID', 'Saldo']], '2:3': [[10, 0], []], '4:5': [[11, 8]] };
+        assert.ok(path.includes("'Itens d''obra'!"));
+        return { data: { values: values[suffix] } };
+      } };
+    } }
+  });
+  assert.deepEqual(await provider.readSheetPage("Itens d'obra", { limit: 2 }), {
+    headers: ['ID', 'Saldo'], rows: [{ row: 2, values: [10, 0] }, { row: 3, values: [] }], nextRow: 4
+  });
+  assert.deepEqual(await provider.readSheetPage("Itens d'obra", { startRow: 4 }), {
+    headers: ['ID', 'Saldo'], rows: [{ row: 4, values: [11, 8] }], nextRow: null
+  });
+  assert.deepEqual(await provider.readSheetPage("Itens d'obra", { startRow: 6 }), {
+    headers: ['ID', 'Saldo'], rows: [], nextRow: null
+  });
+  const previousCalls = calls.length;
+  await assert.rejects(provider.readSheetPage("Itens d'obra", { limit: 101 }), { code: 'SHEET_PAGE_INVALID' });
+  assert.equal(calls.length, previousCalls);
+  await assert.rejects(provider.readSheetPage('Inexistente'), { code: 'SHEET_GRID_REQUIRED' });
+});
+
+
 test('gravações concorrentes e retentativas deixam um único registro de teste', async () => {
   const { provider, rows } = fixture({ loseResponse: true });
   const written = await Promise.all([provider.writeTestRecord(record), provider.writeTestRecord(record)]);

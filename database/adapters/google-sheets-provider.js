@@ -56,7 +56,7 @@ class GoogleSheetsProvider {
   }
 
   async metadata(id) {
-    const fields = encodeURIComponent('spreadsheetId,properties(title),sheets(properties(sheetId,title))');
+    const fields = encodeURIComponent('spreadsheetId,properties(title),sheets(properties(sheetId,title,gridProperties(rowCount)))');
     return this.request(id, `?fields=${fields}`);
   }
 
@@ -88,6 +88,39 @@ class GoogleSheetsProvider {
     await this.request(this.spreadsheetId, `/values/${range}`);
     return connection;
   }
+
+  async readSheetPage(sheet, { startRow = 2, limit = 50 } = {}) {
+    this.validateId(this.spreadsheetId, 'ALMOXA_SPREADSHEET_ID');
+    if (typeof sheet !== 'string' || !sheet.trim()) {
+      throw new GoogleSheetsProviderError('SHEET_REQUIRED', 'Informe o nome da aba.');
+    }
+    if (!Number.isSafeInteger(startRow) || startRow < 2 || startRow > 10000000 ||
+        !Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new GoogleSheetsProviderError('SHEET_PAGE_INVALID', 'Informe uma linha inicial válida e um limite entre 1 e 100.');
+    }
+
+    const metadata = await this.metadata(this.spreadsheetId);
+    const tab = metadata.sheets?.find(item => item.properties.title === sheet)?.properties;
+    const rowCount = tab?.gridProperties?.rowCount;
+    if (!Number.isInteger(rowCount) || rowCount < 1) {
+      throw new GoogleSheetsProviderError('SHEET_GRID_REQUIRED', 'A aba informada não está disponível como grade.');
+    }
+
+    const prefix = "'" + sheet.replaceAll("'", "''") + "'!";
+    const read = range => this.request(this.spreadsheetId,
+      '/values/' + encodeURIComponent(prefix + range) + '?valueRenderOption=UNFORMATTED_VALUE');
+    const endRow = Math.min(rowCount, startRow + limit - 1);
+    const [header, page] = await Promise.all([
+      read('1:1'),
+      startRow <= endRow ? read(startRow + ':' + endRow) : { values: [] }
+    ]);
+    return {
+      headers: header.values?.[0] ?? [],
+      rows: (page.values ?? []).map((values, index) => ({ row: startRow + index, values })),
+      nextRow: endRow < rowCount ? endRow + 1 : null
+    };
+  }
+
 
   async disconnect() {
     this.connected = false;

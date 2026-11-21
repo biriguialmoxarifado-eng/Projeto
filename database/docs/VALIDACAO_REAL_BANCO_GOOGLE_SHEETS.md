@@ -35,3 +35,7 @@ O catálogo `AP_ENTRADA_MODULOS` em `app/ALMOXA PRO — ENTRADA ÚNICA.js` tem 4
 Na V2, o caminho exercitado é comando de validação ou endpoint de saúde → runtime do Core → diagnóstico de banco e camada de dados → provedor Sheets. As telas operacionais continuam pelo caminho `ALMOXA_CONFIG.API_URL` ou `google.script.run` → API/ponte do Apps Script → motor legado → armazenamento. A troca desse caminho requer a validação da autenticação das telas e do contrato de cada motor.
 
 As planilhas guardam dados tabulares. O código de Document Engine, OCR, patrimônio e backup também usa `DriveApp` para arquivos e pastas, incluindo documentos, imagens e cópias de segurança. A validação de banco usa Sheets API. A migração dos fluxos que operam arquivos exigirá Drive API e os IDs dos recursos correspondentes. O legado ainda hospeda endpoints, sessão operacional, envio de e-mail e rotinas de backup. O inventário em código não confirma quais gatilhos auxiliares estão ativos no projeto implantado.
+
+## Leitura paginada de uma aba
+
+Defina ALMOXA_TEST_READ_SHEET com o nome exato de uma aba autorizada ao executar npm run test:google. O teste administra somente leituras por padrão e valida a primeira linha de cabeçalhos sem imprimir dados. No backend, readSheetPage recebe o nome da aba, startRow (padrão 2) e limit (padrão 50, máximo 100). A paginação segue posições físicas até o fim da grade e pode retornar páginas vazias. nextRow é nulo ao terminar a grade. A enumeração não fornece uma visão transacional de abas editadas durante a leitura.

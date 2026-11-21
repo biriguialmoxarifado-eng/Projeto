@@ -12,6 +12,14 @@ async function run() {
   assert.ok(connection.spreadsheet);
   console.log('Leitura operacional via Google Sheets API aprovada.');
 
+  const sheet = process.env.ALMOXA_TEST_READ_SHEET;
+  if (sheet) {
+    const result = await diagnostics.readSheetPage(sheet);
+    assert.ok(result.headers.length, 'A aba selecionada deve conter cabeçalhos na primeira linha.');
+    console.log('Leitura paginada da aba aprovada.');
+  }
+
+
   if (!process.argv.includes('--write')) return;
 
   const id = randomUUID();
