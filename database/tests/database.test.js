@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const {
   DatabaseAdapter,
   DatabaseAdapterError
-} = require('../database/adapters/database-adapter');
+} = require('../adapters/database-adapter');
 
 const {
   DataLayer,
