@@ -1,10 +1,11 @@
+
 {
   "name": "app",
   "version": "1.0.0",
   "description": "ALMOXA PRO V2",
-  "main": "index.js",
+  "main": "core/index.js",
   "scripts": {
-    "test": "node tests/core.test.js && node tests/session-manager.test.js && node tests/authorization-manager.test.js"
+    "test": "node tests/core.test.js && node tests/session-manager.test.js && node tests/authorization-manager.test.js && node database/tests/database.test.js"
   },
   "keywords": [],
   "author": "",
