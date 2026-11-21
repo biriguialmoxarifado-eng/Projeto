@@ -11,9 +11,8 @@ class GoogleSheetsProviderError extends Error {
 }
 
 class GoogleSheetsProvider {
-  constructor(options = {}) {
-    this.url = options.url || process.env.AL
-MOXA_API_URL || '';
+  constructor(options = {}) {  
+  this.url = options.url || process.env.ALMOXA_API_URL || '';
     this.key = options.key || process.env.ALMOXA_API_KEY || '';
     this.session = options.session || process.env.ALMOXA_SESSION || '';
     this.connected = false;
