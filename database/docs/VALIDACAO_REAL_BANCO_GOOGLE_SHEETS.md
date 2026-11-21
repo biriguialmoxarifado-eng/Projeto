@@ -43,3 +43,5 @@ Defina ALMOXA_TEST_READ_SHEET com o nome exato de uma aba autorizada ao executar
 ## Conferência de acesso ao Google Drive
 
 Habilite a Google Drive API no projeto Google Cloud da identidade ADC. Conceda à identidade acesso de leitor a um recurso de teste autorizado e configure seu ID em ALMOXA_TEST_DRIVE_FILE_ID. O comando npm run test:google também confirma que o recurso está ativo, sem imprimir seus metadados. O adaptador usa o escopo drive.metadata.readonly e aceita recursos em unidades compartilhadas. O teste cobre metadados. Download, upload e integração dos motores de documentos e fotos continuam pendentes.
+
+Execute npm run test:google -- --drive para validar apenas o Drive, independentemente da configuração do Sheets. Use npm run test:google para ler Sheets e, se o ID do Drive estiver definido, conferir também o recurso do Drive. Use npm run test:google -- --write para validar a gravação em planilha separada. O comando informa configurações ausentes antes de acessar a API e omite valores de configuração e conteúdo das respostas em caso de falha.
