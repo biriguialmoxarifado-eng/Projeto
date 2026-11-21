@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { createRuntime } = require('../../backend/runtime');
 const { createHandler } = require('../../backend/server');
+const { GoogleDriveProvider } = require('../adapters/google-drive-provider');
 const { GoogleSheetsProvider } = require('../adapters/google-sheets-provider');
 
 function fixture({ testSpreadsheetId = 'test-only', loseResponse = false } = {}) {
@@ -143,4 +144,37 @@ test('a API informa a revisão e o estado sem expor operações de banco', async
   });
   await handler({ method: 'POST', url: '/database' }, response);
   assert.equal(response.status, 404);
+});
+
+test('lê somente os metadados solicitados do Drive com suporte a unidades compartilhadas', async () => {
+  let requests = 0;
+  const provider = new GoogleDriveProvider({ auth: { async getClient() {
+    return { async request({ url, method, retry }) {
+      requests++;
+      const request = new URL(url);
+      assert.equal(request.origin + request.pathname, 'https://www.googleapis.com/drive/v3/files/file-1');
+      assert.equal(request.searchParams.get('supportsAllDrives'), 'true');
+      assert.equal(request.searchParams.get('fields'), 'id,mimeType,trashed,modifiedTime');
+      assert.equal(request.searchParams.has('alt'), false);
+      assert.equal(method, 'GET');
+      assert.equal(retry, false);
+      return { data: { id: 'file-1', mimeType: 'application/pdf', trashed: false, name: 'private' } };
+    } };
+  } } });
+  await assert.rejects(provider.readMetadata('a/../b'), { code: 'DRIVE_FILE_ID_INVALID' });
+  assert.equal(requests, 0);
+  assert.deepEqual(await provider.readMetadata('file-1'), {
+    id: 'file-1', mimeType: 'application/pdf', trashed: false, modifiedTime: null
+  });
+});
+
+test('oculta detalhes de autenticação e de erros do Drive', async () => {
+  const denied = new GoogleDriveProvider({ auth: { async getClient() {
+    return { async request() { throw { response: { status: 403, data: { private: true } } }; } };
+  } } });
+  await assert.rejects(denied.readMetadata('file-1'), {
+    code: 'GOOGLE_DRIVE_HTTP_403', message: 'Google Drive respondeu HTTP 403.'
+  });
+  const unavailable = new GoogleDriveProvider({ auth: { async getClient() { throw new Error('private'); } } });
+  await assert.rejects(unavailable.readMetadata('file-1'), { code: 'GOOGLE_AUTH_FAILED' });
 });

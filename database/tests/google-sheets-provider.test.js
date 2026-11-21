@@ -6,6 +6,8 @@ const { randomUUID } = require('node:crypto');
 
 const { createRuntime } = require('../../backend/runtime');
 
+const { GoogleDriveProvider } = require('../adapters/google-drive-provider');
+
 async function run() {
   const { diagnostics } = await createRuntime();
   const connection = await diagnostics.probeRead();
@@ -17,6 +19,14 @@ async function run() {
     const result = await diagnostics.readSheetPage(sheet);
     assert.ok(result.headers.length, 'A aba selecionada deve conter cabeçalhos na primeira linha.');
     console.log('Leitura paginada da aba aprovada.');
+  }
+
+
+  const driveFileId = process.env.ALMOXA_TEST_DRIVE_FILE_ID;
+  if (driveFileId) {
+    const file = await new GoogleDriveProvider().readMetadata(driveFileId);
+    assert.equal(file.trashed, false, 'O recurso autorizado deve estar ativo.');
+    console.log('Leitura de metadados do Google Drive aprovada.');
   }
 
 

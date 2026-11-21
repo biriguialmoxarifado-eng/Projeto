@@ -39,3 +39,7 @@ As planilhas guardam dados tabulares. O código de Document Engine, OCR, patrim�
 ## Leitura paginada de uma aba
 
 Defina ALMOXA_TEST_READ_SHEET com o nome exato de uma aba autorizada ao executar npm run test:google. O teste administra somente leituras por padrão e valida a primeira linha de cabeçalhos sem imprimir dados. No backend, readSheetPage recebe o nome da aba, startRow (padrão 2) e limit (padrão 50, máximo 100). A paginação segue posições físicas até o fim da grade e pode retornar páginas vazias. nextRow é nulo ao terminar a grade. A enumeração não fornece uma visão transacional de abas editadas durante a leitura.
+
+## Conferência de acesso ao Google Drive
+
+Habilite a Google Drive API no projeto Google Cloud da identidade ADC. Conceda à identidade acesso de leitor a um recurso de teste autorizado e configure seu ID em ALMOXA_TEST_DRIVE_FILE_ID. O comando npm run test:google também confirma que o recurso está ativo, sem imprimir seus metadados. O adaptador usa o escopo drive.metadata.readonly e aceita recursos em unidades compartilhadas. O teste cobre metadados. Download, upload e integração dos motores de documentos e fotos continuam pendentes.
