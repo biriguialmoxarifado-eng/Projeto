@@ -16,9 +16,9 @@ function createStockEngine({ core, store, receipts, coordinate = work => work(),
     return String(session.userId);
   }
 
-  async function receivedByLocation(sku) {
+  async function receivedByLocation(sku, events) {
     const balances = new Map();
-    for (const receipt of await receipts.events()) {
+    for (const receipt of events ?? await receipts.events()) {
       if (receipt.action !== 'receber' || !valid(receipt.local)) continue;
       for (const item of receipt.movimentos ?? []) {
         if (item.sku !== sku) continue;
@@ -132,6 +132,26 @@ function createStockEngine({ core, store, receipts, coordinate = work => work(),
           (sku === undefined || movement.sku === sku) && (!somenteSaidas || movement.qtd < 0));
         filtered.sort((a, b) => Date.parse(b.data) - Date.parse(a.data));
         return { ok: true, dados: filtered.slice(0, limite) };
+      });
+    },
+    async saldos(token, skus, local) {
+      await authorize(token, 'read');
+      if (!valid(local) || !Array.isArray(skus) || skus.some(sku => !valid(sku))) throw fail('ESTOQUE_OPERACAO_INVALIDA');
+      return coordinate(async () => {
+        const [moves, received] = await Promise.all([store.events(), receipts.events()]);
+        const latest = new Map();
+        for (const entry of moves) {
+          if (entry.version > (latest.get(entry.id)?.version ?? 0)) latest.set(entry.id, entry);
+        }
+        const result = new Map();
+        for (const sku of new Set(skus)) {
+          const snapshot = latest.get(sku)?.note.locais ?? {};
+          const balance = Object.hasOwn(snapshot, local) ? snapshot[local] : newBalance();
+          const saldo = balance.saldo + ((await receivedByLocation(sku, received)).get(local) ?? 0);
+          if (!Number.isSafeInteger(saldo) || saldo < balance.reservado) throw fail('ESTOQUE_SALDO_INVALIDO');
+          result.set(sku, { saldo, reservado: balance.reservado });
+        }
+        return result;
       });
     },
     async saldo(token, sku, local) {

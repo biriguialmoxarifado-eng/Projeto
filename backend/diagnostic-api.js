@@ -119,4 +119,4 @@ function createDiagnosticApi({ core, database, log = console }) {
   };
 }
 
-module.exports = { createDiagnosticApi, reply };
+module.exports = { createDiagnosticApi, reply, readBody };

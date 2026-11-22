@@ -67,6 +67,7 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
   let requestEngine;
   let administrationEngine;
   let inventoryEngine;
+  let shopEngine;
   return {
     core, diagnostics: storage, database,
     getInvoiceEngine() {
@@ -102,6 +103,13 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
         core, catalog, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'compras')
       });
       return purchaseEngine;
+    },
+    getShopEngine() {
+      const catalog = this.getCatalogEngine();
+      const stock = this.getStockEngine();
+      const { createShopEngine } = require('../core/motors/shop');
+      shopEngine ??= createShopEngine({ core, catalog, stock });
+      return shopEngine;
     },
     getInventoryEngine() {
       const stock = this.getStockEngine();

@@ -423,3 +423,54 @@ test('inventário registra contagem offline uma vez, aponta divergência e não 
   await assert.rejects(inv(token, 'registrarContagem', { ...input, operacaoId: 'offline-2', version: 3 }),
     { code: 'ATIVIDADE_CONFIRMADA' });
 });
+
+test('lojinha filtra categorias ocultas e busca, e lê saldo por local sem gravar', async () => {
+  const { provider } = fakeGoogle();
+  const runtime = await createRuntime(provider, { invoiceTestStorage: provider, credential });
+  const token = credential.token, catalog = runtime.getCatalogEngine(), stock = runtime.getStockEngine();
+  await catalog.salvar(token, 'categorias', {
+    operation: 'hidden-category', version: 0, data: { nome: 'Oculta', visivel: false }
+  });
+  for (const [sku, categoria] of [['SYN-VISIBLE', 'Visível'], ['SYN-HIDDEN', 'Oculta']]) {
+    await catalog.salvar(token, 'itens', {
+      operation: 'shop-' + sku, version: 0, data: { sku, categoria, descricao: sku, codigoBarras: '01234' }
+    });
+    await stock.movimentar(token, { sku, action: 'entrada', local: 'A', quantidade: 4, version: 0, operation: 'stock-' + sku });
+  }
+  const shop = runtime.getShopEngine();
+  const filtered = await shop(token, 'catalogo', { local: 'A', busca: '01234' });
+  assert.deepEqual(filtered.dados.map(row => row.sku), ['SYN-VISIBLE']);
+  assert.equal(filtered.dados[0].estoque, 4);
+  assert.equal((await shop(token, 'item', { id: 'SYN-VISIBLE', local: 'B' })).dados.estoque, 0);
+  assert.equal((await shop(token, 'catalogo')).codigo, 'LOCAL_OBRIGATORIO');
+  await assert.rejects(shop('wrong', 'catalogo', { local: 'A' }), { code: 'SESSION_INVALID' });
+});
+
+test('homologação HTTP exige credencial, atende leitura e bloqueia mutação', async () => {
+  const { createServer } = require('node:http');
+  const { once } = require('node:events');
+  const { createPreview } = require('../backend/preview-api');
+  const { createHandler } = require('../backend/server');
+  const { provider } = fakeGoogle();
+  const runtime = await createRuntime(provider, { invoiceTestStorage: provider, credential });
+  const handler = createHandler(runtime.core, 'test', undefined, createPreview(runtime, __dirname));
+  const server = createServer(handler).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const url = 'http://127.0.0.1:' + server.address().port + '/api/v2/preview/dispatch';
+    const call = (acao, token) => fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+      body: JSON.stringify({ modulo: 'nf', acao })
+    });
+    const denied = await call('listar');
+    assert.equal(denied.status, 401);
+    assert.equal((await denied.json()).codigo, 'SEM_SESSAO');
+    const allowed = await call('listar', credential.token);
+    assert.deepEqual(await allowed.json(), { ok: true, dados: [] });
+    const write = await call('salvar', credential.token);
+    assert.equal(write.status, 400);
+    assert.equal((await write.json()).codigo, 'OPERACAO_FORA_DA_HOMOLOGACAO');
+  } finally {
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});

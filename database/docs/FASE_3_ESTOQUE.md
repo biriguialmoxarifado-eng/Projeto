@@ -25,7 +25,7 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | itens | Integrado em teste. Cadastro explícito por SKU e consultas. Geração automática, imagem, exclusão e paridade operacional pendentes. |
 | fornecedores | Integrado em teste. Cadastro por CNPJ e consultas. Contrato operacional de escrita e paridade pendentes. |
 | config | Parcial, integrado em teste. Chaves comuns leem e gravam; configuração especial SKU e precedência operacional pendentes. |
-| lojinha | Pendente. Executor legado preservado. |
+| lojinha | Parcial, integrado em homologação local. Catálogo, busca, detalhe e saldo por local. Fotos, status e fluxo de pedidos pendentes. |
 | epi | Pendente. Executor legado preservado. |
 | ferramentas | Pendente. Executor legado preservado. |
 | ocorrencias | Pendente. Executor legado preservado. |
@@ -104,3 +104,11 @@ A partir de a93a254, o runtime isolado carrega Inventário sob demanda. AP_Modul
 npm test passou, incluindo reenvio por duas instâncias, recusa de fechamento antecipado e bloqueio de contagem após confirmação. No Sheets real, INV-0001 recebeu uma única contagem apesar do reenvio, confirmou divergência -2 e preservou o saldo 5. Outro runtime releu o estado. Tempo total 13871 ms em INVENTARIO_CORE_TESTE e ESTOQUE_CORE_TESTE com dados sintéticos.
 
 Contagem após o lote: 16 parciais, 18 pendentes e nenhum motor homologado. Próximo motor: Lojinha, em AP_Modulo_lojinha no arquivo MÓDULOS DE OPERAÇÃO.js. Reaproveitar catálogo, saldo por local e solicitação com reserva pendente. Para Retiradas, mapear AP_Modulo_retiradas e AP_Modulo_reservas retirar, incluindo aprovação, entrega parcial e coordenação entre reserva e baixa por SKU. Manter rotas operacionais legadas.
+
+## Ponte local dos HTMLs e Lojinha
+
+Partida em 1b05439. Desktop usa index.html e API.call, enquanto Campo usa ALMOXA_CAMPO.html.html e api. Com ALMOXA_PREVIEW_SHEET_ID, ALMOXA_GOOGLE_AUTH=oauth e as variáveis ALMOXA_DIAGNOSTICS_TOKEN e ALMOXA_DIAGNOSTICS_ACTOR, inicie npm start em 127.0.0.1. Abra /homologacao/desktop ou /homologacao/campo na mesma origem. Informe somente a credencial de teste no painel. O modo consulta exclusivamente a planilha ALMOXA_TESTE_CORE. As rotas de produção continuam seguindo o código legado quando o script de homologação não é carregado.
+
+A ponte usa HTTP loopback de mesma origem, sem CORS, credencial em memória, timeout, reaproveitamento de leituras simultâneas e resposta clara para operações bloqueadas. Service workers estão desabilitados nas páginas do ensaio. Para a Lojinha, o contrato isolado exige local explícito. O motor aplica os filtros de AP_Modulo_lojinha e consulta saldos em lote, carregando movimentos e recebimentos uma vez. O ensaio Edge headless abriu os dois HTMLs reais, consultou seis NFs sintéticas e dois itens via Core e Sheets, bloqueou nf.salvar e recusou leitura após encerrar a sessão. npm test passou com os testes de Lojinha e HTTP.
+
+A configuração de branch e diretório da publicação do GitHub Pages ainda precisa ser confirmada no painel do repositório. O backend testado foi local e não houve publicação. Antes da Fase 4, faltam login operacional, Android WebView, HTTPS e CORS do ambiente compartilhado, escrita autorizada dos clientes em homologação, arquivos do Drive e paridade dos motores. A matriz registra 17 parciais e 17 pendentes. Próximo motor: Retiradas, pela aprovação, entrega parcial e baixa única em AP_Modulo_reservas e AP_Modulo_retiradas. Para retirar a ponte, encerre o processo de homologação ou inicie sem ALMOXA_PREVIEW_SHEET_ID.

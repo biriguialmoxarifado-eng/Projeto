@@ -844,6 +844,7 @@ function recusouAChave(r){
 }
 
 function api(modulo, acao, payload){
+  if (window.AlmoxaCorePreview) return window.AlmoxaCorePreview.call(modulo, acao, payload);
   if(!CAMPO.url) return Promise.resolve({ok:false,codigo:"SEM_ENDERECO",mensagem:"O endereço do servidor não foi configurado."});
   function montar(comChave){
     return {

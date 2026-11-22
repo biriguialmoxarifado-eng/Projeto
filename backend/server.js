@@ -7,7 +7,7 @@ const { createDiagnosticApi, reply } = require('./diagnostic-api');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 
-function createHandler(core, revision, database) {
+function createHandler(core, revision, database, preview) {
   const api = database && createDiagnosticApi({ core, database });
   const page = api && readFileSync(join(__dirname, 'diagnostics.html'));
   const client = api && readFileSync(join(__dirname, 'diagnostics-client.js'));
@@ -24,6 +24,7 @@ function createHandler(core, revision, database) {
       res.end(html ? page : client);
       return;
     }
+    if (preview && await preview(req, res)) return;
     if (api && await api(req, res)) return;
     if (req.method !== 'GET' || req.url !== '/health') {
       res.writeHead(404).end();
@@ -55,10 +56,22 @@ async function main() {
     const { SqliteDiagnosticsProvider } = require('../database/adapters/sqlite-diagnostics-provider');
     sqlite = new SqliteDiagnosticsProvider(sqlitePath);
   }
-  const { core, database } = await createRuntime(sqlite, { sqlite: Boolean(sqlite), credential: { token, actor, role } });
+  const previewId = process.env.ALMOXA_PREVIEW_SHEET_ID;
+  let invoiceTestStorage;
+  if (previewId) {
+    if ((process.env.HOST ?? '127.0.0.1') !== '127.0.0.1' || !token || token.length < 32 ||
+        !/^\S+$/.test(token) || !actor?.trim() || !['reader', 'operator'].includes(role)) {
+      throw new Error('Homologação exige loopback e credencial local.');
+    }
+    const { GoogleSheetsProvider } = require('../database/adapters/google-sheets-provider');
+    invoiceTestStorage = new GoogleSheetsProvider({ testSpreadsheetId: previewId, testOnly: true });
+  }
+  const runtime = await createRuntime(sqlite, { sqlite: Boolean(sqlite), credential: { token, actor, role }, invoiceTestStorage });
+  const { core, database } = runtime;
+  const preview = invoiceTestStorage && require('./preview-api').createPreview(runtime, join(__dirname, '..'));
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? '127.0.0.1';
-  const handler = createHandler(core, process.env.ALMOXA_REVISION || null, sqlite && database);
+  const handler = createHandler(core, process.env.ALMOXA_REVISION || null, sqlite && database, preview);
   const server = createServer({ requestTimeout: 15000, headersTimeout: 10000 }, (req, res) => {
     if (req.url.startsWith('/api/v2/diagnostics')) {
       const start = performance.now();

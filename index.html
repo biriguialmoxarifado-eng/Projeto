@@ -2036,6 +2036,7 @@ return API.disponivelCore() || PONTE.pronta();
 },
 PONTE: PONTE,
 call: function(modulo, acao, payload, opcoes) {
+if (window.AlmoxaCorePreview) return window.AlmoxaCorePreview.call(modulo, acao, payload);
 var req = {
 modulo: modulo,
 acao: acao,
