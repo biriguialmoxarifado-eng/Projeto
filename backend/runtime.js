@@ -10,8 +10,8 @@ const { createHash, timingSafeEqual } = require('node:crypto');
 
 function diagnosticSecurity(credential, invoices) {
   const authorizationProvider = new AuthorizationManager();
-  const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read'] : [];
-  const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write'] : [];
+  const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read', 'catalog:read'] : [];
+  const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write', 'catalog:write'] : [];
   authorizationProvider.registerRole('reader', ['diagnostics:read', ...invoiceRead]);
   authorizationProvider.registerRole('operator', ['diagnostics:read', 'diagnostics:write', ...invoiceRead, ...invoiceWrite]);
   const digest = value => createHash('sha256').update(value).digest();
@@ -62,6 +62,7 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
   let receivingEngine;
   let invoiceReadAdapter;
   let stockEngine;
+  let catalogEngine;
   return {
     core, diagnostics: storage, database,
     getInvoiceEngine() {
@@ -75,6 +76,18 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
       const { createInvoiceReadAdapter } = require('../core/motors/invoice-read-adapter');
       invoiceReadAdapter ??= createInvoiceReadAdapter(engine);
       return invoiceReadAdapter;
+    },
+    getCatalogEngine() {
+      if (!invoiceTestStorage) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'CATALOGO_TESTE_DESATIVADO' });
+      const { TestInvoiceStore } = require('../core/motors/invoices');
+      const { createCatalogEngine } = require('../core/motors/catalog');
+      catalogEngine ??= createCatalogEngine({
+        core, coordinate, stores: {
+          itens: new TestInvoiceStore(invoiceTestStorage, 'itens'),
+          fornecedores: new TestInvoiceStore(invoiceTestStorage, 'fornecedores')
+        }
+      });
+      return catalogEngine;
     },
     getStockEngine() {
       if (!invoiceTestStorage) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'ESTOQUE_TESTE_DESATIVADO' });

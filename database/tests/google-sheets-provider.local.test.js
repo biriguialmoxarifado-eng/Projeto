@@ -222,3 +222,22 @@ test('callback OAuth local só aceita o caminho e o estado da autorização ativ
   assert.deepEqual(callbackResult('/oauth/callback?state=expected&code=x', 'expected'), { code: 'x', denied: false });
   assert.deepEqual(callbackResult('/oauth/callback?state=expected&error=access_denied', 'expected'), { code: null, denied: true });
 });
+
+test('Sheets respeita Retry-After em leitura e não repete uma gravação limitada', async () => {
+  const waits = [];
+  let reads = 0;
+  let writes = 0;
+  const auth = { async getClient() {
+    return { async request({ method }) {
+      if (method === 'GET' && ++reads > 1) return { data: { ok: true } };
+      if (method === 'POST') writes++;
+      throw { response: { status: 429, headers: new Headers({ 'retry-after': '2' }) } };
+    } };
+  } };
+  const provider = new GoogleSheetsProvider({ readAuth: auth, wait: async ms => { waits.push(ms); } });
+  assert.deepEqual(await provider.request('test', ''), { ok: true });
+  assert.deepEqual(waits, [2000]);
+  await assert.rejects(provider.request('test', ':batchUpdate', { data: {} }), { code: 'GOOGLE_SHEETS_HTTP_429' });
+  assert.equal(writes, 1);
+  assert.deepEqual(waits, [2000]);
+});

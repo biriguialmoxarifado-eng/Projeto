@@ -1,6 +1,7 @@
 'use strict';
 
 const { createHash } = require('node:crypto');
+const { setTimeout: delay } = require('node:timers/promises');
 const { GoogleAuth } = require('google-auth-library');
 const { desktopGoogleAuth } = require('./google-desktop-auth');
 
@@ -21,6 +22,7 @@ class GoogleSheetsProvider {
     this.spreadsheetId = options.spreadsheetId ?? process.env.ALMOXA_SPREADSHEET_ID;
     this.testSpreadsheetId = options.testSpreadsheetId ?? process.env.ALMOXA_TEST_SPREADSHEET_ID;
     this.testOnly = options.testOnly === true;
+    this.wait = options.wait ?? delay;
     const localAuth = desktopGoogleAuth();
     this.readAuth = options.readAuth ?? localAuth ?? new GoogleAuth({ scopes: [SCOPE + '.readonly'] });
     this.writeAuth = options.writeAuth ?? localAuth ?? new GoogleAuth({ scopes: [SCOPE] });
@@ -40,21 +42,31 @@ class GoogleSheetsProvider {
     } catch {
       throw new GoogleSheetsProviderError('GOOGLE_AUTH_FAILED', 'Configure a autenticação Google no backend.');
     }
-    try {
-      const result = await client.request({
-        url: `https://sheets.googleapis.com/v4/spreadsheets/${id}${path}`,
-        method: data ? 'POST' : 'GET',
-        data,
-        timeout: 10000,
-        retry: false
-      });
-      return result.data;
-    } catch (error) {
-      const status = error.response?.status;
-      throw new GoogleSheetsProviderError(
-        Number.isInteger(status) ? `GOOGLE_SHEETS_HTTP_${status}` : 'GOOGLE_SHEETS_UNAVAILABLE',
-        Number.isInteger(status) ? `Google Sheets respondeu HTTP ${status}.` : 'Falha na comunicação com Google Sheets.'
-      );
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const result = await client.request({
+          url: `https://sheets.googleapis.com/v4/spreadsheets/${id}${path}`,
+          method: data ? 'POST' : 'GET',
+          data,
+          timeout: 10000,
+          retry: false
+        });
+        return result.data;
+      } catch (error) {
+        const status = error.response?.status;
+        const header = error.response?.headers?.get?.('retry-after');
+        const seconds = /^\d+$/.test(header ?? '') ? Number(header) * 1000 : NaN;
+        const retryAfter = Number.isFinite(seconds) ? seconds : Date.parse(header) - Date.now();
+        const backoff = Math.max(1000 * 2 ** attempt + Math.floor(Math.random() * 250), retryAfter || 0);
+        if (!data && attempt < 2 && [429, 503].includes(status) && backoff <= 10000) {
+          await this.wait(backoff);
+          continue;
+        }
+        throw new GoogleSheetsProviderError(
+          Number.isInteger(status) ? `GOOGLE_SHEETS_HTTP_${status}` : 'GOOGLE_SHEETS_UNAVAILABLE',
+          Number.isInteger(status) ? `Google Sheets respondeu HTTP ${status}.` : 'Falha na comunicação com Google Sheets.'
+        );
+      }
     }
   }
 

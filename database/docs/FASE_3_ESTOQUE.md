@@ -22,8 +22,8 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | permissoes | Parcial. Escopos de teste aprovados, alçadas operacionais pendentes. |
 | auditoria | Parcial. Autoria de eventos testada, trilha operacional pendente. |
 | usuarios | Pendente. Executor legado preservado. |
-| itens | Pendente. Executor legado preservado. |
-| fornecedores | Pendente. Executor legado preservado. |
+| itens | Integrado em teste. Cadastro explícito por SKU e consultas. Geração automática, imagem, exclusão e paridade operacional pendentes. |
+| fornecedores | Integrado em teste. Cadastro por CNPJ e consultas. Contrato operacional de escrita e paridade pendentes. |
 | config | Pendente. Executor legado preservado. |
 | lojinha | Pendente. Executor legado preservado. |
 | epi | Pendente. Executor legado preservado. |
@@ -62,3 +62,11 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | patrimonio | Pendente de migração operacional. |
 
 Para execução local, use Node 24 e npm test. Os motores são carregados pelo runtime com invoiceTestStorage explícito. O retorno consiste em remover essa configuração do ensaio ou reverter o commit na branch de desenvolvimento. Preserve as abas de teste como evidência. Nenhum executor novo foi ativado em produção.
+
+## Catálogo e cotas do Sheets
+
+O runtime carrega o catálogo quando solicitado no modo isolado. Os nomes originais itens e fornecedores foram preservados. Os cadastros gravam versões por SKU e CNPJ em ITENS_CORE_TESTE e FORNECEDORES_CORE_TESTE. Usuários de teste precisam de catalog:read ou catalog:write. Listar e obter itens e listar e consultar fornecedor por CNPJ têm adaptador interno com envelope legado. Os clientes publicados e seus endpoints continuam intactos.
+
+npm test passou. O ensaio Google real com dados sintéticos gravou, repetiu e atualizou um item até a versão 2, criou um fornecedor na versão 1 e releu ambos por outro runtime. Tempo total 8972 ms. O adaptador repete até duas leituras após HTTP 429 ou 503, com atraso exponencial e aleatoriedade. Respeita Retry-After dentro do limite de espera de dez segundos. Uma escrita limitada continua retornando erro para reconciliação pelo identificador da operação. O teste de cota foi simulado. O limite do Google continua aplicável.
+
+As gravações do catálogo usam o mesmo lock local do estoque e do recebimento. Coordenação distribuída e equivalência ponta a ponta no navegador e Android WebView seguem pendentes. O armazenamento operacional e a publicação continuam no fluxo legado.

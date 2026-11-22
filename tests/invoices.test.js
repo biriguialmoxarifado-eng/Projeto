@@ -12,6 +12,8 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
   const rows = [['EVENTO_JSON']];
   const receivingRows = [['EVENTO_JSON']];
   const stockRows = [['EVENTO_JSON']];
+  const itemRows = [['EVENTO_JSON']];
+  const supplierRows = [['EVENTO_JSON']];
   const markers = new Set();
   let loseResponse = true;
   let writes = 0;
@@ -23,17 +25,17 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
         if (new URL(url).searchParams.has('fields') && new URL(url).searchParams.get('fields').startsWith('namedRanges')) {
           return { data: { namedRanges: [...markers].map(namedRangeId => ({ namedRangeId })) } };
         }
-        if (path.includes('/values/')) return { data: { values: structuredClone(path.includes('RECEBIMENTO_CORE_TESTE') ? receivingRows : path.includes('ESTOQUE_CORE_TESTE') ? stockRows : rows) } };
+        if (path.includes('/values/')) return { data: { values: structuredClone(path.includes('RECEBIMENTO_CORE_TESTE') ? receivingRows : path.includes('ESTOQUE_CORE_TESTE') ? stockRows : path.includes('ITENS_CORE_TESTE') ? itemRows : path.includes('FORNECEDORES_CORE_TESTE') ? supplierRows : rows) } };
         return { data: { spreadsheetId: 'test-only', properties: { title },
-          sheets: [{ properties: { title: 'NF_CORE_TESTE', sheetId: 7 } }, { properties: { title: 'RECEBIMENTO_CORE_TESTE', sheetId: 8 } }, { properties: { title: 'ESTOQUE_CORE_TESTE', sheetId: 9 } }] } };
+          sheets: [{ properties: { title: 'NF_CORE_TESTE', sheetId: 7 } }, { properties: { title: 'RECEBIMENTO_CORE_TESTE', sheetId: 8 } }, { properties: { title: 'ESTOQUE_CORE_TESTE', sheetId: 9 } }, { properties: { title: 'ITENS_CORE_TESTE', sheetId: 10 } }, { properties: { title: 'FORNECEDORES_CORE_TESTE', sheetId: 11 } }] } };
       }
       writes++;
       const append = data.requests.at(-1);
       const names = data.requests.slice(0, -1).map(request => request.addNamedRange.namedRange.namedRangeId);
       if (names.some(name => markers.has(name))) throw { response: { status: 400 } };
       names.forEach(name => markers.add(name));
-      assert.ok([7, 8, 9].includes(append.appendCells.sheetId));
-      const targetRows = append.appendCells.sheetId === 8 ? receivingRows : append.appendCells.sheetId === 9 ? stockRows : rows;
+      assert.ok([7, 8, 9, 10, 11].includes(append.appendCells.sheetId));
+      const targetRows = append.appendCells.sheetId === 8 ? receivingRows : append.appendCells.sheetId === 9 ? stockRows : append.appendCells.sheetId === 10 ? itemRows : append.appendCells.sheetId === 11 ? supplierRows : rows;
       targetRows.push([append.appendCells.rows[0].values[0].userEnteredValue.stringValue]);
       if (loseResponse) {
         loseResponse = false;
@@ -210,4 +212,33 @@ test('estoque isolado protege reservas, transfere em um evento e estorna uma ún
     { code: 'ESTOQUE_ESTORNO_INVALIDO' });
   assert.deepEqual(await stock.saldo(token, 'SYNTHETIC', 'A'), { saldo: 8, reservado: 1, disponivel: 7, version: 7 });
   assert.deepEqual(await stock.saldo(token, 'SYNTHETIC', 'B'), { saldo: 0, reservado: 0, disponivel: 0, version: 7 });
+});
+
+test('itens e fornecedores passam pelo Core, deduplicam e preservam a versão e a identidade', async () => {
+  const { provider } = fakeGoogle();
+  const make = () => createRuntime(provider, { invoiceTestStorage: provider, credential });
+  const engine = (await make()).getCatalogEngine();
+  const token = credential.token;
+  const item = { operation: 'item-create', version: 0, data: { sku: 'SYN-123', descricao: 'Sintético' } };
+  const first = await engine.salvar(token, 'itens', item);
+  assert.equal(first.version, 1);
+  assert.deepEqual(await engine.salvar(token, 'itens', item), first);
+  await assert.rejects(engine.salvar(token, 'itens', { ...item, operation: 'duplicate' }),
+    { code: 'CADASTRO_CONFLITO_VERSAO' });
+  const second = await engine.salvar(token, 'itens', {
+    operation: 'item-edit', version: 1, data: { ...item.data, unidade: 'un' }
+  });
+  assert.deepEqual(await (await make()).getCatalogEngine().obter(token, 'itens', 'SYN-123'), second);
+  const supplier = await engine.salvar(token, 'fornecedores', {
+    operation: 'supplier-create', version: 0, data: { cnpj: '00.000.000/0000-00', razaoSocial: 'Teste' }
+  });
+  assert.equal(supplier.note.cnpj, '00000000000000');
+  assert.deepEqual(await engine.listar(token, 'fornecedores'), [supplier]);
+  assert.deepEqual(await engine.consultarLegado(token, 'itens', 'listar'), { ok: true, dados: [second.note] });
+  assert.deepEqual(await engine.consultarLegado(token, 'itens', 'obter', { sku: 'SYN-123' }),
+    { ok: true, dados: second.note });
+  assert.deepEqual(await engine.consultarLegado(token, 'fornecedores', 'porCnpj', { cnpj: supplier.note.cnpj }),
+    { ok: true, dados: supplier.note, cadastrado: true });
+  assert.equal((await engine.consultarLegado(token, 'fornecedores', 'porCnpj', { cnpj: '11111111111111' })).cadastrado, false);
+  await assert.rejects(engine.salvar('wrong', 'itens', item), { code: 'SESSION_INVALID' });
 });
