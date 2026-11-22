@@ -11,6 +11,7 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
     ['nf', ['listar', 'obter', 'itens', ...(allowWrite ? ['salvar'] : [])]],
     ['nfed', allowWrite ? ['atualizar'] : []],
     ['compras', ['listar', 'precompras', 'pedidos']],
+    ['estoque', ['movimentacoes']],
     ['itens', ['listar', 'obter']],
     ['fornecedores', ['listar', 'porCnpj']],
     ['categorias', ['listar']],
@@ -160,6 +161,7 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
           }
         }
       }
+      else if (modulo === 'estoque') result = await runtime.getStockEngine().movimentacoes(token, payload);
       else if (modulo === 'compras') result = await runtime.getPurchaseEngine().consultarLegado(token, acao, payload);
       else if (modulo === 'auditoria') result = await runtime.getAdministrationEngine().auditoria(token, acao, payload);
       else if (modulo === 'usuarios') result = await runtime.getAdministrationEngine().usuarios(token, acao, payload);
@@ -198,6 +200,7 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
       else if (['NF_OPERACAO_INVALIDA', 'NF_INVALIDA', 'NF_IDENTIDADE_ALTERADA'].includes(cause.code)) {
         error(res, 400, cause.code, 'Dados da nota invalidos.');
       }
+      else if (cause.code === 'ESTOQUE_OPERACAO_INVALIDA') error(res, 400, cause.code, 'Filtro de estoque invalido.');
       else if (cause.status) error(res, cause.status, cause.code, 'Solicitação inválida.');
       else error(res, 503, 'CORE_INDISPONIVEL', 'O Core de homologação não conseguiu consultar os dados.');
     }

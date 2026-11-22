@@ -13,7 +13,7 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | Motor | Implementação Node | Paridade legado | Testes | Integração Desktop | Homologação | Pendências |
 | --- | --- | --- | --- | --- | --- | --- |
 | nf | Parcial | Recorte comparado | HTTP e Sheets isolado | Leitura e escrita sintetica via transporte no Edge | Pendente | Formularios legados, recuperacao de orfas e escrita operacional pendentes. |
-| estoque | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Integrado em teste com recebimento por local. Paridade operacional pendente. |
+| estoque | Parcial | Recorte comparado | Suite HTTP e Sheets isolado | Tela Movimentacoes renderizada no Edge | Pendente | Escrita pela V430, saldos e paridade de campos historicos pendentes. |
 | compras | Parcial | Recorte comparado | Suite HTTP e Sheets real isolado | Consultas listar, precompras e pedidos no Edge | Pendente | Emissao, conversao e alteracao de status pela interface ainda exigem teste de paridade. |
 | solicitacoes | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Criação e listagem com reserva pendente integradas em teste. Aprovação e retirada operacionais pendentes. |
 | reservas | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Criação pendente pela solicitação integrada em teste. Decisão, alçadas e retirada operacional pendentes. |
@@ -200,3 +200,7 @@ Referencias: https://www.w3.org/TR/webauthn-2/ e https://www.gov.br/anpd/pt-br/a
 ### Consultas de compras no Desktop V430
 
 A V430 em homologacao usa os contratos de consulta do Core para compras.listar, compras.precompras e compras.pedidos. O cache legado do HTML e ignorado apenas no modo de homologacao, que continua deduplicando chamadas simultaneas identicas no transporte proprio. No Edge, apos abrir sessao, as tres consultas retornaram listas via Sheets de teste em 1.749 ms no total. Escrita fiscal permaneceu bloqueada nesse ensaio de leitura e logout encerrou o acesso. A suite npm test passou com 42 casos no executor node --test. A matriz permanece em 34 parciais, 0 sem implementacao inicial e 0 homologados.
+
+### Movimentacoes no Desktop V430
+
+Edge com OAuth e ALMOXA_TESTE_CORE: estoque.movimentacoes retornou 26 movimentos; a rotina de renderizacao da tela Movimentacoes incluiu o SKU real da primeira linha sintetica. Consulta e renderizacao em 2.868 ms. O HTTP recusou limite invalido com 400 e manteve escrita desativada nesse ensaio. Suite npm test: 42 casos no executor node --test, zero falhas. Sem mudanca nos totais da matriz.

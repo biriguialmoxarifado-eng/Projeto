@@ -10646,7 +10646,13 @@ modulo: "estoque",
 render: function() {
 return API.call("estoque", "movimentacoes", {}).then(function(r) {
 if (!r.ok) return UI.estado("erro", "Não foi possível carregar as movimentações", r.mensagem);
-var todas = listaSegura(r.dados).map(normalizarMovimento);
+var todas = listaSegura(r.dados).map(function(movimento) {
+var row = normalizarMovimento(movimento);
+if (window.AlmoxaCorePreview && !movimento.descricao && !movimento.item && !movimento.nome && row.codigo) {
+row.item = row.codigo;
+}
+return row;
+});
 todas.sort(function(a, b) {
 return String(b.data || "").localeCompare(String(a.data || ""));
 });
