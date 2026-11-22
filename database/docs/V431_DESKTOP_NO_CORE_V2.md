@@ -138,3 +138,7 @@ Pages não fala mais com o Apps Script.
 
 Antes disso, confira na tabela da FASE_3 quais motores ainda estão
 PARCIAL: o que não tiver paridade vai parar de funcionar na troca.
+
+## Recuperacao operacional local
+
+A V431 publicada abriu no Edge em um perfil limpo, sem tela branca reproduzida. O HTML nao carregou o cliente de homologacao do Node.js e quatro recursos retornaram 404. A causa da tela branca no perfil do usuario continua sem confirmacao. A raiz do Node.js preserva o HTML original e o transporte V2. Somente SQLite permite abrir a interface e a sessao, mas as consultas dos motores retornam ARMAZENAMENTO_OPERACIONAL_INDISPONIVEL ate configurar ALMOXA_PREVIEW_SHEET_ID. Com ALMOXA_TESTE_CORE o Edge confirmou sessao, Painel, Estoque (5 itens), EPI, 11 notas de teste, colaboradores e movimentacoes. O endpoint local de saude retornou 200. Sem gravacao operacional, alteracao em main ou publicacao.

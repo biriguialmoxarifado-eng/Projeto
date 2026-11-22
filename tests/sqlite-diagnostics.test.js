@@ -63,6 +63,16 @@ test('servidor real persiste, autoriza, faz backup e reabre SQLite após reinici
   try {
     server = await start(path);
     assert.equal((await server.call('/health')).status, 200);
+    assert.match(await (await server.call('/')).text(), /preview-client\.js/);
+    const opened = await server.call('/api/v2/preview/session', { method: 'POST' });
+    assert.equal(opened.status, 200);
+    const session = (await opened.json()).dados.token;
+    const unavailable = await fetch(new URL('/api/v2/preview/dispatch', opened.url), {
+      method: 'POST', headers: { Authorization: 'Bearer ' + session, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ modulo: 'nf', acao: 'listar' })
+    });
+    assert.equal(unavailable.status, 503);
+    assert.equal((await unavailable.json()).codigo, 'ARMAZENAMENTO_OPERACIONAL_INDISPONIVEL');
     assert.match(await (await server.call('/diagnostics')).text(), /diagnostics-client\.js/);
     const browserScript = await (await server.call('/diagnostics-client.js')).text();
     assert.equal((await server.call(base, { authenticated: false })).status, 401);
