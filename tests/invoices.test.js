@@ -504,6 +504,54 @@ test('homologação HTTP exige credencial, atende leitura e bloqueia mutação',
   }
 });
 
+test('HTTP preview fiscal exige opt-in e preserva a versao', async () => {
+  const { createServer } = require('node:http');
+  const { once } = require('node:events');
+  const { createPreview } = require('../backend/preview-api');
+  const { createHandler } = require('../backend/server');
+  const { provider } = fakeGoogle();
+  const runtime = await createRuntime(provider, { invoiceTestStorage: provider, credential });
+  const handler = createHandler(runtime.core, 'test', undefined, createPreview(runtime, __dirname, { allowWrite: true }));
+  const server = createServer(handler).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const url = 'http://127.0.0.1:' + server.address().port + '/api/v2/preview/dispatch';
+    const call = (acao, token, payload, modulo = 'nf') => fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+      body: JSON.stringify({ modulo, acao, payload })
+    });
+    const denied = await call('listar');
+    assert.equal(denied.status, 401);
+    assert.equal((await denied.json()).codigo, 'SEM_SESSAO');
+    const noSession = await call('listar', credential.token);
+    assert.equal(noSession.status, 401);
+    const login = await fetch(url.replace('/dispatch', '/session'), {
+      method: 'POST', headers: { Authorization: 'Bearer ' + credential.token }
+    });
+    assert.equal(login.status, 200);
+    const session = (await login.json()).dados.token;
+    const allowed = await call('listar', session);
+    assert.deepEqual(await allowed.json(), { ok: true, dados: [] });
+    const note = { numero: '90801', fornecedor: 'TESTE CORE NF', itens: [{ sku: 'SYN' }], operacaoCore: 'fiscal-create' };
+    const created = await (await call('salvar', session, note)).json();
+    assert.equal(created.dados?.versaoCore, 1, JSON.stringify(created));
+    const id = created.dados.id;
+    const edit = { ...note, id, versaoCore: 1, operacaoCore: 'fiscal-edit', observacao: 'Nova' };
+    const changed = await (await call('atualizar', session, edit, 'nfed')).json();
+    assert.equal(changed.dados?.versaoCore, 2, JSON.stringify(changed));
+    assert.deepEqual(await (await call('atualizar', session, edit, 'nfed')).json(), changed);
+    assert.equal((await call('atualizar', session, { ...edit, operacaoCore: 'stale' }, 'nfed')).status, 409);
+    assert.equal((await call('atualizar', session, { ...edit, numero: '90802' }, 'nfed')).status, 400);
+    assert.equal((await (await call('obter', session, { id })).json()).dados.observacao, 'Nova');
+    await fetch(url.replace('/dispatch', '/session'), {
+      method: 'DELETE', headers: { Authorization: 'Bearer ' + session }
+    });
+    assert.equal((await call('listar', session)).status, 401);
+  } finally {
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
 test('ocorrências e notificações persistem com controle de acesso e retentativa', async () => {
   const { provider } = fakeGoogle();
   const load = (role, actor) => createRuntime(provider, { invoiceTestStorage: provider,

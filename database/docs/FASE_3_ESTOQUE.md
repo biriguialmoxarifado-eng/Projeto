@@ -12,7 +12,7 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 
 | Motor | Implementação Node | Paridade legado | Testes | Integração Desktop | Homologação | Pendências |
 | --- | --- | --- | --- | --- | --- | --- |
-| nf | Parcial | Recorte comparado | Suíte e armazenamento isolado | Leitura no Edge | Pendente | Integrado em teste. Busca e ordenação do legado e campos públicos de itens cobertos. Escrita operacional e recuperação de órfãs pendentes. |
+| nf | Parcial | Recorte comparado | HTTP e Sheets isolado | Leitura e escrita sintetica via transporte no Edge | Pendente | Formularios legados, recuperacao de orfas e escrita operacional pendentes. |
 | estoque | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Integrado em teste com recebimento por local. Paridade operacional pendente. |
 | compras | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Pré-compra, reforço, filtros e alteração de status integrados em teste. Emissão de pedido e conversão de pré-compra pendentes. |
 | solicitacoes | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Criação e listagem com reserva pendente integradas em teste. Aprovação e retirada operacionais pendentes. |
@@ -180,3 +180,7 @@ A partir de 2661e14, o Desktop de homologação troca a credencial de ensaio por
 No Edge, o HTML Desktop abriu e consultou, pelo Core e pelo Sheets isolado, Configuração, Usuários, Auditoria de Obras, Itens, Fornecedores, Categorias, Obras e seis notas de teste. O navegador também verificou disponibilidade OCR, bloqueio de escrita de NF e encerramento da sessão. A auditoria da Base expõe metadados autorizados, sem o conteúdo dos eventos. npm test passou. Isso valida o transporte e a sessão de homologação, sem homologar o login individual do legado nem a paridade das escritas.
 
 Retomada: completar a Base com sessões individuais e a comparação de escrita e efeitos do Apps Script em cópia. Em seguida, executar Operação, Gestão e Integrações especiais. No OCR faltam PDF, processamento de arquivo de teste no Drive e o formulário operacional. A integração física do leitor biométrico continua pendente. A matriz registra zero motores sem implementação inicial, 34 parciais e zero homologados.
+
+### Ensaio fiscal no Desktop de homologacao
+
+Em 2026-11-22, Edge e Core local, com OAuth e ALMOXA_TESTE_CORE: criacao em 1.633 ms, edicao em 3.214 ms, reenvio retornou versao 2, edicao com versao antiga retornou conflito e a releitura confirmou versao 2 e a observacao. Exclusao ficou bloqueada e o logout encerrou o acesso. O teste usou o transporte do Desktop, sem preencher os formularios legados. A escrita requer opt-in explicito. Drive e paridade operacional permanecem pendentes neste lote.

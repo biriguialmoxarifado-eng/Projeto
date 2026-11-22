@@ -20,7 +20,7 @@ function legacyNote(event) {
   const valorItens = Math.round(itens.reduce((sum, item) =>
     sum + (Number(item.valorTotal) || (Number(item.quantidade ?? item.qtd) || 0) * (Number(item.valorUnitario) || 0)), 0) * 100) / 100;
   return {
-    id: event.id, idNF: event.id, numero: note.numero, serie: note.serie, chave: note.chave,
+    id: event.id, idNF: event.id, versaoCore: event.version, numero: note.numero, serie: note.serie, chave: note.chave,
     fornecedor: note.fornecedor || '', cnpj: note.cnpj, origem: String(note.origem || 'MANUAL').toUpperCase(),
     emissao: note.emissao || '', entrada: note.entrada || '', valor: Number(note.valor) > 0 ? Number(note.valor) : valorItens,
     valorItens, status: note.status || 'EM_CONFERENCIA', lancadoPor: note.lancadoPor || '',
@@ -61,4 +61,4 @@ function createInvoiceReadAdapter(engine) {
   };
 }
 
-module.exports = { createInvoiceReadAdapter };
+module.exports = { createInvoiceReadAdapter, legacyNote };

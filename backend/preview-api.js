@@ -2,12 +2,14 @@
 
 const { readFileSync } = require('node:fs');
 const { randomBytes } = require('node:crypto');
+const { setTimeout: delay } = require('node:timers/promises');
 const { join } = require('node:path');
 const { reply, readBody } = require('./diagnostic-api');
 
 function createPreview(runtime, root, { allowWrite = false } = {}) {
   const read = new Map([
-    ['nf', ['listar', 'obter', 'itens']],
+    ['nf', ['listar', 'obter', 'itens', ...(allowWrite ? ['salvar'] : [])]],
+    ['nfed', allowWrite ? ['atualizar'] : []],
     ['itens', ['listar', 'obter']],
     ['fornecedores', ['listar', 'porCnpj']],
     ['categorias', ['listar']],
@@ -75,7 +77,7 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
         return true;
       }
       const id = randomBytes(32).toString('base64url');
-      sessions.set(id, { token, expires: now + ttlMs });
+      sessions.set(id, { token, expires: now + ttlMs, invoiceVersions: new Map() });
       reply(res, 200, { ok: true, dados: { token: id, expiraEm: now + ttlMs } });
       return true;
     }
@@ -115,7 +117,48 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
       }
       let result;
       if (modulo === 'ocr') result = await runtime.getOcrEngine()(token, acao, payload);
-      else if (modulo === 'nf') result = await runtime.getInvoiceReadAdapter()(token, acao, payload);
+      else if (modulo === 'nfed' || (modulo === 'nf' && acao === 'salvar')) {
+        const { legacyNote } = require('../core/motors/invoice-read-adapter');
+        const editing = modulo === 'nfed';
+        const { operacaoCore, versaoCore, ...note } = payload;
+        const id = note.id || note.idNF;
+        if (!/^TESTE CORE /.test(note.fornecedor || '') ||
+            (editing && (!id || !Number.isSafeInteger(versaoCore) || versaoCore < 1))) {
+          error(res, 400, 'NF_OPERACAO_INVALIDA', 'Informe os dados sinteticos e a versao lida da nota.');
+          return true;
+        }
+        const engine = runtime.getInvoiceEngine();
+        if (editing) {
+          const previous = await engine.consultar(token, id);
+          if (!/^TESTE CORE /.test(previous?.note.fornecedor || '')) {
+            error(res, 404, 'NAO_ENCONTRADA', 'Nota sintetica indisponivel.');
+            return true;
+          }
+        }
+        const entry = await engine.salvar(token, {
+          operation: operacaoCore, version: editing ? versaoCore : 0,
+          expectedId: editing ? id : undefined, note
+        });
+        const confirmed = session.invoiceVersions.get(entry.id) ?? 0;
+        session.invoiceVersions.set(entry.id, Math.max(confirmed, entry.version));
+        result = { ok: true, dados: legacyNote(entry), atualizada: editing };
+      }
+      else if (modulo === 'nf') {
+        const readInvoice = runtime.getInvoiceReadAdapter();
+        const minVersion = acao === 'obter' ? session.invoiceVersions.get(payload.id || payload.idNF) : undefined;
+        result = await readInvoice(token, acao, payload);
+        if (minVersion) {
+          for (const pause of [250, 750]) {
+            if (result.dados?.versaoCore >= minVersion) break;
+            await delay(pause);
+            result = await readInvoice(token, acao, payload);
+          }
+          if (!(result.dados?.versaoCore >= minVersion)) {
+            error(res, 503, 'NF_LEITURA_DESATUALIZADA', 'A versao confirmada ainda nao esta disponivel para consulta.');
+            return true;
+          }
+        }
+      }
       else if (modulo === 'auditoria') result = await runtime.getAdministrationEngine().auditoria(token, acao, payload);
       else if (modulo === 'usuarios') result = await runtime.getAdministrationEngine().usuarios(token, acao, payload);
       else if (modulo === 'config') {
@@ -146,6 +189,12 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
       }
       else if (['ADMIN_OPERACAO_INVALIDA', 'ADMIN_DADOS_INVALIDOS', 'OCORRENCIA_MATERIAIS_INVALIDOS'].includes(cause.code)) {
         error(res, 400, cause.code, 'Dados da operação inválidos.');
+      }
+      else if (['NF_CONFLITO_IDEMPOTENCIA', 'NF_CONFLITO_VERSAO', 'NF_RECEBIDA'].includes(cause.code)) {
+        error(res, 409, cause.code, 'A nota mudou ou a operacao ja foi utilizada.');
+      }
+      else if (['NF_OPERACAO_INVALIDA', 'NF_INVALIDA', 'NF_IDENTIDADE_ALTERADA'].includes(cause.code)) {
+        error(res, 400, cause.code, 'Dados da nota invalidos.');
       }
       else if (cause.status) error(res, cause.status, cause.code, 'Solicitação inválida.');
       else error(res, 503, 'CORE_INDISPONIVEL', 'O Core de homologação não conseguiu consultar os dados.');

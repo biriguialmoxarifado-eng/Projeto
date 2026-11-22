@@ -11540,6 +11540,7 @@ resolve(null);
 });
 }
 function chamar(acao, payload) {
+  if (window.AlmoxaCorePreview) return window.AlmoxaCorePreview.call('nf', acao, payload);
 var pelaPorta = direto(acao, payload);
 if (!pelaPorta) return API.call("nf", acao, payload || {});
 return pelaPorta.then(function(r) {
@@ -11606,6 +11607,7 @@ resolve(null);
 });
 }
 function porEdicao(acao, payload) {
+  if (window.AlmoxaCorePreview) return window.AlmoxaCorePreview.call('nfed', acao, payload);
 var p = portaDeEdicao(acao, payload);
 if (!p) return Promise.resolve({
 ok: false,

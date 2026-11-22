@@ -131,6 +131,7 @@ function createInvoiceEngine({ core, storage, coordinate = work => work(), clock
     }
     const proposed = restore ? null : normalize(input.note);
     const id = restore ? input.id : proposed.id;
+    if (input.expectedId !== undefined && input.expectedId !== id) throw fail('NF_IDENTIDADE_ALTERADA');
     if (typeof id !== 'string' || !/^(?:NF|NFE):[\d-]{1,120}$/.test(id)) throw fail('NF_INVALIDA');
     const fingerprint = hash(JSON.stringify(canonical({
       actor, id, version, action: restore ? 'recuperar' : 'salvar', fromVersion: input.fromVersion, note: proposed

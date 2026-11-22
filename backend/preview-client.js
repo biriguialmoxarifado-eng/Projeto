@@ -2,7 +2,8 @@
 (() => {
   const writeEnabled = document.currentScript?.dataset.write === '1';
   const supported = new Map([
-    ['nf', new Set(['listar', 'obter', 'itens'])],
+    ['nf', new Set(['listar', 'obter', 'itens', ...(writeEnabled ? ['salvar'] : [])])],
+    ['nfed', new Set(writeEnabled ? ['atualizar'] : [])],
     ['itens', new Set(['listar', 'obter'])],
     ['fornecedores', new Set(['listar', 'porCnpj'])],
     ['categorias', new Set(['listar'])],
