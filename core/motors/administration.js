@@ -22,7 +22,7 @@ function latest(events) {
   return records;
 }
 
-function createAdministrationEngine({ core, stores, catalog, backupSources, stockForWithdrawal, coordinate, clock = () => new Date() }) {
+function createAdministrationEngine({ core, stores, catalog, backupSources, stockForWithdrawal, receiptNotifications, coordinate, clock = () => new Date() }) {
   async function authorize(token, module, access) {
     await core.authorizeSession(token, module + ':' + access);
     const session = await core.getSession(token);
@@ -432,9 +432,22 @@ function createAdministrationEngine({ core, stores, catalog, backupSources, stoc
         if (note.destinatario && note.destinatario !== actor) return false;
         return !note.perfis || note.perfis.split(',').includes(String(session.role).toUpperCase());
       };
+      async function fromReceipts() {
+        if (!receiptNotifications) return [];
+        return (await receiptNotifications.events()).filter(event =>
+          event.action === 'receber' && event.notificacao?.solicitante === actor &&
+          ['PARCIAL', 'RECEBIDA'].includes(event.note.status)).map(event => ({
+          id: 'REC-' + createHash('sha256').update(event.operation).digest('hex').slice(0, 24),
+          quando: event.at, evento: 'RECEBIMENTO_NF', titulo: 'Recebimento de compra',
+          texto: event.notificacao.requisicao + ': ' + event.note.status,
+          rota: '', destinatario: actor, perfis: '', lida: false, versaoCore: 0
+        }));
+      }
       if (action === 'listar') {
-        return { ok: true, dados: [...latest(await stores.notificacoes.events()).values()]
-          .filter(event => visible(event.note)).map(event => event.note) };
+        const records = latest(await stores.notificacoes.events());
+        const projected = await fromReceipts();
+        return { ok: true, dados: [...records.values()].filter(event => visible(event.note)).map(event => event.note)
+          .concat(projected.filter(note => !records.has(note.id))) };
       }
       if (action === 'criar') {
         const fields = textFields(input, ['evento', 'titulo', 'texto', 'rota', 'destinatario']);
@@ -450,10 +463,11 @@ function createAdministrationEngine({ core, stores, catalog, backupSources, stoc
       }
       if (action === 'marcarLida') {
         const { id, operation, version } = input;
-        return save(token, 'notificacoes', { id, operation, version }, records => {
+        return save(token, 'notificacoes', { id, operation, version }, async records => {
           const current = records.get(id);
-          if (!current || !visible(current.note)) throw invalid('NOTIFICACAO_NAO_ENCONTRADA');
-          const note = { ...current.note, lida: true };
+          const base = current?.note ?? (String(id).startsWith('REC-') ? (await fromReceipts()).find(note => note.id === id) : undefined);
+          if (!base || !visible(base)) throw invalid('NOTIFICACAO_NAO_ENCONTRADA');
+          const note = { ...base, lida: true, ...(base.versaoCore !== undefined ? { versaoCore: version + 1 } : {}) };
           return { id, current, note, response: { ok: true, dados: { id, lida: true } } };
         });
       }

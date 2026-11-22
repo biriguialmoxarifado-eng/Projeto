@@ -133,7 +133,8 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
       const { TestInvoiceStore } = require('../core/motors/invoices');
       const { createAdministrationEngine } = require('../core/motors/administration');
       administrationEngine ??= createAdministrationEngine({
-        core, catalog: this.getCatalogEngine(), coordinate, stockForWithdrawal: this.getWithdrawalStockReader(), backupSources: {
+        core, catalog: this.getCatalogEngine(), coordinate,
+        receiptNotifications: new TestInvoiceStore(invoiceTestStorage, 'receiving'), stockForWithdrawal: this.getWithdrawalStockReader(), backupSources: {
           CONFIG_CORE_TESTE: new TestInvoiceStore(invoiceTestStorage, 'config'),
           OBRAS_CORE_TESTE: new TestInvoiceStore(invoiceTestStorage, 'obras')
         }, stores: {

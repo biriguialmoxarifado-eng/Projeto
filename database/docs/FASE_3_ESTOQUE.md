@@ -43,7 +43,7 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | calendario | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Criação, listagem e exclusão lógica. Paridade com os consumidores operacionais pendente. |
 | centros | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Criação, edição, listagem e exclusão lógica. Vínculos e consumidores operacionais pendentes. |
 | retiradas | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Entrega parcial por SKU e baixa única. Assinaturas, lote e paridade do cliente pendentes. |
-| notificacoes | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Criar, listar e marcar lida; integração com eventos e contratos de perfis reais pendentes. |
+| notificacoes | Parcial | Recorte comparado | Suíte e Sheets real isolado | Pendente no cliente | Pendente | Aviso por recebimento confirmado, visibilidade por solicitante e leitura idempotente. Sessão, interface operacional e regras legadas pendentes. |
 | automacao | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Listar, cadastrar e alternar regras. Executor de eventos e efeitos permanecem no legado. |
 | biometria | Parcial | Pendente | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, estrutura de teste. Identidade única e referência opaca auditada. Autenticação biométrica e leitor físico ficam para depois. |
 
@@ -184,3 +184,15 @@ Retomada: completar a Base com sessões individuais e a comparação de escrita 
 ### Ensaio fiscal no Desktop de homologacao
 
 Em 2026-11-22, Edge e Core local, com OAuth e ALMOXA_TESTE_CORE: criacao em 1.633 ms, edicao em 3.214 ms, reenvio retornou versao 2, edicao com versao antiga retornou conflito e a releitura confirmou versao 2 e a observacao. Exclusao ficou bloqueada e o logout encerrou o acesso. O teste usou o transporte do Desktop, sem preencher os formularios legados. A escrita requer opt-in explicito. Drive e paridade operacional permanecem pendentes neste lote.
+
+### Recebimento e aviso ao solicitante
+
+O index.html declara internamente sistema 430. O ensaio OAuth em ALMOXA_TESTE_CORE passou em 15.334 ms: criou NF, vinculou requisicao e compra, confirmou recebimento e reenvio, abriu outro runtime, verificou saldo 3 no local A e marcou o unico aviso como lido. O aviso e derivado do proprio evento de recebimento, evitando uma segunda gravacao para publica-lo. A confirmacao de leitura usa a trilha de notificacoes. A suite verificou recebimentos parciais, isolamento por destinatario e reenvio. O teste independente do Drive confirmou metadados do arquivo de teste. Conteudo e anexos continuam pendentes. Matriz: 34 parciais, 0 sem implementacao inicial e 0 integralmente homologados.
+
+### Central de Identidade Digital
+
+Usar o ID permanente do colaborador como vinculo para matriculas, foto, cracha, assinatura e credenciais revogaveis. Manter foto com acesso restrito e referencias no Core. Preferir autenticadores WebAuthn em terminais compativeis. Para leitor legado, identificar fabricante, modelo, Windows suportado, licenca e SDK, e validar em dois terminais um adaptador local autenticado, com revogacao por terminal. Manter imagens e modelos de digitais fora de Sheets.
+
+O Core deve emitir um desafio descartavel com validade curta, vinculado ao colaborador, terminal e resumo da operacao de EPI ou ferramenta. Confirmar permissao, verificar resposta e consumir o desafio uma vez. Vincular a evidencia de autenticacao ao evento auditado. Gerar uma cautela por operacao confirmada com identificador idempotente. A assinatura eletronica e sua evidencia exigem fluxo proprio e validacao da finalidade, base legal, acesso e retencao antes de coletar biometria. O sinal de verificacao do WebAuthn pode corresponder a PIN ou biometria.
+
+Referencias: https://www.w3.org/TR/webauthn-2/ e https://www.gov.br/anpd/pt-br/acesso-a-informacao/perguntas-frequentes

@@ -163,7 +163,25 @@ test('requisição e compra só geram entrada após conferência e recebem em du
   assert.equal(final.note.itens[0].pendente, 0);
   assert.equal(await receiving.entradas(token, 'SYNTHETIC'), 5);
   assert.equal((await receiving.consultar(token, id)).version, 4);
-  const reopened = (await createRuntime(provider, { invoiceTestStorage: provider, credential })).getStockEngine();
+  const reopenedRuntime = await createRuntime(provider, { invoiceTestStorage: provider, credential });
+  const reopened = reopenedRuntime.getStockEngine();
+  const recipient = await createRuntime(provider, { invoiceTestStorage: provider,
+    credential: { ...credential, actor: 'synthetic' } });
+  const other = await createRuntime(provider, { invoiceTestStorage: provider,
+    credential: { ...credential, actor: 'someone-else' } });
+  const notifications = recipient.getAdministrationEngine();
+  const entries = (await notifications.notificacoes(token, 'listar')).dados;
+  assert.deepEqual(entries.map(entry => entry.texto), ['RC-0007: PARCIAL', 'RC-0007: RECEBIDA']);
+  assert.equal(new Set(entries.map(entry => entry.id)).size, 2);
+  const ack = { id: entries[0].id, operation: 'mark-receipt', version: 0 };
+  const foreign = other.getAdministrationEngine();
+  assert.deepEqual((await foreign.notificacoes(token, 'listar')).dados, []);
+  await assert.rejects(foreign.notificacoes(token, 'marcarLida', ack), { code: 'NOTIFICACAO_NAO_ENCONTRADA' });
+  const read = await notifications.notificacoes(token, 'marcarLida', ack);
+  assert.deepEqual(await notifications.notificacoes(token, 'marcarLida', ack), read);
+  const afterRead = (await notifications.notificacoes(token, 'listar')).dados;
+  assert.equal(afterRead.length, 2);
+  assert.equal(afterRead.find(entry => entry.id === ack.id).lida, true);
   assert.equal((await reopened.saldo(token, 'SYNTHETIC', 'A')).saldo, 5);
   assert.equal((await reopened.saldo(token, 'SYNTHETIC', 'B')).saldo, 0);
   const movement = { sku: 'SYNTHETIC', local: 'A', version: 0, action: 'saida', quantidade: 4, operation: 'receipt-spend' };
