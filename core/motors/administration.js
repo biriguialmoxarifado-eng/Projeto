@@ -65,6 +65,56 @@ function createAdministrationEngine({ core, stores, coordinate, clock = () => ne
   return {
     ...createComplementaryMethods({ save, authorize, getRecords: async kind => latest(await stores[kind].events()) }),
     ...createWorkflowMethods({ save, authorize, getRecords: async kind => latest(await stores[kind].events()) }),
+    async ferramentas(token, action, payload = {}) {
+      if (['listar', 'obter', 'historico'].includes(action)) {
+        await authorize(token, 'ferramentas', 'read');
+        const events = await stores.ferramentas.events();
+        if (action === 'historico') return { ok: true, dados: events.filter(event => event.id === payload.patrimonio)
+          .map(({ action: evento, actor, at, note }) => ({ evento, actor, at, status: note.status })) };
+        const records = latest(events);
+        if (action === 'listar') return { ok: true, dados: [...records.values()].map(event => event.note)
+          .filter(note => !payload.status || payload.status === note.status) };
+        const entry = records.get(payload.patrimonio);
+        return entry ? { ok: true, dados: entry.note } :
+          { ok: false, codigo: 'NAO_ENCONTRADA', mensagem: 'Patrimônio não localizado.' };
+      }
+      if (!['salvar', 'retirar', 'devolver', 'retornarManutencao'].includes(action)) {
+        return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
+      }
+      const { patrimonio: id, operation, version } = payload;
+      if (!key(id)) return { ok: false, codigo: 'SEM_PATRIMONIO', mensagem: 'Informe o patrimônio.' };
+      const fields = action === 'salvar'
+        ? textFields(payload, ['sku', 'nome', 'categoria', 'marca', 'modelo', 'serie', 'obra', 'local', 'observacao'])
+        : textFields(payload, ['condicao', 'observacao']);
+      const damaged = action === 'devolver' && (payload.avaria === true || ['AVARIA', 'DANIFICADA'].includes(fields.condicao?.toUpperCase()));
+      if (damaged && !fields.observacao?.trim()) throw invalid('SEM_DESCRICAO_DA_AVARIA');
+      return save(token, 'ferramentas', { id, operation, version, action, fields, damaged }, (records, at, actor) => {
+        const current = records.get(id);
+        let note;
+        if (action === 'salvar') {
+          note = { id, patrimonio: id, status: 'DISPONIVEL', com: '', matricula: '', desde: '',
+            ...current?.note, ...fields, atualizadoEm: at, atualizadoPor: actor };
+        } else {
+          if (!current) throw invalid('FERRAMENTA_NAO_ENCONTRADA');
+          const state = current.note;
+          if (action === 'retirar') {
+            if (state.status !== 'DISPONIVEL') throw invalid(state.status === 'EM_POSSE' ? 'JA_EM_POSSE' : 'FERRAMENTA_INDISPONIVEL');
+            note = { ...state, status: 'EM_POSSE', com: actor, matricula: actor, desde: at };
+          } else if (action === 'devolver') {
+            if (state.status !== 'EM_POSSE') throw invalid('NAO_ESTA_EM_POSSE');
+            if (state.com !== actor) throw invalid('ACCESS_DENIED');
+            note = { ...state, status: damaged ? 'MANUTENCAO' : 'DISPONIVEL', com: '', matricula: '', desde: '',
+              motivo: damaged ? fields.observacao : '' };
+          } else {
+            if (state.status !== 'MANUTENCAO') throw invalid('FERRAMENTA_FORA_MANUTENCAO');
+            note = { ...state, status: 'DISPONIVEL', motivo: '' };
+          }
+          Object.assign(note, { atualizadoEm: at, atualizadoPor: actor });
+        }
+        return { id, current, note, response: { ok: true, dados: note } };
+      });
+    },
+
     async painel(token, action, payload = {}) {
       if (action === 'carregar') {
         await authorize(token, 'painel', 'read');

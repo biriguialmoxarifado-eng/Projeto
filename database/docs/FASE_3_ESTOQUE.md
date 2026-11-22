@@ -27,7 +27,7 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | config | Parcial, integrado em teste. Chaves comuns leem e gravam; configuração especial SKU e precedência operacional pendentes. |
 | lojinha | Parcial, integrado em homologação local. Catálogo, busca, detalhe e saldo por local. Fotos, status e fluxo de pedidos pendentes. |
 | epi | Pendente. Executor legado preservado. |
-| ferramentas | Pendente. Executor legado preservado. |
+| ferramentas | Parcial, integrado em teste. Cadastro, custódia, devolução com avaria e retorno da manutenção. Transferência e identificação operacional pendentes. |
 | ocorrencias | Parcial, integrado no Desktop local. Criar, atualizar e consultar; exclusão, alçadas operacionais e formulários publicados pendentes. |
 | projetos | Parcial, integrado em teste. Cadastro, progresso, consulta e exclusão lógica. Integração de abastecimento e clientes pendentes. |
 | inventario | Parcial, integrado em teste. Abertura, contagem, divergência e encerramento. QR, rotas, escopo de equipe e ajuste de saldo pendentes. |
@@ -142,3 +142,9 @@ Próxima retomada: Painel, pelos contratos carregar/salvar de AP_Modulo_painel e
 Partida em 30f7aff. Painel preserva a chave PAINEL_CONFIG e os contratos carregar/salvar. Automação implementa regras, salvar e alternar com histórico de autoria, versão e reenvio. Consultas disponíveis no Desktop local de homologação. Gravações permanecem no Core isolado. Gatilhos operacionais continuam no executor legado.
 
 npm test passou. O ensaio OAuth em ALMOXA_TESTE_CORE usou CONFIG_CORE_TESTE e AUTOMACAO_CORE_TESTE, confirmou Painel versão 1 por releitura e alternância concorrente com somente dois eventos de auditoria na regra: AUT-f7c8d163d4a01184763c0258. Tempo de 8385 ms. Nenhuma regra foi disparada. Matriz: 27 parciais, 7 pendentes e nenhum homologado. Próximo ponto: fichas de EPI e Ferramentaria, começando pelos contratos AP_Modulo_epi, AP_Modulo_ferramentas e AP_FER_retirar_ para preservar entrega, custódia e saldo.
+
+## Ferramentaria: custódia isolada
+
+A partir de 0b5a388, Ferramentaria passou a registrar cadastro por patrimônio, retirada, devolução, avaria e retorno da manutenção, com consultas de estado e histórico. Na retirada, a identidade da sessão vira o responsável. A devolução por terceiro e a avaria sem descrição são recusadas. Não aceitamos uma declaração do cliente como prova de identidade. Os contratos de autenticação operacional, transferência, cautelas e os campos de patrimônio ainda exigem homologação.
+
+npm test passou. No Sheets ALMOXA_TESTE_CORE, o patrimônio sintético SYN-c073f9a9-b6f8-48e0-988f-2df1802972fd teve quatro eventos em FERRAMENTAS_CORE_TESTE e terminou DISPONIVEL. Reenvios concorrentes da retirada devolveram o mesmo evento. Outra instância confirmou histórico e estado. Tempo de 10110 ms. Matriz: 28 parciais, 6 pendentes, nenhum homologado. Próximo ponto: fichas EPI em AP_Modulo_epi e AP_Modulo_epigestao, com autenticação individual e comprovante associado à operação. Ainda pendentes Aprovações, OCR, Manutenção, Retiradas e Biometria, mantida por último.

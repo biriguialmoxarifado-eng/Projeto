@@ -3,7 +3,7 @@
 const { createHash } = require('node:crypto');
 const { StorageOperations } = require('../../database/storage-operations');
 
-const TEST_TABLES = { nf: 'NF_CORE_TESTE', receiving: 'RECEBIMENTO_CORE_TESTE', stock: 'ESTOQUE_CORE_TESTE', itens: 'ITENS_CORE_TESTE', fornecedores: 'FORNECEDORES_CORE_TESTE', categorias: 'CATEGORIAS_CORE_TESTE', compras: 'COMPRAS_CORE_TESTE', solicitacoes: 'SOLICITACOES_CORE_TESTE', config: 'CONFIG_CORE_TESTE', obras: 'OBRAS_CORE_TESTE', usuarios: 'USUARIOS_CORE_TESTE', inventario: 'INVENTARIO_CORE_TESTE', ocorrencias: 'OCORRENCIAS_CORE_TESTE', notificacoes: 'NOTIFICACOES_CORE_TESTE', kits: 'KITS_CORE_TESTE', calendario: 'CALENDARIO_CORE_TESTE', centros: 'CENTROS_CORE_TESTE', projetos: 'PROJETOS_CORE_TESTE', relatorios: 'RELATORIOS_CORE_TESTE', mural: 'MURAL_CORE_TESTE', automacao: 'AUTOMACAO_CORE_TESTE' };
+const TEST_TABLES = { nf: 'NF_CORE_TESTE', receiving: 'RECEBIMENTO_CORE_TESTE', stock: 'ESTOQUE_CORE_TESTE', itens: 'ITENS_CORE_TESTE', fornecedores: 'FORNECEDORES_CORE_TESTE', categorias: 'CATEGORIAS_CORE_TESTE', compras: 'COMPRAS_CORE_TESTE', solicitacoes: 'SOLICITACOES_CORE_TESTE', config: 'CONFIG_CORE_TESTE', obras: 'OBRAS_CORE_TESTE', usuarios: 'USUARIOS_CORE_TESTE', inventario: 'INVENTARIO_CORE_TESTE', ocorrencias: 'OCORRENCIAS_CORE_TESTE', notificacoes: 'NOTIFICACOES_CORE_TESTE', kits: 'KITS_CORE_TESTE', calendario: 'CALENDARIO_CORE_TESTE', centros: 'CENTROS_CORE_TESTE', projetos: 'PROJETOS_CORE_TESTE', relatorios: 'RELATORIOS_CORE_TESTE', mural: 'MURAL_CORE_TESTE', automacao: 'AUTOMACAO_CORE_TESTE', ferramentas: 'FERRAMENTAS_CORE_TESTE' };
 const HEADERS = ['EVENTO_JSON'];
 const hash = value => createHash('sha256').update(value).digest('hex');
 const digits = value => String(value ?? '').replace(/\D/g, '');

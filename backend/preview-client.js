@@ -17,6 +17,7 @@
     ['mural', new Set(['listar', 'obter'])],
     ['painel', new Set(['carregar'])],
     ['automacao', new Set(['regras'])],
+    ['ferramentas', new Set(['listar', 'obter', 'historico'])],
     ['lojinha', new Set(['catalogo', 'item'])],
     ['inventario', new Set(['listar', 'obter', 'divergencias'])]
   ]);

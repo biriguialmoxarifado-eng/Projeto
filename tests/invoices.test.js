@@ -30,7 +30,8 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
     ['PROJETOS_CORE_TESTE', { sheetId: 24, rows: [['EVENTO_JSON']] }],
     ['RELATORIOS_CORE_TESTE', { sheetId: 25, rows: [['EVENTO_JSON']] }],
     ['MURAL_CORE_TESTE', { sheetId: 26, rows: [['EVENTO_JSON']] }],
-    ['AUTOMACAO_CORE_TESTE', { sheetId: 27, rows: [['EVENTO_JSON']] }]
+    ['AUTOMACAO_CORE_TESTE', { sheetId: 27, rows: [['EVENTO_JSON']] }],
+    ['FERRAMENTAS_CORE_TESTE', { sheetId: 28, rows: [['EVENTO_JSON']] }]
   ]);
   const markers = new Set();
   let loseResponse = true;
@@ -54,7 +55,7 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
       const names = data.requests.slice(0, -1).map(request => request.addNamedRange.namedRange.namedRangeId);
       if (names.some(name => markers.has(name))) throw { response: { status: 400 } };
       names.forEach(name => markers.add(name));
-      assert.ok([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27].includes(append.appendCells.sheetId));
+      assert.ok([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28].includes(append.appendCells.sheetId));
       const admin = [...adminRows.values()].find(row => row.sheetId === append.appendCells.sheetId);
       const targetRows = append.appendCells.sheetId === 8 ? receivingRows : append.appendCells.sheetId === 9 ? stockRows : append.appendCells.sheetId === 10 ? itemRows : append.appendCells.sheetId === 11 ? supplierRows : append.appendCells.sheetId === 12 ? categoryRows : append.appendCells.sheetId === 13 ? purchaseRows : append.appendCells.sheetId === 14 ? requestRows : rows;
       (admin?.rows ?? targetRows).push([append.appendCells.rows[0].values[0].userEnteredValue.stringValue]);
@@ -587,4 +588,29 @@ test('painel compartilha a chave legada e regras alternam uma única vez sob con
   const { TestInvoiceStore } = require('../core/motors/invoices');
   assert.deepEqual((await new TestInvoiceStore(provider, 'automacao').events()).map(event => event.action),
     ['AUTOMACAO_CRIADA', 'AUTOMACAO_ALTERADA']);
+});
+
+test('ferramentaria serializa custódia, impede devolução de terceiro e registra avaria e retorno', async () => {
+  const { provider } = fakeGoogle();
+  const load = actor => createRuntime(provider, { invoiceTestStorage: provider, credential: { ...credential, actor } });
+  const a = (await load('operator-a')).getAdministrationEngine();
+  const b = (await load('operator-b')).getAdministrationEngine();
+  const token = credential.token, patrimonio = 'SYN-FER';
+  await a.ferramentas(token, 'salvar', { patrimonio, operation: 'tool-create', version: 0, nome: 'Sintética' });
+  const take = { patrimonio, operation: 'tool-take-a', version: 1 };
+  const result = await a.ferramentas(token, 'retirar', take);
+  assert.equal(result.dados.com, 'operator-a');
+  assert.deepEqual(await a.ferramentas(token, 'retirar', take), result);
+  await assert.rejects(b.ferramentas(token, 'retirar', { ...take, operation: 'tool-take-b', version: 2 }),
+    { code: 'JA_EM_POSSE' });
+  await assert.rejects(b.ferramentas(token, 'devolver', { ...take, operation: 'wrong-return', version: 2 }),
+    { code: 'ACCESS_DENIED' });
+  await assert.rejects(a.ferramentas(token, 'devolver', { ...take, operation: 'no-description', version: 2, avaria: true }),
+    { code: 'SEM_DESCRICAO_DA_AVARIA' });
+  const returned = await a.ferramentas(token, 'devolver', { ...take, operation: 'damaged-return',
+    version: 2, avaria: true, observacao: 'Avaria sintética' });
+  assert.equal(returned.dados.status, 'MANUTENCAO');
+  await b.ferramentas(token, 'retornarManutencao', { ...take, operation: 'repair', version: 3 });
+  assert.equal((await b.ferramentas(token, 'obter', { patrimonio })).dados.status, 'DISPONIVEL');
+  assert.equal((await a.ferramentas(token, 'historico', { patrimonio })).dados.length, 4);
 });
