@@ -13,12 +13,12 @@ const { SqliteDiagnosticsProvider } = require('../database/adapters/sqlite-diagn
 
 const token = 'test-only-credential-for-sqlite-suite';
 
-async function start(path, role = 'operator', preview = false, allowWrite = preview) {
+async function start(path, role = 'operator', preview = false, allowWrite = preview, approvalProfile = '') {
   const processEnv = {
     ...process.env, ALMOXA_SQLITE_PATH: path, ALMOXA_DIAGNOSTICS_TOKEN: token,
     ALMOXA_DIAGNOSTICS_ACTOR: 'integration-test', ALMOXA_DIAGNOSTICS_ROLE: role,
     ALMOXA_PREVIEW_SHEET_ID: '', ALMOXA_PREVIEW_SQLITE: preview ? '1' : '',
-    ALMOXA_PREVIEW_WRITE: allowWrite ? '1' : '',
+    ALMOXA_PREVIEW_WRITE: allowWrite ? '1' : '', ALMOXA_PREVIEW_APPROVAL_PROFILE: approvalProfile,
     ALMOXA_PREVIEW_ORIGIN: preview ? 'https://candidate.example' : '', HOST: '127.0.0.1', PORT: '0'
   };
   const child = spawn(process.execPath, ['backend/server.js'], {
@@ -462,6 +462,55 @@ test('compras e solicitações pelo HTTP preservam reenvio, reserva e recuperaç
     await server.close();
     await boot('operator',false);
     assert.equal((await call('solicitacoes','criar',request)).status,403);
+  } finally {
+    await server?.close();
+    await rm(temp,{recursive:true,force:true});
+  }
+});
+
+test('aprovação e retirada via HTTP aplicam a alçada e baixam estoque uma vez', { timeout: 45000 }, async () => {
+  const temp = await mkdtemp(join(tmpdir(), 'almoxa-retirada-http-'));
+  const path = join(temp, 'retirada.sqlite');
+  let server;
+  let session;
+  async function boot(role, approvalProfile) {
+    server = await start(path, role, true, true, approvalProfile);
+    const response = await server.call('/api/v2/preview/session', { method:'POST' });
+    assert.equal(response.status,200);
+    session={url:response.url,token:(await response.json()).dados.token};
+  }
+  async function call(modulo,acao,payload) {
+    const response=await fetch(new URL('/api/v2/preview/dispatch',session.url),{
+      method:'POST',headers:{Authorization:'Bearer '+session.token,'Content-Type':'application/json'},
+      body:JSON.stringify({modulo,acao,payload}),signal:AbortSignal.timeout(5000)
+    });
+    return {status:response.status,...await response.json()};
+  }
+  try {
+    await boot('operator','MESTRE');
+    const sku='SYN-WITHDRAW-HTTP';
+    const local='A';
+    assert.equal((await call('itens','salvar',{operation:'withdraw-item',version:0,
+      data:{sku,descricao:'Item sintético',categoria:'Material'}})).ok,true);
+    assert.equal((await call('estoque','movimentar',{sku,local,tipo:'entrada',qtd:4,
+      operacaoCore:'withdraw-stock',versaoCore:0})).ok,true);
+    const request=await call('solicitacoes','criar',{operation:'withdraw-request',local,itens:[{sku,qtd:3}]});
+    const protocolo=request.reserva.protocolo;
+    const decision={protocolo,itens:[sku],decisao:'APROVADA',version:1,operation:'withdraw-approve'};
+    const take={protocolo,sku,qtd:1,version:2,operation:'withdraw-one'};
+    assert.equal((await call('retiradas','confirmar',take)).status,409);
+    assert.equal((await call('aprovacoes','decidirItens',decision)).ok,true);
+    const partial=await call('retiradas','confirmar',take);
+    assert.equal(partial.dados.status,'PARCIALMENTE_RETIRADA');
+    assert.deepEqual(await call('retiradas','confirmar',take),partial);
+    assert.equal((await call('estoque','saldo',{sku,local})).dados.saldo,3);
+    await server.close();
+    await boot('reader','MESTRE');
+    assert.equal((await call('aprovacoes','decidirItens',decision)).status,403);
+    assert.equal((await call('retiradas','confirmar',take)).status,403);
+    assert.equal((await call('retiradas','itensLiberados',{protocolo})).dados.liberados.length,1);
+    const history=await call('estoque','movimentacoes',{sku,somenteSaidas:true});
+    assert.deepEqual(history.dados.map(row=>row.qtd),[-1]);
   } finally {
     await server?.close();
     await rm(temp,{recursive:true,force:true});

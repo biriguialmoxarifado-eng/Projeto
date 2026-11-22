@@ -115,7 +115,7 @@ async function main() {
     const { GoogleSheetsProvider } = require('../database/adapters/google-sheets-provider');
     invoiceTestStorage = new GoogleSheetsProvider({ testSpreadsheetId: previewId, testOnly: true });
   }
-  const runtime = await createRuntime(operationalStorage || sqlite, { operationalSecurity: operational?.security, sqlite: Boolean(sqlite), credential: { token, actor, role, approvalProfile: previewId ? process.env.ALMOXA_PREVIEW_APPROVAL_PROFILE : undefined }, invoiceTestStorage, sqlitePreview });
+  const runtime = await createRuntime(operationalStorage || sqlite, { operationalSecurity: operational?.security, sqlite: Boolean(sqlite), credential: { token, actor, role, approvalProfile: (previewId || sqlitePreview) ? process.env.ALMOXA_PREVIEW_APPROVAL_PROFILE : undefined }, invoiceTestStorage, sqlitePreview });
   const { core, database } = runtime;
   // O Desktop e o Campo passam a ser servidos sempre que houver banco —
   // SQLite basta. Antes dependiam de ALMOXA_PREVIEW_SHEET_ID, o que

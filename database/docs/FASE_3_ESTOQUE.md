@@ -315,3 +315,13 @@ A lista de fontes permitidas continua a mesma.
 npm test passou com 46 testes no executor Node, além das suítes auxiliares.
 Este lote verifica rota, sessão e envelope em armazenamento isolado.
 A classificação operacional permanece 0 homologados, 33 parciais e 1 bloqueado.
+
+### Gravações HTTP isoladas — continuação de 22/11/2026
+
+| Lote | Motores e operações | Evidência | Status operacional |
+| --- | --- | --- | --- |
+| Cadastro | Itens, fornecedores, categorias, configuração e obras. Criação, atualização de item, leitura e auditoria limitada. | HTTP e SQLite temporário. Reenvio idêntico, 400 para entrada inválida, 409 para versão defasada, 403 para leitor e leitura após reinício. Commit 7d37e27. | Parcial |
+| Compras e atendimento | Pré-compra, mudança de estado, criação da solicitação e reserva pendente. | HTTP e SQLite temporário. Reenvio, conflito, falta de saldo, leitura após reinício e bloqueio de escrita. A solicitação preserva o saldo antes de aprovação. Commit 2144593. | Parcial |
+| Aprovação e retirada | Decisão por item, retirada parcial e movimentação de baixa. | HTTP e SQLite temporário. 409 antes da aprovação, alçada MESTRE de teste definida no servidor, leitor bloqueado, reenvio sem segunda baixa, histórico relido após reinício. | Parcial |
+
+npm test passou com 49 testes do executor Node, além das suítes do Core, sessão, autorização e camada de dados. Os endpoints são exclusivos da homologação; o HTML atual e o armazenamento operacional não foram modificados. Saldo operacional, alçadas reais por obra, equivalência dos formulários e validação Desktop/Campo com perfis reais permanecem pendentes. Biometria segue bloqueada por falta de validação com o leitor físico. Contagem oficial: 0 homologados operacionalmente, 33 parciais e 1 bloqueado.

@@ -11,7 +11,8 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
   const catalogKinds = new Set(['itens', 'fornecedores', 'categorias']);
   const adminWrites = new Set([...catalogKinds, 'config', 'obras']);
   const flowWrites = new Map([['compras', new Set(['precompra', 'alterarStatus'])],
-    ['solicitacoes', new Set(['criar'])]]);
+    ['solicitacoes', new Set(['criar'])], ['aprovacoes', new Set(['decidirItens'])],
+    ['retiradas', new Set(['confirmar'])]]);
   const read = new Map([
     ['nf', ['listar', 'obter', 'itens', ...(allowWrite ? ['salvar'] : [])]],
     ['nfed', allowWrite ? ['atualizar'] : []],
@@ -39,8 +40,8 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
     ['ferramentas', ['listar', 'obter', 'historico']],
     ['epi', ['listar', 'fichas', 'obter', 'historicoEstoque', ...(allowWrite ? [...epiWrites] : [])]],
     ['manutencao', ['status', 'versoes', 'backups']],
-    ['aprovacoes', ['listar', 'pendentes', 'porPerfil']],
-    ['retiradas', ['itensLiberados']],
+    ['aprovacoes', ['listar', 'pendentes', 'porPerfil', ...flowWrites.get('aprovacoes')]],
+    ['retiradas', ['itensLiberados', ...flowWrites.get('retiradas')]],
     ['biometria', ['status']],
     ['ocr', ['disponivel', ...(allowWrite ? ['ler'] : [])]],
     ['lojinha', ['catalogo', 'item']],
@@ -328,6 +329,11 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
       else if (['COMPRA_DADOS_INVALIDOS', 'SOLICITACAO_INVALIDA', 'SOLICITACAO_ITENS_INVALIDOS'].includes(cause.code)) {
         error(res, 400, cause.code, 'Dados de fluxo inválidos.');
       }
+      else if (cause.code === 'RESERVA_NAO_ENCONTRADA') error(res, 404, cause.code, 'Reserva não localizada.');
+      else if (['RESERVA_NAO_APROVADA', 'RETIRADA_ACIMA_DO_PENDENTE', 'RETIRADA_LOCAL_NAO_INFORMADO', 'RETIRADA_ITEM_AMBIGUO'].includes(cause.code)) {
+        error(res, 409, cause.code, 'A retirada não é compatível com a reserva atual.');
+      }
+      else if (cause.code === 'RETIRADA_INVALIDA') error(res, 400, cause.code, 'Dados de retirada inválidos.');
       else if (cause.status) error(res, cause.status, cause.code, 'Solicitação inválida.');
       else error(res, 503, 'CORE_INDISPONIVEL', 'O Core de homologação não conseguiu consultar os dados.');
     }
