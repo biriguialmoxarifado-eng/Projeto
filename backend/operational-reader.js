@@ -58,10 +58,11 @@ function createOperationalReader(provider, { expectedTitle, drive } = {}) {
     return result;
   }
 
-  function rows(name, required) {
-    const entry = cache.get(name);
+  function rows(name, required, sample = false) {
+    const key = name + (sample ? ':sample' : '');
+    const entry = cache.get(key);
     if (entry && entry.until > Date.now()) return entry.result;
-    const range = encodeURIComponent("'" + name + "'!A:Z");
+    const range = encodeURIComponent("'" + name + (sample ? "'!A1:Z2" : "'!A:Z"));
     const result = identify().then(() => provider.request(provider.spreadsheetId, '/values/' + range + '?valueRenderOption=FORMATTED_VALUE'))
       .then(({ values = [] }) => {
         const headers = values[0] ?? [];
@@ -72,16 +73,16 @@ function createOperationalReader(provider, { expectedTitle, drive } = {}) {
           Object.fromEntries(headers.filter(header => typeof header === 'string' && header)
             .map(header => [header, row[headers.indexOf(header)] ?? ''])));
       }).catch(error => {
-        if (cache.get(name)?.result === result) cache.delete(name);
+        if (cache.get(key)?.result === result) cache.delete(key);
         if (error.code === 'GOOGLE_SHEETS_HTTP_400') throw sheetError('PLANILHA_ESQUEMA_INVALIDO');
         throw error;
       });
-    cache.set(name, { until: Date.now() + 15000, result });
+    cache.set(key, { until: Date.now() + (sample ? 30000 : 15000), result });
     return result;
   }
-  const users = () => rows('USUARIOS', ['id', 'nome', 'email', 'senha_hash', 'perfil', 'status']);
-  const items = () => rows('ALMOXA_ITENS', ['sku', 'descricao', 'estoqueAtual']);
-  const categories = () => rows('ALMOXA_CATEGORIAS', ['nome', 'visivel']);
+  const users = sample => rows('USUARIOS', ['id', 'nome', 'email', 'senha_hash', 'perfil', 'status'], sample);
+  const items = sample => rows('ALMOXA_ITENS', ['sku', 'descricao', 'estoqueAtual'], sample);
+  const categories = sample => rows('ALMOXA_CATEGORIAS', ['nome', 'visivel'], sample);
   const works = () => rows('ALMOXA_OBRAS', ['id', 'nome']);
   const epi = () => rows('ALMOXA_EPI_FICHAS', ['id', 'matricula', 'colaborador', 'sku', 'item']);
   const isAdmin = user => user && text(user.id) && normalized(user.status) === 'ativo' &&
@@ -111,7 +112,7 @@ function createOperationalReader(provider, { expectedTitle, drive } = {}) {
     const source = text(value);
     if (source.length <= 1400000 && /^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(source)) return { inline: source };
     if (/^[\w-]{10,200}$/.test(text(id))) return { fileId: text(id) };
-    if (source.length > 500) return {};
+    if (!source || source.length > 500) return {};
     try {
       const url = new URL(source);
       if (url.protocol === 'https:' && url.hostname === 'drive.google.com' && !url.username && !url.password) {
@@ -149,7 +150,7 @@ function createOperationalReader(provider, { expectedTitle, drive } = {}) {
     security: { authorizationProvider, sessionProvider, auditProvider: { record() {} } },
     async connection() {
       try {
-        await Promise.all([items(), categories(), users()]);
+        await Promise.all([items(true), categories(true), users(true)]);
         return { provider: 'google-sheets', status: 'connected' };
       } catch (error) {
         const code = storageCode(error);

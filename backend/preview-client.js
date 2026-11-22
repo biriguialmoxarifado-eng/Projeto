@@ -87,7 +87,7 @@
     refreshConnection() {
       if (healthRequest) return healthRequest;
       healthRequest = fetch(endpoint('/health'), { cache: 'no-store', credentials: 'omit', redirect: 'error',
-        signal: AbortSignal.timeout(12000) }).then(async response => {
+        signal: AbortSignal.timeout(25000) }).then(async response => {
         const body = await response.json();
         if (body.core !== 'online' || body.environment !== 'operacional-leitura' || body.storage?.provider !== 'google-sheets') throw new Error();
         connectivity = { core: 'online', storage: body.storage, revision: body.revision };
@@ -175,7 +175,7 @@
       const request = fetch(endpoint(upload ? '/api/v2/preview/ocr' : '/api/v2/preview/dispatch'), {
         method: 'POST', credentials: 'omit', redirect: 'error', cache: 'no-store',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body, signal: AbortSignal.any([session.signal, AbortSignal.timeout(upload ? 40000 : 12000)])
+        body, signal: AbortSignal.any([session.signal, AbortSignal.timeout(upload ? 40000 : operational ? 25000 : 12000)])
       }).then(async response => {
         const result = await response.json();
         if (response.status === 401 && active === session) {
@@ -191,7 +191,7 @@
         return result;
       }).catch(() => {
         if (operational && active === session) { connectivity = { ...connectivity, core: 'unavailable' }; notifyConnection(); }
-        return { ok: false, codigo: 'CORE_INDISPONIVEL', mensagem: 'O Core Node não respondeu.' };
+        return { ok: false, codigo: 'CORE_INDISPONIVEL', mensagem: operational ? 'O Core Node não respondeu.' : 'O Core de homologação não respondeu.' };
       }).finally(() => {
         if (pending.get(body) === request) pending.delete(body);
       });

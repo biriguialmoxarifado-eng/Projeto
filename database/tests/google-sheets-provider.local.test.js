@@ -190,6 +190,24 @@ test('oculta detalhes de autenticação e de erros do Drive', async () => {
   await assert.rejects(unavailable.readMetadata('file-1'), { code: 'GOOGLE_AUTH_FAILED' });
 });
 
+test('a imagem do Drive usa a autorização de conteúdo e oculta o corpo da recusa', async () => {
+  const auth = { async getClient() { return { async request() {
+    return { data: { id: 'image-1', mimeType: 'image/png', trashed: false } };
+  } }; } };
+  let deny = false;
+  const mediaAuth = { async getClient() { return { async request({ url, method, responseType }) {
+    assert.equal(new URL(url).searchParams.get('alt'), 'media');
+    assert.equal(method, 'GET');
+    assert.equal(responseType, 'stream');
+    if (deny) throw { response: { status: 403, data: { detail: 'privado' } } };
+    return { data: [Buffer.from('img')] };
+  } }; } };
+  const provider = new GoogleDriveProvider({ auth, mediaAuth });
+  assert.equal(await provider.readImage('image-1'), 'data:image/png;base64,aW1n');
+  deny = true;
+  await assert.rejects(provider.readImage('image-1'), { code: 'GOOGLE_DRIVE_HTTP_403', message: 'Google Drive respondeu HTTP 403.' });
+});
+
 test('o modo isolado valida o título e nunca consulta o ID operacional', async () => {
   const { provider, calls } = fixture({ testOnly: true });
   await provider.testRows();

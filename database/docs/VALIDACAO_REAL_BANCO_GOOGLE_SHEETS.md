@@ -1,5 +1,15 @@
 # Migração e validação do banco na V2
 
+## Desktop operacional somente leitura — 22/11/2026
+
+`ALMOXA_OPERATIONAL_READ=1` usa `ALMOXA_SPREADSHEET_ID` e o OAuth local. Configure também `ALMOXA_OPERATIONAL_SHEET_TITLE` com o título esperado e mantenha o servidor em `127.0.0.1`. O arquivo local `.env.operational`, ignorado pelo Git, pode ser carregado com `node --env-file=.env.operational backend/server.js`. A Loja exige sessão do ALMOXA PRO, lê itens e categorias da planilha, aplica a visibilidade configurada e exibe o saldo registrado. As gravações permanecem bloqueadas.
+
+`GET /health` verifica a identidade e a leitura de uma amostra de Itens, Categorias e Usuários. O Desktop distingue sessão recusada, Core sem resposta e falha de acesso à planilha. O ensaio confirmou a planilha **Base Dado almoxarifado**, 103 abas, 1.283 linhas de itens, 14 categorias, 2.310 movimentações, 994 linhas de fichas EPI, 244 linhas de usuários, duas obras e 86 linhas fiscais. O ensaio registra cabeçalhos e contagens.
+
+O Edge confirmou 1.283 itens no catálogo da planilha original, a partir do `index.html` servido pelo Core. O servidor descartável do teste usa uma identidade sintética em memória para testar o login sem coletar a senha de um administrador. O caminho de configuração, as permissões, o catálogo, o indicador e a chamada ao Google Sheets usam a implementação do Desktop. A aba de usuários original foi lida separadamente pelo Core operacional.
+
+O OAuth existente leu os metadados da planilha e de uma imagem WebP associada no Drive. A solicitação do conteúdo retornou HTTP 403. O token concede `drive.metadata.readonly`. Para autorizar o conteúdo, o titular da conta pode executar `npm run auth:google -- --operational` e aceitar a leitura de Sheets e Drive. Esse fluxo guarda o token operacional separado no perfil do Windows. O catálogo funciona independentemente da autorização das fotos. O Core busca fotos pelas referências da planilha e aceita formatos raster de até 1 MiB.
+
 ## Acesso ao Google
 
 O backend usa Application Default Credentials (ADC). Habilite a Google Sheets API no projeto Google Cloud da identidade de execução. Configure a conta de serviço no ambiente do backend. Em execução local, ADC pode carregar o arquivo apontado por `GOOGLE_APPLICATION_CREDENTIALS`, armazenado fora do projeto. O e-mail da conta vem de `client_email` ou da identidade vinculada ao serviço de execução.

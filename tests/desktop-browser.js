@@ -17,7 +17,7 @@ async function until(check, label) {
   throw new Error('Tempo esgotado no Desktop: ' + label);
 }
 
-async function exerciseDesktop(browser, profile, origin, credential) {
+async function withBrowser(browser, profile, origin, visit) {
   const child = spawn(browser, ['--headless', '--no-first-run', '--disable-sync', '--no-default-browser-check',
     '--disable-background-networking', '--remote-debugging-port=0', '--user-data-dir=' + profile, 'about:blank'],
   { windowsHide: true, stdio: 'ignore' });
@@ -85,8 +85,8 @@ async function exerciseDesktop(browser, profile, origin, credential) {
       await evaluate(name => { location.hash = '#/' + name; }, name);
       await text('#appMain h1', label);
     };
-    const login = async (password = credential) => {
-      await set('#lgUser', 'integration-test');
+    const login = async (user, password) => {
+      await set('#lgUser', user);
       await set('#lgPass', password);
       await click('#lgEntrar');
     };
@@ -100,6 +100,18 @@ async function exerciseDesktop(browser, profile, origin, credential) {
       assert.equal(await evaluate(() => document.querySelector('[data-core-erro]')?.textContent || ''), '');
     };
     await send('Page.navigate', { url: origin });
+    await visit({ evaluate, visible, text, click, set, route, login, save, send });
+    await send('Browser.close');
+  } finally {
+    socket?.close();
+    child.kill();
+    await exited.catch(() => {});
+  }
+}
+
+function exerciseDesktop(browser, profile, origin, credential) {
+  return withBrowser(browser, profile, origin, async ({ evaluate, visible, text, click, set, route, login: signIn, save, send }) => {
+    const login = (password = credential) => signIn('integration-test', password);
     await login('credencial inválida');
     await until(() => evaluate(() => document.querySelector('#lgErro')?.innerText.trim()), 'rejeitar credencial inválida');
     await login();
@@ -183,12 +195,25 @@ async function exerciseDesktop(browser, profile, origin, credential) {
     await until(() => evaluate(() => document.querySelectorAll('#appMain tbody tr').length === 5), 'reler cinco movimentos');
     await evaluate(() => { location.hash = '#/nf'; });
     await text('#appMain', '90831');
-    await send('Browser.close');
-  } finally {
-    socket?.close();
-    child.kill();
-    await exited.catch(() => {});
-  }
+  });
 }
 
-module.exports = { exerciseDesktop };
+function exerciseOperational(browser, profile, origin, credential, item) {
+  return withBrowser(browser, profile, origin, async ({ text, click, evaluate, login, route }) => {
+    await text('#coreLoginStatus', 'Planilha conectada');
+    await login('browser-admin', 'invalid');
+    await text('#coreLoginStatus', 'Login recusado');
+    await login('browser-admin', credential);
+    await text('#corePill span', 'Core e planilha conectados');
+    await route('loja', 'Loja / Catálogo');
+    await text('#appMain', item);
+    assert.equal(await evaluate(() => document.querySelectorAll('#appMain .prod').length > 0), true);
+    assert.equal(await evaluate(() => Boolean(document.querySelector('#appMain [data-mais], #appMain [data-pedir-compra]'))), false);
+    await click('#btnUser');
+    await click('#btnSair');
+    await click('#modalRoot [data-ok]');
+    await text('#coreLoginStatus', 'Planilha conectada');
+  });
+}
+
+module.exports = { exerciseDesktop, exerciseOperational };
