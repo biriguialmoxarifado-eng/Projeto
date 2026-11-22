@@ -2,6 +2,7 @@
 
 const { createHash } = require('node:crypto');
 const { createComplementaryMethods } = require('./complementary');
+const { createWorkflowMethods } = require('./workflows');
 const invalid = code => Object.assign(new Error(code), { code });
 const key = value => typeof value === 'string' && /^[\w.-]{1,100}$/.test(value);
 const obraFields = ['nome', 'codigo', 'cliente', 'local', 'almoxarifado', 'responsavel', 'status', 'inicio', 'previsao'];
@@ -63,6 +64,7 @@ function createAdministrationEngine({ core, stores, coordinate, clock = () => ne
 
   return {
     ...createComplementaryMethods({ save, authorize, getRecords: async kind => latest(await stores[kind].events()) }),
+    ...createWorkflowMethods({ save, authorize, getRecords: async kind => latest(await stores[kind].events()) }),
     async config(token, action, input = {}) {
       if (!['obter', 'salvar'].includes(action)) return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
       const { chave, valor } = input;

@@ -16,6 +16,9 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
     ['kits', ['listar', 'obter', 'doPerfil']],
     ['calendario', ['listar']],
     ['centros', ['listar']],
+    ['projetos', ['listar', 'obter', 'detalhe']],
+    ['relatorios', ['listar', 'obter', 'gerados']],
+    ['mural', ['listar', 'obter']],
     ['lojinha', ['catalogo', 'item']],
     ['inventario', ['listar', 'obter', 'divergencias']]
   ]);
@@ -57,7 +60,7 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
       let result;
       if (modulo === 'nf') result = await runtime.getInvoiceReadAdapter()(token, acao, payload);
       else if (modulo === 'obras') result = await runtime.getAdministrationEngine().obras(token, acao, payload);
-      else if (['ocorrencias', 'notificacoes', 'kits', 'calendario', 'centros'].includes(modulo)) {
+      else if (['ocorrencias', 'notificacoes', 'kits', 'calendario', 'centros', 'projetos', 'relatorios', 'mural'].includes(modulo)) {
         result = await runtime.getAdministrationEngine()[modulo](token, acao, payload);
       }
       else if (modulo === 'lojinha') result = await runtime.getShopEngine()(token, acao, payload);

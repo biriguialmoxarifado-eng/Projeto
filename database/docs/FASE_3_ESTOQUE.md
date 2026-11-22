@@ -29,11 +29,11 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | epi | Pendente. Executor legado preservado. |
 | ferramentas | Pendente. Executor legado preservado. |
 | ocorrencias | Parcial, integrado no Desktop local. Criar, atualizar e consultar; exclusão, alçadas operacionais e formulários publicados pendentes. |
-| projetos | Pendente. Executor legado preservado. |
+| projetos | Parcial, integrado em teste. Cadastro, progresso, consulta e exclusão lógica. Integração de abastecimento e clientes pendentes. |
 | inventario | Parcial, integrado em teste. Abertura, contagem, divergência e encerramento. QR, rotas, escopo de equipe e ajuste de saldo pendentes. |
-| relatorios | Pendente. Executor legado preservado. |
+| relatorios | Parcial, integrado em teste. Registro e consulta de metadados e parâmetros. Geração e entrega de arquivos pendentes. |
 | painel | Pendente. Executor legado preservado. |
-| mural | Pendente. Executor legado preservado. |
+| mural | Parcial, integrado em teste. Publicações e referências de fotos com exclusão lógica. Acesso a conteúdo e paridade do cliente pendentes. |
 | aprovacoes | Pendente. Executor legado preservado. |
 | categorias | Integrado em teste. Cadastro, atualização e listagem. Exclusão com validação de itens em uso e paridade operacional pendentes. |
 | obras | Parcial, integrado em teste. Cadastro e atualização com IDs estáveis; escopo por obra e interfaces operacionais pendentes. |
@@ -128,3 +128,11 @@ Matriz após o lote: 19 parciais, 15 pendentes e nenhum motor homologado. Próxi
 Partida em d2ebdab. O lote reutiliza armazenamento de eventos, lock local, autor e releitura. As ações de consulta são permitidas no Desktop de homologação. As mutações continuam disponíveis somente pelo Core isolado. Exclusões lógicas preservam o histórico sintético. Nenhum módulo mudou de executor operacional.
 
 npm test passou. No Sheets ALMOXA_TESTE_CORE, a retentativa concorrente gerou um único KIT-001, a consulta de perfil retornou o kit, a exclusão de calendário foi relida sem o evento na lista e outro runtime confirmou a versão 2 do centro. Tempo de 12066 ms. Somente as abas KITS_CORE_TESTE, CALENDARIO_CORE_TESTE e CENTROS_CORE_TESTE receberam gravações. Matriz: 22 parciais, 12 pendentes e nenhum homologado. Próximos motores independentes: Projetos, Relatórios e Mural, pelos contratos de AP_Modulo_projetos, AP_Modulo_relatorios e AP_Modulo_mural e pela função AP_FLUXO_crud_.
+
+## Projetos, Relatórios e Mural
+
+A partir de ccaa35f, o segundo lote implementa criar, consultar, atualizar e excluir logicamente, com os aliases detalhe, registrar e gerados dos módulos de Fluxo. A escrita usa sessão, permissão, versão, auditoria, reenvio e releitura. A homologação Desktop recebe somente as consultas. O registro de relatório não gera arquivos. Mural preserva referências de fotos, sem acesso a conteúdo no Drive. Projetos ainda não abastece estoque.
+
+npm test passou. No Sheets ALMOXA_TESTE_CORE, PRJ-001 foi criado, repetido, atualizado e relido com progresso 30; REL00001 foi registrado e apareceu em gerados; Mural exibiu referência sintética de foto e confirmou exclusão lógica. Tempo total de 11252 ms. Somente as abas PROJETOS_CORE_TESTE, RELATORIOS_CORE_TESTE e MURAL_CORE_TESTE foram gravadas. A matriz passa a 25 parciais, 9 pendentes e nenhum homologado.
+
+Próxima retomada: Painel, pelos contratos carregar/salvar de AP_Modulo_painel e pelos agregados de AP_Modulo_dashboard. Reaproveitar a configuração PAINEL_CONFIG, as obras e a projeção de estoque. Outros pendentes são EPI, Ferramentaria, Aprovações, OCR, Manutenção, Retiradas, Automação e Biometria. Manter Biometria por último e o Apps Script como executor operacional.

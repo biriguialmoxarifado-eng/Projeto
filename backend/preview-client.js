@@ -12,6 +12,9 @@
     ['kits', new Set(['listar', 'obter', 'doPerfil'])],
     ['calendario', new Set(['listar'])],
     ['centros', new Set(['listar'])],
+    ['projetos', new Set(['listar', 'obter', 'detalhe'])],
+    ['relatorios', new Set(['listar', 'obter', 'gerados'])],
+    ['mural', new Set(['listar', 'obter'])],
     ['lojinha', new Set(['catalogo', 'item'])],
     ['inventario', new Set(['listar', 'obter', 'divergencias'])]
   ]);

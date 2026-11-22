@@ -10,8 +10,8 @@ const { createHash, timingSafeEqual } = require('node:crypto');
 
 function diagnosticSecurity(credential, invoices) {
   const authorizationProvider = new AuthorizationManager();
-  const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read', 'catalog:read', 'purchases:read', 'requests:read', 'config:read', 'obras:read', 'inventory:read', 'ocorrencias:read', 'notificacoes:read', 'kits:read', 'calendario:read', 'centros:read'] : [];
-  const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write', 'catalog:write', 'purchases:write', 'requests:write', 'config:write', 'obras:write', 'usuarios:read', 'inventory:write', 'ocorrencias:write', 'notificacoes:write', 'kits:write', 'calendario:write', 'centros:write'] : [];
+  const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read', 'catalog:read', 'purchases:read', 'requests:read', 'config:read', 'obras:read', 'inventory:read', 'ocorrencias:read', 'notificacoes:read', 'kits:read', 'calendario:read', 'centros:read', 'projetos:read', 'relatorios:read', 'mural:read'] : [];
+  const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write', 'catalog:write', 'purchases:write', 'requests:write', 'config:write', 'obras:write', 'usuarios:read', 'inventory:write', 'ocorrencias:write', 'notificacoes:write', 'kits:write', 'calendario:write', 'centros:write', 'projetos:write', 'relatorios:write', 'mural:write'] : [];
   authorizationProvider.registerRole('reader', ['diagnostics:read', ...invoiceRead]);
   authorizationProvider.registerRole('operator', ['diagnostics:read', 'diagnostics:write', ...invoiceRead, ...invoiceWrite]);
   const digest = value => createHash('sha256').update(value).digest();
@@ -133,7 +133,10 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
           notificacoes: new TestInvoiceStore(invoiceTestStorage, 'notificacoes'),
           kits: new TestInvoiceStore(invoiceTestStorage, 'kits'),
           calendario: new TestInvoiceStore(invoiceTestStorage, 'calendario'),
-          centros: new TestInvoiceStore(invoiceTestStorage, 'centros')
+          centros: new TestInvoiceStore(invoiceTestStorage, 'centros'),
+          projetos: new TestInvoiceStore(invoiceTestStorage, 'projetos'),
+          relatorios: new TestInvoiceStore(invoiceTestStorage, 'relatorios'),
+          mural: new TestInvoiceStore(invoiceTestStorage, 'mural')
         }
       });
       return administrationEngine;
