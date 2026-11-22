@@ -6001,6 +6001,13 @@ fecharDropdowns();
 });
 var bs = document.getElementById("btnSair");
 if (bs) bs.addEventListener("click", function() {
+if (window.AlmoxaCorePreview?.desktop) {
+confirmar("Encerrar sessão", "Você voltará à tela de entrada.", "Sair", async function() {
+await API.call("auth", "logout", {});
+LOGIN.voltarCore();
+});
+return;
+}
 confirmar("Sair do sistema", "Você volta para a tela principal do almoxarifado, que continua aberta para consulta e solicitações.", "Sair", function() {
 ST.sessao = null;
 ST.carrinho = [];
@@ -6777,6 +6784,17 @@ return '<button class="auth-tab ' + (metodo === id ? "active" : "") + '" data-me
 }
 function area() {
 var a = document.getElementById("authArea");
+if (window.AlmoxaCorePreview?.desktop) {
+metodo = "senha";
+var tela = document.getElementById("loginScreen");
+tela.querySelector(".login-form .ls").textContent = "Entre com a identidade e a credencial do operador configurado no Core V2 local.";
+for (var seletor of [".auth-tabs", "#lgVoltar", "#lgNovoCadastro"]) tela.querySelector(seletor)?.remove();
+a.innerHTML = '<form id="lgCoreForm">' + campoCore("Usuário", "usuario", "", 'id="lgUser" autocomplete="username" required') +
+'<div class="field"><label for="lgPass">Credencial</label><input class="input" id="lgPass" type="password" autocomplete="current-password" required></div>' +
+'<button class="btn btn-orange btn-lg btn-block" id="lgEntrar">Entrar</button><div id="lgErro" class="mt12" role="status"></div></form>';
+a.querySelector("form").addEventListener("submit", function(e) { e.preventDefault(); entrar(); });
+return;
+}
 if (metodo === "senha") {
 a.innerHTML = '<div class="field"><label>Matrícula ou e-mail <span class="req">*</span></label>' + '<input class="input" id="lgUser" placeholder="000458" autocomplete="username"></div>' + '<div class="field"><label>Senha <span class="req">*</span></label>' + '<input class="input" id="lgPass" type="password" placeholder="••••••••" autocomplete="current-password"></div>' + '<div class="flex between center mb16"><label class="flex center gap8" style="cursor:pointer;font-size:12.5px">' + '<span class="check on" id="lgLembrar"></span> Manter conectado nesta estação</label>' + '<button class="btn-link" id="lgEsqueci">Esqueci minha senha</button></div>' + '<button class="btn btn-orange btn-lg btn-block" id="lgEntrar">Entrar</button>' + '<div id="lgErro" class="mt12"></div>' + avisoDaBaseOficial() + '<div class="login-rodape mt16">' + (semUsuarioCadastrado() ? '<div class="alert a-blue mb12">' + ic("info") + "<div><b>Ainda não existe administrador</b>O primeiro cadastro cria o acesso e entra no sistema.</div></div>" : "") + (baseConsultada() ? '<div class="txt-c small">' + (semUsuarioCadastrado() ? "Comece por aqui:" : "Ainda não tem cadastro?") + "</div>" + '<button class="btn ' + (semUsuarioCadastrado() ? "btn-primary" : "btn-ghost") + ' btn-block mt8" id="lgNovoCadastro">' + ic("usuario") + (semUsuarioCadastrado() ? "Criar o primeiro administrador" : "Criar novo cadastro") + "</button>" : "") + "</div>";
 a.querySelector("#lgLembrar").addEventListener("click", function() {
@@ -6906,6 +6924,7 @@ btn.innerHTML = '<span class="spinner"></span> Entrando…';
 btn.disabled = true;
 }
 var senhaDigitada = (document.getElementById("lgPass") || {}).value || "";
+if (window.AlmoxaCorePreview?.desktop) document.getElementById("lgPass").value = "";
 API.call("auth", "login", {
 usuario: user,
 senha: senhaDigitada,
@@ -7490,7 +7509,7 @@ ST.usuario = r.dados.usuario;
 ST.perfil = r.dados.usuario.perfil;
 ST.obra = r.dados.obra || ST.obra || null;
 ST.sessao = r.dados.sessao;
-ST.notificacoes = window.AlmoxaCorePreview?.operational ? [] : MOCK.notificacoes.slice();
+ST.notificacoes = (window.AlmoxaCorePreview?.operational || window.AlmoxaCorePreview?.desktop) ? [] : MOCK.notificacoes.slice();
 document.getElementById("loginScreen").classList.add("hidden");
 document.getElementById("kioskScreen").classList.add("hidden");
 document.getElementById("appHeader").classList.remove("hidden");
@@ -7511,6 +7530,15 @@ try {
 avisarTarefaPendente();
 } catch (e) {}
 }, 1200);
+}
+function voltarAoLoginCore() {
+ST.usuario = ST.sessao = ST.obra = null;
+ST.carrinho = [];
+ST.publico = true;
+UI.fecharModais();
+document.getElementById("appHeader").classList.add("hidden");
+document.getElementById("appMain").classList.add("hidden");
+LOGIN.abrir();
 }
 function modalPorQueNaoEntrei(info) {
 var d = info.cracha || {};
@@ -7722,6 +7750,7 @@ montar: montar,
 abrir: abrir,
 fechar: fechar,
 porCracha: porCracha,
+voltarCore: voltarAoLoginCore,
 entrarComResposta: concluirLogin
 };
 }();
@@ -10284,6 +10313,81 @@ toast("info", "Gerando PDF", "O serviço de PDF do Core prepara o arquivo para d
 });
 }
 
+function campoCore(rotulo, nome, valor, atributos) {
+return '<label class="field"><span>' + U.esc(rotulo) + '</span><input class="input" name="' + nome +
+'" value="' + U.esc(valor || "") + '" ' + (atributos || "") + '></label>';
+}
+
+function modalGravacaoCore(titulo, campos, preparar) {
+UI.modal({ titulo: titulo, corpo: '<form>' + campos + '<div role="status" data-core-erro></div></form>',
+rodape: '<button class="btn btn-ghost" data-core-cancelar>Cancelar</button>' +
+'<button class="btn btn-primary" data-core-gravar>Salvar</button>',
+aoAbrir: function(janela, fechar) {
+var form = janela.querySelector("form"), salvar = janela.querySelector("[data-core-gravar]");
+var aviso = janela.querySelector("[data-core-erro]");
+var assinatura, pedido;
+janela.querySelector("[data-core-cancelar]").onclick = fechar;
+salvar.onclick = function() { form.requestSubmit(); };
+form.addEventListener("submit", async function(evento) {
+evento.preventDefault();
+if (salvar.disabled) return;
+salvar.disabled = true;
+aviso.textContent = "";
+try {
+var dados = Object.fromEntries(new FormData(form));
+var atual = JSON.stringify(dados);
+if (!pedido || assinatura !== atual) {
+pedido = await preparar(dados, crypto.randomUUID());
+assinatura = atual;
+}
+if (pedido.erro) { aviso.textContent = pedido.erro; pedido = null; return; }
+var resultado = await window.AlmoxaCorePreview.call(pedido.modulo, pedido.acao, pedido.payload);
+if (!resultado.ok) {
+aviso.textContent = resultado.mensagem || resultado.codigo || "A operação não foi confirmada.";
+if (resultado.codigo?.endsWith("CONFLITO_VERSAO")) pedido = null;
+return;
+}
+fechar();
+toast("ok", "Registro salvo", titulo);
+ROUTER.render();
+} finally { salvar.disabled = false; }
+});
+}});
+}
+
+function selecionarCore(rotulo, nome, opcoes) {
+return '<label class="field"><span>' + U.esc(rotulo) + '</span><select class="select" name="' + nome + '" required>' +
+'<option value="">Selecione</option>' + opcoes.map(function(opcao) {
+return '<option value="' + U.esc(opcao[0]) + '">' + U.esc(opcao[1]) + '</option>';
+}).join("") + '</select></label>';
+}
+
+function modalItemCore() {
+modalGravacaoCore("Cadastrar item", campoCore("SKU", "sku", "SYN-", 'required pattern="SYN-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*" maxlength="80"') +
+campoCore("Descrição", "descricao", "", 'required maxlength="160"') + campoCore("Categoria", "categoria", "", 'maxlength="80"'),
+function(dados, operation) {
+return { modulo: "itens", acao: "salvar", payload: { operation: operation, version: 0, data: dados } };
+});
+}
+
+async function modalMovimentoCore() {
+var local = ST.obra.id;
+var itens = await API.call("estoque", "listar", { local: local });
+if (!itens.ok || !itens.dados.length) {
+toast("warn", "Movimentação indisponível", itens.mensagem || "Cadastre um item no Estoque Geral.");
+return;
+}
+modalGravacaoCore("Registrar movimentação", selecionarCore("Item", "sku", itens.dados.map(function(item) { return [item.sku, item.nome + " · " + item.sku]; })) +
+selecionarCore("Tipo", "tipo", [["entrada", "Entrada"], ["saida", "Saída"]]) +
+campoCore("Quantidade", "qtd", "", 'type="number" min="1" step="1" required') +
+campoCore("Motivo", "motivo", "", 'required maxlength="250"'), async function(dados, operation) {
+var saldo = await API.call("estoque", "saldo", { sku: dados.sku, local: local });
+if (!saldo.ok) return { erro: saldo.mensagem };
+return { modulo: "estoque", acao: "movimentar", payload: { ...dados, local: local, qtd: Number(dados.qtd),
+operacaoCore: operation, versaoCore: saldo.dados.version } };
+});
+}
+
 var estEstado = {
 aba: "todos",
 busca: "",
@@ -10332,7 +10436,8 @@ return UI.cabecalho({
 trilha: [ "Estoque", "Estoque Geral" ],
 titulo: "Estoque Geral",
 sub: "Saldo, mínimo, reservado e disponível de todos os itens da obra ativa.",
-acoes: '<button class="btn btn-ghost" data-ir="#/movimentacoes">' + ic("sync") + "Movimentações</button>" + '<button class="btn btn-ghost" data-exportar="Estoque">' + ic("excel") + "Exportar</button>" + '<button class="btn btn-orange" data-ir="#/nf-nova">' + ic("upload") + "Entrada de NF</button>"
+acoes: '<button class="btn btn-ghost" data-ir="#/movimentacoes">' + ic("sync") + "Movimentações</button>" + '<button class="btn btn-ghost" data-exportar="Estoque">' + ic("excel") + "Exportar</button>" + '<button class="btn btn-orange" data-ir="#/nf-nova">' + ic("upload") + "Entrada de NF</button>" +
+(window.AlmoxaCorePreview?.canWrite() ? '<button class="btn btn-primary" data-core-novo-item>Novo item</button>' : "")
 }) + '<div class="grid g5 mb16">' + UI.kpi({
 icone: "caixa",
 cor: "ico-blue",
@@ -10451,13 +10556,16 @@ return '<div class="bar-track" style="width:70px"><div class="bar-fill ' + cor +
 rotulo: "",
 acts: true,
 render: function(p) {
-return '<button class="btn-icon" data-ir="#/estoque-item/' + p.id + '" title="Detalhes">' + ic("olho") + "</button>" + ' <button class="btn-icon" data-ajuste="' + p.id + '" title="Ajustar saldo">' + ic("balanca") + "</button>";
+return '<button class="btn-icon" data-ir="#/estoque-item/' + U.esc(p.id) + '" title="Detalhes">' + ic("olho") + "</button>" +
+(!window.AlmoxaCorePreview?.desktop || window.AlmoxaCorePreview.canWrite() ?
+' <button class="btn-icon" data-ajuste="' + U.esc(p.id) + '" title="Ajustar saldo">' + ic("balanca") + "</button>" : "");
 }
 } ]
 }) + UI.paginador(pg) + "</div>";
 });
 },
 mount: function() {
+document.querySelector("[data-core-novo-item]")?.addEventListener("click", modalItemCore);
 document.querySelectorAll("[data-aba]").forEach(function(b) {
 b.addEventListener("click", function() {
 estEstado.aba = b.getAttribute("data-aba");
@@ -10739,7 +10847,8 @@ return UI.cabecalho({
 trilha: [ "Estoque", "Movimentações" ],
 titulo: "Movimentações",
 sub: "Entradas, saídas, transferências, ajustes, devoluções e reservas.",
-acoes: '<button class="btn btn-ghost" data-exportar="Movimentações">' + ic("excel") + "Exportar período</button>"
+acoes: '<button class="btn btn-ghost" data-exportar="Movimentações">' + ic("excel") + "Exportar período</button>" +
+(window.AlmoxaCorePreview?.canWrite() ? '<button class="btn btn-primary" data-core-movimento>Registrar movimentação</button>' : "")
 }) + '<div class="grid g4 mb16">' + UI.kpi({
 icone: "sync",
 cor: "ico-blue",
@@ -10825,6 +10934,7 @@ return "<div>" + U.esc(m.usuario || "—") + "</div>" + (m.obra ? '<div class="m
 });
 },
 mount: function() {
+document.querySelector("[data-core-movimento]")?.addEventListener("click", modalMovimentoCore);
 document.querySelectorAll("[data-tipo]").forEach(function(b) {
 b.addEventListener("click", function() {
 movEstado.tipo = b.getAttribute("data-tipo");
@@ -12920,6 +13030,62 @@ if (btVarios) btVarios.addEventListener("click", function () {
 }
 
 
+async function modalEntregaEpiCore() {
+var local = ST.obra.id;
+var [usuarios, estoque] = await Promise.all([API.call("usuarios", "listar", {}), API.call("estoque", "listar", { local: local })]);
+if (!usuarios.ok || !estoque.ok) {
+toast("err", "Entrega indisponível", usuarios.mensagem || estoque.mensagem);
+return;
+}
+var pessoas = usuarios.dados.filter(function(pessoa) { return pessoa.matricula && pessoa.ativo !== false &&
+!/^(INATIVO|BLOQUEADO|EXCLU)/i.test(pessoa.status); });
+var itens = estoque.dados.filter(function(item) { return item.disponivel > 0; });
+if (!pessoas.length || !itens.length) {
+toast("warn", "Entrega indisponível", "Cadastre um colaborador ativo e registre a entrada do material.");
+return;
+}
+modalGravacaoCore("Registrar entrega de EPI",
+selecionarCore("Colaborador", "usuarioId", pessoas.map(function(pessoa) { return [pessoa.id, pessoa.nome + " · " + pessoa.matricula]; })) +
+selecionarCore("Material", "sku", itens.map(function(item) { return [item.sku, item.nome + " · disponível " + item.disponivel]; })) +
+campoCore("Quantidade", "quantidade", "", 'type="number" min="1" step="1" required'), async function(dados, operation) {
+var saldo = await API.call("estoque", "saldo", { sku: dados.sku, local: local });
+if (!saldo.ok) return { erro: saldo.mensagem };
+return { modulo: "epi", acao: "entregarEstoque", payload: { ...dados, local: local, quantidade: Number(dados.quantidade),
+operacaoCore: operation, versaoCore: saldo.dados.version } };
+});
+}
+
+function modalDevolucaoEpiCore(entrega) {
+modalGravacaoCore("Confirmar devolução de EPI", '<p>' + U.esc(entrega.colaborador) + ' · ' + U.esc(entrega.sku) +
+' · ' + U.num(entrega.quantidade) + ' un.</p>', async function(_dados, operation) {
+var saldo = await API.call("estoque", "saldo", { sku: entrega.sku, local: entrega.local });
+if (!saldo.ok) return { erro: saldo.mensagem };
+return { modulo: "epi", acao: "devolverEstoque", payload: { sku: entrega.sku, local: entrega.local,
+quantidade: entrega.quantidade, original: entrega.operation, operacaoCore: operation, versaoCore: saldo.dados.version } };
+});
+}
+
+var entregasEpiCore = [];
+async function renderEpiCore() {
+var resultado = await API.call("epi", "historicoEstoque", {});
+if (!resultado.ok) return UI.estado("erro", "Não foi possível carregar as fichas", resultado.mensagem);
+entregasEpiCore = resultado.dados;
+var devolvidas = new Set(entregasEpiCore.map(function(movimento) { return movimento.original; }));
+var podeGravar = window.AlmoxaCorePreview.canWrite();
+return UI.cabecalho({titulo:"Fichas de EPI", sub:"Entregas e devoluções no local " + ST.obra.nome,
+acoes:podeGravar ? '<button class="btn btn-primary" data-core-entregar>Entregar EPI</button>' : ""}) +
+'<div class="card">' + UI.tabela({ linhas: entregasEpiCore.slice().reverse(), vazioTitulo: "Nenhuma entrega registrada",
+colunas: [
+{ rotulo:"Colaborador", render:function(m) { return U.esc(m.colaborador + " · " + m.matricula); } },
+{ rotulo:"Material", render:function(m) { return U.esc(m.sku); } },
+{ rotulo:"Quantidade", num:true, render:function(m) { return U.num(m.quantidade); } },
+{ rotulo:"Movimento", render:function(m) { return {entrega:"Entrega", devolucao:"Devolução", estorno:"Estorno"}[m.kind]; } },
+{ rotulo:"Registrado por", render:function(m) { return U.esc(m.actor) + " · " + U.dataHora(m.at); } },
+{ rotulo:"", acts:true, render:function(m) { return podeGravar && m.kind === "entrega" && !devolvidas.has(m.operation) ?
+'<button class="btn btn-ghost" data-core-devolver="' + U.esc(m.operation) + '">Devolver</button>' : ""; } }
+] }) + '</div>';
+}
+
 function renderEpiProgressivoV431() {
 return API.call("epi", "indice", {}).then(function(r) {
 if (!r.ok) return UI.estado("erro", "Não foi possível carregar as fichas", r.mensagem);
@@ -12997,6 +13163,7 @@ SCREENS["epi-fichas"] = {
 titulo: "Fichas de EPI Ativas",
 modulo: "epi",
 render: function() {
+if (window.AlmoxaCorePreview?.desktop) return renderEpiCore();
 if (window.AlmoxaCorePreview?.epiProgressive) return renderEpiProgressivoV431();
 /* O CADASTRO OFICIAL VEM PRIMEIRO, ANTES DE AGRUPAR.
    Agrupar sem ele não tem como saber que a ficha da matrícula 1 e a
@@ -13121,6 +13288,16 @@ sub: "Nao deu para carregar agora."
 });
 },
 mount: function() {
+if (window.AlmoxaCorePreview?.desktop) {
+document.querySelector("[data-core-entregar]")?.addEventListener("click", modalEntregaEpiCore);
+document.querySelectorAll("[data-core-devolver]").forEach(function(botao) {
+botao.onclick = function() {
+var entrega = entregasEpiCore.find(function(m) { return m.operation === botao.dataset.coreDevolver; });
+if (entrega) modalDevolucaoEpiCore(entrega);
+};
+});
+return;
+}
 document.querySelectorAll("[data-epi-excluir]").forEach(function(b) {
 b.addEventListener("click", function(ev) {
 ev.stopPropagation();
@@ -14700,10 +14877,39 @@ function modalSenhaDeOutro(usuario) {
 try { window.modalSenhaDeOutro = modalSenhaDeOutro; } catch (e) {}
 try { window.SENHAUSR = SENHAUSR; } catch (e) {}
 
+function modalUsuarioCore(usuario) {
+modalGravacaoCore(usuario ? "Editar colaborador" : "Cadastrar colaborador",
+campoCore("Nome", "nome", usuario?.nome, 'required maxlength="160"') +
+campoCore("Matrícula", "matricula", usuario?.matricula, 'required maxlength="36"' + (usuario ? " readonly" : "")) +
+campoCore("Cargo", "cargo", usuario?.cargo, 'maxlength="120"') +
+campoCore("Setor", "setor", usuario?.setor, 'maxlength="120"'), function(dados, operation) {
+return { modulo: "usuarios", acao: "salvar", payload: { ...dados, id: usuario?.id,
+version: usuario?.versaoCore || 0, operation: operation } };
+});
+}
+
+async function renderUsuariosCore() {
+var r = await API.call("usuarios", "listar", {});
+if (!r.ok) return UI.estado("erro", "Não foi possível carregar os usuários", r.mensagem);
+var podeGravar = window.AlmoxaCorePreview.canWrite();
+return UI.cabecalho({titulo:"Usuários e perfis", sub:"Cadastro de colaboradores no Core V2",
+acoes:podeGravar ? '<button class="btn btn-primary" data-core-novo-usuario>Novo colaborador</button>' : ""}) +
+'<div class="card">' + UI.tabela({linhas:r.dados, vazioTitulo:"Nenhum colaborador cadastrado", colunas:[
+{rotulo:"Nome", render:function(u) { return U.esc(u.nome); }},
+{rotulo:"Matrícula", render:function(u) { return U.esc(u.matricula); }},
+{rotulo:"Cargo", render:function(u) { return U.esc(u.cargo || "—"); }},
+{rotulo:"Setor", render:function(u) { return U.esc(u.setor || "—"); }},
+{rotulo:"Situação", render:function(u) { return U.esc(u.status || "—"); }},
+{rotulo:"", acts:true, render:function(u) { return podeGravar ? '<button class="btn btn-ghost" data-core-editar-usuario="' +
+U.esc(u.id) + '">Editar</button>' : ""; }}
+]}) + '</div>';
+}
+
 SCREENS["usuarios"] = {
 titulo: "Usuários e Perfis",
 modulo: "usuarios",
 render: function() {
+if (window.AlmoxaCorePreview?.desktop) return renderUsuariosCore();
 /* [v257] as fotos já vêm junto: o FOTOCRACHA intercepta
    "usuarios.listar" e preenche u.foto antes de a tela desenhar.
    Não há segunda chamada a fazer aqui. */
@@ -14851,6 +15057,17 @@ ic("lixo") + "</button>" + "</div>";
 });
 },
 mount: function() {
+if (window.AlmoxaCorePreview?.desktop) {
+document.querySelector("[data-core-novo-usuario]")?.addEventListener("click", function() { modalUsuarioCore(); });
+document.querySelectorAll("[data-core-editar-usuario]").forEach(function(botao) {
+botao.onclick = async function() {
+var r = await API.call("usuarios", "obter", { id: botao.dataset.coreEditarUsuario });
+if (r.ok && r.dados) modalUsuarioCore(r.dados);
+else toast("err", "Cadastro indisponível", r.mensagem || "Colaborador não localizado.");
+};
+});
+return;
+}
 /* [v284] liga a busca: filtra as linhas da tabela, sem tocar em dado */
 (function ligarBuscaUsuarios() {
   var campo = document.getElementById("usBusca");
@@ -17647,6 +17864,13 @@ render: function() {
 return API.call("dashboard", "mural", {}).then(function(r) {
 if (!r.ok) return UI.estado("erro", "Não foi possível carregar o painel", r.mensagem);
 var d = r.dados || {};
+if (d.coreDesktop) {
+return UI.cabecalho({titulo:"Painel do almoxarifado", sub:"Local " + ST.obra.nome + " · Core V2"}) +
+'<div class="grid g4 mb16">' + UI.kpi({icone:"estoque",cor:"ico-orange",valor:d.itens,rotulo:"Itens cadastrados",rota:"#/estoque"}) +
+UI.kpi({icone:"epi",cor:"ico-blue",valor:d.entregas,rotulo:"Entregas de EPI",rota:"#/epi-fichas"}) +
+'<button class="btn btn-ghost" data-ir="#/movimentacoes">Movimentações</button>' +
+'<button class="btn btn-ghost" data-ir="#/usuarios">Usuários e perfis</button></div>';
+}
 /* [v247] a tela não pode morrer porque faltou um pedaço do pacote.
    Era aqui: o Core respondia ok:true sem "meta", isto estourava e o
    Dashboard ficava em branco. Agora o que falta vira vazio e a tela
@@ -49162,6 +49386,14 @@ if (window.console) console.error("[ALMOX-PRO] Promessa rejeitada:", e.reason);
 (function boot() {
 function iniciarApp() {
 try {
+if (window.AlmoxaCorePreview?.desktop) {
+document.getElementById("bootScreen").classList.add("hidden");
+if (!location.hash || location.hash === "#/") location.hash = "#/dashboard";
+ROUTER.iniciar();
+window.addEventListener("almoxa-core-session-expired", LOGIN.voltarCore);
+LOGIN.voltarCore();
+return;
+}
 /* [PCLINK] quem chega por um link recebido não vê o sistema:
    vê a página daquele link. LinkFlow primeiro, pré-conta depois. */
 if (typeof LFDIRETO !== "undefined") {
@@ -110719,6 +110951,7 @@ emissao: hoje,
      LIGAR · troca a rota, guardando o que estava lá
      ------------------------------------------------------------ */
   N.ligar = function () {
+    if (window.AlmoxaCorePreview?.desktop) return false;
     if (N.ligado) return false;
     if (typeof window.SCREENS !== "object" || !window.SCREENS) return false;
     if (!SCREENS["nf"]) return false;

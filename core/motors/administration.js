@@ -518,12 +518,35 @@ function createAdministrationEngine({ core, stores, catalog, backupSources, stoc
     },
 
     async usuarios(token, action, input = {}) {
+      const normalize = item => String(item ?? '').trim().toLowerCase().replace(/^0+(?=\d+$)/, '');
+      if (action === 'salvar') {
+        await authorize(token, 'usuarios', 'write');
+        const { id, operation, version } = input;
+        const fields = textFields(input, ['nome', 'matricula', 'cargo', 'setor']);
+        for (const field of Object.keys(fields)) fields[field] = fields[field].trim();
+        if ((id !== undefined && !key(id)) || !fields.nome || fields.nome.length > 160 ||
+            !/^[\w-]{1,36}$/.test(fields.matricula ?? '') || [fields.cargo, fields.setor].some(value => value?.length > 120)) {
+          throw invalid('ADMIN_DADOS_INVALIDOS');
+        }
+        const userId = id ?? 'USR-' + createHash('sha256').update(String(operation)).digest('hex').slice(0, 24);
+        return save(token, 'usuarios', { id: userId, operation, version, fields, action: 'USUARIO_SALVO' }, records => {
+          const current = records.get(userId);
+          if (id && !current) throw invalid('USUARIO_NAO_ENCONTRADO');
+          if (current && fields.matricula !== String(current.note.matricula)) throw invalid('ADMIN_DADOS_INVALIDOS');
+          if ([...records.values()].some(event => event.id !== userId &&
+              [event.note.matricula, event.note.id, event.note.login].some(value => normalize(value) === normalize(fields.matricula)))) {
+            throw invalid('USUARIO_DUPLICADO');
+          }
+          const note = { id: userId, perfil: 'OPERADOR', status: 'ATIVO', ...current?.note, ...fields };
+          return { id: userId, current, note, response: { ok: true, dados: { id: userId, ...fields }, versaoCore: version + 1 } };
+        });
+      }
       if (!['listar', 'contar', 'obter'].includes(action)) return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
       await authorize(token, 'usuarios', 'read');
-      const rows = [...latest(await stores.usuarios.events()).values()].map(event => event.note);
+      const rows = [...latest(await stores.usuarios.events()).values()].map(event => ({ ...event.note, versaoCore: event.version }));
       if (action === 'contar') return { ok: true, dados: { total: rows.length } };
       const publicUser = record => {
-        const keys = ['id', 'nome', 'email', 'login', 'matricula', 'obra', 'status', 'ativo'];
+        const keys = ['id', 'nome', 'email', 'login', 'matricula', 'obra', 'cargo', 'setor', 'status', 'ativo', 'versaoCore'];
         const output = Object.fromEntries(keys.filter(field => Object.hasOwn(record, field)).map(field => [field, record[field]]));
         const perfilCore = String(record.perfil || '');
         const map = { ADMINISTRADOR: 'admin', GESTOR: 'gestor', ALMOXARIFE: 'almoxarife', OPERADOR: 'colaborador' };
@@ -533,7 +556,6 @@ function createAdministrationEngine({ core, stores, catalog, backupSources, stoc
       if (action === 'listar') return { ok: true, dados: rows.map(publicUser) };
       const value = String(input.id || input.matricula || input.email || '').trim().toLowerCase();
       if (!value) return { ok: true, dados: null };
-      const normalize = item => String(item ?? '').trim().toLowerCase().replace(/^0+(?=\d+$)/, '');
       const matches = rows.filter(row => [row.id, row.email, row.matricula, row.login]
         .some(field => normalize(field) === normalize(value)));
       const selected = matches.length ? matches : rows.filter(row =>

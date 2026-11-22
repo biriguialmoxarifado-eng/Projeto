@@ -6,10 +6,10 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { join } = require('node:path');
 const { reply, readBody } = require('./diagnostic-api');
 
-function createPreview(runtime, root, { allowWrite = false, modulesAvailable = true, operational } = {}) {
+function createPreview(runtime, root, { allowWrite = false, modulesAvailable = true, operational, desktopLocal } = {}) {
   const epiWrites = new Set(['entregarEstoque', 'devolverEstoque', 'estornarEstoque']);
   const catalogKinds = new Set(['itens', 'fornecedores', 'categorias']);
-  const adminWrites = new Set([...catalogKinds, 'config', 'obras']);
+  const adminWrites = new Set([...catalogKinds, 'config', 'obras', 'usuarios']);
   const flowWrites = new Map([['compras', new Set(['precompra', 'alterarStatus', 'pedido'])],
     ['solicitacoes', new Set(['criar'])], ['aprovacoes', new Set(['decidirItens'])],
     ['retiradas', new Set(['confirmar'])],
@@ -28,7 +28,7 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
     ['fornecedores', ['listar', 'porCnpj', 'salvar']],
     ['categorias', ['listar', 'salvar']],
     ['obras', ['listar', 'salvar']],
-    ['usuarios', ['listar', 'contar', 'obter']],
+    ['usuarios', ['listar', 'contar', 'obter', ...(desktopLocal ? ['salvar'] : [])]],
     ['config', ['obter', 'salvar']],
     ['auditoria', ['listar']],
     ['ocorrencias', ['listar', 'obter', ...(allowWrite ? ['criar', 'salvar'] : [])]],
@@ -62,7 +62,8 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
   };
   const desktopScripts = new Map(["ALMOXA PRO — MÓDULO DE SINCRONIZAÇÃO E RENDERIZAÇÃO VISUAL.js","ALMOX-PRO — BOOTSYNC.js","ALMOX-PRO — MOTOR DE LEITURA DE NOTA FISCAL.js"].map(name => [encodeURIComponent(name), name]));
   const client = readFileSync(join(__dirname, 'preview-client.js'));
-  const guard = write => '<script src="/homologacao/preview-client.js"' + (write ? ' data-write="1"' : '') + (operational ? ' data-operational="1"' : '') + '></script>';
+  const guard = (write, desktop) => '<script src="/homologacao/preview-client.js"' + (write ? ' data-write="1"' : '') +
+    (operational ? ' data-operational="1"' : '') + (desktop ? ' data-desktop="1"' : '') + '></script>';
   const pageHeaders = {
     'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
     'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'none'; frame-ancestors 'self'; form-action 'none'; base-uri 'none'",
@@ -75,7 +76,7 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
   return async (req, res) => {
     if (operational && await operational.handle(runtime.core, req, res)) return true;
     if (req.url === '/api/v2/preview/session') {
-      const token = bearer(req);
+      let token = bearer(req);
       if (req.method === 'DELETE') {
         sessions.delete(token);
         reply(res, 200, { ok: true });
@@ -85,7 +86,16 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
         error(res, 405, 'METODO_INVALIDO', 'Método de sessão inválido.');
         return true;
       }
+      const desktop = Boolean(desktopLocal && !token);
+      let actor;
       try {
+        if (desktop) {
+          const { usuario, senha, metodo } = await readBody(req, 2048);
+          if (typeof usuario !== 'string' || typeof senha !== 'string' || (metodo && metodo !== 'senha')) throw new Error();
+          token = senha;
+          actor = await runtime.core.getSession(token);
+          if (!actor?.userId || String(actor.userId).toLowerCase() !== usuario.trim().toLowerCase()) throw new Error();
+        }
         await runtime.core.authorizeSession(token, 'preview:session');
       } catch {
         error(res, 401, 'SEM_SESSAO', 'Credencial de homologação inválida.');
@@ -98,15 +108,21 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
         return true;
       }
       const id = randomBytes(32).toString('base64url');
-      sessions.set(id, { token, expires: now + ttlMs, invoiceVersions: new Map() });
-      reply(res, 200, { ok: true, dados: { token: id, expiraEm: now + ttlMs } });
+      const expires = now + ttlMs;
+      sessions.set(id, { token, expires, desktop, invoiceVersions: new Map() });
+      const data = desktop ? {
+        usuario: { id: actor.userId, nome: actor.userId, perfil: actor.role === 'operator' ? 'admin' : 'almoxarife' },
+        sessao: { token: id, expira: expires }, obra: { id: desktopLocal, nome: desktopLocal },
+        podeGravar: allowWrite && actor.role === 'operator'
+      } : { token: id, expiraEm: expires };
+      reply(res, 200, { ok: true, dados: data });
       return true;
     }
     if (req.method === 'GET' && Object.hasOwn(files, req.url)) {
       const html = readFileSync(join(root, files[req.url]), 'utf8');
       const desktopScript = '<script src="./backend/preview-client.js" data-deployment="pages"></script>';
       const page = html.includes(desktopScript)
-        ? html.replace(desktopScript, guard(allowWrite))
+        ? html.replace(desktopScript, guard(allowWrite, desktopLocal && !req.url.endsWith('/campo')))
         : html.replace(/<head[^>]*>/i, tag => tag + '<meta name="almoxa-core-v2">' + guard(false));
       res.writeHead(200, pageHeaders).end(page);
       return true;
@@ -157,6 +173,17 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
       if (!read.get(modulo)?.includes(acao) || (upload !== (modulo === 'ocr' && acao === 'ler')) || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
         error(res, 400, 'OPERACAO_FORA_DA_HOMOLOGACAO', 'Operação indisponível no ambiente de homologação.');
         return true;
+      }
+      if (modulo === 'usuarios' && acao === 'salvar' && !session.desktop) {
+        error(res, 403, 'ACESSO_NEGADO', 'Use a sessão do Desktop V2 local.');
+        return true;
+      }
+      if (session.desktop && ['estoque', 'lojinha', 'epi'].includes(modulo)) {
+        if (payload.local !== undefined && payload.local !== desktopLocal) {
+          error(res, 403, 'ACESSO_NEGADO', 'Local fora da sessão do Desktop.');
+          return true;
+        }
+        payload.local = desktopLocal;
       }
       let result;
       if (modulo === 'ocr') result = await runtime.getOcrEngine()(token, acao, payload);
@@ -253,13 +280,23 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
         result = acao === 'criar' ? await requests.criar(token, payload) : await requests.listar(token);
       }
       else if (modulo === 'dashboard') {
-        const panel = await runtime.getAdministrationEngine().painel(token, 'carregar');
-        result = { ok: true, dados: panel.dados ?? {} };
+        if (session.desktop) {
+          const [stock, history] = await Promise.all([
+            runtime.getShopEngine()(token, 'estoque', { local: desktopLocal }),
+            runtime.getStockEngine().historicoEpi(token)
+          ]);
+          result = { ok: true, dados: { coreDesktop: true, itens: stock.dados.length,
+            entregas: history.filter(event => event.local === desktopLocal && event.kind === 'entrega').length } };
+        } else {
+          const panel = await runtime.getAdministrationEngine().painel(token, 'carregar');
+          result = { ok: true, dados: panel.dados ?? {} };
+        }
       }
       else if (modulo === 'epi' && ['entregarEstoque', 'devolverEstoque', 'estornarEstoque', 'historicoEstoque'].includes(acao)) {
         const stock = runtime.getStockEngine();
         if (acao === 'historicoEstoque') {
-          result = { ok: true, dados: await stock.historicoEpi(token, payload.usuarioId) };
+          const history = await stock.historicoEpi(token, payload.usuarioId);
+          result = { ok: true, dados: session.desktop ? history.filter(event => event.local === desktopLocal) : history };
         } else {
           const { sku, local, quantidade, operacaoCore, versaoCore, original, usuarioId } = payload;
           const [action, kind] = {
@@ -295,6 +332,10 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
       else if (modulo === 'auditoria') result = await runtime.getAdministrationEngine().auditoria(token, acao, payload);
       else if (modulo === 'usuarios') result = await runtime.getAdministrationEngine().usuarios(token, acao, payload);
       else if (catalogKinds.has(modulo) && acao === 'salvar') {
+        if (session.desktop && modulo === 'itens' && !/^SYN-[a-zA-Z0-9-]+$/.test(payload.data?.sku ?? '')) {
+          error(res, 400, 'CADASTRO_DADOS_INVALIDOS', 'Use um SKU que comece com SYN-.');
+          return true;
+        }
         const event = await runtime.getCatalogEngine().salvar(token, modulo, payload);
         result = { ok: true, dados: event.note, versaoCore: event.version, operacaoCore: event.operation };
       }
@@ -324,6 +365,8 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
       else if (cause.code === 'OCORRENCIA_NAO_ENCONTRADA') {
         error(res, 404, cause.code, 'Ocorrência não localizada.');
       }
+      else if (cause.code === 'USUARIO_NAO_ENCONTRADO') error(res, 404, cause.code, 'Usuário não localizado.');
+      else if (cause.code === 'USUARIO_DUPLICADO') error(res, 409, cause.code, 'Matrícula já cadastrada.');
       else if (['ADMIN_OPERACAO_INVALIDA', 'ADMIN_DADOS_INVALIDOS', 'OCORRENCIA_MATERIAIS_INVALIDOS'].includes(cause.code)) {
         error(res, 400, cause.code, 'Dados da operação inválidos.');
       }

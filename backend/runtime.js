@@ -11,10 +11,11 @@ const { DatabaseAdapter } = require('../database/adapters/database-adapter');
 const { AuthorizationManager } = require('../core/security/authorization-manager');
 const { createHash, timingSafeEqual } = require('node:crypto');
 
-function diagnosticSecurity(credential, invoices) {
+function diagnosticSecurity(credential, invoices, desktop) {
   const authorizationProvider = new AuthorizationManager();
   const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read', 'catalog:read', 'purchases:read', 'requests:read', 'config:read', 'obras:read', 'inventory:read', 'ocorrencias:read', 'notificacoes:read', 'kits:read', 'calendario:read', 'centros:read', 'projetos:read', 'relatorios:read', 'mural:read', 'painel:read', 'automacao:read', 'ferramentas:read', 'epi:read', 'aprovacoes:read', 'manutencao:read', 'retiradas:read', 'ocr:read'] : [];
   const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write', 'catalog:write', 'purchases:write', 'requests:write', 'config:write', 'obras:write', 'usuarios:read', 'inventory:write', 'ocorrencias:write', 'notificacoes:write', 'kits:write', 'calendario:write', 'centros:write', 'projetos:write', 'relatorios:write', 'mural:write', 'painel:write', 'automacao:write', 'ferramentas:write', 'epi:write', 'aprovacoes:write', 'manutencao:write', 'retiradas:write', 'biometria:read', 'biometria:write', 'ocr:write', 'auditoria:read'] : [];
+  if (desktop) invoiceWrite.push('usuarios:write');
   authorizationProvider.registerRole('reader', ['diagnostics:read', 'preview:session', ...invoiceRead]);
   authorizationProvider.registerRole('operator', ['diagnostics:read', 'diagnostics:write', 'preview:session', ...invoiceRead, ...invoiceWrite]);
   const digest = value => createHash('sha256').update(value).digest();
@@ -37,7 +38,7 @@ function diagnosticSecurity(credential, invoices) {
   };
 }
 
-async function createRuntime(storage, { sqlite = false, credential, invoiceTestStorage, sqlitePreview = false, operationalSecurity } = {}) {
+async function createRuntime(storage, { sqlite = false, credential, invoiceTestStorage, sqlitePreview = false, desktop = false, operationalSecurity } = {}) {
   if (!storage) {
     const { GoogleSheetsProvider } = require('../database/adapters/google-sheets-provider');
     storage = new GoogleSheetsProvider();
@@ -52,7 +53,7 @@ async function createRuntime(storage, { sqlite = false, credential, invoiceTestS
   // O acesso continua protegido pelo que já protegia: o servidor só
   // escuta em 127.0.0.1 e exige o token local de 32 caracteres ou mais.
   const comModulos = Boolean(invoiceTestStorage || sqlite);
-  const core = new AlmoxaCore(operationalSecurity ?? (sqlite || invoiceTestStorage ? diagnosticSecurity(credential, comModulos) : {}));
+  const core = new AlmoxaCore(operationalSecurity ?? (sqlite || invoiceTestStorage ? diagnosticSecurity(credential, comModulos, desktop) : {}));
   core.registerModule({
     id: 'database',
     version: '2.1.0',

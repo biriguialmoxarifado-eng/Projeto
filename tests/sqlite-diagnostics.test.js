@@ -13,13 +13,14 @@ const { SqliteDiagnosticsProvider } = require('../database/adapters/sqlite-diagn
 
 const token = 'test-only-credential-for-sqlite-suite';
 
-async function start(path, role = 'operator', preview = false, allowWrite = preview, approvalProfile = '', actor = 'integration-test') {
+async function start(path, role = 'operator', preview = false, allowWrite = preview, approvalProfile = '', actor = 'integration-test', desktopLocal = '') {
   const processEnv = {
     ...process.env, ALMOXA_SQLITE_PATH: path, ALMOXA_DIAGNOSTICS_TOKEN: token,
     ALMOXA_DIAGNOSTICS_ACTOR: actor, ALMOXA_DIAGNOSTICS_ROLE: role,
     ALMOXA_PREVIEW_SHEET_ID: '', ALMOXA_PREVIEW_SQLITE: preview ? '1' : '',
     ALMOXA_PREVIEW_WRITE: allowWrite ? '1' : '', ALMOXA_PREVIEW_APPROVAL_PROFILE: approvalProfile,
-    ALMOXA_PREVIEW_ORIGIN: preview ? 'https://candidate.example' : '', HOST: '127.0.0.1', PORT: '0'
+    ALMOXA_DESKTOP_LOCAL: desktopLocal,
+    ALMOXA_PREVIEW_ORIGIN: preview && !desktopLocal ? 'https://candidate.example' : '', HOST: '127.0.0.1', PORT: '0'
   };
   const child = spawn(process.execPath, ['backend/server.js'], {
     env: processEnv, stdio: ['ignore', 'pipe', 'pipe']
@@ -67,6 +68,26 @@ async function previewDispatch(server) {
     return { status: response.status, ...(await response.json()) };
   };
 }
+
+test('Desktop no navegador persiste usuário, estoque, movimentações e EPI após recarga', {
+  timeout: 90000, skip: !process.env.ALMOXA_TEST_BROWSER && 'Configure ALMOXA_TEST_BROWSER com o executável Chromium ou Edge'
+}, async () => {
+  const temp = await mkdtemp(join(tmpdir(), 'almoxa-desktop-browser-'));
+  let server;
+  try {
+    server = await start(join(temp, 'desktop.sqlite'), 'operator', true, true, '', 'integration-test', 'A');
+    const origin = new URL((await server.call('/health')).url).origin;
+    const seed = await previewDispatch(server);
+    const invoice = await seed('nf', 'salvar', { numero: '90831', fornecedor: 'TESTE CORE CONTINUIDADE',
+      itens: [{ sku: 'SYN-NF', quantidade: 1 }], operacaoCore: 'desktop-fiscal' });
+    assert.equal(invoice.status, 200);
+    const { exerciseDesktop } = require('./desktop-browser');
+    await exerciseDesktop(process.env.ALMOXA_TEST_BROWSER, join(temp, 'browser'), origin, token);
+  } finally {
+    await server?.close();
+    await rm(temp, { recursive: true, force: true, maxRetries: 12, retryDelay: 100 });
+  }
+});
 
 test('servidor real persiste, autoriza, faz backup e reabre SQLite após reiniciar', { timeout: 45000 }, async () => {
   const temp = await mkdtemp(join(tmpdir(), 'almoxa-diagnostics-'));
@@ -162,6 +183,69 @@ test('servidor real persiste, autoriza, faz backup e reabre SQLite após reinici
     assert.equal(persisted.data.version, 2);
     assert.equal(persisted.data.updatedBy, 'integration-test');
     assert.equal((await patch({ message: 'bloqueado', version: 2 })).status, 403);
+  } finally {
+    await server?.close();
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test('Desktop V2 vincula login ao local do servidor e grava colaboradores versionados', { timeout: 45000 }, async () => {
+  const temp = await mkdtemp(join(tmpdir(), 'almoxa-desktop-local-'));
+  const path = join(temp, 'desktop.sqlite');
+  const sessionPath = '/api/v2/preview/session';
+  const user = { nome: 'Colaboradora sintética', matricula: '00091', cargo: 'Operadora', operation: 'desktop-user', version: 0 };
+  let server;
+  const login = (usuario, senha = token) => server.call(sessionPath, {
+    method: 'POST', authenticated: false, body: { usuario, senha, metodo: 'senha' }
+  });
+  const dispatch = async (session, modulo, acao, payload = {}) => {
+    const response = await server.call('/api/v2/preview/dispatch', {
+      method: 'POST', authenticated: false, headers: { Authorization: 'Bearer ' + session }, body: { modulo, acao, payload }
+    });
+    return { status: response.status, ...(await response.json()) };
+  };
+  try {
+    server = await start(path, 'operator', true, true, '', 'integration-test', 'A');
+    assert.match(await (await server.call('/')).text(), /data-desktop="1"/);
+    assert.doesNotMatch(await (await server.call('/campo')).text(), /data-desktop="1"/);
+    assert.equal((await login('outro-usuario')).status, 401);
+    assert.equal((await login('integration-test', 'credencial inválida')).status, 401);
+    const opened = (await (await login('integration-test')).json()).dados;
+    assert.equal(opened.obra.id, 'A');
+    assert.equal(opened.podeGravar, true);
+    assert.notEqual(opened.sessao.token, token);
+    const call = (...args) => dispatch(opened.sessao.token, ...args);
+    const diagnostics = await previewDispatch(server);
+    assert.equal((await diagnostics('usuarios', 'salvar', user)).status, 403);
+    const created = await call('usuarios', 'salvar', { ...user, perfil: 'admin', senha: 'ignorada' });
+    assert.equal(created.versaoCore, 1);
+    assert.deepEqual(await call('usuarios', 'salvar', user), created);
+    const id = created.dados.id;
+    const record = (await call('usuarios', 'obter', { id })).dados;
+    assert.equal(record.perfil, 'colaborador');
+    assert.equal(record.senha, undefined);
+    assert.equal((await call('usuarios', 'salvar', { ...user, operation: 'desktop-dupe', matricula: '91' })).status, 409);
+    assert.equal((await call('usuarios', 'salvar', { ...user, id, version: record.versaoCore,
+      operation: 'desktop-edit', cargo: 'Almoxarife' })).versaoCore, 2);
+    const sku = 'SYN-DESKTOP-LOCAL';
+    assert.equal((await call('itens', 'salvar', { operation: 'desktop-sku', version: 0, data: { sku, descricao: 'Item sintético' } })).status, 200);
+    const movement = { sku, tipo: 'entrada', qtd: 3, operacaoCore: 'desktop-mov', versaoCore: 0 };
+    assert.equal((await call('estoque', 'movimentar', { ...movement, local: 'B' })).status, 403);
+    assert.equal((await call('estoque', 'movimentar', movement)).status, 200);
+    assert.equal((await diagnostics('estoque', 'saldo', { sku, local: 'B' })).dados.saldo, 0);
+    assert.equal((await call('estoque', 'movimentacoes', { local: 'B' })).status, 403);
+    assert.equal((await call('estoque', 'movimentacoes')).dados[0].local, 'A');
+    assert.equal((await call('nf', 'listar')).status, 200);
+    await server.call(sessionPath, { method: 'DELETE', authenticated: false, headers: { Authorization: 'Bearer ' + opened.sessao.token } });
+    assert.equal((await call('estoque', 'listar')).status, 401);
+
+    await server.close();
+    server = await start(path, 'operator', true, false, '', 'integration-test', 'A');
+    const reopened = (await (await login('integration-test')).json()).dados;
+    assert.equal(reopened.podeGravar, false);
+    assert.equal((await dispatch(reopened.sessao.token, 'usuarios', 'salvar', user)).status, 403);
+    assert.equal((await dispatch(reopened.sessao.token, 'usuarios', 'obter', { id })).dados.cargo, 'Almoxarife');
+    assert.equal((await dispatch(reopened.sessao.token, 'estoque', 'saldo', { sku })).dados.saldo, 3);
   } finally {
     await server?.close();
     await rm(temp, { recursive: true, force: true });

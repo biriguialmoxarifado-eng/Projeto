@@ -90,10 +90,14 @@ async function main() {
   }
   const previewId = process.env.ALMOXA_PREVIEW_SHEET_ID;
   const sqlitePreview = process.env.ALMOXA_PREVIEW_SQLITE === '1';
+  const desktopLocal = process.env.ALMOXA_DESKTOP_LOCAL;
   if (sqlitePreview && (!sqlite || previewId || (process.env.HOST ?? '127.0.0.1') !== '127.0.0.1')) {
     throw new Error('Homologação SQLite exige banco isolado, loopback e ausência de planilha de teste.');
   }
   if (sqlitePreview) sqlite.enablePreview();
+  if (desktopLocal && (!sqlitePreview || !/^[\w-]{1,80}$/.test(desktopLocal) || process.env.ALMOXA_PREVIEW_ORIGIN)) {
+    throw new Error('Desktop V2 local exige SQLite de homologação, código de local válido e mesma origem.');
+  }
   let operational;
   let operationalStorage;
   if (process.env.ALMOXA_OPERATIONAL_READ === '1') {
@@ -115,7 +119,11 @@ async function main() {
     const { GoogleSheetsProvider } = require('../database/adapters/google-sheets-provider');
     invoiceTestStorage = new GoogleSheetsProvider({ testSpreadsheetId: previewId, testOnly: true });
   }
-  const runtime = await createRuntime(operationalStorage || sqlite, { operationalSecurity: operational?.security, sqlite: Boolean(sqlite), credential: { token, actor, role, approvalProfile: (previewId || sqlitePreview) ? process.env.ALMOXA_PREVIEW_APPROVAL_PROFILE : undefined }, invoiceTestStorage, sqlitePreview });
+  const runtime = await createRuntime(operationalStorage || sqlite, {
+    operationalSecurity: operational?.security, sqlite: Boolean(sqlite), desktop: Boolean(desktopLocal),
+    credential: { token, actor, role, approvalProfile: (previewId || sqlitePreview) ? process.env.ALMOXA_PREVIEW_APPROVAL_PROFILE : undefined },
+    invoiceTestStorage, sqlitePreview
+  });
   const { core, database } = runtime;
   // O Desktop e o Campo passam a ser servidos sempre que houver banco —
   // SQLite basta. Antes dependiam de ALMOXA_PREVIEW_SHEET_ID, o que
@@ -123,6 +131,7 @@ async function main() {
   const preview = (operational || invoiceTestStorage || sqlite) &&
     require('./preview-api').createPreview(runtime, join(__dirname, '..'), {
       operational,
+      desktopLocal,
       modulesAvailable: Boolean(invoiceTestStorage || sqlitePreview),
       allowWrite: Boolean(invoiceTestStorage || sqlitePreview) && process.env.ALMOXA_PREVIEW_WRITE === '1'
     });
@@ -131,7 +140,7 @@ async function main() {
   const handler = createHandler(core, process.env.ALMOXA_REVISION || null, sqlite && database, preview);
   const cors = previewCors(preview ? process.env.ALMOXA_PREVIEW_ORIGIN : undefined);
   const server = createServer({ requestTimeout: 15000, headersTimeout: 10000 }, (req, res) => {
-    if (operational && req.headers.host !== host + ':' + server.address().port) {
+    if ((operational || desktopLocal) && req.headers.host !== host + ':' + server.address().port) {
       res.writeHead(403).end();
       return;
     }

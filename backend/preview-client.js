@@ -4,6 +4,7 @@
   const script = document.currentScript;
   const remote = script?.dataset.deployment === 'pages';
   const operational = script?.dataset.operational === '1';
+  const desktop = script?.dataset.desktop === '1';
   const configured = remote ? document.querySelector('meta[name="almoxa-core-v2"]')?.content?.trim() : '';
   let origin = location.origin;
   if (remote) {
@@ -32,11 +33,12 @@
     ['nfed', new Set(writeEnabled ? ['atualizar'] : [])],
     ['compras', new Set(['listar', 'precompras', 'pedidos'])],
     ['estoque', new Set(['listar', 'item', 'movimentacoes', 'saldo', ...(writeEnabled ? ['movimentar'] : [])])],
-    ['itens', new Set(['listar', 'obter'])],
+    ['itens', new Set(['listar', 'obter', ...(desktop && writeEnabled ? ['salvar'] : [])])],
     ['fornecedores', new Set(['listar', 'porCnpj'])],
     ['categorias', new Set(['listar'])],
     ['obras', new Set(['listar'])],
-    ['usuarios', new Set(['listar', 'contar', 'obter', ...(operational ? ['fotoEpi'] : [])])],
+    ['usuarios', new Set(['listar', 'contar', 'obter', ...(operational ? ['fotoEpi'] : []),
+      ...(desktop && writeEnabled ? ['salvar'] : [])])],
     ['config', new Set(['obter'])],
     ['auditoria', new Set(['listar'])],
     ['ocorrencias', new Set(['listar', 'obter', 'criar', 'salvar'])],
@@ -51,7 +53,9 @@
     ['dashboard', new Set(['mural'])],
     ['automacao', new Set(['regras'])],
     ['ferramentas', new Set(['listar', 'obter', 'historico'])],
-    ['epi', new Set(['listar', 'fichas', 'obter', ...(operational ? ['indice', 'detalhe'] : []), ...(writeEnabled ? ['entregarEstoque', 'devolverEstoque', 'estornarEstoque', 'historicoEstoque'] : [])])],
+    ['epi', new Set(['listar', 'fichas', 'obter', ...(operational ? ['indice', 'detalhe'] : []),
+      ...(desktop || writeEnabled ? ['historicoEstoque'] : []),
+      ...(writeEnabled ? ['entregarEstoque', 'devolverEstoque', 'estornarEstoque'] : [])])],
     ['manutencao', new Set(['status', 'versoes', 'backups'])],
     ['aprovacoes', new Set(['listar', 'pendentes', 'porPerfil'])],
     ['retiradas', new Set(['itensLiberados'])],
@@ -63,14 +67,18 @@
   const unavailable = () => ({ ok: false, codigo: 'CORE_V2_SEM_ENDERECO',
     mensagem: 'Configure o endereco HTTPS do Core V2 para abrir a sessao.' });
   let token = '';
+  let canWrite = false;
   let session = new AbortController();
   const pending = new Map();
   window.AlmoxaCorePreview = {
     operational,
+    desktop,
+    canWrite: () => canWrite,
     epiProgressive: operational,
     async logout() {
       const previous = token;
       token = '';
+      canWrite = false;
       session.abort();
       session = new AbortController();
       pending.clear();
@@ -98,7 +106,7 @@
     },
     call(module, action, payload) {
       if (!origin) return Promise.resolve(unavailable());
-      if (operational && module === 'auth' && action === 'login') {
+      if ((operational || desktop) && module === 'auth' && action === 'login') {
         return (async () => {
           await this.logout();
           const active = session;
@@ -111,14 +119,17 @@
             });
             const result = await response.json();
             if (active !== session) return { ok: false, mensagem: 'Tentativa substituída.' };
-            if (result.ok) token = result.dados.sessao.token;
+            if (result.ok) {
+              token = result.dados.sessao.token;
+              canWrite = Boolean(result.dados.podeGravar);
+            }
             return result;
           } catch {
             return { ok: false, codigo: 'CORE_INDISPONIVEL', mensagem: 'O Core Node não respondeu.' };
           }
         })();
       }
-      if (operational && module === 'auth' && action === 'logout') {
+      if ((operational || desktop) && module === 'auth' && action === 'logout') {
         return this.logout().then(() => ({ ok: true }));
       }
       if (!supported.get(module)?.has(action)) {
@@ -137,6 +148,7 @@
         const result = await response.json();
         if (response.status === 401 && active === session) {
           void window.AlmoxaCorePreview.logout();
+          if (desktop) window.dispatchEvent(new Event('almoxa-core-session-expired'));
           document.querySelector('#almoxa-preview output')?.replaceChildren('Sessao expirada. Identifique-se novamente.');
         }
         return result;
@@ -151,7 +163,7 @@
   };
 
   window.addEventListener('DOMContentLoaded', () => {
-    if (operational) return;
+    if (operational || desktop) return;
     const panel = document.createElement('div');
     panel.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:#14242b;color:white;padding:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap';
     const label = document.createElement('label');

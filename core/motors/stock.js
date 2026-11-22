@@ -77,14 +77,15 @@ function createStockEngine({ core, store, receipts, withdrawals, coordinate = wo
         const user = (await epiUsers.events()).filter(event => event.id === epi.usuarioId)
           .reduce((prior, event) => event.version > (prior?.version ?? 0) ? event : prior, null)?.note;
         if (!user || !user.matricula || user.ativo === false ||
-            ['INATIVO', 'BLOQUEADO'].includes(String(user.status || '').toUpperCase())) {
+            /^(INATIVO|BLOQUEADO|EXCLU)/i.test(user.status)) {
           throw fail('EPI_COLABORADOR_INVALIDO');
         }
         epiRecord = { kind: 'entrega', usuarioId: epi.usuarioId, matricula: String(user.matricula),
           colaborador: String(user.nome || ''), quantidade, local };
       } else if (epi) {
         const source = before.find(event => event.id === sku && event.operation === original && event.epi?.kind === 'entrega');
-        if (!source || before.some(event => event.id === sku && event.original === original) ||
+        if (!source || (local !== undefined && local !== source.epi.local) ||
+            before.some(event => event.id === sku && event.original === original) ||
             (epi.kind === 'devolucao' && (local !== source.epi.local || quantidade !== source.epi.quantidade))) {
           throw fail('EPI_REVERSAO_INVALIDA');
         }
@@ -156,9 +157,10 @@ function createStockEngine({ core, store, receipts, withdrawals, coordinate = wo
       return (await store.events()).filter(event => event.epi && (usuarioId === undefined || event.epi.usuarioId === usuarioId))
         .map(({ id, operation, original, actor, at, epi }) => ({ sku: id, operation, original, actor, at, ...epi }));
     },
-    async movimentacoes(token, { sku, limite = 200, somenteSaidas = false } = {}) {
+    async movimentacoes(token, { sku, local, limite = 200, somenteSaidas = false } = {}) {
       await authorize(token, 'read');
-      if ((sku !== undefined && !valid(sku)) || !Number.isSafeInteger(limite) || limite < 1 || limite > 200) {
+      if ((sku !== undefined && !valid(sku)) || (local !== undefined && !valid(local)) ||
+          !Number.isSafeInteger(limite) || limite < 1 || limite > 200) {
         throw fail('ESTOQUE_OPERACAO_INVALIDA');
       }
       return coordinate(async () => {
@@ -182,7 +184,8 @@ function createStockEngine({ core, store, receipts, withdrawals, coordinate = wo
             qtd: -movement.quantidade, local: movement.local, usuario: event.actor, documento: event.reserva.protocolo });
         }
         const filtered = movements.filter(movement =>
-          (sku === undefined || movement.sku === sku) && (!somenteSaidas || movement.qtd < 0));
+          (sku === undefined || movement.sku === sku) && (local === undefined || movement.local === local) &&
+          (!somenteSaidas || movement.qtd < 0));
         filtered.sort((a, b) => Date.parse(b.data) - Date.parse(a.data));
         return { ok: true, dados: filtered.slice(0, limite) };
       });
