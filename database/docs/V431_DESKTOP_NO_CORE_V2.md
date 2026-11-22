@@ -142,3 +142,9 @@ PARCIAL: o que não tiver paridade vai parar de funcionar na troca.
 ## Recuperacao operacional local
 
 A V431 publicada abriu no Edge em um perfil limpo, sem tela branca reproduzida. O HTML nao carregou o cliente de homologacao do Node.js e quatro recursos retornaram 404. A causa da tela branca no perfil do usuario continua sem confirmacao. A raiz do Node.js preserva o HTML original e o transporte V2. Somente SQLite permite abrir a interface e a sessao, mas as consultas dos motores retornam ARMAZENAMENTO_OPERACIONAL_INDISPONIVEL ate configurar ALMOXA_PREVIEW_SHEET_ID. Com ALMOXA_TESTE_CORE o Edge confirmou sessao, Painel, Estoque (5 itens), EPI, 11 notas de teste, colaboradores e movimentacoes. O endpoint local de saude retornou 200. Sem gravacao operacional, alteracao em main ou publicacao.
+
+## Ponte HTTPS no GitHub Pages
+
+O index.html carrega o cliente HTTP existente antes dos scripts da V431. A meta almoxa-core-v2 permanece vazia ate confirmar o Core HTTPS e autorizar a ativacao. O valor deve ser uma origem HTTPS, sem caminho, credenciais ou parametros. Quando configurada, a ponte usa somente essa origem, sem redirecionamento ou fallback para Apps Script nas operacoes encaminhadas. O Core local injeta o mesmo cliente na mesma origem.
+
+Antes de ativar: confirmar /health e a compatibilidade de sessao e despacho no Core online. O Core deste checkout expoe /api/v2/preview/session e /api/v2/preview/dispatch como homologacao local. O backend publico precisa de autenticacao individual e autorizacao por obra, alem de CORS para a origem exata https://biriguialmoxarifado-eng.github.io com Authorization e Content-Type no preflight. A credencial local de diagnostico nao deve ser publicada. A ativacao e reversivel pela configuracao versionada e pela revisao anterior do Pages. A publicacao nao foi alterada.

@@ -90,7 +90,11 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
     }
     if (req.method === 'GET' && Object.hasOwn(files, req.url)) {
       const html = readFileSync(join(root, files[req.url]), 'utf8');
-      res.writeHead(200, pageHeaders).end(html.replace(/<head[^>]*>/i, tag => tag + guard(allowWrite && files[req.url] === 'index.html')));
+      const desktopScript = '<script src="./backend/preview-client.js" data-deployment="pages"></script>';
+      const page = html.includes(desktopScript)
+        ? html.replace(desktopScript, guard(allowWrite))
+        : html.replace(/<head[^>]*>/i, tag => tag + guard(false));
+      res.writeHead(200, pageHeaders).end(page);
       return true;
     }
     if (req.method === 'GET' && req.url === '/homologacao/preview-client.js') {

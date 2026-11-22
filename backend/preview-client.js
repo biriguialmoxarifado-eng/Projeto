@@ -1,6 +1,32 @@
 'use strict';
 (() => {
-  const writeEnabled = document.currentScript?.dataset.write === '1';
+  if (window.AlmoxaCorePreview) return;
+  const script = document.currentScript;
+  const remote = script?.dataset.deployment === 'pages';
+  const configured = remote ? document.querySelector('meta[name="almoxa-core-v2"]')?.content?.trim() : '';
+  if (remote && !configured) return;
+  let origin = location.origin;
+  if (remote) {
+    try {
+      const url = new URL(configured);
+      if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' ||
+          url.search || url.hash || /(?:^|\.)(?:google\.com|googleapis\.com|googleusercontent\.com)$/i.test(url.hostname)) {
+        throw new Error('Invalid Core origin');
+      }
+      origin = url.origin;
+      const policy = document.createElement('meta');
+      policy.httpEquiv = 'Content-Security-Policy';
+      policy.content = 'connect-src ' + origin;
+      document.head.append(policy);
+    } catch {
+      origin = null;
+    }
+  }
+  const endpoint = path => {
+    if (!origin) throw new Error('Core origin unavailable');
+    return origin + path;
+  };
+  const writeEnabled = !remote && script?.dataset.write === '1';
   const supported = new Map([
     ['nf', new Set(['listar', 'obter', 'itens', ...(writeEnabled ? ['salvar'] : [])])],
     ['nfed', new Set(writeEnabled ? ['atualizar'] : [])],
@@ -45,7 +71,7 @@
       session = new AbortController();
       pending.clear();
       if (previous) {
-        await fetch('/api/v2/preview/session', { method: 'DELETE', credentials: 'omit',
+        await fetch(endpoint('/api/v2/preview/session'), { method: 'DELETE', credentials: 'omit', redirect: 'error',
           headers: { Authorization: 'Bearer ' + previous }, signal: AbortSignal.timeout(5000) }).catch(() => {});
       }
     },
@@ -55,7 +81,7 @@
       const identifier = typeof value === 'string' ? value.trim() : '';
       if (!identifier) return { ok: false, mensagem: 'Informe a credencial de homologação.' };
       try {
-        const response = await fetch('/api/v2/preview/session', { method: 'POST', credentials: 'omit',
+        const response = await fetch(endpoint('/api/v2/preview/session'), { method: 'POST', credentials: 'omit', redirect: 'error',
           headers: { Authorization: 'Bearer ' + identifier },
           signal: AbortSignal.any([active.signal, AbortSignal.timeout(5000)]) });
         const result = await response.json();
@@ -74,8 +100,8 @@
       if (pending.has(body)) return pending.get(body);
       const upload = module === 'ocr' && action === 'ler';
       const active = session;
-      const request = fetch(upload ? '/api/v2/preview/ocr' : '/api/v2/preview/dispatch', {
-        method: 'POST', credentials: 'omit', cache: 'no-store',
+      const request = fetch(endpoint(upload ? '/api/v2/preview/ocr' : '/api/v2/preview/dispatch'), {
+        method: 'POST', credentials: 'omit', redirect: 'error', cache: 'no-store',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body, signal: AbortSignal.any([session.signal, AbortSignal.timeout(upload ? 40000 : 12000)])
       }).then(async response => {
@@ -147,13 +173,14 @@
     const frontend = location.pathname.endsWith('/campo') ? 'ALMOX CAMPO' : (window.ALMOXA_VERSAO || 'Desktop V430');
     diagnostics.textContent = frontend + ' | Core: verificando';
     panel.append(label, button, clear, status, diagnostics);
-    void fetch('/health', { credentials: 'omit', cache: 'no-store', signal: AbortSignal.timeout(5000) })
+    if (!origin) diagnostics.textContent = frontend + ' | Endereco HTTPS do Core invalido';
+    else void fetch(endpoint('/health'), { credentials: 'omit', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(5000) })
       .then(async response => {
         const health = await response.json();
         if (health.environment !== 'homologacao-local' || !health.coreVersion) throw new Error();
         const revision = /^[a-f0-9]{7,40}$/i.test(health.revision ?? '') ? ' (' + health.revision.slice(0, 12) + ')' : '';
         diagnostics.textContent = frontend + ' | Core Node.js ' + health.coreVersion + revision +
-          ' | Homologacao local | ' + location.origin + '/api/v2/preview/dispatch | Health HTTP ' + response.status;
+          (remote ? ' | Core remoto | ' : ' | Homologacao local | ') + endpoint('/api/v2/preview/dispatch') + ' | Health HTTP ' + response.status;
       })
       .catch(() => { diagnostics.textContent = frontend + ' | Core de homologacao indisponivel'; });
     if (writeEnabled) {
