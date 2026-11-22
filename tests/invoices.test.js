@@ -17,6 +17,11 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
   const categoryRows = [['EVENTO_JSON']];
   const purchaseRows = [['EVENTO_JSON']];
   const requestRows = [['EVENTO_JSON']];
+  const adminRows = new Map([
+    ['CONFIG_CORE_TESTE', { sheetId: 15, rows: [['EVENTO_JSON']] }],
+    ['OBRAS_CORE_TESTE', { sheetId: 16, rows: [['EVENTO_JSON']] }],
+    ['USUARIOS_CORE_TESTE', { sheetId: 17, rows: [['EVENTO_JSON']] }]
+  ]);
   const markers = new Set();
   let loseResponse = true;
   let writes = 0;
@@ -28,18 +33,21 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
         if (new URL(url).searchParams.has('fields') && new URL(url).searchParams.get('fields').startsWith('namedRanges')) {
           return { data: { namedRanges: [...markers].map(namedRangeId => ({ namedRangeId })) } };
         }
+        const admin = [...adminRows].find(([name]) => path.includes("/values/'" + name + "'!"));
+        if (admin) return { data: { values: structuredClone(admin[1].rows) } };
         if (path.includes('/values/')) return { data: { values: structuredClone(path.includes('RECEBIMENTO_CORE_TESTE') ? receivingRows : path.includes('ESTOQUE_CORE_TESTE') ? stockRows : path.includes('ITENS_CORE_TESTE') ? itemRows : path.includes('FORNECEDORES_CORE_TESTE') ? supplierRows : path.includes('CATEGORIAS_CORE_TESTE') ? categoryRows : path.includes('COMPRAS_CORE_TESTE') ? purchaseRows : path.includes('SOLICITACOES_CORE_TESTE') ? requestRows : rows) } };
         return { data: { spreadsheetId: 'test-only', properties: { title },
-          sheets: [{ properties: { title: 'NF_CORE_TESTE', sheetId: 7 } }, { properties: { title: 'RECEBIMENTO_CORE_TESTE', sheetId: 8 } }, { properties: { title: 'ESTOQUE_CORE_TESTE', sheetId: 9 } }, { properties: { title: 'ITENS_CORE_TESTE', sheetId: 10 } }, { properties: { title: 'FORNECEDORES_CORE_TESTE', sheetId: 11 } }, { properties: { title: 'CATEGORIAS_CORE_TESTE', sheetId: 12 } }, { properties: { title: 'COMPRAS_CORE_TESTE', sheetId: 13 } }, { properties: { title: 'SOLICITACOES_CORE_TESTE', sheetId: 14 } }] } };
+          sheets: [{ properties: { title: 'NF_CORE_TESTE', sheetId: 7 } }, { properties: { title: 'RECEBIMENTO_CORE_TESTE', sheetId: 8 } }, { properties: { title: 'ESTOQUE_CORE_TESTE', sheetId: 9 } }, { properties: { title: 'ITENS_CORE_TESTE', sheetId: 10 } }, { properties: { title: 'FORNECEDORES_CORE_TESTE', sheetId: 11 } }, { properties: { title: 'CATEGORIAS_CORE_TESTE', sheetId: 12 } }, { properties: { title: 'COMPRAS_CORE_TESTE', sheetId: 13 } }, { properties: { title: 'SOLICITACOES_CORE_TESTE', sheetId: 14 } }, ...[...adminRows].map(([title, v]) => ({ properties: { title, sheetId: v.sheetId } }))] } };
       }
       writes++;
       const append = data.requests.at(-1);
       const names = data.requests.slice(0, -1).map(request => request.addNamedRange.namedRange.namedRangeId);
       if (names.some(name => markers.has(name))) throw { response: { status: 400 } };
       names.forEach(name => markers.add(name));
-      assert.ok([7, 8, 9, 10, 11, 12, 13, 14].includes(append.appendCells.sheetId));
+      assert.ok([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].includes(append.appendCells.sheetId));
+      const admin = [...adminRows.values()].find(row => row.sheetId === append.appendCells.sheetId);
       const targetRows = append.appendCells.sheetId === 8 ? receivingRows : append.appendCells.sheetId === 9 ? stockRows : append.appendCells.sheetId === 10 ? itemRows : append.appendCells.sheetId === 11 ? supplierRows : append.appendCells.sheetId === 12 ? categoryRows : append.appendCells.sheetId === 13 ? purchaseRows : append.appendCells.sheetId === 14 ? requestRows : rows;
-      targetRows.push([append.appendCells.rows[0].values[0].userEnteredValue.stringValue]);
+      (admin?.rows ?? targetRows).push([append.appendCells.rows[0].values[0].userEnteredValue.stringValue]);
       if (loseResponse) {
         loseResponse = false;
         throw new Error('response lost');
@@ -346,4 +354,47 @@ test('solicitação abre uma única reserva pendente, informa falta e deixa sald
   assert.equal(dados[0].reserva, a.reserva.protocolo);
   assert.equal(dados[0].itens[0].qtd, 3);
   assert.deepEqual(await stock.saldo(token, 'SYN-REQUEST', 'A'), { saldo: 2, reservado: 0, disponivel: 2, version: 1 });
+});
+
+test('configuração e obras preservam envelope e valores legados, com versão e acesso restrito', async () => {
+  const { provider } = fakeGoogle();
+  const load = role => createRuntime(provider, { invoiceTestStorage: provider, credential: { ...credential, role } });
+  const admin = (await load('operator')).getAdministrationEngine();
+  const reader = (await load('reader')).getAdministrationEngine();
+  const token = credential.token;
+  const config = { chave: 'catalogo.teste', valor: { limite: 7 }, operation: 'config-new', version: 0 };
+  assert.deepEqual(await admin.config(token, 'salvar', config), { ok: true, dados: config.valor });
+  assert.deepEqual(await reader.config(token, 'obter', { chave: config.chave }), { ok: true, dados: config.valor });
+  await assert.rejects(reader.config(token, 'salvar', config), { code: 'ACCESS_DENIED' });
+  await assert.rejects(admin.config(token, 'salvar', { ...config, operation: 'config-stale' }), { code: 'ADMIN_CONFLITO_VERSAO' });
+  const obra = { nome: 'Obra sintética', codigo: 'SYN', operation: 'obra-create', version: 0 };
+  const [first, replay] = await Promise.all([admin.obras(token, 'criar', obra), admin.obras(token, 'salvar', obra)]);
+  assert.deepEqual(first, replay);
+  assert.equal(first.dados.id, 'OB01');
+  assert.equal(first.dados.status, 'Mobilização');
+  await admin.obras(token, 'salvar', { ...obra, id: first.dados.id, version: 1, operation: 'obra-edit', avanco: 40 });
+  assert.equal((await reader.obras(token, 'listar')).dados[0].avanco, 40);
+});
+
+test('consultas de usuários resolvem matrícula e perfil e omitem credenciais do envelope', async () => {
+  const { provider } = fakeGoogle();
+  const user = { id: 'U-SYN', nome: 'Sintético', matricula: '0001', perfil: 'OPERADOR',
+    email: 'teste@example.invalid', senha_hash: 'fixture', token: 'fixture' };
+  const { TestInvoiceStore } = require('../core/motors/invoices');
+  await new TestInvoiceStore(provider, 'usuarios').append({
+    id: user.id, version: 1, operation: 'synthetic-user', fingerprint: 'synthetic',
+    actor: 'test-operator', note: user
+  }).catch(error => { if (error.code !== 'GOOGLE_SHEETS_UNAVAILABLE') throw error; });
+  const admin = (await createRuntime(provider, { invoiceTestStorage: provider, credential })).getAdministrationEngine();
+  const token = credential.token;
+  const result = await admin.usuarios(token, 'obter', { matricula: 1 });
+  assert.equal(result.dados.id, user.id);
+  assert.equal(result.dados.perfil, 'colaborador');
+  assert.equal(result.dados.perfilCore, 'OPERADOR');
+  assert.equal(Object.hasOwn(result.dados, 'senha_hash'), false);
+  assert.equal(Object.hasOwn(result.dados, 'token'), false);
+  assert.deepEqual(await admin.usuarios(token, 'contar'), { ok: true, dados: { total: 1 } });
+  assert.equal((await admin.usuarios(token, 'listar')).dados.length, 1);
+  const reader = await createRuntime(provider, { invoiceTestStorage: provider, credential: { ...credential, role: 'reader' } });
+  await assert.rejects(reader.getAdministrationEngine().usuarios(token, 'listar'), { code: 'ACCESS_DENIED' });
 });

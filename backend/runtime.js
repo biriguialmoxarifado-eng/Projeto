@@ -10,8 +10,8 @@ const { createHash, timingSafeEqual } = require('node:crypto');
 
 function diagnosticSecurity(credential, invoices) {
   const authorizationProvider = new AuthorizationManager();
-  const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read', 'catalog:read', 'purchases:read', 'requests:read'] : [];
-  const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write', 'catalog:write', 'purchases:write', 'requests:write'] : [];
+  const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read', 'catalog:read', 'purchases:read', 'requests:read', 'config:read', 'obras:read'] : [];
+  const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write', 'catalog:write', 'purchases:write', 'requests:write', 'config:write', 'obras:write', 'usuarios:read'] : [];
   authorizationProvider.registerRole('reader', ['diagnostics:read', ...invoiceRead]);
   authorizationProvider.registerRole('operator', ['diagnostics:read', 'diagnostics:write', ...invoiceRead, ...invoiceWrite]);
   const digest = value => createHash('sha256').update(value).digest();
@@ -65,6 +65,7 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
   let catalogEngine;
   let purchaseEngine;
   let requestEngine;
+  let administrationEngine;
   return {
     core, diagnostics: storage, database,
     getInvoiceEngine() {
@@ -100,6 +101,19 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
         core, catalog, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'compras')
       });
       return purchaseEngine;
+    },
+    getAdministrationEngine() {
+      if (!invoiceTestStorage) throw Object.assign(new Error('Motores de teste desativados.'), { code: 'ADMIN_TESTE_DESATIVADO' });
+      const { TestInvoiceStore } = require('../core/motors/invoices');
+      const { createAdministrationEngine } = require('../core/motors/administration');
+      administrationEngine ??= createAdministrationEngine({
+        core, coordinate, stores: {
+          config: new TestInvoiceStore(invoiceTestStorage, 'config'),
+          obras: new TestInvoiceStore(invoiceTestStorage, 'obras'),
+          usuarios: new TestInvoiceStore(invoiceTestStorage, 'usuarios')
+        }
+      });
+      return administrationEngine;
     },
     getRequestEngine() {
       const stock = this.getStockEngine();

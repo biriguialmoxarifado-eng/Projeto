@@ -21,10 +21,10 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | auth | Parcial. Sessão Node testada, login operacional pendente. |
 | permissoes | Parcial. Escopos de teste aprovados, alçadas operacionais pendentes. |
 | auditoria | Parcial. Autoria de eventos testada, trilha operacional pendente. |
-| usuarios | Pendente. Executor legado preservado. |
+| usuarios | Parcial, integrado em teste. Listagem, contagem e consulta com projeção pública; cadastro, permissões por obra e credenciais pendentes. |
 | itens | Integrado em teste. Cadastro explícito por SKU e consultas. Geração automática, imagem, exclusão e paridade operacional pendentes. |
 | fornecedores | Integrado em teste. Cadastro por CNPJ e consultas. Contrato operacional de escrita e paridade pendentes. |
-| config | Pendente. Executor legado preservado. |
+| config | Parcial, integrado em teste. Chaves comuns leem e gravam; configuração especial SKU e precedência operacional pendentes. |
 | lojinha | Pendente. Executor legado preservado. |
 | epi | Pendente. Executor legado preservado. |
 | ferramentas | Pendente. Executor legado preservado. |
@@ -36,7 +36,7 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | mural | Pendente. Executor legado preservado. |
 | aprovacoes | Pendente. Executor legado preservado. |
 | categorias | Integrado em teste. Cadastro, atualização e listagem. Exclusão com validação de itens em uso e paridade operacional pendentes. |
-| obras | Pendente. Executor legado preservado. |
+| obras | Parcial, integrado em teste. Cadastro e atualização com IDs estáveis; escopo por obra e interfaces operacionais pendentes. |
 | ocr | Pendente. Executor legado preservado. |
 | manutencao | Pendente. Executor legado preservado. |
 | kits | Pendente. Executor legado preservado. |
@@ -88,3 +88,11 @@ Ao portar AP_Modulo_compras, a pré-compra mantém um registro aberto por SKU e 
 AP_Modulo_solicitacoes foi usado como referência para criação e listagem. O ensaio grava solicitação e reserva pendente no mesmo evento. A falta de saldo é informativa e a criação não movimenta estoque. No Sheets real, duas submissões da mesma operação resultaram em #SOL-000001 e #RES-000001, com saldo preservado em 2 (11526 ms, incluindo a alteração de status de compra). npm test passou.
 
 A emissão de pedidos em lote e a conversão da pré-compra requerem persistência coordenada de todas as linhas e do vínculo. A aprovação e a retirada da reserva ainda precisam dos contratos e das regras de alçada. Mantenha a escrita operacional no Apps Script até validar esses fluxos, NF com órfãs, formato completo de movimentos e os clientes publicados.
+
+## Lote de Configuração, Usuários e Obras
+
+Partida em a62aece. O runtime isolado carrega a administração sob demanda. AP_Modulo_config, AP_CONFIG_ler_, AP_CONFIG_gravar_, AP_Modulo_obras e AP_Modulo_usuarios são as referências dos contratos. O Core valida permissões antes de consultar dados ou persistir e usa o armazenamento de eventos e lock local existentes.
+
+npm test passou. A suíte cobriu concorrência e reenvio de criação de obra, versão de configuração, perfis, matrícula com zeros e omissão de credenciais. No Sheets real, as abas CONFIG_CORE_TESTE, OBRAS_CORE_TESTE e USUARIOS_CORE_TESTE foram usadas exclusivamente. O ciclo sintético de 10538 ms confirmou, em outro runtime, a atualização da configuração, avanço 40 em OB01 e consulta do perfil público de uma fixture de usuário. A escrita de usuário na fixture foi feita diretamente no armazenamento para preparar o ensaio. O motor de Usuários oferece apenas consultas. O modo legado e os clientes publicados foram preservados.
+
+Contagem após o lote: 15 parciais e 19 pendentes. Nenhum motor recebeu homologação operacional. Próximo ponto: Inventário, começando por AP_Modulo_inventario em MÓDULOS DE FLUXO.js e AP_INV_registrarContagem no arquivo INVENTÁRIO MÓVEL POR ENDEREÇO. O saldo isolado por SKU e local está no motor de estoque já validado.
