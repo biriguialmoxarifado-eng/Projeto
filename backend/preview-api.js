@@ -7,6 +7,7 @@ const { join } = require('node:path');
 const { reply, readBody } = require('./diagnostic-api');
 
 function createPreview(runtime, root, { allowWrite = false, modulesAvailable = true, operational } = {}) {
+  const epiWrites = new Set(['entregarEstoque', 'devolverEstoque', 'estornarEstoque']);
   const read = new Map([
     ['nf', ['listar', 'obter', 'itens', ...(allowWrite ? ['salvar'] : [])]],
     ['nfed', allowWrite ? ['atualizar'] : []],
@@ -31,7 +32,7 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
     ['dashboard', ['mural']],
     ['automacao', ['regras']],
     ['ferramentas', ['listar', 'obter', 'historico']],
-    ['epi', ['listar', 'fichas', 'obter', ...(allowWrite ? ['entregarEstoque', 'devolverEstoque', 'estornarEstoque', 'historicoEstoque'] : [])]],
+    ['epi', ['listar', 'fichas', 'obter', 'historicoEstoque', ...(allowWrite ? [...epiWrites] : [])]],
     ['manutencao', ['status', 'versoes', 'backups']],
     ['aprovacoes', ['listar', 'pendentes', 'porPerfil']],
     ['retiradas', ['itensLiberados']],
@@ -134,6 +135,10 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
     try {
       await runtime.core.authorizeSession(token, 'preview:session');
       const { modulo, acao, payload = {} } = await readBody(req, upload ? 1450000 : 8192);
+      if (!allowWrite && modulo === 'epi' && epiWrites.has(acao)) {
+        error(res, 403, 'ACESSO_NEGADO', 'Gravações de EPI indisponíveis nesta homologação.');
+        return true;
+      }
       if (!read.get(modulo)?.includes(acao) || (upload !== (modulo === 'ocr' && acao === 'ler')) || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
         error(res, 400, 'OPERACAO_FORA_DA_HOMOLOGACAO', 'Operação indisponível no ambiente de homologação.');
         return true;
@@ -226,7 +231,7 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
           result = { ok: true, dados: { operacaoCore: entry.operation, versaoCore: entry.version, ...entry.epi } };
         }
       }
-      else if (allowWrite && modulo === 'epi' && ['listar', 'fichas', 'obter'].includes(acao)) {
+      else if (modulo === 'epi' && ['listar', 'fichas', 'obter'].includes(acao)) {
         result = await runtime.getAdministrationEngine().epi(token, acao, payload);
         if (acao !== 'obter' || !result.ok) {
           const all = await runtime.getStockEngine().historicoEpi(token);

@@ -17,7 +17,7 @@ test('leitura operacional exige administrador autenticado e retorna somente camp
       ['1', 'Admin Teste', 'admin@example.test', digest, ' AdMiNiStRaDoR ', 'ATIVO', '11', 'data:image/png;base64,aW1n'],
       ['2', 'Operador Teste', 'operator@example.test', digest, 'OPERADOR', 'ATIVO', '22']
     ],
-    ALMOXA_ITENS: [['sku', 'descricao', 'estoqueAtual'], ['SYN-1', 'Item sintético', 8]],
+    ALMOXA_ITENS: [['sku', 'descricao', 'estoqueAtual'], ['SYN-1', 'Item sintético', 8], ['OTHER-2', 'Item sem saldo conhecido', 'inconsistente']],
     ALMOXA_EPI_FICHAS: [['id', 'matricula', 'colaborador', 'sku', 'item', 'assinatura'], ['a', '11', 'Admin Teste', 'SYN-1', 'Luva', 'segredo']],
     ALMOXA_MOVIMENTACOES: [['id', 'sku', 'qtd', 'valorUnitario', 'usuario'], ['m', 'SYN-1', 2, '12,50', 'operador-teste']]
   };
@@ -54,7 +54,7 @@ test('leitura operacional exige administrador autenticado e retorna somente camp
     assert.equal(login.dados.usuario.perfil, 'admin');
     token = login.dados.sessao.token;
     assert.deepEqual((await dispatch('dashboard', 'mural')).dados,
-      { coreOperational: true, itens: 1, colaboradores: 2, fichasEpi: 1 });
+      { coreOperational: true, itens: 2, colaboradores: 2, fichasEpi: 1 });
     assert.equal((await dispatch('estoque', 'listar')).dados[0].estoque, 8);
     const movement = (await dispatch('estoque', 'movimentacoes')).dados[0];
     assert.equal(movement.sku, 'SYN-1');
@@ -65,6 +65,9 @@ test('leitura operacional exige administrador autenticado e retorna somente camp
     const call = (modulo, acao, payload) => send('dispatch', { modulo, acao, payload });
     const catalogue = await call('itens', 'listar', { busca: 'SYN' });
     assert.equal(catalogue.dados.length, 1);
+    const unknown = (await call('estoque', 'item', { sku: 'OTHER-2' })).dados;
+    assert.equal(unknown.estoque, null);
+    assert.equal(unknown.status, 'desconhecido');
     assert.equal(catalogue.dados[0].disponivel, null);
     const index = (await dispatch('epi', 'indice')).dados;
     assert.equal(index[0].chave, 'u:1');

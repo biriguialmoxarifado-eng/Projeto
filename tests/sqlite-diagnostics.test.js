@@ -13,12 +13,12 @@ const { SqliteDiagnosticsProvider } = require('../database/adapters/sqlite-diagn
 
 const token = 'test-only-credential-for-sqlite-suite';
 
-async function start(path, role = 'operator', preview = false) {
+async function start(path, role = 'operator', preview = false, allowWrite = preview) {
   const processEnv = {
     ...process.env, ALMOXA_SQLITE_PATH: path, ALMOXA_DIAGNOSTICS_TOKEN: token,
     ALMOXA_DIAGNOSTICS_ACTOR: 'integration-test', ALMOXA_DIAGNOSTICS_ROLE: role,
     ALMOXA_PREVIEW_SHEET_ID: '', ALMOXA_PREVIEW_SQLITE: preview ? '1' : '',
-    ALMOXA_PREVIEW_WRITE: preview ? '1' : '',
+    ALMOXA_PREVIEW_WRITE: allowWrite ? '1' : '',
     ALMOXA_PREVIEW_ORIGIN: preview ? 'https://candidate.example' : '', HOST: '127.0.0.1', PORT: '0'
   };
   const child = spawn(process.execPath, ['backend/server.js'], {
@@ -290,8 +290,9 @@ test('entrega, devolução e estorno de EPI persistem em um único evento de est
     assert.equal((await mutate('entregarEstoque', { ...deliver, operacaoCore: 'epi-second', versaoCore: 3 })).status, 200);
     assert.equal((await mutate('estornarEstoque', { original: 'epi-second', operacaoCore: 'epi-reverse', versaoCore: 4 })).status, 200);
     await server.close();
-    server = await start(path, 'operator', true);
+    server = await start(path, 'reader', true, false);
     await login();
+    assert.equal((await mutate('entregarEstoque', { ...deliver, operacaoCore: 'readonly-denied', versaoCore: 5 })).status, 403);
     const fiche = await call('epi', 'obter', { id:'epi-deliver' });
     assert.equal(fiche.dados.matricula, '123');
     const list = await call('epi', 'fichas', {});

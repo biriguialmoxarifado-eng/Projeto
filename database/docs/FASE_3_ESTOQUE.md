@@ -242,3 +242,58 @@ Base 65d8c0c. index.html tem 60 referencias textuais a google.script.run, 2 URLs
 Estoque Geral e detalhe usam o adaptador central no modo isolado. O saldo e calculado no Core com catalogo e local declarado; o filtro comercial da Lojinha fica restrito a Lojinha. No Edge, Estoque Geral renderizou cinco itens da planilha de teste; Painel, Movimentacoes e EPI renderizaram e as consultas retornaram sucesso. HTTP testou sessao e ausencia de local. npm test: 42 aprovados e zero falhas no executor node --test. O local A foi selecionado no estado da interface pelo ensaio. A consulta individual foi integrada, mas nao validada no navegador nesta rodada.
 
 A publicacao atual permanece no legado. Requer endpoint HTTPS confirmado, login individual e autorizacao por obra para ativar a V430 em producao. Atributo de obra vindo do navegador seleciona local de teste e nao prova autorizacao operacional.
+
+
+## Reconciliação dos 34 motores — V431 local, 22/11/2026
+
+Fonte da lista e dos estados anteriores: tabela oficial no início deste arquivo.
+Critério de homologação: paridade operacional comprovada, da interface ao Core,
+com autenticação, persistência apropriada e regressão verificada para o escopo do motor.
+A suíte completa `npm test` foi executada após cada lote e passou.
+Para motores sem alteração, as evidências específicas da tabela são históricas.
+A leitura real no navegador se refere à V431 local anterior à correção deste lote.
+Os testes de escrita desta rodada usaram apenas dados isolados.
+
+| # | Motor | Anterior | Atual | Mudança ou evidência nova | Teste e evidência | Pendência |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | nf | PARCIAL | PARCIAL | Sem alterações neste lote. | HTTP e Sheets isolado · Leitura e escrita sintetica via transporte no Edge · `4b47ca4` | Formularios legados, recuperacao de orfas e escrita operacional pendentes. |
+| 2 | estoque | PARCIAL | PARCIAL | Saldo inválido retorna desconhecido no Core. A V431 local já leu estoque e movimentos reais. | HTTP simulado para saldo inválido e histórico com valor e operador. Estoque e movimentações vistos no navegador com o backend anterior. | Reservas, saldos por endereço e gravações operacionais ainda precisam de fonte confirmada e teste ponta a ponta. |
+| 3 | compras | PARCIAL | PARCIAL | Sem alterações neste lote. | Suite HTTP e Sheets real isolado · Consultas listar, precompras e pedidos no Edge · `a2a1d59` | Emissao, conversao e alteracao de status pela interface ainda exigem teste de paridade. |
+| 4 | solicitacoes | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Pendente no cliente · `a62aece` | Criação e listagem com reserva pendente integradas em teste. Aprovação e retirada operacionais pendentes. |
+| 5 | reservas | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Pendente no cliente · `a62aece` | Criação pendente pela solicitação integrada em teste. Decisão, alçadas e retirada operacional pendentes. |
+| 6 | saidas | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Pendente no cliente · `a62aece` | Testado no estoque isolado. Fluxo operacional legado pendente. |
+| 7 | auth | PARCIAL | PARCIAL | Login por senha de administrador e sessão em memória no recorte operacional da V431. | Login administrativo observado no navegador. Testes HTTP de credencial inválida, perfil não permitido e logout. | Identidade dos demais perfis, revogação e alçadas por obra ainda pendentes. |
+| 8 | permissoes | PARCIAL | PARCIAL | Core valida a sessão administrativa no recorte local. Leitura e escrita de EPI têm fronteiras separadas na homologação. | Suite de autorização e HTTP 403 para leitor tentando gravar no ensaio SQLite. | Matriz operacional por obra e equivalência dos demais papéis ainda pendentes. |
+| 9 | auditoria | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Consulta de Obras no Edge · `74f7316` | Parcial. Autoria de eventos testada, trilha operacional pendente. |
+| 10 | usuarios | PARCIAL | PARCIAL | Listagem operacional com projeção pública, foto sob demanda e vínculo de matrícula única. | Teste HTTP não devolve hash de senha. Colaboradores e foto observados no fluxo EPI real. | Cadastro operacional, resolução de homônimos e validação de vínculo físico por crachá ainda pendentes. |
+| 11 | itens | PARCIAL | PARCIAL | Catálogo operacional consulta dados do Google Sheets pelo Core Node. | Teste HTTP de filtro e catálogo exibido no navegador com dados reais. | Edição de cadastro e equivalência dos consumidores ainda pendentes. |
+| 12 | fornecedores | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Leitura no Edge · `74f7316` | Integrado em teste. Cadastro por CNPJ e consultas. Contrato operacional de escrita e paridade pendentes. |
+| 13 | config | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Leitura no Edge · `a93a254` | Parcial, integrado em teste. Chaves comuns leem e gravam; configuração especial SKU e precedência operacional pendentes. |
+| 14 | lojinha | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Leitura no Edge em lote anterior · `aa5ad6a` | Parcial, integrado em homologação local. Catálogo, busca, detalhe e saldo por local. Fotos, status e fluxo de pedidos pendentes. |
+| 15 | epi | PARCIAL | PARCIAL | Histórico e consulta de ficha independem da chave de escrita. A V431 já abriu fichas, catálogo e uma foto real. | HTTP e SQLite temporário: entrega e estorno persistem após reinício em modo leitor, que recebe 403 ao gravar. | Assinaturas, crachá, paridade dos controles e gravação operacional continuam pendentes. |
+| 16 | ferramentas | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Pendente no cliente · `2b6fa34` | Parcial, integrado em teste. Cadastro, custódia, devolução com avaria e retorno da manutenção. Transferência e identificação operacional pendentes. |
+| 17 | ocorrencias | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Escrita sintética no Edge em lote anterior · `d2ebdab` | Parcial, integrado no Desktop local. Criar, atualizar e consultar; exclusão, alçadas operacionais e formulários publicados pendentes. |
+| 18 | projetos | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Pendente no cliente · `30f7aff` | Parcial, integrado em teste. Cadastro, progresso, consulta e exclusão lógica. Integração de abastecimento e clientes pendentes. |
+| 19 | inventario | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Pendente no cliente · `1b05439` | Parcial, integrado em teste. Abertura, contagem, divergência e encerramento. QR, rotas, escopo de equipe e ajuste de saldo pendentes. |
+| 20 | relatorios | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Pendente no cliente · `30f7aff` | Parcial, integrado em teste. Registro e consulta de metadados e parâmetros. Geração e entrega de arquivos pendentes. |
+| 21 | painel | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Pendente no cliente · `da3d398` | Parcial, integrado em teste. Carregar e salvar PAINEL_CONFIG. Agregados e homologação visual pendentes. |
+| 22 | mural | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Pendente no cliente · `30f7aff` | Parcial, integrado em teste. Publicações e referências de fotos com exclusão lógica. Acesso a conteúdo e paridade do cliente pendentes. |
+| 23 | aprovacoes | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Pendente no cliente · `3b0c965` | Parcial, integrado em teste. Alçada por item e decisão de reserva. Pré-compra e links legados pendentes. |
+| 24 | categorias | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Leitura no Edge · `74f7316` | Integrado em teste. Cadastro, atualização e listagem. Exclusão com validação de itens em uso e paridade operacional pendentes. |
+| 25 | obras | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Leitura no Edge · `a93a254` | Parcial, integrado em teste. Cadastro e atualização com IDs estáveis; escopo por obra e interfaces operacionais pendentes. |
+| 26 | ocr | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Disponibilidade no Edge · `2661e14` | Parcial, integrado em teste. OCR real de PNG/JPEG no Windows, interpretação DANFE e histórico. PDF, Drive e paridade Desktop pendentes. |
+| 27 | manutencao | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Pendente no cliente · `3b0c965` | Parcial, integrado em teste. Estado, versões e snapshot lógico limitado. Cópia Drive e restauração pendentes. |
+| 28 | kits | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Pendente no cliente · `ccaa35f` | Parcial, integrado em teste. Cadastro, perfil, consultas e exclusão lógica. Validação com a Lojinha e os consumidores reais pendente. |
+| 29 | calendario | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Pendente no cliente · `ccaa35f` | Parcial, integrado em teste. Criação, listagem e exclusão lógica. Paridade com os consumidores operacionais pendente. |
+| 30 | centros | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Pendente no cliente · `ccaa35f` | Parcial, integrado em teste. Criação, edição, listagem e exclusão lógica. Vínculos e consumidores operacionais pendentes. |
+| 31 | retiradas | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Pendente no cliente · `3b0c965` | Parcial, integrado em teste. Entrega parcial por SKU e baixa única. Assinaturas, lote e paridade do cliente pendentes. |
+| 32 | notificacoes | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e Sheets real isolado · Pendente no cliente · `77b3a85` | Aviso por recebimento confirmado, visibilidade por solicitante e leitura idempotente. Sessão, interface operacional e regras legadas pendentes. |
+| 33 | automacao | PARCIAL | PARCIAL | Sem alterações neste lote. | Suíte e armazenamento isolado · Pendente no cliente · `0b5a388` | Parcial, integrado em teste. Listar, cadastrar e alternar regras. Executor de eventos e efeitos permanecem no legado. |
+| 34 | biometria | BLOQUEADO | BLOQUEADO | Sem alterações neste lote. | Suíte e armazenamento isolado · Pendente no cliente · `3b0c965` | Parcial, estrutura de teste. Identidade única e referência opaca auditada. Autenticação biométrica e leitor físico ficam para depois. |
+
+Resultado: **0 homologados, 33 parciais e 1 bloqueado (biometria)**.
+
+- Equipamento: biometria exige leitor físico e validação de identidade no equipamento real.
+- Validação humana: equivalência de formulários, permissões por obra, assinaturas e fluxos completos dos perfis.
+- Dados e acesso: fonte de reservas e vínculos SKU/endereço, conteúdo autenticado de arquivos Drive e validação de escrita fora da planilha operacional.
+- A implantação operacional não foi alterada. O HTML atual foi preservado neste lote.

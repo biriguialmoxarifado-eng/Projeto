@@ -6,7 +6,13 @@ const { readBody, reply } = require('./diagnostic-api');
 
 const text = value => String(value ?? '').trim();
 const normalized = value => text(value).toLowerCase();
-const number = value => Number(text(value).replace(/\.(?=\d{3}(?:[.,]|$))/g, '').replace(',', '.')) || 0;
+const number = value => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const formatted = text(value).replace(/^R\$\s*/, '');
+  if (!/^-?(?:\d+|\d{1,3}(?:\.\d{3})+)(?:,\d+)?$/.test(formatted)) return null;
+  const parsed = Number(formatted.replaceAll('.', '').replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : null;
+};
 const sha256 = value => createHash('sha256').update(value, 'utf8').digest('hex');
 const userFields = ['id', 'nome', 'email', 'matricula', 'login', 'cargo', 'setor', 'obra', 'status'];
 const select = (row, keys) => Object.fromEntries(keys.map(key => [key, row[key] ?? '']));
@@ -70,12 +76,12 @@ function createOperationalReader(provider) {
   const fail = (res, status, codigo, mensagem) => reply(res, status, { ok: false, codigo, mensagem });
   const publicUser = user => ({ ...select(user, userFields), perfil: normalized(user.perfil) === 'administrador' ? 'admin' : normalized(user.perfil) });
   const stockItem = row => {
-    const estoque = text(row.estoqueAtual) ? number(row.estoqueAtual) : null;
+    const estoque = number(row.estoqueAtual);
     const minimo = number(row.estoqueMinimo);
     return { ...select(row, ['sku', 'descricao', 'categoria', 'unidade', 'ca', 'codigoBarras']), id: row.sku,
       codigo: row.sku, nome: row.descricao, local: row.localizacao || '', estoque, estoqueAtual: estoque, minimo,
       preco: number(row.valorUnitario), valorUnitario: number(row.valorUnitario), reservado: null, disponivel: null,
-      status: estoque === null ? 'desconhecido' : estoque <= 0 ? 'critico' : estoque < minimo ? 'atencao' : 'ok' };
+      status: estoque === null ? 'desconhecido' : estoque <= 0 ? 'critico' : minimo !== null && estoque < minimo ? 'atencao' : 'ok' };
   };
 
   return {
@@ -147,7 +153,7 @@ function createOperationalReader(provider) {
         } else if (modulo === 'estoque' && acao === 'movimentacoes') {
           data = (await rows('ALMOXA_MOVIMENTACOES', ['id', 'sku', 'qtd']))
             .map(row => ({ ...select(row, ['id', 'data', 'tipo', 'sku', 'descricao', 'saldo', 'obra', 'documento', 'usuario']),
-              qtd: number(row.qtd), valorUnitario: text(row.valorUnitario) ? number(row.valorUnitario) : null }));
+              qtd: number(row.qtd), valorUnitario: number(row.valorUnitario) }));
         } else if (modulo === 'estoque' || modulo === 'itens') {
           const list = (await items()).filter(row => text(row.sku)).map(stockItem);
           const term = normalized(payload?.busca);
