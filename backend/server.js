@@ -75,9 +75,11 @@ async function main() {
   const host = process.env.HOST ?? '127.0.0.1';
   const handler = createHandler(core, process.env.ALMOXA_REVISION || null, sqlite && database, preview);
   const server = createServer({ requestTimeout: 15000, headersTimeout: 10000 }, (req, res) => {
-    if (req.url.startsWith('/api/v2/diagnostics')) {
+    const diagnostic = req.url.startsWith('/api/v2/diagnostics');
+    const previewRequest = req.url.startsWith('/api/v2/preview/');
+    if (diagnostic || previewRequest) {
       const start = performance.now();
-      res.once('finish', () => console.info('diagnostics', req.method, res.statusCode, Math.round(performance.now() - start) + 'ms'));
+      res.once('finish', () => console.info(diagnostic ? 'diagnostics' : 'preview', req.method, res.statusCode, Math.round(performance.now() - start) + 'ms'));
     }
     handler(req, res).catch(() => {
       console.error('Falha ao processar uma requisição.');

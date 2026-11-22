@@ -22,6 +22,7 @@
     ['relatorios', new Set(['listar', 'obter', 'gerados'])],
     ['mural', new Set(['listar', 'obter'])],
     ['painel', new Set(['carregar'])],
+    ['dashboard', new Set(['mural'])],
     ['automacao', new Set(['regras'])],
     ['ferramentas', new Set(['listar', 'obter', 'historico'])],
     ['epi', new Set(['listar', 'fichas', 'obter'])],

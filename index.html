@@ -17596,7 +17596,7 @@ try {
 var semComunicado = comunicados.length === 0;
 var hora = (new Date).getHours();
 var saudacao = hora < 12 ? "Bom dia" : hora < 18 ? "Boa tarde" : "Boa noite";
-var quem = ST.publico ? "" : ", " + ST.usuario.nome.split(" ")[0];
+var quem = ST.publico || !ST.usuario?.nome ? "" : ", " + ST.usuario.nome.split(" ")[0];
 var criticos = MOCK.produtos.filter(function(p) {
 return p.status === "critico";
 }).length;

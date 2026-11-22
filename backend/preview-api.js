@@ -28,6 +28,7 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
     ['relatorios', ['listar', 'obter', 'gerados']],
     ['mural', ['listar', 'obter']],
     ['painel', ['carregar']],
+    ['dashboard', ['mural']],
     ['automacao', ['regras']],
     ['ferramentas', ['listar', 'obter', 'historico']],
     ['epi', ['listar', 'fichas', 'obter']],
@@ -180,6 +181,10 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
         }
       }
       else if (modulo === 'compras') result = await runtime.getPurchaseEngine().consultarLegado(token, acao, payload);
+      else if (modulo === 'dashboard') {
+        const panel = await runtime.getAdministrationEngine().painel(token, 'carregar');
+        result = { ok: true, dados: panel.dados ?? {} };
+      }
       else if (modulo === 'auditoria') result = await runtime.getAdministrationEngine().auditoria(token, acao, payload);
       else if (modulo === 'usuarios') result = await runtime.getAdministrationEngine().usuarios(token, acao, payload);
       else if (modulo === 'config') {

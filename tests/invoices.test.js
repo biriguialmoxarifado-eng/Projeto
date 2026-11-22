@@ -510,6 +510,12 @@ test('homologação HTTP exige credencial, atende leitura e bloqueia mutação',
     const session = (await login.json()).dados.token;
     const allowed = await call('listar', session);
     assert.deepEqual(await allowed.json(), { ok: true, dados: [] });
+    const dashboard = token => fetch(url, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ modulo: 'dashboard', acao: 'mural' })
+    });
+    assert.equal((await dashboard(credential.token)).status, 401);
+    assert.deepEqual(await (await dashboard(session)).json(), { ok: true, dados: {} });
     const stock = payload => fetch(url, { method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session },
       body: JSON.stringify({ modulo: 'estoque', acao: 'movimentacoes', payload })

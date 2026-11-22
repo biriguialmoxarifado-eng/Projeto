@@ -222,3 +222,7 @@ No Edge a sessao de homologacao abriu, mas chamar estoque.mount e estoque-item.m
 Base 7cd5044. O Edge identificou ReferenceError no modal: STATE pertence ao APP. Corrigido o acesso para APP.STATE. Com obra sintetica A e acionador ligado pelo mount original de Estoque, o modal gravou saldo 4 e uma linha de historico com motivo em ALMOXA_TESTE_CORE. Tempo do segundo ensaio: 6.635 ms. Apos recarregar e reabrir a sessao de homologacao, a consulta voltou a indicar 4. O acionador de ensaio foi inserido no DOM para acionar o manipulador original. Proxima acao: validar a abertura pela lista de itens e os formularios de entrada e saida, escopo por obra e paridade historica.
 
 Contagem reconciliada nesta revisao: 0 HOMOLOGADO, 33 PARCIAL, 1 BLOQUEADO (biometria). As contagens de outras rodadas no historico acima se referem as revisoes em que foram registradas.
+
+### Correcao urgente do painel V430
+
+Base cfa592a. Edge reproduziu a mensagem do painel com OPERACAO_FORA_DA_HOMOLOGACAO para dashboard.mural. A rota de leitura agora usa painel:read e reaproveita PAINEL_CONFIG no Google Sheets de teste. No Edge, a sessao de homologacao abriu e as rotinas reais de painel, Movimentacoes e EPI renderizaram; as consultas de fichas e movimentos retornaram sucesso. Logs do Core registraram HTTP 401 sem sessao e HTTP 200 nas consultas autorizadas. npm test passou com 42 casos no executor node --test. A publicacao GitHub Pages retornou V430 sem o cliente da homologacao e segue pelo caminho legado. O teste local nao comprova a recuperacao do ambiente publicado.
