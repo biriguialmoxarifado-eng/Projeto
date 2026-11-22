@@ -1,10 +1,10 @@
 {
   "name": "app",
   "version": "1.0.0",
-  "description": "",
+  "description": "ALMOXA PRO — legado em Apps Script",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node scripts/verificar-apps-script.js"
   },
   "keywords": [],
   "author": "",
