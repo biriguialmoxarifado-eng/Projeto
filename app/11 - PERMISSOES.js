@@ -101,6 +101,7 @@ function AP_Permissions_can_(perfil, modulo, acao) {
  */
 function AP_Permissions_decidir_(perfil, modulo, acao) {
   var perfilLimpo = String(perfil || '').trim().toLowerCase();
+  if (perfilLimpo === 'administrador') perfilLimpo = 'admin';
   var moduloLimpo = String(modulo || '').trim();
   var acaoRbac = String(acao || 'READ').trim().toUpperCase();
 
