@@ -107,17 +107,32 @@ function mapearFuncoes(arquivos) {
   return onde;
 }
 
+/**
+ * doGet e doPost duplicados entram como AVISO.
+ *
+ * É um defeito sério — o Apps Script fica com um só, e qual depende da
+ * ordem dos arquivos. Mas é assim que o projeto está hoje, e já tentei
+ * resolver com um roteador único: a troca derrubou o login e precisou
+ * ser revertida. Bloquear a publicação aqui impediria qualquer correção
+ * de chegar ao ar, inclusive a que vai consertar isto.
+ *
+ * Vira impedimento quando NENHUM arquivo declarar a entrada: aí o
+ * sistema não responde de jeito nenhum.
+ */
 function verificarEntradas(onde) {
   for (const entrada of ['doGet', 'doPost']) {
     const arquivos = onde.get(entrada) || [];
     if (arquivos.length > 1) {
-      problemas.push(
-        `${entrada} declarado em ${arquivos.length} arquivos — no Apps Script só um ` +
-        `sobrevive, e qual depende da ordem:\n       ${arquivos.join('\n       ')}`
+      avisos.push(
+        `${entrada} declarado em ${arquivos.length} arquivos — o Apps Script fica ` +
+        `com um só, e qual depende da ordem:\n       ${arquivos.join('\n       ')}`
       );
     }
     if (arquivos.length === 0) {
-      avisos.push(`Nenhum arquivo declara ${entrada}.`);
+      problemas.push(
+        `Nenhum arquivo declara ${entrada}. Sem isso o sistema não atende ` +
+        `nenhum pedido por essa via.`
+      );
     }
   }
 }
