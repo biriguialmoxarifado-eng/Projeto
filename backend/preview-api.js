@@ -166,7 +166,7 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
         if (acao === 'movimentacoes') result = await stock.movimentacoes(token, payload);
         else if (acao === 'saldo') result = { ok: true, dados: await stock.saldo(token, payload.sku, payload.local) };
         else {
-          const { sku, local, tipo, qtd, operacaoCore, versaoCore } = payload;
+          const { sku, local, tipo, qtd, operacaoCore, versaoCore, motivo } = payload;
           const action = typeof tipo === 'string' ? tipo.toLowerCase() : '';
           if (typeof sku !== 'string' || !/^SYN-[a-zA-Z0-9-]+$/.test(sku) ||
               !['entrada', 'saida', 'ajuste'].includes(action)) {
@@ -174,7 +174,7 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
             return true;
           }
           const entry = await stock.movimentar(token, { sku, local, action, quantidade: qtd,
-            operation: operacaoCore, version: versaoCore });
+            operation: operacaoCore, version: versaoCore, motivo });
           result = { ok: true, dados: { sku, local, tipo: action.toUpperCase(), versaoCore: entry.version,
             operacaoCore: entry.operation } };
         }

@@ -45,7 +45,7 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | retiradas | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Entrega parcial por SKU e baixa única. Assinaturas, lote e paridade do cliente pendentes. |
 | notificacoes | Parcial | Recorte comparado | Suíte e Sheets real isolado | Pendente no cliente | Pendente | Aviso por recebimento confirmado, visibilidade por solicitante e leitura idempotente. Sessão, interface operacional e regras legadas pendentes. |
 | automacao | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Listar, cadastrar e alternar regras. Executor de eventos e efeitos permanecem no legado. |
-| biometria | Parcial | Pendente | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, estrutura de teste. Identidade única e referência opaca auditada. Autenticação biométrica e leitor físico ficam para depois. |
+| biometria | Parcial | Pendente | Suíte e armazenamento isolado | Pendente no cliente | Bloqueado | Parcial, estrutura de teste. Identidade única e referência opaca auditada. Autenticação biométrica e leitor físico ficam para depois. |
 
 | Extensão | Estágio |
 | --- | --- |
@@ -210,3 +210,9 @@ Edge com OAuth e ALMOXA_TESTE_CORE: estoque.movimentacoes retornou 26 movimentos
 Base d961505. O commit que introduz esta secao integra estoque.saldo e estoque.movimentar ao transporte da V430 de homologacao. Escrita opt-in limitada a SKUs SYN-, com chave de operacao e versao explicitas. No Edge e ALMOXA_TESTE_CORE, entrada 5, reenvio e saida 2 produziram saldo 3, versao 2 e duas linhas de historico em 9.168 ms. npm test passou com 42 casos no executor node --test, incluindo conflito de versao e reenvio no HTTP.
 
 Proxima acao: localizar o emissor efetivo de escrita de estoque na V430 e ligar seu formulario ao adaptador de SKU, local, chave de operacao e versao lida. Repetir entrada, saida e ajuste pelo formulario e recarregar o saldo. Depois retomar os formularios de NF, Itens, Compras e Solicitacoes. Matriz: 0 homologados, 34 parciais, 0 sem implementacao inicial.
+
+### Continuidade: formulario de ajuste de estoque
+
+Base b0d4a93. O modalAjuste da V430 agora consulta saldo e versao para SKU sintetico e obra selecionada, envia ajuste com a mesma chave em caso de reenvio e grava motivo no historico. O backend conserva a assinatura de idempotencia dos movimentos antigos sem motivo. npm test: 42 casos no executor node --test, zero falhas. HTTP verificou ajuste de 3 para 4, historico com motivo e conflito ao alterar o motivo mantendo a chave.
+
+No Edge a sessao de homologacao abriu, mas chamar estoque.mount e estoque-item.mount com um acionador sintetico nao abriu #ajNovo. O ajuste pelo formulario nao foi comprovado. Retomar pela navegacao real e verificar qual botao da tela ativa chama modalAjuste, e se o ambiente apresenta obra selecionada. Biometria conserva estrutura parcial e homologacao bloqueada: validar WebAuthn com identidade individual, HTTPS, dispositivo Windows Hello e pelo menos dois terminais, antes de ligar EPI, ferramentas e recebimentos. Nesta rodada nenhuma imagem foi coletada.

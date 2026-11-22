@@ -576,6 +576,12 @@ test('HTTP preview fiscal exige opt-in e preserva a versao', async () => {
     assert.equal((await (await stock('movimentar', saida)).json()).dados?.versaoCore, 2);
     assert.equal((await (await stock('saldo', entrada)).json()).dados.saldo, 3);
     assert.equal((await (await stock('movimentacoes', { sku: entrada.sku })).json()).dados.length, 2);
+    const ajuste = { ...entrada, tipo: 'AJUSTE', qtd: 4, operacaoCore: 'stock-adjust', versaoCore: 2, motivo: 'Contagem' };
+    assert.equal((await (await stock('movimentar', ajuste)).json()).dados?.versaoCore, 3);
+    assert.equal((await stock('movimentar', { ...ajuste, motivo: 'Outro' })).status, 409);
+    assert.equal((await (await stock('saldo', entrada)).json()).dados.saldo, 4);
+    const history = (await (await stock('movimentacoes', { sku: entrada.sku })).json()).dados;
+    assert.equal(history.find(event => event.tipo === 'AJUSTE').observacao, 'Contagem');
     const note = { numero: '90801', fornecedor: 'TESTE CORE NF', itens: [{ sku: 'SYN' }], operacaoCore: 'fiscal-create' };
     const created = await (await call('salvar', session, note)).json();
     assert.equal(created.dados?.versaoCore, 1, JSON.stringify(created));

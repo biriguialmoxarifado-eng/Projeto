@@ -42,13 +42,16 @@ function createStockEngine({ core, store, receipts, withdrawals, coordinate = wo
 
   async function movimentar(token, input) {
     const actor = await authorize(token, 'write');
-    const { sku, local, destino, action, operation, version, quantidade, original } = input ?? {};
+    const { sku, local, destino, action, operation, version, quantidade, original, motivo } = input ?? {};
     if (!valid(sku) || !valid(operation) || !Number.isSafeInteger(version) || version < 0 ||
         version >= Number.MAX_SAFE_INTEGER) throw fail('ESTOQUE_OPERACAO_INVALIDA');
     if (action === 'estorno' ? !valid(original) :
       !valid(local) || !Number.isSafeInteger(quantidade) || quantidade < (action === 'ajuste' ? 0 : 1)) throw fail('ESTOQUE_MOVIMENTO_INVALIDO');
+    if (motivo !== undefined && (typeof motivo !== 'string' || !motivo.trim() || motivo.length > 1000)) {
+      throw fail('ESTOQUE_MOVIMENTO_INVALIDO');
+    }
     const fingerprint = createHash('sha256')
-      .update(JSON.stringify([actor, sku, local, destino, action, version, quantidade, original])).digest('hex');
+      .update(JSON.stringify([actor, sku, local, destino, action, version, quantidade, original, ...(motivo === undefined ? [] : [motivo])])).digest('hex');
 
     return queue.mutate(() => coordinate(async () => {
       const replay = events => {
@@ -104,7 +107,7 @@ function createStockEngine({ core, store, receipts, withdrawals, coordinate = wo
       }
 
       const event = { id: sku, operation, version: version + 1, fingerprint, action, actor,
-        at: clock().toISOString(), original: action === 'estorno' ? original : null, deltas,
+        at: clock().toISOString(), ...(motivo === undefined ? {} : { motivo }), original: action === 'estorno' ? original : null, deltas,
         note: { id: sku, locais: Object.fromEntries(balances) } };
       let appendError;
       try { await store.append(event); } catch (failure) { appendError = failure; }
@@ -127,7 +130,7 @@ function createStockEngine({ core, store, receipts, withdrawals, coordinate = wo
         const events = await store.events();
         const movements = events.flatMap(event => (event.deltas ?? []).map(delta => ({
           id: event.operation, data: event.at, sku: event.id, tipo: event.action.toUpperCase(),
-          qtd: delta.saldo, local: delta.local, usuario: event.actor
+          qtd: delta.saldo, local: delta.local, usuario: event.actor, ...(event.motivo ? { observacao: event.motivo } : {})
         })));
         for (const receipt of await receipts.events()) {
           if (receipt.action !== 'receber' || !valid(receipt.local)) continue;

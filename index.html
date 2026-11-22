@@ -10474,11 +10474,24 @@ modalAjuste(b.getAttribute("data-ajuste"));
 }
 };
 
-function modalAjuste(id) {
-var p = MOCK.produtos.filter(function(x) {
-return x.id === id;
-})[0];
+async function modalAjuste(id) {
+var preview = window.AlmoxaCorePreview;
+var local = preview && STATE.obra && STATE.obra.id;
+var versaoCore;
+var p;
+if (preview) {
+if (!/^SYN-[a-zA-Z0-9-]+$/.test(id) || !local) {
+toast("err", "Ajuste indisponível", "Selecione uma obra de teste e um SKU sintético.");
+return;
+}
+var saldo = await preview.call("estoque", "saldo", { sku: id, local: local });
+if (!saldo.ok) { toast("err", "Saldo indisponível", saldo.mensagem); return; }
+versaoCore = saldo.dados.version;
+p = { nome: id, codigo: id, estoque: saldo.dados.saldo, reservado: saldo.dados.reservado, minimo: 0 };
+} else {
+p = MOCK.produtos.filter(function(x) { return x.id === id; })[0];
 if (!p) return;
+}
 UI.modal({
 titulo: "Ajuste de estoque",
 sub: p.nome + " · " + p.codigo,
@@ -10493,7 +10506,36 @@ var d = Number(novo.value) - p.estoque;
 dif.value = (d > 0 ? "+" : "") + d + " un.";
 });
 w.querySelector("[data-x]").addEventListener("click", fechar);
-w.querySelector("[data-ok]").addEventListener("click", function() {
+var botao = w.querySelector("[data-ok]");
+var tentativa = null;
+botao.addEventListener("click", async function() {
+if (preview) {
+if (botao.disabled) return;
+var qtd = Number(novo.value);
+if (!novo.value.trim() || !Number.isSafeInteger(qtd) || qtd < 0) {
+toast("err", "Ajuste recusado", "Informe uma quantidade inteira válida.");
+return;
+}
+var motivo = w.querySelector("#ajMotivo").value;
+var justificativa = w.querySelector("#ajJust").value.trim();
+if (justificativa) motivo += ": " + justificativa;
+if (!tentativa || tentativa.qtd !== qtd || tentativa.motivo !== motivo) {
+tentativa = { sku: id, local: local, tipo: "AJUSTE", qtd: qtd, motivo: motivo,
+operacaoCore: crypto.randomUUID(), versaoCore: versaoCore };
+}
+botao.disabled = true;
+try {
+var ajuste = await preview.call("estoque", "movimentar", tentativa);
+if (!ajuste.ok) {
+toast("err", "Ajuste recusado", ajuste.mensagem);
+return;
+}
+fechar();
+toast("ok", "Saldo ajustado", p.nome + " agora tem " + qtd + " un.");
+ROUTER.render();
+} finally { botao.disabled = false; }
+return;
+}
 API.call("estoque", "ajustar", {
 id: id,
 novo: Number(novo.value),
