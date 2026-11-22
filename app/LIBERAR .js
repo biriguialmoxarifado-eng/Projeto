@@ -95,6 +95,8 @@ function liberar(req, res) {
   return false;
 }
 
-module.exports = liberar;
-module.exports.liberar = liberar;
-module.exports.ORIGENS = ORIGENS;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = liberar;
+  module.exports.liberar = liberar;
+  module.exports.ORIGENS = ORIGENS;
+}

@@ -75,10 +75,7 @@ var APIX_VERSAO = 4;
    1. A PORTA — a única do projeto
    ============================================================ */
 
-/* RENOMEADA pelo ROTEADOR UNICO — antes se chamava doPost.
-   Chamado PRIMEIRO pelo ROTEADOR UNICO (parte 00). E o canal oficial da V2. */
-
-function APIX_doPost_(e) {
+function doPost(e) {
   var corpo;
   try {
     corpo = JSON.parse((e && e.postData && e.postData.contents) || '{}');
@@ -291,6 +288,23 @@ function APIX_rotear_(req) {
      não lança estoque: só guarda a decisão e a auditoria. */
   if (req.modulo === 'confronte' && typeof AP_CONFRONTE_direto === 'function') {
     return APIX_padronizar_(AP_CONFRONTE_direto(JSON.stringify({
+      acao: req.acao,
+      payload: req.payload,
+      sessao: req.sessao,
+      token: req.sessao
+    })));
+  }
+
+  /* [DATABASE] Banco central — porta única */
+  if (req.modulo === 'database') {
+    if (typeof AP_DB_direto !== 'function') {
+      return APIX_erro_(
+        'DATABASE_ROUTER_AUSENTE',
+        'O módulo DATABASE não foi carregado.'
+      );
+    }
+
+    return APIX_padronizar_(AP_DB_direto(JSON.stringify({
       acao: req.acao,
       payload: req.payload,
       sessao: req.sessao,
