@@ -6,7 +6,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { join } = require('node:path');
 const { reply, readBody } = require('./diagnostic-api');
 
-function createPreview(runtime, root, { allowWrite = false, modulesAvailable = true } = {}) {
+function createPreview(runtime, root, { allowWrite = false, modulesAvailable = true, operational } = {}) {
   const read = new Map([
     ['nf', ['listar', 'obter', 'itens', ...(allowWrite ? ['salvar'] : [])]],
     ['nfed', allowWrite ? ['atualizar'] : []],
@@ -31,7 +31,7 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
     ['dashboard', ['mural']],
     ['automacao', ['regras']],
     ['ferramentas', ['listar', 'obter', 'historico']],
-    ['epi', ['listar', 'fichas', 'obter']],
+    ['epi', ['listar', 'fichas', 'obter', ...(allowWrite ? ['entregarEstoque', 'devolverEstoque', 'estornarEstoque', 'historicoEstoque'] : [])]],
     ['manutencao', ['status', 'versoes', 'backups']],
     ['aprovacoes', ['listar', 'pendentes', 'porPerfil']],
     ['retiradas', ['itensLiberados']],
@@ -50,7 +50,7 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
   };
   const desktopScripts = new Map(["ALMOXA PRO — MÓDULO DE SINCRONIZAÇÃO E RENDERIZAÇÃO VISUAL.js","ALMOX-PRO — BOOTSYNC.js","ALMOX-PRO — MOTOR DE LEITURA DE NOTA FISCAL.js"].map(name => [encodeURIComponent(name), name]));
   const client = readFileSync(join(__dirname, 'preview-client.js'));
-  const guard = write => '<script src="/homologacao/preview-client.js"' + (write ? ' data-write="1"' : '') + '></script>';
+  const guard = write => '<script src="/homologacao/preview-client.js"' + (write ? ' data-write="1"' : '') + (operational ? ' data-operational="1"' : '') + '></script>';
   const pageHeaders = {
     'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
     'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'none'; frame-ancestors 'self'; form-action 'none'; base-uri 'none'",
@@ -61,6 +61,7 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
   const ttlMs = 15 * 60 * 1000;
   const bearer = req => /^Bearer ([^\s]+)$/i.exec(req.headers.authorization || '')?.[1];
   return async (req, res) => {
+    if (operational && await operational.handle(runtime.core, req, res)) return true;
     if (req.url === '/api/v2/preview/session') {
       const token = bearer(req);
       if (req.method === 'DELETE') {
@@ -206,6 +207,42 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
         const panel = await runtime.getAdministrationEngine().painel(token, 'carregar');
         result = { ok: true, dados: panel.dados ?? {} };
       }
+      else if (modulo === 'epi' && ['entregarEstoque', 'devolverEstoque', 'estornarEstoque', 'historicoEstoque'].includes(acao)) {
+        const stock = runtime.getStockEngine();
+        if (acao === 'historicoEstoque') {
+          result = { ok: true, dados: await stock.historicoEpi(token, payload.usuarioId) };
+        } else {
+          const { sku, local, quantidade, operacaoCore, versaoCore, original, usuarioId } = payload;
+          const [action, kind] = {
+            entregarEstoque: ['saida', 'entrega'], devolverEstoque: ['devolucao', 'devolucao'],
+            estornarEstoque: ['estorno', 'estorno']
+          }[acao];
+          if (typeof sku !== 'string' || !/^SYN-[a-zA-Z0-9-]+$/.test(sku)) {
+            error(res, 400, 'EPI_MOVIMENTO_INVALIDO', 'Use um SKU sintético.');
+            return true;
+          }
+          const entry = await stock.movimentar(token, { sku, local, quantidade, original, action,
+            operation: operacaoCore, version: versaoCore, epi: { kind, usuarioId } });
+          result = { ok: true, dados: { operacaoCore: entry.operation, versaoCore: entry.version, ...entry.epi } };
+        }
+      }
+      else if (allowWrite && modulo === 'epi' && ['listar', 'fichas', 'obter'].includes(acao)) {
+        result = await runtime.getAdministrationEngine().epi(token, acao, payload);
+        if (acao !== 'obter' || !result.ok) {
+          const all = await runtime.getStockEngine().historicoEpi(token);
+          const linked = all.map(event => ({ id: event.operation, colaborador: event.colaborador,
+            matricula: event.matricula, sku: event.sku, item: event.sku, qtd: event.quantidade,
+            entrega: event.at, entreguePor: event.actor, status: event.kind.toUpperCase(),
+            local: event.local, original: event.original }));
+          if (acao === 'obter') {
+            const item = linked.find(record => record.id === payload.id);
+            if (item) result = { ok: true, dados: item };
+          } else if (result.ok) {
+            result = { ...result, dados: [...result.dados, ...linked.filter(row =>
+              !payload.status || row.status === payload.status)] };
+          }
+        }
+      }
       else if (modulo === 'auditoria') result = await runtime.getAdministrationEngine().auditoria(token, acao, payload);
       else if (modulo === 'usuarios') result = await runtime.getAdministrationEngine().usuarios(token, acao, payload);
       else if (modulo === 'config') {
@@ -249,6 +286,8 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
       else if (['ESTOQUE_CONFLITO_VERSAO', 'ESTOQUE_CONFLITO_IDEMPOTENCIA', 'ESTOQUE_SALDO_INSUFICIENTE'].includes(cause.code)) {
         error(res, 409, cause.code, 'O movimento conflita com os dados atuais do estoque.');
       }
+      else if (cause.code === 'EPI_REVERSAO_INVALIDA') error(res, 409, cause.code, 'Entrega já revertida ou incompatível.');
+      else if (['EPI_MOVIMENTO_INVALIDO', 'EPI_COLABORADOR_INVALIDO'].includes(cause.code)) error(res, 400, cause.code, 'Dados de EPI inválidos.');
       else if (cause.status) error(res, cause.status, cause.code, 'Solicitação inválida.');
       else error(res, 503, 'CORE_INDISPONIVEL', 'O Core de homologação não conseguiu consultar os dados.');
     }

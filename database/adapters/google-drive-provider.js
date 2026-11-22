@@ -14,6 +14,24 @@ class GoogleDriveProvider {
     this.auth = auth;
   }
 
+  async readImage(fileId) {
+    const meta = await this.readMetadata(fileId);
+    if (meta.trashed || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(meta.mimeType)) return null;
+    const client = await this.auth.getClient();
+    const { data } = await client.request({
+      url: 'https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media&supportsAllDrives=true',
+      method: 'GET', timeout: 10000, retry: false, responseType: 'stream'
+    });
+    const chunks = [];
+    let bytes = 0;
+    for await (const chunk of data) {
+      bytes += chunk.length;
+      if (bytes > 1048576) return null;
+      chunks.push(chunk);
+    }
+    return 'data:' + meta.mimeType + ';base64,' + Buffer.concat(chunks).toString('base64');
+  }
+
   async readMetadata(fileId) {
     if (typeof fileId !== 'string' || !/^[\w-]+$/.test(fileId)) {
       throw driveError('DRIVE_FILE_ID_INVALID', 'Informe um ID de arquivo válido do Google Drive.');

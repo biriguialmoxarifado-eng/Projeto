@@ -3,6 +3,7 @@
   if (window.AlmoxaCorePreview) return;
   const script = document.currentScript;
   const remote = script?.dataset.deployment === 'pages';
+  const operational = script?.dataset.operational === '1';
   const configured = remote ? document.querySelector('meta[name="almoxa-core-v2"]')?.content?.trim() : '';
   let origin = location.origin;
   if (remote) {
@@ -35,7 +36,7 @@
     ['fornecedores', new Set(['listar', 'porCnpj'])],
     ['categorias', new Set(['listar'])],
     ['obras', new Set(['listar'])],
-    ['usuarios', new Set(['listar', 'contar', 'obter'])],
+    ['usuarios', new Set(['listar', 'contar', 'obter', ...(operational ? ['fotoEpi'] : [])])],
     ['config', new Set(['obter'])],
     ['auditoria', new Set(['listar'])],
     ['ocorrencias', new Set(['listar', 'obter', 'criar', 'salvar'])],
@@ -50,7 +51,7 @@
     ['dashboard', new Set(['mural'])],
     ['automacao', new Set(['regras'])],
     ['ferramentas', new Set(['listar', 'obter', 'historico'])],
-    ['epi', new Set(['listar', 'fichas', 'obter'])],
+    ['epi', new Set(['listar', 'fichas', 'obter', ...(operational ? ['indice', 'detalhe'] : []), ...(writeEnabled ? ['entregarEstoque', 'devolverEstoque', 'estornarEstoque', 'historicoEstoque'] : [])])],
     ['manutencao', new Set(['status', 'versoes', 'backups'])],
     ['aprovacoes', new Set(['listar', 'pendentes', 'porPerfil'])],
     ['retiradas', new Set(['itensLiberados'])],
@@ -65,6 +66,8 @@
   let session = new AbortController();
   const pending = new Map();
   window.AlmoxaCorePreview = {
+    operational,
+    epiProgressive: operational,
     async logout() {
       const previous = token;
       token = '';
@@ -95,6 +98,29 @@
     },
     call(module, action, payload) {
       if (!origin) return Promise.resolve(unavailable());
+      if (operational && module === 'auth' && action === 'login') {
+        return (async () => {
+          await this.logout();
+          const active = session;
+          try {
+            const response = await fetch(endpoint('/api/v2/preview/session'), {
+              method: 'POST', credentials: 'omit', redirect: 'error', cache: 'no-store',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+              signal: AbortSignal.any([active.signal, AbortSignal.timeout(20000)])
+            });
+            const result = await response.json();
+            if (active !== session) return { ok: false, mensagem: 'Tentativa substituída.' };
+            if (result.ok) token = result.dados.sessao.token;
+            return result;
+          } catch {
+            return { ok: false, codigo: 'CORE_INDISPONIVEL', mensagem: 'O Core Node não respondeu.' };
+          }
+        })();
+      }
+      if (operational && module === 'auth' && action === 'logout') {
+        return this.logout().then(() => ({ ok: true }));
+      }
       if (!supported.get(module)?.has(action)) {
         return Promise.resolve({ ok: false, codigo: 'OPERACAO_FORA_DA_HOMOLOGACAO', mensagem: 'Operação indisponível no ambiente de homologação.' });
       }
@@ -125,6 +151,7 @@
   };
 
   window.addEventListener('DOMContentLoaded', () => {
+    if (operational) return;
     const panel = document.createElement('div');
     panel.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:#14242b;color:white;padding:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap';
     const label = document.createElement('label');

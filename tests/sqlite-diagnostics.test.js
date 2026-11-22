@@ -237,3 +237,71 @@ test('Desktop e Campo usam os motores do Core no mesmo SQLite isolado', { timeou
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+test('entrega, devolução e estorno de EPI persistem em um único evento de estoque', { timeout: 45000 }, async () => {
+  const temp = await mkdtemp(join(tmpdir(), 'almoxa-epi-'));
+  const path = join(temp, 'epi.sqlite');
+  let server;
+  try {
+    server = await start(path, 'operator', true);
+    const db = new DatabaseSync(path);
+    try {
+      const insert = db.prepare('INSERT INTO v2_preview_events (motor,id,version,operation,payload) VALUES (?,?,1,?,?)');
+      for (const [motor, note] of [
+        ['usuarios', { id: 'synthetic-user', nome: 'Pessoa de teste', matricula: '123', status: 'ATIVO' }],
+        ['stock', { id: 'SYN-EPI-1', locais: { A1: { saldo: 8, reservado: 2 }, B1: { saldo: 4, reservado: 0 } } }]
+      ]) {
+        insert.run(motor, note.id, 'seed-' + motor, JSON.stringify({
+          id: note.id, operation: 'seed-' + motor, version: 1, note
+        }));
+      }
+      db.exec("CREATE TRIGGER epi_fail BEFORE INSERT ON v2_preview_events WHEN NEW.operation='epi-fail' BEGIN SELECT RAISE(ABORT,'fixture'); END");
+    } finally { db.close(); }
+    let session;
+    async function login() {
+      const response = await server.call('/api/v2/preview/session', { method: 'POST' });
+      assert.equal(response.status, 200);
+      session = { url: response.url, token: (await response.json()).dados.token };
+    }
+    async function call(modulo, acao, payload) {
+      const r = await fetch(new URL('/api/v2/preview/dispatch', session.url), {
+        method: 'POST', headers: { Authorization: 'Bearer ' + session.token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modulo, acao, payload })
+      });
+      return { status: r.status, ...(await r.json()) };
+    }
+    await login();
+    const base = { sku: 'SYN-EPI-1', local: 'A1', usuarioId: 'synthetic-user' };
+    const mutate = (acao, fields) => call('epi', acao, { ...base, ...fields });
+    const balance = async (local = 'A1') => (await call('estoque', 'saldo', { ...base, local })).dados;
+    const history = async () => (await call('epi', 'historicoEstoque', { usuarioId: base.usuarioId })).dados;
+    const deliver = { operacaoCore: 'epi-deliver', versaoCore: 1, quantidade: 3 };
+    assert.equal((await mutate('entregarEstoque', { ...deliver, operacaoCore: 'epi-fail' })).status, 503);
+    assert.equal((await balance()).saldo, 8);
+    assert.deepEqual(await history(), []);
+    assert.equal((await mutate('entregarEstoque', { ...deliver, quantidade: 7 })).status, 409);
+    const first = await mutate('entregarEstoque', deliver);
+    assert.equal(first.status, 200);
+    assert.deepEqual(await mutate('entregarEstoque', deliver), first);
+    assert.deepEqual(await balance(), { saldo: 5, reservado: 2, disponivel: 3, version: 2 });
+    assert.equal((await balance('B1')).saldo, 4);
+    assert.equal((await mutate('devolverEstoque', { original: 'epi-deliver', operacaoCore: 'epi-return', versaoCore: 2, quantidade: 3 })).status, 200);
+    assert.equal((await mutate('estornarEstoque', { original: 'epi-deliver', operacaoCore: 'epi-again', versaoCore: 3 })).status, 409);
+    assert.equal((await mutate('entregarEstoque', { ...deliver, operacaoCore: 'epi-second', versaoCore: 3 })).status, 200);
+    assert.equal((await mutate('estornarEstoque', { original: 'epi-second', operacaoCore: 'epi-reverse', versaoCore: 4 })).status, 200);
+    await server.close();
+    server = await start(path, 'operator', true);
+    await login();
+    const fiche = await call('epi', 'obter', { id:'epi-deliver' });
+    assert.equal(fiche.dados.matricula, '123');
+    const list = await call('epi', 'fichas', {});
+    assert.equal(list.dados.length, 4);
+    const events = await history();
+    assert.deepEqual(events.map(event => event.kind), ['entrega', 'devolucao', 'entrega', 'estorno']);
+    assert.ok(events.every(event => event.actor === 'integration-test' && event.matricula === '123' && event.at));
+    assert.deepEqual(await balance(), { saldo: 8, reservado: 2, disponivel: 6, version: 5 });
+  } finally {
+    await server?.close();
+    await rm(temp, { recursive: true, force: true });
+  }
+});

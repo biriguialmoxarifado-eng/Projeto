@@ -7,7 +7,7 @@ const fail = code => Object.assign(new Error(code), { code });
 const valid = value => typeof value === 'string' && /^[\w-]{1,80}$/.test(value);
 const newBalance = () => ({ saldo: 0, reservado: 0 });
 
-function createStockEngine({ core, store, receipts, withdrawals, coordinate = work => work(), clock = () => new Date() }) {
+function createStockEngine({ core, store, receipts, withdrawals, coordinate = work => work(), epiUsers, clock = () => new Date() }) {
   const queue = new StorageOperations();
   async function authorize(token, access) {
     await core.authorizeSession(token, 'stock:' + access);
@@ -42,7 +42,7 @@ function createStockEngine({ core, store, receipts, withdrawals, coordinate = wo
 
   async function movimentar(token, input) {
     const actor = await authorize(token, 'write');
-    const { sku, local, destino, action, operation, version, quantidade, original, motivo } = input ?? {};
+    const { sku, local, destino, action, operation, version, quantidade, original, motivo, epi } = input ?? {};
     if (!valid(sku) || !valid(operation) || !Number.isSafeInteger(version) || version < 0 ||
         version >= Number.MAX_SAFE_INTEGER) throw fail('ESTOQUE_OPERACAO_INVALIDA');
     if (action === 'estorno' ? !valid(original) :
@@ -50,8 +50,16 @@ function createStockEngine({ core, store, receipts, withdrawals, coordinate = wo
     if (motivo !== undefined && (typeof motivo !== 'string' || !motivo.trim() || motivo.length > 1000)) {
       throw fail('ESTOQUE_MOVIMENTO_INVALIDO');
     }
+    if (epi) {
+      await core.authorizeSession(token, 'epi:write');
+      if (!epiUsers || !['entrega', 'devolucao', 'estorno'].includes(epi.kind) ||
+          (epi.kind === 'entrega' ? action !== 'saida' || !valid(epi.usuarioId) :
+            !valid(original) || action !== (epi.kind === 'estorno' ? 'estorno' : 'devolucao'))) {
+        throw fail('EPI_MOVIMENTO_INVALIDO');
+      }
+    }
     const fingerprint = createHash('sha256')
-      .update(JSON.stringify([actor, sku, local, destino, action, version, quantidade, original, ...(motivo === undefined ? [] : [motivo])])).digest('hex');
+      .update(JSON.stringify([actor, sku, local, destino, action, version, quantidade, original, ...(motivo === undefined ? [] : [motivo]), ...(epi ? [epi.kind, epi.usuarioId] : [])])).digest('hex');
 
     return queue.mutate(() => coordinate(async () => {
       const replay = events => {
@@ -64,6 +72,26 @@ function createStockEngine({ core, store, receipts, withdrawals, coordinate = wo
       const before = await store.events();
       const duplicate = replay(before);
       if (duplicate) return duplicate;
+      let epiRecord;
+      if (epi?.kind === 'entrega') {
+        const user = (await epiUsers.events()).filter(event => event.id === epi.usuarioId)
+          .reduce((prior, event) => event.version > (prior?.version ?? 0) ? event : prior, null)?.note;
+        if (!user || !user.matricula || user.ativo === false ||
+            ['INATIVO', 'BLOQUEADO'].includes(String(user.status || '').toUpperCase())) {
+          throw fail('EPI_COLABORADOR_INVALIDO');
+        }
+        epiRecord = { kind: 'entrega', usuarioId: epi.usuarioId, matricula: String(user.matricula),
+          colaborador: String(user.nome || ''), quantidade, local };
+      } else if (epi) {
+        const source = before.find(event => event.id === sku && event.operation === original && event.epi?.kind === 'entrega');
+        if (!source || before.some(event => event.id === sku && event.original === original) ||
+            (epi.kind === 'devolucao' && (local !== source.epi.local || quantidade !== source.epi.quantidade))) {
+          throw fail('EPI_REVERSAO_INVALIDA');
+        }
+        epiRecord = { ...source.epi, kind: epi.kind };
+      } else if (action === 'estorno' && before.some(event => event.id === sku && event.operation === original && event.epi)) {
+        throw fail('EPI_REVERSAO_INVALIDA');
+      }
       const previous = latest(before);
       if ((previous?.version ?? 0) !== version) throw fail('ESTOQUE_CONFLITO_VERSAO');
       const balances = new Map(Object.entries(previous?.note.locais ?? {}));
@@ -107,7 +135,8 @@ function createStockEngine({ core, store, receipts, withdrawals, coordinate = wo
       }
 
       const event = { id: sku, operation, version: version + 1, fingerprint, action, actor,
-        at: clock().toISOString(), ...(motivo === undefined ? {} : { motivo }), original: action === 'estorno' ? original : null, deltas,
+        at: clock().toISOString(), ...(motivo === undefined ? {} : { motivo }), original: action === 'estorno' || epi?.kind === 'devolucao' ? original : null, deltas,
+        ...(epiRecord ? { epi: epiRecord } : {}),
         note: { id: sku, locais: Object.fromEntries(balances) } };
       let appendError;
       try { await store.append(event); } catch (failure) { appendError = failure; }
@@ -121,6 +150,12 @@ function createStockEngine({ core, store, receipts, withdrawals, coordinate = wo
 
   return {
     movimentar,
+    async historicoEpi(token, usuarioId) {
+      await core.authorizeSession(token, 'epi:read');
+      if (usuarioId !== undefined && !valid(usuarioId)) throw fail('EPI_COLABORADOR_INVALIDO');
+      return (await store.events()).filter(event => event.epi && (usuarioId === undefined || event.epi.usuarioId === usuarioId))
+        .map(({ id, operation, original, actor, at, epi }) => ({ sku: id, operation, original, actor, at, ...epi }));
+    },
     async movimentacoes(token, { sku, limite = 200, somenteSaidas = false } = {}) {
       await authorize(token, 'read');
       if ((sku !== undefined && !valid(sku)) || !Number.isSafeInteger(limite) || limite < 1 || limite > 200) {
@@ -130,7 +165,8 @@ function createStockEngine({ core, store, receipts, withdrawals, coordinate = wo
         const events = await store.events();
         const movements = events.flatMap(event => (event.deltas ?? []).map(delta => ({
           id: event.operation, data: event.at, sku: event.id, tipo: event.action.toUpperCase(),
-          qtd: delta.saldo, local: delta.local, usuario: event.actor, ...(event.motivo ? { observacao: event.motivo } : {})
+          qtd: delta.saldo, local: delta.local, usuario: event.actor,
+          ...(event.epi ? { epi: event.epi, original: event.original } : {}), ...(event.motivo ? { observacao: event.motivo } : {})
         })));
         for (const receipt of await receipts.events()) {
           if (receipt.action !== 'receber' || !valid(receipt.local)) continue;

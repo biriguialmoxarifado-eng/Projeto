@@ -37,7 +37,7 @@ function diagnosticSecurity(credential, invoices) {
   };
 }
 
-async function createRuntime(storage, { sqlite = false, credential, invoiceTestStorage, sqlitePreview = false } = {}) {
+async function createRuntime(storage, { sqlite = false, credential, invoiceTestStorage, sqlitePreview = false, operationalSecurity } = {}) {
   if (!storage) {
     const { GoogleSheetsProvider } = require('../database/adapters/google-sheets-provider');
     storage = new GoogleSheetsProvider();
@@ -52,7 +52,7 @@ async function createRuntime(storage, { sqlite = false, credential, invoiceTestS
   // O acesso continua protegido pelo que já protegia: o servidor só
   // escuta em 127.0.0.1 e exige o token local de 32 caracteres ou mais.
   const comModulos = Boolean(invoiceTestStorage || sqlite);
-  const core = new AlmoxaCore(sqlite || invoiceTestStorage ? diagnosticSecurity(credential, comModulos) : {});
+  const core = new AlmoxaCore(operationalSecurity ?? (sqlite || invoiceTestStorage ? diagnosticSecurity(credential, comModulos) : {}));
   core.registerModule({
     id: 'database',
     version: '2.1.0',
@@ -210,7 +210,7 @@ async function createRuntime(storage, { sqlite = false, credential, invoiceTestS
       const { TestInvoiceStore } = require('../core/motors/invoices');
       const { createStockEngine } = require('../core/motors/stock');
       stockEngine ??= createStockEngine({
-        core, coordinate, store: operationalStore('stock'),
+        core, coordinate, store: operationalStore('stock'), epiUsers: operationalStore('usuarios'),
         receipts: operationalStore('receiving'),
         withdrawals: operationalStore('solicitacoes')
       });

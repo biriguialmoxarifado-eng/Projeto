@@ -6872,6 +6872,7 @@ return typeof precisaPrimeiroAcesso === "function" ? precisaPrimeiroAcesso() : f
 /* Enquanto o Core não confirmar a base oficial, o sistema não diz que
    falta administrador — diz que não conseguiu consultar, com o erro real. */
 function avisoDaBaseOficial() {
+if (window.AlmoxaCorePreview?.operational) return "";
 if (typeof baseConsultada !== "function" || baseConsultada()) return "";
 var e = (typeof erroDaBase === "function" && erroDaBase()) || null;
 return '<div class="alert a-yellow mt12" id="lgBase">' + ic("alerta") + "<div><b>Não consegui consultar o cadastro de usuários</b>" + U.esc(e && e.mensagem || "O servidor não respondeu.") + (e && e.codigo ? '<div class="small mt8" style="opacity:.8">Código: <b class="mono">' + U.esc(e.codigo) + "</b></div>" : "") + "<div class=\"small mt8\">Você ainda pode tentar entrar com matrícula e senha. " + "O cadastro existente não foi alterado.</div>" + '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' + '<button class="btn btn-ghost btn-sm" data-base-tentar>' + ic("sync") + "Tentar de novo</button>" + '<button class="btn btn-ghost btn-sm" data-base-diag>' + ic("doutor") + "Ver diagnóstico</button>" + /* só aparece quando a recusa é de chave do aplicativo */ ((e && (e.chaveDoAplicativo || /CHAVE|AUTORIZADO/i.test(String(e.codigo || "")))) ? '<button class="btn btn-primary btn-sm" data-base-chave>' + ic("cadeado") + "Informar a chave do aplicativo</button>" : "") + "</div>" + "</div></div>";
@@ -7489,7 +7490,7 @@ ST.usuario = r.dados.usuario;
 ST.perfil = r.dados.usuario.perfil;
 ST.obra = r.dados.obra || ST.obra || null;
 ST.sessao = r.dados.sessao;
-ST.notificacoes = MOCK.notificacoes.slice();
+ST.notificacoes = window.AlmoxaCorePreview?.operational ? [] : MOCK.notificacoes.slice();
 document.getElementById("loginScreen").classList.add("hidden");
 document.getElementById("kioskScreen").classList.add("hidden");
 document.getElementById("appHeader").classList.remove("hidden");
@@ -7736,6 +7737,16 @@ render: function() {
 return API.call("dashboard", "mural", {}).then(function(r) {
 if (!r.ok) return UI.estado("erro", "Não foi possível carregar o mural", r.mensagem);
 var d = r.dados;
+if (d.coreOperational) {
+return UI.cabecalho({titulo:"Dashboard", sub:"Dados do Google Sheets · somente leitura"}) +
+'<div class="grid g5 mb16">' +
+UI.kpi({icone:"estoque",cor:"ico-orange",valor:d.itens,rotulo:"Itens cadastrados",rota:"#/estoque"}) +
+UI.kpi({icone:"user",cor:"ico-green",valor:d.colaboradores,rotulo:"Colaboradores ativos",rota:"#/colaboradores"}) +
+UI.kpi({icone:"epi",cor:"ico-blue",valor:d.fichasEpi,rotulo:"Linhas de entrega de EPI",rota:"#/epi-fichas"}) + '</div>';
+}
+if (!Array.isArray(d.banners) || !d.banners.length || !d.obra || !d.meta) {
+return UI.estado("erro", "Mural indisponível", "O Core não retornou a configuração do mural.");
+}
 var b = d.banners[muralIdx % d.banners.length];
 var meta = d.meta, pct = Math.round(meta.alcancado / meta.meta * 100);
 var u = ST.usuario;
@@ -10380,22 +10391,23 @@ linhas: pg.itens,
 colunas: [ {
 rotulo: "Item",
 render: function(p) {
-return '<div class="cell-item"><span class="thumb">' + p.emoji + '</span><div><div class="strong">' + U.esc(p.nome) + '</div><div class="muted mono">' + U.esc(p.codigo) + " · " + U.esc(p.sap) + "</div></div></div>";
+return '<div class="cell-item"><span class="thumb">' + (p.emoji ? U.esc(p.emoji) : ic("estoque")) + '</span><div><div class="strong">' + U.esc(p.nome) + '</div><div class="muted mono">' + U.esc(p.codigo) + (p.sap ? " · " + U.esc(p.sap) : "") + "</div></div></div>";
 }
 }, {
 rotulo: "Categoria",
 render: function(p) {
-return '<span class="badge b-gray">' + U.esc(p.categoria) + "</span>";
+return '<span class="badge b-gray">' + U.esc(p.categoria || "—") + "</span>";
 }
 }, {
 rotulo: "Local",
 render: function(p) {
-return '<span class="muted mono">' + U.esc(p.local) + "</span>";
+return '<span class="muted mono">' + U.esc(p.local || "—") + "</span>";
 }
 }, {
 rotulo: "Saldo",
 num: true,
 render: function(p) {
+if (p.estoque == null) return "—";
 return '<b class="' + (p.status === "ok" ? "stock-ok" : p.status === "atencao" ? "stock-warn" : "stock-crit") + '">' + U.num(p.estoque) + "</b>";
 }
 }, {
@@ -10408,12 +10420,18 @@ return U.num(p.minimo);
 rotulo: "Reservado",
 num: true,
 render: function(p) {
-return p.reservado ? '<span class="badge b-orange">' + p.reservado + "</span>" : '<span class="muted">0</span>';
+if (p.reservado == null || p.reservado === "" || !Number.isFinite(Number(p.reservado))) {
+return '<span class="muted" title="Reservas não apuradas">—</span>';
+}
+return Number(p.reservado) ? '<span class="badge b-orange">' + U.num(Number(p.reservado)) + "</span>" : '<span class="muted">0</span>';
 }
 }, {
 rotulo: "Disponível",
 num: true,
 render: function(p) {
+if (p.reservado == null || p.reservado === "" || !Number.isFinite(Number(p.reservado))) {
+return '<span class="muted" title="Disponível não apurado sem as reservas">—</span>';
+}
 return "<b>" + U.num(Math.max(0, p.estoque - p.reservado)) + "</b>";
 }
 }, {
@@ -12901,10 +12919,85 @@ if (btVarios) btVarios.addEventListener("click", function () {
 });
 }
 
+
+function renderEpiProgressivoV431() {
+return API.call("epi", "indice", {}).then(function(r) {
+if (!r.ok) return UI.estado("erro", "Não foi possível carregar as fichas", r.mensagem);
+var index = Array.isArray(r.dados) ? r.dados : [];
+var host = document.createElement("div");
+host.innerHTML = UI.cabecalho({titulo:"Fichas de EPI ativas",sub:"Consulte as entregas registradas."}) +
+'<div class="card card-body"><label for="epiBuscaV431">Buscar por nome, matrícula ou material</label>' +
+'<input type="search" class="input" id="epiBuscaV431"><div class="mt12" data-lista></div>' +
+'<button type="button" class="btn btn-ghost" data-mais>Carregar mais</button></div>';
+var input = host.querySelector("input"), list = host.querySelector("[data-lista]"), more = host.querySelector("[data-mais]");
+var limit = 12;
+var plain = function(s) { return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase(); };
+var rows = index.map(function(ficha) { return {ficha:ficha, search:plain([ficha.colaborador,ficha.matricula,ficha.materiais].join(" "))}; });
+var detailsCache = new Map();
+var photoCache = new Map();
+function addRow(row) {
+var f = row.ficha;
+var detail = document.createElement("details");
+var summary = document.createElement("summary");
+summary.textContent = f.colaborador + " · " + f.matricula + " · " + f.total + " entregas";
+detail.append(summary);
+var panel = document.createElement("div");
+detail.append(panel);
+detail.addEventListener("toggle", async function() {
+if (!detail.open || detail.dataset.loaded) return;
+detail.dataset.loaded = "1";
+panel.textContent = "Carregando ficha…";
+if (!detailsCache.has(f.chave)) {
+detailsCache.set(f.chave, API.call("epi", "detalhe", {chave:f.chave}));
+}
+var result = await detailsCache.get(f.chave);
+if (!result.ok || !result.dados) {
+panel.textContent = result.mensagem || "Ficha indisponível.";
+detailsCache.delete(f.chave);
+delete detail.dataset.loaded;
+return;
+}
+panel.replaceChildren();
+var table = document.createElement("ul");
+for (var item of result.dados.itens) {
+var line = document.createElement("li");
+line.textContent = [item.item || item.sku, item.qtd, item.entrega, item.status].filter(Boolean).join(" · ");
+table.append(line);
+}
+panel.append(table);
+if (!f.usuarioId) return;
+if (!photoCache.has(f.usuarioId)) photoCache.set(f.usuarioId, API.call("usuarios", "fotoEpi", {id:f.usuarioId}));
+var photo = await photoCache.get(f.usuarioId);
+if (!photo.ok) photoCache.delete(f.usuarioId);
+if (photo.ok && photo.dados?.foto) {
+var img = document.createElement("img");
+img.alt = ""; img.width = 64; img.height = 64; img.loading = "lazy"; img.src = photo.dados.foto;
+panel.prepend(img);
+}
+});
+list.append(detail);
+}
+function refresh() {
+var query = plain(input.value).trim();
+var found = rows.filter(function(row) { return row.search.includes(query); });
+list.replaceChildren();
+if (!found.length) list.textContent = "Nenhuma ficha encontrada.";
+found.slice(0, limit).forEach(addRow);
+more.hidden = found.length <= limit;
+}
+input.addEventListener("input", function() { limit = 12; refresh(); });
+more.addEventListener("click", function() { limit += 12; refresh(); });
+refresh();
+var mount = "epi-v431-" + Math.random().toString(36).slice(2);
+setTimeout(function() { document.getElementById(mount)?.replaceWith(host); }, 0);
+return '<div id="' + mount + '"></div>';
+}, function() { return UI.estado("erro", "Não foi possível carregar as fichas", "Tente novamente."); });
+}
 SCREENS["epi-fichas"] = {
 titulo: "Fichas de EPI Ativas",
 modulo: "epi",
 render: function() {
+if (window.AlmoxaCorePreview?.epiProgressive) return renderEpiProgressivoV431();
 /* O CADASTRO OFICIAL VEM PRIMEIRO, ANTES DE AGRUPAR.
    Agrupar sem ele não tem como saber que a ficha da matrícula 1 e a
    da 408220 são da mesma pessoa — e saíam dois cartões para o mesmo

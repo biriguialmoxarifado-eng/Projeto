@@ -94,6 +94,18 @@ async function main() {
     throw new Error('Homologação SQLite exige banco isolado, loopback e ausência de planilha de teste.');
   }
   if (sqlitePreview) sqlite.enablePreview();
+  let operational;
+  let operationalStorage;
+  if (process.env.ALMOXA_OPERATIONAL_READ === '1') {
+    if (sqlite || previewId || (process.env.HOST ?? '127.0.0.1') !== '127.0.0.1' ||
+        process.env.ALMOXA_PREVIEW_ORIGIN) {
+      throw new Error('Leitura operacional local exige loopback, sem SQLite, homologação ou origem externa.');
+    }
+    const { GoogleSheetsProvider } = require('../database/adapters/google-sheets-provider');
+    operationalStorage = new GoogleSheetsProvider();
+    operationalStorage.validateId(operationalStorage.spreadsheetId, 'ALMOXA_SPREADSHEET_ID');
+    operational = require('./operational-reader').createOperationalReader(operationalStorage);
+  }
   let invoiceTestStorage;
   if (previewId) {
     if ((process.env.HOST ?? '127.0.0.1') !== '127.0.0.1' || !token || token.length < 32 ||
@@ -103,13 +115,14 @@ async function main() {
     const { GoogleSheetsProvider } = require('../database/adapters/google-sheets-provider');
     invoiceTestStorage = new GoogleSheetsProvider({ testSpreadsheetId: previewId, testOnly: true });
   }
-  const runtime = await createRuntime(sqlite, { sqlite: Boolean(sqlite), credential: { token, actor, role, approvalProfile: previewId ? process.env.ALMOXA_PREVIEW_APPROVAL_PROFILE : undefined }, invoiceTestStorage, sqlitePreview });
+  const runtime = await createRuntime(operationalStorage || sqlite, { operationalSecurity: operational?.security, sqlite: Boolean(sqlite), credential: { token, actor, role, approvalProfile: previewId ? process.env.ALMOXA_PREVIEW_APPROVAL_PROFILE : undefined }, invoiceTestStorage, sqlitePreview });
   const { core, database } = runtime;
   // O Desktop e o Campo passam a ser servidos sempre que houver banco —
   // SQLite basta. Antes dependiam de ALMOXA_PREVIEW_SHEET_ID, o que
   // amarrava a interface a uma planilha do Google para simplesmente abrir.
-  const preview = (invoiceTestStorage || sqlite) &&
+  const preview = (operational || invoiceTestStorage || sqlite) &&
     require('./preview-api').createPreview(runtime, join(__dirname, '..'), {
+      operational,
       modulesAvailable: Boolean(invoiceTestStorage || sqlitePreview),
       allowWrite: Boolean(invoiceTestStorage || sqlitePreview) && process.env.ALMOXA_PREVIEW_WRITE === '1'
     });
@@ -118,6 +131,10 @@ async function main() {
   const handler = createHandler(core, process.env.ALMOXA_REVISION || null, sqlite && database, preview);
   const cors = previewCors(preview ? process.env.ALMOXA_PREVIEW_ORIGIN : undefined);
   const server = createServer({ requestTimeout: 15000, headersTimeout: 10000 }, (req, res) => {
+    if (operational && req.headers.host !== host + ':' + server.address().port) {
+      res.writeHead(403).end();
+      return;
+    }
     if (cors(req, res)) return;
     const diagnostic = req.url.startsWith('/api/v2/diagnostics');
     const previewRequest = req.url.startsWith('/api/v2/preview/');
@@ -139,7 +156,7 @@ async function main() {
     console.log(`ALMOXA PRO V2 disponível na porta ${server.address().port}.`);
     // Sem banco não há diagnóstico: o servidor responderia 404 a tudo
     // sem dizer por quê. Avisar aqui evita a caça ao erro.
-    if (!sqlite && !invoiceTestStorage) {
+    if (!operational && !sqlite && !invoiceTestStorage) {
       console.warn(
         'ATENÇÃO: nenhum banco configurado — todas as rotas vão responder 404.\n' +
         '  Falta a variável ALMOXA_SQLITE_PATH (e a credencial do diagnóstico).\n' +
