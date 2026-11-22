@@ -54,6 +54,9 @@ class GoogleSheetsProvider {
         return result.data;
       } catch (error) {
         const status = error.response?.status;
+        if (['invalid_grant', 'invalid_client'].includes(error.response?.data?.error)) {
+          throw new GoogleSheetsProviderError('GOOGLE_AUTH_FAILED', 'Renove a autenticação Google do backend.');
+        }
         const header = error.response?.headers?.get?.('retry-after');
         const seconds = /^\d+$/.test(header ?? '') ? Number(header) * 1000 : NaN;
         const retryAfter = Number.isFinite(seconds) ? seconds : Date.parse(header) - Date.now();

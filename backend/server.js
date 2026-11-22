@@ -7,7 +7,7 @@ const { createDiagnosticApi, reply } = require('./diagnostic-api');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 
-function createHandler(core, revision, database, preview) {
+function createHandler(core, revision, database, preview, operational) {
   const api = database && createDiagnosticApi({ core, database });
   const page = api && readFileSync(join(__dirname, 'diagnostics.html'));
   const client = api && readFileSync(join(__dirname, 'diagnostics-client.js'));
@@ -28,6 +28,13 @@ function createHandler(core, revision, database, preview) {
     if (api && await api(req, res)) return;
     if (req.method !== 'GET' || req.url !== '/health') {
       res.writeHead(404).end();
+      return;
+    }
+    if (operational) {
+      const storage = await operational.connection();
+      const ready = storage.status === 'connected';
+      reply(res, ready ? 200 : 503, { status: ready ? 'healthy' : 'degraded', core: 'online',
+        coreVersion: CORE_VERSION, revision, environment: 'operacional-leitura', storage });
       return;
     }
     const { status } = await core.health();
@@ -108,7 +115,9 @@ async function main() {
     const { GoogleSheetsProvider } = require('../database/adapters/google-sheets-provider');
     operationalStorage = new GoogleSheetsProvider();
     operationalStorage.validateId(operationalStorage.spreadsheetId, 'ALMOXA_SPREADSHEET_ID');
-    operational = require('./operational-reader').createOperationalReader(operationalStorage);
+    operational = require('./operational-reader').createOperationalReader(operationalStorage, {
+      expectedTitle: process.env.ALMOXA_OPERATIONAL_SHEET_TITLE
+    });
   }
   let invoiceTestStorage;
   if (previewId) {
@@ -137,7 +146,7 @@ async function main() {
     });
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? '127.0.0.1';
-  const handler = createHandler(core, process.env.ALMOXA_REVISION || null, sqlite && database, preview);
+  const handler = createHandler(core, process.env.ALMOXA_REVISION || null, sqlite && database, preview, operational);
   const cors = previewCors(preview ? process.env.ALMOXA_PREVIEW_ORIGIN : undefined);
   const server = createServer({ requestTimeout: 15000, headersTimeout: 10000 }, (req, res) => {
     if ((operational || desktopLocal) && req.headers.host !== host + ':' + server.address().port) {

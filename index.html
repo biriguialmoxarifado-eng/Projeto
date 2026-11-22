@@ -2246,6 +2246,7 @@ terminar(res);
 });
 },
 ping: function() {
+if (window.AlmoxaCorePreview?.operational) return window.AlmoxaCorePreview.refreshConnection();
 return API.call("doutor", "ping", {});
 }
 };
@@ -6001,7 +6002,7 @@ fecharDropdowns();
 });
 var bs = document.getElementById("btnSair");
 if (bs) bs.addEventListener("click", function() {
-if (window.AlmoxaCorePreview?.desktop) {
+if (window.AlmoxaCorePreview?.desktop || window.AlmoxaCorePreview?.operational) {
 confirmar("Encerrar sessão", "Você voltará à tela de entrada.", "Sair", async function() {
 await API.call("auth", "logout", {});
 LOGIN.voltarCore();
@@ -6236,8 +6237,34 @@ function faixaNaoGrava_(estado) {
   } catch (e) {}
 }
 
+function estadoConexaoOperacional() {
+var estado = window.AlmoxaCorePreview.connection();
+var detalhe = estado.revision ? "Core Node · revisão " + estado.revision : "Core Node";
+if (estado.core === "unavailable") return {cls:"err", txt:"Core indisponível", detalhe:"O servidor Node não respondeu."};
+if (estado.storage?.status === "unavailable") return {cls:"err", txt:"Planilha inacessível", detalhe:estado.storage.message};
+if (estado.signIn === "refused") return {cls:"off", txt:"Login recusado", detalhe:"Confira sua identificação e senha no ALMOXA PRO."};
+if (estado.core === "checking" || !estado.storage) return {cls:"off", txt:"Verificando Core e planilha…", detalhe:detalhe};
+if (estado.signIn !== "authenticated") return {cls:"off", txt:"Planilha conectada · entre no sistema", detalhe:detalhe};
+return {cls:"", txt:"Core e planilha conectados", detalhe:detalhe};
+}
+
 function atualizarCore() {
 var pill = document.getElementById("corePill");
+if (window.AlmoxaCorePreview?.operational) {
+var estado = estadoConexaoOperacional();
+var aviso = document.getElementById("coreLoginStatus");
+if (aviso) {
+aviso.textContent = estado.txt;
+aviso.title = estado.detalhe || "";
+}
+if (pill) {
+pill.className = "core-pill " + estado.cls;
+pill.querySelector("span").textContent = estado.txt;
+pill.title = estado.txt + (estado.detalhe ? " · " + estado.detalhe : "");
+pill.setAttribute("aria-label", pill.title);
+}
+return;
+}
 try { faixaNaoGrava_(ST.coreStatus); } catch (e) {}
 if (!pill) return;
 var mapa = {
@@ -6890,7 +6917,7 @@ return typeof precisaPrimeiroAcesso === "function" ? precisaPrimeiroAcesso() : f
 /* Enquanto o Core não confirmar a base oficial, o sistema não diz que
    falta administrador — diz que não conseguiu consultar, com o erro real. */
 function avisoDaBaseOficial() {
-if (window.AlmoxaCorePreview?.operational) return "";
+if (window.AlmoxaCorePreview?.operational) return '<p id="coreLoginStatus" class="small mt12" role="status">Verificando Core e planilha…</p>';
 if (typeof baseConsultada !== "function" || baseConsultada()) return "";
 var e = (typeof erroDaBase === "function" && erroDaBase()) || null;
 return '<div class="alert a-yellow mt12" id="lgBase">' + ic("alerta") + "<div><b>Não consegui consultar o cadastro de usuários</b>" + U.esc(e && e.mensagem || "O servidor não respondeu.") + (e && e.codigo ? '<div class="small mt8" style="opacity:.8">Código: <b class="mono">' + U.esc(e.codigo) + "</b></div>" : "") + "<div class=\"small mt8\">Você ainda pode tentar entrar com matrícula e senha. " + "O cadastro existente não foi alterado.</div>" + '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">' + '<button class="btn btn-ghost btn-sm" data-base-tentar>' + ic("sync") + "Tentar de novo</button>" + '<button class="btn btn-ghost btn-sm" data-base-diag>' + ic("doutor") + "Ver diagnóstico</button>" + /* só aparece quando a recusa é de chave do aplicativo */ ((e && (e.chaveDoAplicativo || /CHAVE|AUTORIZADO/i.test(String(e.codigo || "")))) ? '<button class="btn btn-primary btn-sm" data-base-chave>' + ic("cadeado") + "Informar a chave do aplicativo</button>" : "") + "</div>" + "</div></div>";
@@ -7539,6 +7566,7 @@ UI.fecharModais();
 document.getElementById("appHeader").classList.add("hidden");
 document.getElementById("appMain").classList.add("hidden");
 LOGIN.abrir();
+if (window.AlmoxaCorePreview?.operational) UI.atualizarCore();
 }
 function modalPorQueNaoEntrei(info) {
 var d = info.cracha || {};
@@ -7945,12 +7973,59 @@ categoria: item.categoria
 toast("ok", "Item adicionado", item.nome + " — " + qtd + " un. no carrinho.");
 }
 
+function renderLojaOperacional(todos) {
+var categorias = [...new Set(todos.map(function(p) { return p.categoria; }).filter(Boolean))].sort();
+var filtrados = todos.filter(function(p) { return lojaEstado.categoria === "Todas" || p.categoria === lojaEstado.categoria; });
+var lista = U.buscar(filtrados, lojaEstado.busca, ["nome", "codigo", "codigoBarras", "marca"]);
+if (lojaEstado.ordem === "nome") lista = U.ordenar(lista, "nome");
+if (lojaEstado.ordem === "estoque") lista = U.ordenar(lista, "estoque", "desc");
+var pg = U.paginar(lista, lojaEstado.pagina, 8);
+return UI.cabecalho({trilha:["Almoxarifado", "Loja / Catálogo"], titulo:"Loja / Catálogo",
+sub:"Consulta à planilha operacional. O saldo registrado é exibido sem deduzir reservas."}) +
+'<div class="filter-bar"><div class="search-wrap">' + ic("busca") +
+'<input type="search" id="lojaBusca" class="input" aria-label="Buscar produtos" placeholder="Buscar por nome, código ou marca" value="' + U.esc(lojaEstado.busca) + '"></div>' +
+'<label class="field"><span>Ordenar por</span><select class="select" id="lojaOrdem">' +
+[["relevancia", "Ordem da planilha"], ["nome", "Nome"], ["estoque", "Saldo"]].map(function(opt) {
+return '<option value="' + opt[0] + '"' + (lojaEstado.ordem === opt[0] ? ' selected' : '') + '>' + opt[1] + '</option>';
+}).join("") + '</select></label></div><div class="chips mb16">' + ["Todas"].concat(categorias).map(function(c) {
+return '<button class="chip' + (lojaEstado.categoria === c ? ' active' : '') + '" data-cat="' + U.esc(c) + '">' + U.esc(c) + '</button>';
+}).join("") + '</div>' + (pg.itens.length ? '<div class="prod-grid">' + pg.itens.map(function(p) {
+return '<div class="prod"><div class="prod-img"' + (p.temFoto ? ' data-loja-foto="' + U.esc(p.sku) + '"' : '') + '>' +
+ic("caixa") + '</div><h4>' + U.esc(p.nome) + '</h4><div class="ca">' + U.esc(p.codigo) + '</div>' +
+'<div class="meta">' + U.esc(p.categoria || "Sem categoria") + '<br>Saldo registrado <b>' +
+(p.estoque == null ? "—" : U.num(p.estoque) + " " + U.esc(p.unidade || "un.")) + '</b></div></div>';
+}).join("") + '</div>' + UI.paginador(pg) : UI.estado("vazio", "Nenhum item encontrado", "Confira a busca e a categoria."));
+}
+
+var observadorFotosLoja;
+function montarFotosLojaOperacional() {
+observadorFotosLoja?.disconnect();
+var observar = typeof IntersectionObserver === "function";
+async function carregar(el) {
+var r = await API.call("lojinha", "foto", {sku:el.dataset.lojaFoto});
+if (r.dados?.foto && el.isConnected) {
+var imagem = document.createElement("img");
+imagem.src = r.dados.foto;
+imagem.alt = "";
+el.classList.add("com-foto");
+el.replaceChildren(imagem);
+} else if (r.dados?.estado === "FOTO_INDISPONIVEL") el.title = "Foto indisponível no Drive";
+}
+if (observar) observadorFotosLoja = new IntersectionObserver(function(entradas, observer) {
+entradas.forEach(function(entrada) { if (entrada.isIntersecting) { observer.unobserve(entrada.target); void carregar(entrada.target); } });
+});
+document.querySelectorAll("[data-loja-foto]").forEach(function(el) {
+if (observar) observadorFotosLoja.observe(el); else void carregar(el);
+});
+}
+
 SCREENS["loja"] = {
 titulo: "Loja / Catálogo",
 modulo: "lojinha",
 render: function() {
 return API.call("lojinha", "catalogo", {}).then(function(r) {
 if (!r.ok) return UI.estado("erro", "Catálogo indisponível", r.mensagem);
+if (window.AlmoxaCorePreview?.operational) return renderLojaOperacional(r.dados);
 var todos = typeof filtrarPeloKit === "function" ? filtrarPeloKit(r.dados) : r.dados;
 var lista = todos;
 if (lojaEstado.categoria !== "Todas") lista = lista.filter(function(p) {
@@ -8000,6 +8075,7 @@ return '<div class="card"><div class="card-body flex gap12 center">' + '<div cla
 });
 },
 mount: function() {
+if (window.AlmoxaCorePreview?.operational) montarFotosLojaOperacional();
 if (typeof selMultLigar === "function") selMultLigar();
 var btn3d = document.getElementById("verMontagem3D");
 if (btn3d && typeof abrirMontagem3D === "function") {
@@ -8080,7 +8156,7 @@ toast("info", "Favoritos", ids.length ? ids.length + " itens marcados como favor
 });
 var lf = document.getElementById("lojaFiltros");
 if (lf) lf.addEventListener("click", modalFiltrosAvancados);
-ligarCarrinho();
+if (!window.AlmoxaCorePreview?.operational) ligarCarrinho();
 function mexerNoCatalogo(id, d) {
 var item = typeof itemDoCatalogo === "function" ? itemDoCatalogo(id) : MOCK.produtos.filter(function(p) {
 return p.id === id;
@@ -17864,6 +17940,14 @@ render: function() {
 return API.call("dashboard", "mural", {}).then(function(r) {
 if (!r.ok) return UI.estado("erro", "Não foi possível carregar o painel", r.mensagem);
 var d = r.dados || {};
+if (d.coreOperational) {
+return UI.cabecalho({titulo:"Painel do almoxarifado", sub:"Dados da planilha operacional · somente leitura"}) +
+'<div class="grid g4 mb16">' +
+UI.kpi({icone:"estoque",cor:"ico-orange",valor:d.itens,rotulo:"Itens cadastrados",rota:"#/loja"}) +
+UI.kpi({icone:"user",cor:"ico-green",valor:d.colaboradores,rotulo:"Colaboradores ativos",rota:"#/usuarios"}) +
+UI.kpi({icone:"epi",cor:"ico-blue",valor:d.fichasEpi,rotulo:"Linhas de EPI",rota:"#/epi-fichas"}) +
+'<button class="btn btn-ghost" data-ir="#/movimentacoes">Movimentações</button></div>';
+}
 if (d.coreDesktop) {
 return UI.cabecalho({titulo:"Painel do almoxarifado", sub:"Local " + ST.obra.nome + " · Core V2"}) +
 '<div class="grid g4 mb16">' + UI.kpi({icone:"estoque",cor:"ico-orange",valor:d.itens,rotulo:"Itens cadastrados",rota:"#/estoque"}) +
@@ -49386,12 +49470,20 @@ if (window.console) console.error("[ALMOX-PRO] Promessa rejeitada:", e.reason);
 (function boot() {
 function iniciarApp() {
 try {
-if (window.AlmoxaCorePreview?.desktop) {
+var preview = window.AlmoxaCorePreview;
+if (preview?.desktop || preview?.operational) {
 document.getElementById("bootScreen").classList.add("hidden");
 if (!location.hash || location.hash === "#/") location.hash = "#/dashboard";
 ROUTER.iniciar();
 window.addEventListener("almoxa-core-session-expired", LOGIN.voltarCore);
 LOGIN.voltarCore();
+if (preview.operational) {
+window.addEventListener("almoxa-core-connection", UI.atualizarCore);
+var atualizarConexao = function() { if (!document.hidden) void preview.refreshConnection(); };
+void preview.refreshConnection();
+window.setInterval(atualizarConexao, 30000);
+document.addEventListener("visibilitychange", atualizarConexao);
+}
 return;
 }
 /* [PCLINK] quem chega por um link recebido não vê o sistema:

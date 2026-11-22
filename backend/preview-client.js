@@ -61,7 +61,7 @@
     ['retiradas', new Set(['itensLiberados'])],
     ['biometria', new Set(['status'])],
     ['ocr', new Set(['disponivel', ...(writeEnabled ? ['ler'] : [])])],
-    ['lojinha', new Set(['catalogo', 'item'])],
+    ['lojinha', new Set(['catalogo', 'item', ...(operational ? ['foto'] : [])])],
     ['inventario', new Set(['listar', 'obter', 'divergencias'])]
   ]);
   const unavailable = () => ({ ok: false, codigo: 'CORE_V2_SEM_ENDERECO',
@@ -70,11 +70,34 @@
   let canWrite = false;
   let session = new AbortController();
   const pending = new Map();
+  let connectivity = { core: 'checking', storage: null, revision: null };
+  let signIn = 'required';
+  let healthRequest;
+  const notifyConnection = () => window.dispatchEvent(new Event('almoxa-core-connection'));
+  function updateStorageFailure(result) {
+    if (!/^(GOOGLE_AUTH_FAILED|GOOGLE_SHEETS_[A-Z_\d]+|PLANILHA_[A-Z_]+)$/.test(result.codigo ?? '')) return;
+    connectivity = { ...connectivity, core: 'online', storage: { status: 'unavailable', message: result.mensagem } };
+  }
   window.AlmoxaCorePreview = {
     operational,
     desktop,
     canWrite: () => canWrite,
     epiProgressive: operational,
+    connection: () => ({ ...connectivity, signIn }),
+    refreshConnection() {
+      if (healthRequest) return healthRequest;
+      healthRequest = fetch(endpoint('/health'), { cache: 'no-store', credentials: 'omit', redirect: 'error',
+        signal: AbortSignal.timeout(12000) }).then(async response => {
+        const body = await response.json();
+        if (body.core !== 'online' || body.environment !== 'operacional-leitura' || body.storage?.provider !== 'google-sheets') throw new Error();
+        connectivity = { core: 'online', storage: body.storage, revision: body.revision };
+        return { ok: body.storage.status === 'connected', dados: connectivity };
+      }).catch(() => {
+        connectivity = { ...connectivity, core: 'unavailable' };
+        return { ok: false, codigo: 'CORE_INDISPONIVEL' };
+      }).finally(() => { healthRequest = undefined; notifyConnection(); });
+      return healthRequest;
+    },
     async logout() {
       const previous = token;
       token = '';
@@ -82,6 +105,7 @@
       session.abort();
       session = new AbortController();
       pending.clear();
+      if (operational) { signIn = 'required'; notifyConnection(); }
       if (previous) {
         await fetch(endpoint('/api/v2/preview/session'), { method: 'DELETE', credentials: 'omit', redirect: 'error',
           headers: { Authorization: 'Bearer ' + previous }, signal: AbortSignal.timeout(5000) }).catch(() => {});
@@ -123,8 +147,16 @@
               token = result.dados.sessao.token;
               canWrite = Boolean(result.dados.podeGravar);
             }
+            if (operational) {
+              connectivity = { ...connectivity, core: 'online' };
+              signIn = result.ok ? 'authenticated' : response.status === 503 ? 'required' : 'refused';
+              updateStorageFailure(result);
+              notifyConnection();
+              if (result.ok) void this.refreshConnection();
+            }
             return result;
           } catch {
+            if (operational && session === active) { connectivity = { ...connectivity, core: 'unavailable' }; notifyConnection(); }
             return { ok: false, codigo: 'CORE_INDISPONIVEL', mensagem: 'O Core Node não respondeu.' };
           }
         })();
@@ -148,13 +180,19 @@
         const result = await response.json();
         if (response.status === 401 && active === session) {
           void window.AlmoxaCorePreview.logout();
-          if (desktop) window.dispatchEvent(new Event('almoxa-core-session-expired'));
+          if (desktop || operational) window.dispatchEvent(new Event('almoxa-core-session-expired'));
           document.querySelector('#almoxa-preview output')?.replaceChildren('Sessao expirada. Identifique-se novamente.');
         }
+        if (operational && active === session) {
+          connectivity = { ...connectivity, core: 'online' };
+          updateStorageFailure(result);
+          notifyConnection();
+        }
         return result;
-      }).catch(() => ({
-        ok: false, codigo: 'CORE_INDISPONIVEL', mensagem: 'O Core de homologação não respondeu.'
-      })).finally(() => {
+      }).catch(() => {
+        if (operational && active === session) { connectivity = { ...connectivity, core: 'unavailable' }; notifyConnection(); }
+        return { ok: false, codigo: 'CORE_INDISPONIVEL', mensagem: 'O Core Node não respondeu.' };
+      }).finally(() => {
         if (pending.get(body) === request) pending.delete(body);
       });
       pending.set(body, request);
