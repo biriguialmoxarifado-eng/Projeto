@@ -11,7 +11,7 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
     ['nf', ['listar', 'obter', 'itens', ...(allowWrite ? ['salvar'] : [])]],
     ['nfed', allowWrite ? ['atualizar'] : []],
     ['compras', ['listar', 'precompras', 'pedidos']],
-    ['estoque', ['movimentacoes', 'saldo', ...(allowWrite ? ['movimentar'] : [])]],
+    ['estoque', ['listar', 'item', 'movimentacoes', 'saldo', ...(allowWrite ? ['movimentar'] : [])]],
     ['itens', ['listar', 'obter']],
     ['fornecedores', ['listar', 'porCnpj']],
     ['categorias', ['listar']],
@@ -164,7 +164,9 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
       }
       else if (modulo === 'estoque') {
         const stock = runtime.getStockEngine();
-        if (acao === 'movimentacoes') result = await stock.movimentacoes(token, payload);
+        if (acao === 'listar' || acao === 'item') {
+          result = await runtime.getShopEngine()(token, acao === 'listar' ? 'estoque' : 'item', payload);
+        } else if (acao === 'movimentacoes') result = await stock.movimentacoes(token, payload);
         else if (acao === 'saldo') result = { ok: true, dados: await stock.saldo(token, payload.sku, payload.local) };
         else {
           const { sku, local, tipo, qtd, operacaoCore, versaoCore, motivo } = payload;

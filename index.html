@@ -10281,7 +10281,8 @@ SCREENS["estoque"] = {
 titulo: "Estoque Geral",
 modulo: "estoque",
 render: function() {
-return API.call("estoque", "listar", {}).then(function(r) {
+var filtroCore = window.AlmoxaCorePreview ? { local: APP.STATE.obra?.id } : {};
+return API.call("estoque", "listar", filtroCore).then(function(r) {
 if (!r.ok) return UI.estado("erro", "Estoque indisponível", r.mensagem);
 var todos = r.dados;
 var filtros = {
@@ -10565,7 +10566,7 @@ render: function(params) {
    usar a mesma fonte. Se o Core não responder, a lista vem vazia:
    melhor vazia que inventada. */
 return Promise.all([
-API.call("estoque", "item", { id: params.id }),
+API.call("estoque", "item", window.AlmoxaCorePreview ? { id: params.id, local: APP.STATE.obra?.id } : { id: params.id }),
 API.call("estoque", "movimentacoes", {})
 ]).then(function(resIt) {
 var r = resIt[0];

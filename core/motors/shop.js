@@ -2,7 +2,7 @@
 
 function createShopEngine({ core, catalog, stock }) {
   return async (token, action, input = {}) => {
-    if (!['catalogo', 'item'].includes(action)) return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
+    if (!['catalogo', 'item', 'estoque'].includes(action)) return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
     await core.authorizeSession(token, 'stock:read');
     const local = input.local;
     if (typeof local !== 'string' || !/^[\w-]{1,80}$/.test(local)) {
@@ -17,7 +17,7 @@ function createShopEngine({ core, catalog, stock }) {
     const rawSearch = String(input.busca ?? '');
     const search = rawSearch.toLowerCase();
     const filtered = items.map(item => item.note).filter(note => {
-      if (action === 'item') return true;
+      if (action !== 'catalogo') return true;
       const category = note.categoria || 'Sem categoria';
       return !hidden.has(category) && (!input.categoria || input.categoria === 'Todas' || input.categoria === category) &&
         (!search || [note.descricao, note.sku].some(value => String(value).toLowerCase().includes(search)) ||
@@ -30,7 +30,8 @@ function createShopEngine({ core, catalog, stock }) {
       const minimo = Number(note.estoqueMinimo) || 0;
       const maximo = Number(note.estoqueMaximo) || 0;
       const preco = Number(note.valorUnitario) || 0;
-      return { id: note.sku, sku: note.sku, codigo: note.sku, nome: note.descricao, descricao: note.descricao,
+      const status = balance.saldo <= 0 ? 'critico' : balance.saldo < minimo ? 'atencao' : 'ok';
+      return { status, id: note.sku, sku: note.sku, codigo: note.sku, nome: note.descricao, descricao: note.descricao,
         categoria: note.categoria || 'Sem categoria', unidade: note.unidade || 'un', local,
         estoque: balance.saldo, reservado: balance.reservado, disponivel: balance.saldo - balance.reservado,
         minimo, maximo, preco, valorUnitario: preco, codigoBarras: note.codigoBarras || '',
