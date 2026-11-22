@@ -51,7 +51,14 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
     version: '1.0.0',
     dependencies: ['database'],
     async healthcheck() {
-      return (await database.healthCheck()).success;
+      if (!invoiceTestStorage) return (await database.healthCheck()).success;
+      const { TestInvoiceStore } = require('../core/motors/invoices');
+      try {
+        await new TestInvoiceStore(invoiceTestStorage).target();
+        return true;
+      } catch {
+        return false;
+      }
     }
   });
   await core.start();
