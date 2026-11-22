@@ -325,3 +325,12 @@ A classificação operacional permanece 0 homologados, 33 parciais e 1 bloqueado
 | Aprovação e retirada | Decisão por item, retirada parcial e movimentação de baixa. | HTTP e SQLite temporário. 409 antes da aprovação, alçada MESTRE de teste definida no servidor, leitor bloqueado, reenvio sem segunda baixa, histórico relido após reinício. | Parcial |
 
 npm test passou com 49 testes do executor Node, além das suítes do Core, sessão, autorização e camada de dados. Os endpoints são exclusivos da homologação; o HTML atual e o armazenamento operacional não foram modificados. Saldo operacional, alçadas reais por obra, equivalência dos formulários e validação Desktop/Campo com perfis reais permanecem pendentes. Biometria segue bloqueada por falta de validação com o leitor físico. Contagem oficial: 0 homologados operacionalmente, 33 parciais e 1 bloqueado.
+
+### Inventário e Ferramentaria via HTTP — 22/11/2026
+
+| Motor | Evidência no Core V2 | Homologação | Pendências |
+| --- | --- | --- | --- |
+| Inventário | Abertura com leitura conjunta dos saldos por local, contagem versionada, reenvio idempotente, fechamento pelo responsável e consulta de divergências após reinício do servidor. O fechamento deixou o saldo de estoque em 5. | PARCIAL | QR, equipe por obra, ajuste de saldo e fluxo no cliente. |
+| Ferramentaria | Cadastro, retirada, devolução com avaria e retorno da manutenção. A API recusou devolução por outro operador. O histórico relido após reinício confirmou quatro eventos com autoria. | PARCIAL | Transferência, identificação operacional e fluxo no cliente. |
+
+`npm test` passou com 50 testes do executor Node e as suítes auxiliares. O ensaio HTTP usou SQLite temporário e confirmou HTTP 403 para perfil leitor e modo sem escrita. Contagem oficial de 0 homologados, 33 parciais e 1 bloqueado.

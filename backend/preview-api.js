@@ -12,7 +12,9 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
   const adminWrites = new Set([...catalogKinds, 'config', 'obras']);
   const flowWrites = new Map([['compras', new Set(['precompra', 'alterarStatus'])],
     ['solicitacoes', new Set(['criar'])], ['aprovacoes', new Set(['decidirItens'])],
-    ['retiradas', new Set(['confirmar'])]]);
+    ['retiradas', new Set(['confirmar'])],
+    ['ferramentas', new Set(['salvar', 'retirar', 'devolver', 'retornarManutencao'])],
+    ['inventario', new Set(['criar', 'registrarContagem', 'encerrar'])]]);
   const read = new Map([
     ['nf', ['listar', 'obter', 'itens', ...(allowWrite ? ['salvar'] : [])]],
     ['nfed', allowWrite ? ['atualizar'] : []],
@@ -37,7 +39,7 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
     ['painel', ['carregar']],
     ['dashboard', ['mural']],
     ['automacao', ['regras']],
-    ['ferramentas', ['listar', 'obter', 'historico']],
+    ['ferramentas', ['listar', 'obter', 'historico', ...flowWrites.get('ferramentas')]],
     ['epi', ['listar', 'fichas', 'obter', 'historicoEstoque', ...(allowWrite ? [...epiWrites] : [])]],
     ['manutencao', ['status', 'versoes', 'backups']],
     ['aprovacoes', ['listar', 'pendentes', 'porPerfil', ...flowWrites.get('aprovacoes')]],
@@ -45,7 +47,7 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
     ['biometria', ['status']],
     ['ocr', ['disponivel', ...(allowWrite ? ['ler'] : [])]],
     ['lojinha', ['catalogo', 'item']],
-    ['inventario', ['listar', 'obter', 'divergencias']]
+    ['inventario', ['listar', 'obter', 'divergencias', ...flowWrites.get('inventario')]]
   ]);
   const files = {
     // A raiz abre o Desktop: quem sobe o Core V2 digita o endereço e usa
@@ -334,6 +336,18 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
         error(res, 409, cause.code, 'A retirada não é compatível com a reserva atual.');
       }
       else if (cause.code === 'RETIRADA_INVALIDA') error(res, 400, cause.code, 'Dados de retirada inválidos.');
+      else if (['INVENTARIO_OPERACAO_INVALIDA', 'INVENTARIO_DADOS_INVALIDOS', 'INVENTARIO_CONTAGEM_INVALIDA',
+        'SEM_DESCRICAO_DA_AVARIA', 'SEM_PATRIMONIO'].includes(cause.code)) {
+        error(res, 400, cause.code, 'Dados da operação inválidos.');
+      }
+      else if (['ATIVIDADE_NAO_ENCONTRADA', 'FERRAMENTA_NAO_ENCONTRADA'].includes(cause.code)) {
+        error(res, 404, cause.code, 'Registro não localizado.');
+      }
+      else if (['INVENTARIO_CONFLITO_VERSAO', 'INVENTARIO_CONFLITO_IDEMPOTENCIA', 'INVENTARIO_CONTAGEM_PENDENTE',
+        'ATIVIDADE_CONFIRMADA', 'JA_EM_POSSE', 'FERRAMENTA_INDISPONIVEL', 'NAO_ESTA_EM_POSSE',
+        'FERRAMENTA_FORA_MANUTENCAO'].includes(cause.code)) {
+        error(res, 409, cause.code, 'Operação incompatível com o estado atual do registro.');
+      }
       else if (cause.status) error(res, cause.status, cause.code, 'Solicitação inválida.');
       else error(res, 503, 'CORE_INDISPONIVEL', 'O Core de homologação não conseguiu consultar os dados.');
     }

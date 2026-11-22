@@ -198,11 +198,12 @@ function createStockEngine({ core, store, receipts, withdrawals, coordinate = wo
         }
         const result = new Map();
         for (const sku of new Set(skus)) {
-          const snapshot = latest.get(sku)?.note.locais ?? {};
+          const entry = latest.get(sku);
+          const snapshot = entry?.note.locais ?? {};
           const balance = Object.hasOwn(snapshot, local) ? snapshot[local] : newBalance();
           const saldo = balance.saldo + ((await receivedByLocation(sku, received, delivered)).get(local) ?? 0);
           if (!Number.isSafeInteger(saldo) || saldo < balance.reservado) throw fail('ESTOQUE_SALDO_INVALIDO');
-          result.set(sku, { saldo, reservado: balance.reservado });
+          result.set(sku, { saldo, reservado: balance.reservado, version: entry?.version ?? 0 });
         }
         return result;
       });

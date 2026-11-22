@@ -21,11 +21,12 @@ function createInventoryEngine({ core, store, stock, coordinate, clock = () => n
   return async (token, action, input = {}) => {
     if (['listar', 'obter', 'divergencias'].includes(action)) {
       await session(token, 'read');
-      const rows = [...latest(await store.events()).values()].map(event => event.note);
-      if (action === 'listar') return { ok: true, dados: rows };
-      const selected = rows.find(row => row.id === input.id);
+      const records = latest(await store.events());
+      if (action === 'listar') return { ok: true, dados: [...records.values()].map(event => event.note) };
+      const selected = records.get(input.id);
       if (!selected) return { ok: false, codigo: 'NAO_ENCONTRADA' };
-      return { ok: true, dados: action === 'obter' ? selected : JSON.parse(selected.divergencias) };
+      return { ok: true, dados: action === 'obter' ? selected.note : JSON.parse(selected.note.divergencias),
+        versaoCore: selected.version };
     }
     if (!['criar', 'registrarContagem', 'encerrar'].includes(action)) return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
     const actor = await session(token, 'write');
@@ -41,7 +42,7 @@ function createInventoryEngine({ core, store, stock, coordinate, clock = () => n
       return prior;
     };
     const existing = replay(await store.events());
-    if (existing) return { ok: true, dados: existing.note, repetida: true };
+    if (existing) return { ok: true, dados: existing.note, versaoCore: existing.version, repetida: true };
     let openingItems;
     if (action === 'criar') {
       if (input.version !== 0 || !valid(input.obra) || !valid(input.local) ||
@@ -49,17 +50,17 @@ function createInventoryEngine({ core, store, stock, coordinate, clock = () => n
           input.itens.some(item => !valid(item?.sku))) throw fail('INVENTARIO_DADOS_INVALIDOS');
       const skus = input.itens.map(item => item.sku);
       if (new Set(skus).size !== skus.length) throw fail('INVENTARIO_DADOS_INVALIDOS');
-      openingItems = [];
-      for (const sku of skus) {
-        const balance = await stock.saldo(token, sku, input.local);
-        openingItems.push({ sku, saldo: balance.saldo, versaoEstoque: balance.version, quantidade: null });
-      }
+      const balances = await stock.saldos(token, skus, input.local);
+      openingItems = skus.map(sku => {
+        const { saldo, version } = balances.get(sku);
+        return { sku, saldo, versaoEstoque: version, quantidade: null };
+      });
     }
 
     return coordinate(async () => {
       const before = await store.events();
       const duplicate = replay(before);
-      if (duplicate) return { ok: true, dados: duplicate.note, repetida: true };
+      if (duplicate) return { ok: true, dados: duplicate.note, versaoCore: duplicate.version, repetida: true };
       const records = latest(before);
       const id = action === 'criar' ? 'INV-' + String(records.size + 1).padStart(4, '0') : input.id;
       const previous = records.get(id);
@@ -89,7 +90,7 @@ function createInventoryEngine({ core, store, stock, coordinate, clock = () => n
       try { await store.append(event); } catch (error) { writeError = error; }
       const after = await store.events().catch(error => { throw writeError ?? error; });
       const persisted = replay(after);
-      if (persisted) return { ok: true, dados: persisted.note };
+      if (persisted) return { ok: true, dados: persisted.note, versaoCore: persisted.version };
       throw writeError ?? fail('INVENTARIO_NAO_CONFIRMADO');
     });
   };

@@ -13,10 +13,10 @@ const { SqliteDiagnosticsProvider } = require('../database/adapters/sqlite-diagn
 
 const token = 'test-only-credential-for-sqlite-suite';
 
-async function start(path, role = 'operator', preview = false, allowWrite = preview, approvalProfile = '') {
+async function start(path, role = 'operator', preview = false, allowWrite = preview, approvalProfile = '', actor = 'integration-test') {
   const processEnv = {
     ...process.env, ALMOXA_SQLITE_PATH: path, ALMOXA_DIAGNOSTICS_TOKEN: token,
-    ALMOXA_DIAGNOSTICS_ACTOR: 'integration-test', ALMOXA_DIAGNOSTICS_ROLE: role,
+    ALMOXA_DIAGNOSTICS_ACTOR: actor, ALMOXA_DIAGNOSTICS_ROLE: role,
     ALMOXA_PREVIEW_SHEET_ID: '', ALMOXA_PREVIEW_SQLITE: preview ? '1' : '',
     ALMOXA_PREVIEW_WRITE: allowWrite ? '1' : '', ALMOXA_PREVIEW_APPROVAL_PROFILE: approvalProfile,
     ALMOXA_PREVIEW_ORIGIN: preview ? 'https://candidate.example' : '', HOST: '127.0.0.1', PORT: '0'
@@ -52,6 +52,19 @@ async function start(path, role = 'operator', preview = false, allowWrite = prev
       child.kill();
       await exit;
     }
+  };
+}
+
+async function previewDispatch(server) {
+  const login = await server.call('/api/v2/preview/session', { method: 'POST' });
+  assert.equal(login.status, 200);
+  const session = (await login.json()).dados.token;
+  return async (modulo, acao, payload = {}) => {
+    const response = await fetch(new URL('/api/v2/preview/dispatch', login.url), {
+      method: 'POST', headers: { Authorization: 'Bearer ' + session, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ modulo, acao, payload }), signal: AbortSignal.timeout(5000)
+    });
+    return { status: response.status, ...(await response.json()) };
   };
 }
 
@@ -514,5 +527,83 @@ test('aprovação e retirada via HTTP aplicam a alçada e baixam estoque uma vez
   } finally {
     await server?.close();
     await rm(temp,{recursive:true,force:true});
+  }
+});
+
+test('inventário e ferramentas pela API aplicam versões, custódia e restrições de gravação', { timeout: 45000 }, async () => {
+  const temp = await mkdtemp(join(tmpdir(), 'almoxa-inventario-ferramentas-'));
+  const path = join(temp, 'operacoes.sqlite');
+  let server;
+  try {
+    server = await start(path, 'operator', true);
+    let call = await previewDispatch(server);
+    const sku = 'SYN-INV-HTTP';
+    const local = 'A';
+    const secondSku = 'SYN-INV-SEGUNDO';
+    assert.equal((await call('estoque', 'movimentar', { sku, local, tipo: 'entrada', qtd: 5,
+      operacaoCore: 'inv-http-stock', versaoCore: 0 })).ok, true);
+    const open = { operation: 'inv-http-open', version: 0, obra: 'OB01', local, itens: [{ sku }, { sku: secondSku }] };
+    const inventory = await call('inventario', 'criar', open);
+    assert.equal(inventory.versaoCore, 1);
+    const id = inventory.dados.id;
+    assert.deepEqual(JSON.parse(inventory.dados.itens).map(item => [item.saldo, item.versaoEstoque]), [[5, 1], [0, 0]]);
+    const count = { id, sku, quantidade: 3, operation: 'inv-http-count', version: 1 };
+    assert.equal((await call('inventario', 'encerrar', { id, operation: 'inv-http-close', version: 1 })).status, 409);
+    assert.equal((await call('inventario', 'registrarContagem', { ...count, quantidade: -1 })).status, 400);
+    assert.equal((await call('inventario', 'registrarContagem', count)).versaoCore, 2);
+    assert.equal((await call('inventario', 'registrarContagem', count)).repetida, true);
+    assert.equal((await call('inventario', 'registrarContagem', { ...count, quantidade: 4 })).codigo, 'INVENTARIO_CONFLITO_IDEMPOTENCIA');
+    assert.equal((await call('inventario', 'registrarContagem', { ...count, operation: 'inv-second', sku: secondSku, quantidade: 0 })).codigo,
+      'INVENTARIO_CONFLITO_VERSAO');
+    assert.equal((await call('inventario', 'registrarContagem', { ...count, operation: 'inv-second', sku: secondSku, quantidade: 0, version: 2 })).versaoCore, 3);
+
+    const patrimonio = 'SYN-FERRAMENTA';
+    const tool = { patrimonio, operation: 'tool-http-open', version: 0, nome: 'Ferramenta sintética' };
+    assert.equal((await call('ferramentas', 'salvar', tool)).dados.status, 'DISPONIVEL');
+    const take = { patrimonio, operation: 'tool-http-take', version: 1 };
+    const taken = await call('ferramentas', 'retirar', take);
+    assert.equal(taken.dados.com, 'integration-test');
+    assert.deepEqual(await call('ferramentas', 'retirar', take), taken);
+    const damaged = { patrimonio, operation: 'tool-http-return', version: 2, avaria: true };
+    assert.equal((await call('ferramentas', 'devolver', damaged)).status, 400);
+    damaged.observacao = 'Avaria sintética';
+
+    await server.close();
+    server = await start(path, 'operator', true, true, '', 'outro-operador');
+    call = await previewDispatch(server);
+    const close = { id, operation: 'inv-http-close', version: 3 };
+    assert.equal((await call('inventario', 'encerrar', close)).status, 403);
+    assert.equal((await call('ferramentas', 'devolver', damaged)).status, 403);
+
+    await server.close();
+    server = await start(path, 'operator', true);
+    call = await previewDispatch(server);
+    assert.equal((await call('inventario', 'encerrar', close)).dados.status, 'CONFIRMADA');
+    assert.equal((await call('ferramentas', 'devolver', damaged)).dados.status, 'MANUTENCAO');
+    assert.equal((await call('ferramentas', 'retornarManutencao', { patrimonio, operation: 'tool-http-repair', version: 3 })).dados.status,
+      'DISPONIVEL');
+
+    await server.close();
+    server = await start(path, 'reader', true);
+    call = await previewDispatch(server);
+    assert.equal((await call('inventario', 'criar', open)).status, 403);
+    assert.equal((await call('ferramentas', 'retirar', take)).status, 403);
+    assert.equal((await call('inventario', 'obter', { id })).versaoCore, 4);
+    assert.deepEqual((await call('inventario', 'divergencias', { id })).dados,
+      [{ sku, saldo: 5, quantidade: 3, diferenca: -2 }]);
+    assert.equal((await call('estoque', 'saldo', { sku, local })).dados.saldo, 5);
+    assert.equal((await call('ferramentas', 'obter', { patrimonio })).versaoCore, 4);
+    const history = await call('ferramentas', 'historico', { patrimonio });
+    assert.deepEqual(history.dados.map(row => [row.evento, row.actor]),
+      ['salvar', 'retirar', 'devolver', 'retornarManutencao'].map(evento => [evento, 'integration-test']));
+
+    await server.close();
+    server = await start(path, 'operator', true, false);
+    call = await previewDispatch(server);
+    assert.equal((await call('inventario', 'criar', open)).status, 403);
+    assert.equal((await call('ferramentas', 'salvar', tool)).status, 403);
+  } finally {
+    await server?.close();
+    await rm(temp, { recursive: true, force: true });
   }
 });

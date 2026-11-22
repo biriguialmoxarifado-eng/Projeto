@@ -302,14 +302,15 @@ function createAdministrationEngine({ core, stores, catalog, backupSources, stoc
         if (action === 'listar') return { ok: true, dados: [...records.values()].map(event => event.note)
           .filter(note => !payload.status || payload.status === note.status) };
         const entry = records.get(payload.patrimonio);
-        return entry ? { ok: true, dados: entry.note } :
+        return entry ? { ok: true, dados: entry.note, versaoCore: entry.version } :
           { ok: false, codigo: 'NAO_ENCONTRADA', mensagem: 'Patrimônio não localizado.' };
       }
       if (!['salvar', 'retirar', 'devolver', 'retornarManutencao'].includes(action)) {
         return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
       }
       const { patrimonio: id, operation, version } = payload;
-      if (!key(id)) return { ok: false, codigo: 'SEM_PATRIMONIO', mensagem: 'Informe o patrimônio.' };
+      await authorize(token, 'ferramentas', 'write');
+      if (!key(id)) throw invalid('SEM_PATRIMONIO');
       const fields = action === 'salvar'
         ? textFields(payload, ['sku', 'nome', 'categoria', 'marca', 'modelo', 'serie', 'obra', 'local', 'observacao'])
         : textFields(payload, ['condicao', 'observacao']);
