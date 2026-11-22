@@ -5,6 +5,13 @@ const invalid = code => Object.assign(new Error(code), { code });
 const key = value => typeof value === 'string' && /^[\w.-]{1,100}$/.test(value);
 const obraFields = ['nome', 'codigo', 'cliente', 'local', 'almoxarifado', 'responsavel', 'status', 'inicio', 'previsao'];
 
+function textFields(input, fields) {
+  return Object.fromEntries(fields.filter(field => Object.hasOwn(input, field)).map(field => {
+    if (typeof input[field] !== 'string' || input[field].length > 2000) throw invalid('ADMIN_DADOS_INVALIDOS');
+    return [field, input[field]];
+  }));
+}
+
 function latest(events) {
   const records = new Map();
   for (const event of events) {
@@ -39,7 +46,7 @@ function createAdministrationEngine({ core, stores, coordinate, clock = () => ne
       const duplicate = replay(before);
       if (duplicate) return duplicate.response;
       const at = clock().toISOString();
-      const { id, current, note, response } = prepare(latest(before), at);
+      const { id, current, note, response } = prepare(latest(before), at, actor);
       if ((current?.version ?? 0) !== version) throw invalid('ADMIN_CONFLITO_VERSAO');
       const event = { id, operation, version: version + 1, fingerprint, actor, at,
         action: version ? 'atualizar' : 'criar', note, response };
@@ -72,6 +79,78 @@ function createAdministrationEngine({ core, stores, coordinate, clock = () => ne
         id: chave, current: records.get(chave), note: { id: chave, chave, valor: text, atualizadoEm: at },
         response: { ok: true, dados: valor }
       }));
+    },
+
+    async notificacoes(token, action, input = {}) {
+      const actor = await authorize(token, 'notificacoes', 'read');
+      const session = await core.getSession(token);
+      const visible = note => {
+        if (note.destinatario && note.destinatario !== actor) return false;
+        return !note.perfis || note.perfis.split(',').includes(String(session.role).toUpperCase());
+      };
+      if (action === 'listar') {
+        return { ok: true, dados: [...latest(await stores.notificacoes.events()).values()]
+          .filter(event => visible(event.note)).map(event => event.note) };
+      }
+      if (action === 'criar') {
+        const fields = textFields(input, ['evento', 'titulo', 'texto', 'rota', 'destinatario']);
+        const roles = input.perfis ?? [];
+        if (!Array.isArray(roles) || roles.some(role => !key(role))) throw invalid('NOTIFICACAO_DADOS_INVALIDOS');
+        const id = 'NOT-' + createHash('sha256').update(String(input.operation)).digest('hex').slice(0, 24);
+        return save(token, 'notificacoes', { operation: input.operation, version: input.version, fields, roles },
+          (records, at) => {
+            const note = { id, quando: at, evento: '', titulo: '', texto: '', rota: '', destinatario: '',
+              ...fields, perfis: roles.map(role => role.toUpperCase()).join(','), lida: false };
+            return { id, current: records.get(id), note, response: { ok: true, dados: note } };
+          });
+      }
+      if (action === 'marcarLida') {
+        const { id, operation, version } = input;
+        return save(token, 'notificacoes', { id, operation, version }, records => {
+          const current = records.get(id);
+          if (!current || !visible(current.note)) throw invalid('NOTIFICACAO_NAO_ENCONTRADA');
+          const note = { ...current.note, lida: true };
+          return { id, current, note, response: { ok: true, dados: { id, lida: true } } };
+        });
+      }
+      return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
+    },
+
+    async ocorrencias(token, action, input = {}) {
+      if (['listar', 'obter'].includes(action)) {
+        await authorize(token, 'ocorrencias', 'read');
+        const records = latest(await stores.ocorrencias.events());
+        if (action === 'listar') {
+          return { ok: true, dados: [...records.values()].map(event => event.note)
+            .filter(note => !input.status || input.status === note.status) };
+        }
+        const found = records.get(input.id);
+        return found ? { ok: true, dados: found.note } :
+          { ok: false, codigo: 'NAO_ENCONTRADA', mensagem: 'Ocorrência não localizado.' };
+      }
+      if (!['criar', 'salvar'].includes(action)) return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
+      const fields = textFields(input, ['titulo', 'categoria', 'prioridade', 'obra', 'local', 'responsavel', 'status', 'descricao']);
+      if (input.materiais !== undefined) {
+        let materials;
+        try { materials = typeof input.materiais === 'string' ? JSON.parse(input.materiais) : input.materiais; }
+        catch { throw invalid('OCORRENCIA_MATERIAIS_INVALIDOS'); }
+        if (!Array.isArray(materials) || JSON.stringify(materials).length > 8000) throw invalid('OCORRENCIA_MATERIAIS_INVALIDOS');
+        fields.materiais = JSON.stringify(materials);
+      }
+      const { id: requestedId, version, operation } = input;
+      return save(token, 'ocorrencias', { requestedId, version, operation, fields }, (records, at, actor) => {
+        const id = requestedId ?? '#OC-' + String(records.size + 1).padStart(6, '0');
+        const current = records.get(id);
+        if (requestedId !== undefined && !current) throw invalid('OCORRENCIA_NAO_ENCONTRADA');
+        const note = current ? { ...current.note, ...fields } : {
+          id, data: at, titulo: '', categoria: 'Geral', prioridade: 'Média', obra: '', local: '',
+          responsavel: '', autor: actor, status: 'ABERTA', descricao: '', materiais: '[]',
+          protocoloNecessidade: '', historico: '[]', ...fields
+        };
+        const response = current ? { ok: true, dados: { id, ...fields }, atualizado: true } :
+          { ok: true, dados: note, criado: true };
+        return { id, current, note, response };
+      });
     },
 
     async usuarios(token, action, input = {}) {

@@ -28,7 +28,7 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | lojinha | Parcial, integrado em homologação local. Catálogo, busca, detalhe e saldo por local. Fotos, status e fluxo de pedidos pendentes. |
 | epi | Pendente. Executor legado preservado. |
 | ferramentas | Pendente. Executor legado preservado. |
-| ocorrencias | Pendente. Executor legado preservado. |
+| ocorrencias | Parcial, integrado no Desktop local. Criar, atualizar e consultar; exclusão, alçadas operacionais e formulários publicados pendentes. |
 | projetos | Pendente. Executor legado preservado. |
 | inventario | Parcial, integrado em teste. Abertura, contagem, divergência e encerramento. QR, rotas, escopo de equipe e ajuste de saldo pendentes. |
 | relatorios | Pendente. Executor legado preservado. |
@@ -43,7 +43,7 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | calendario | Pendente. Executor legado preservado. |
 | centros | Pendente. Executor legado preservado. |
 | retiradas | Pendente. Executor legado preservado. |
-| notificacoes | Pendente. Executor legado preservado. |
+| notificacoes | Parcial, integrado em teste. Criar, listar e marcar lida; integração com eventos e contratos de perfis reais pendentes. |
 | automacao | Pendente. Executor legado preservado. |
 | biometria | Pendente. Executor legado preservado. |
 
@@ -112,3 +112,13 @@ Partida em 1b05439. Desktop usa index.html e API.call, enquanto Campo usa ALMOXA
 A ponte usa HTTP loopback de mesma origem, sem CORS, credencial em memória, timeout, reaproveitamento de leituras simultâneas e resposta clara para operações bloqueadas. Service workers estão desabilitados nas páginas do ensaio. Para a Lojinha, o contrato isolado exige local explícito. O motor aplica os filtros de AP_Modulo_lojinha e consulta saldos em lote, carregando movimentos e recebimentos uma vez. O ensaio Edge headless abriu os dois HTMLs reais, consultou seis NFs sintéticas e dois itens via Core e Sheets, bloqueou nf.salvar e recusou leitura após encerrar a sessão. npm test passou com os testes de Lojinha e HTTP.
 
 A configuração de branch e diretório da publicação do GitHub Pages ainda precisa ser confirmada no painel do repositório. O backend testado foi local e não houve publicação. Antes da Fase 4, faltam login operacional, Android WebView, HTTPS e CORS do ambiente compartilhado, escrita autorizada dos clientes em homologação, arquivos do Drive e paridade dos motores. A matriz registra 17 parciais e 17 pendentes. Próximo motor: Retiradas, pela aprovação, entrega parcial e baixa única em AP_Modulo_reservas e AP_Modulo_retiradas. Para retirar a ponte, encerre o processo de homologação ou inicie sem ALMOXA_PREVIEW_SHEET_ID.
+
+## Desktop com gravação isolada, Ocorrências e Notificações
+
+Partida em aa5ad6a. O Core implementa criação, atualização e consultas de Ocorrências a partir de AP_Modulo_ocorrencias e AP_FLUXO_crud_, e criação, listagem e confirmação de leitura a partir de AP_Modulo_notificacoes. Versão, reenvio, auditoria e persistência usam a camada isolada existente. Notificação registra estado no Sheets de teste, sem envio externo. A filtragem verifica destinatário e correspondência exata de perfil. A marcação de leitura segue um campo compartilhado no registro, como no legado, e depende de permissão de escrita no ensaio.
+
+Para verificar no Desktop, inicie o Core local com as variáveis do modo de homologação, ALMOXA_DIAGNOSTICS_ROLE=operator e ALMOXA_PREVIEW_WRITE=1. Em /homologacao/desktop, informe a credencial de teste, teste a leitura de NF e pressione Registrar ocorrência sintética. O painel usa API.call, confirma por releitura e conserva a chave da operação nas tentativas sem confirmação. O backend permite escrita somente para as ações de Ocorrências declaradas no modo local. O login operacional do Desktop permanece no legado.
+
+npm test passou. No Edge com os HTMLs reais, o Desktop leu seis NFs, gravou e releu a ocorrência #OC-000001 no Sheets de teste, bloqueou escrita de NF e encerrou a sessão de homologação. A API também comprovou criação, retentativa e marcação como lida de uma notificação sintética. Foram usadas somente as abas OCORRENCIAS_CORE_TESTE e NOTIFICACOES_CORE_TESTE para escrita. Nenhuma mensagem externa foi emitida.
+
+Matriz após o lote: 19 parciais, 15 pendentes e nenhum motor homologado. Próximo ponto: Retiradas e Aprovações, pela regra de alçada em AP_Modulo_aprovacoes e pela entrega parcial em AP_Modulo_reservas retirar. Para o Desktop, validar a autenticação do usuário e migrar o primeiro formulário operacional com um piloto isolado, usando o transporte central e um esquema de sessão que não dependa da credencial compartilhada de ensaio.

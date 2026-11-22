@@ -68,7 +68,9 @@ async function main() {
   }
   const runtime = await createRuntime(sqlite, { sqlite: Boolean(sqlite), credential: { token, actor, role }, invoiceTestStorage });
   const { core, database } = runtime;
-  const preview = invoiceTestStorage && require('./preview-api').createPreview(runtime, join(__dirname, '..'));
+  const preview = invoiceTestStorage && require('./preview-api').createPreview(runtime, join(__dirname, '..'), {
+    allowWrite: process.env.ALMOXA_PREVIEW_WRITE === '1'
+  });
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? '127.0.0.1';
   const handler = createHandler(core, process.env.ALMOXA_REVISION || null, sqlite && database, preview);

@@ -10,8 +10,8 @@ const { createHash, timingSafeEqual } = require('node:crypto');
 
 function diagnosticSecurity(credential, invoices) {
   const authorizationProvider = new AuthorizationManager();
-  const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read', 'catalog:read', 'purchases:read', 'requests:read', 'config:read', 'obras:read', 'inventory:read'] : [];
-  const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write', 'catalog:write', 'purchases:write', 'requests:write', 'config:write', 'obras:write', 'usuarios:read', 'inventory:write'] : [];
+  const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read', 'catalog:read', 'purchases:read', 'requests:read', 'config:read', 'obras:read', 'inventory:read', 'ocorrencias:read', 'notificacoes:read'] : [];
+  const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write', 'catalog:write', 'purchases:write', 'requests:write', 'config:write', 'obras:write', 'usuarios:read', 'inventory:write', 'ocorrencias:write', 'notificacoes:write'] : [];
   authorizationProvider.registerRole('reader', ['diagnostics:read', ...invoiceRead]);
   authorizationProvider.registerRole('operator', ['diagnostics:read', 'diagnostics:write', ...invoiceRead, ...invoiceWrite]);
   const digest = value => createHash('sha256').update(value).digest();
@@ -128,7 +128,9 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
         core, coordinate, stores: {
           config: new TestInvoiceStore(invoiceTestStorage, 'config'),
           obras: new TestInvoiceStore(invoiceTestStorage, 'obras'),
-          usuarios: new TestInvoiceStore(invoiceTestStorage, 'usuarios')
+          usuarios: new TestInvoiceStore(invoiceTestStorage, 'usuarios'),
+          ocorrencias: new TestInvoiceStore(invoiceTestStorage, 'ocorrencias'),
+          notificacoes: new TestInvoiceStore(invoiceTestStorage, 'notificacoes')
         }
       });
       return administrationEngine;

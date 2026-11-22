@@ -21,7 +21,9 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
     ['CONFIG_CORE_TESTE', { sheetId: 15, rows: [['EVENTO_JSON']] }],
     ['OBRAS_CORE_TESTE', { sheetId: 16, rows: [['EVENTO_JSON']] }],
     ['USUARIOS_CORE_TESTE', { sheetId: 17, rows: [['EVENTO_JSON']] }],
-    ['INVENTARIO_CORE_TESTE', { sheetId: 18, rows: [['EVENTO_JSON']] }]
+    ['INVENTARIO_CORE_TESTE', { sheetId: 18, rows: [['EVENTO_JSON']] }],
+    ['OCORRENCIAS_CORE_TESTE', { sheetId: 19, rows: [['EVENTO_JSON']] }],
+    ['NOTIFICACOES_CORE_TESTE', { sheetId: 20, rows: [['EVENTO_JSON']] }]
   ]);
   const markers = new Set();
   let loseResponse = true;
@@ -45,7 +47,7 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
       const names = data.requests.slice(0, -1).map(request => request.addNamedRange.namedRange.namedRangeId);
       if (names.some(name => markers.has(name))) throw { response: { status: 400 } };
       names.forEach(name => markers.add(name));
-      assert.ok([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].includes(append.appendCells.sheetId));
+      assert.ok([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].includes(append.appendCells.sheetId));
       const admin = [...adminRows.values()].find(row => row.sheetId === append.appendCells.sheetId);
       const targetRows = append.appendCells.sheetId === 8 ? receivingRows : append.appendCells.sheetId === 9 ? stockRows : append.appendCells.sheetId === 10 ? itemRows : append.appendCells.sheetId === 11 ? supplierRows : append.appendCells.sheetId === 12 ? categoryRows : append.appendCells.sheetId === 13 ? purchaseRows : append.appendCells.sheetId === 14 ? requestRows : rows;
       (admin?.rows ?? targetRows).push([append.appendCells.rows[0].values[0].userEnteredValue.stringValue]);
@@ -473,4 +475,32 @@ test('homologação HTTP exige credencial, atende leitura e bloqueia mutação',
   } finally {
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
+});
+
+test('ocorrências e notificações persistem com controle de acesso e retentativa', async () => {
+  const { provider } = fakeGoogle();
+  const load = (role, actor) => createRuntime(provider, { invoiceTestStorage: provider,
+    credential: { ...credential, role, actor } });
+  const a = (await load('operator', 'operator-a')).getAdministrationEngine();
+  const b = (await load('reader', 'reader-b')).getAdministrationEngine();
+  const token = credential.token;
+  const input = { operation: 'occ-create', version: 0, titulo: 'Sintética', materiais: [{ sku: 'SYN' }] };
+  await assert.rejects(b.ocorrencias(token, 'criar', input), { code: 'ACCESS_DENIED' });
+  const created = await a.ocorrencias(token, 'criar', input);
+  assert.deepEqual(await a.ocorrencias(token, 'criar', input), created);
+  const id = created.dados.id;
+  assert.equal(id, '#OC-000001');
+  assert.deepEqual(JSON.parse(created.dados.materiais), [{ sku: 'SYN' }]);
+  await a.ocorrencias(token, 'salvar', { id, operation: 'occ-update', version: 1, status: 'ENCERRADA' });
+  assert.equal((await b.ocorrencias(token, 'listar', { status: 'ABERTA' })).dados.length, 0);
+  assert.equal((await b.ocorrencias(token, 'obter', { id })).dados.status, 'ENCERRADA');
+  const noticeInput = { operation: 'notice-create', version: 0, titulo: 'Aviso', destinatario: 'operator-a', perfis: ['OPERATOR'] };
+  const createdNotice = await a.notificacoes(token, 'criar', noticeInput);
+  assert.deepEqual(await a.notificacoes(token, 'criar', noticeInput), createdNotice);
+  assert.deepEqual(await b.notificacoes(token, 'listar'), { ok: true, dados: [] });
+  await assert.rejects(b.notificacoes(token, 'marcarLida', {
+    id: createdNotice.dados.id, version: 1, operation: 'foreign-notice'
+  }), { code: 'ACCESS_DENIED' });
+  await a.notificacoes(token, 'marcarLida', { id: createdNotice.dados.id, version: 1, operation: 'notice-read' });
+  assert.equal((await a.notificacoes(token, 'listar')).dados[0].lida, true);
 });

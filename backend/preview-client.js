@@ -1,11 +1,14 @@
 'use strict';
 (() => {
+  const writeEnabled = document.currentScript?.dataset.write === '1';
   const supported = new Map([
     ['nf', new Set(['listar', 'obter', 'itens'])],
     ['itens', new Set(['listar', 'obter'])],
     ['fornecedores', new Set(['listar', 'porCnpj'])],
     ['categorias', new Set(['listar'])],
     ['obras', new Set(['listar'])],
+    ['ocorrencias', new Set(['listar', 'obter', 'criar', 'salvar'])],
+    ['notificacoes', new Set(['listar'])],
     ['lojinha', new Set(['catalogo', 'item'])],
     ['inventario', new Set(['listar', 'obter', 'divergencias'])]
   ]);
@@ -80,6 +83,37 @@
     });
     panel.id = 'almoxa-preview';
     panel.append(label, button, clear, status);
+    if (writeEnabled) {
+      const write = document.createElement('button');
+      write.type = 'button';
+      write.textContent = 'Registrar ocorrência sintética';
+      write.dataset.action = 'occurrence-test';
+      let operation;
+      write.addEventListener('click', async () => {
+        const active = session;
+        operation ??= crypto.randomUUID();
+        write.disabled = true;
+        try {
+          const title = 'Homologação ' + operation;
+          const created = await window.API.call('ocorrencias', 'criar', { operation, version: 0, titulo: title });
+          if (active !== session) return;
+          if (!created.ok) {
+            status.textContent = created.mensagem || created.codigo;
+            return;
+          }
+          const result = await window.API.call('ocorrencias', 'obter', { id: created.dados.id });
+          if (active !== session) return;
+          if (result.ok && result.dados.titulo === title) {
+            status.textContent = 'Ocorrência de teste confirmada: ' + result.dados.id;
+            status.dataset.written = result.dados.id;
+            operation = undefined;
+          } else status.textContent = result.mensagem || 'Gravação ainda não confirmada por releitura.';
+        } finally {
+          write.disabled = false;
+        }
+      });
+      panel.append(write);
+    }
     document.body.append(panel);
   });
 })();
