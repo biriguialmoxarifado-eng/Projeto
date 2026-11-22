@@ -4,7 +4,7 @@ O legado usa ALMOXA_COMPRAS para compras e pré-compras, ALMOXA_NOTAS e ALMOXA_N
 
 ## Contrato interno de ensaio
 
-Em Node 24, instale as dependências e execute npm test. O teste automatizado usa dados sintéticos. Um chamador local pode criar o runtime com invoiceTestStorage e uma credencial de diagnóstico explícitos, acessando getInvoiceEngine() e getReceivingEngine() sob demanda. Para Google real use OAuth local e um GoogleSheetsProvider com testOnly e o ID de ALMOXA_TESTE_CORE. O teste depende das abas NF_CORE_TESTE e RECEBIMENTO_CORE_TESTE preparadas com EVENTO_JSON em A1. O runtime padrão não abre o motor ou uma rota HTTP.
+Em Node 24, instale as dependências e execute npm test. O teste automatizado usa dados sintéticos. Um chamador local pode criar o runtime com invoiceTestStorage e uma credencial de diagnóstico explícitos, acessando getInvoiceEngine() e getReceivingEngine() sob demanda. Para Google real use OAuth local e um GoogleSheetsProvider com testOnly e o ID de ALMOXA_TESTE_CORE. O teste depende das abas NF_CORE_TESTE e RECEBIMENTO_CORE_TESTE preparadas com EVENTO_JSON em A1. O motor fica disponível via HTTP quando o servidor inicia com armazenamento isolado de homologação.
 
 | Operação interna | Contrato |
 | --- | --- |
@@ -19,6 +19,10 @@ Cada recebimento confirmado persiste em um único evento o vínculo, o movimento
 ## Evidências
 
 npm test passou, incluindo leitura de entradas zeradas antes da confirmação, recusa de conferência divergente, parcial, total, retentativa e recusa de NF duplicada. No Sheets real, o ensaio RC-SYN-12f105b7 terminou na versão 4, com duas NFs sintéticas, cinco unidades na projeção de entradas e zero pendentes, em 14632 ms. Uma nova instância do runtime confirmou a persistência. Nenhum saldo operacional foi alterado.
+
+Em 22/11/2026, `POST /api/v2/preview/dispatch` passou a aceitar o módulo `recebimento` com `requisitar`, `comprar`, `receber` e `consultar`. A API deriva o solicitante da sessão, exige local de estoque ao receber e devolve a versão do registro em `versaoCore`. A referência informada em `compra` segue o contrato interno da requisição. O vínculo entre essa referência e os pedidos do motor Compras requer integração adicional.
+
+O teste HTTP com SQLite temporário confirmou recusa de conferência divergente, saldo zero antes da confirmação, uma única entrada de três unidades após reenvio, leitura após reinício e HTTP 403 para perfil leitor tentando gravar. `notificacoes.listar` exibiu o aviso apenas ao solicitante. `notificacoes.marcarLida` persistiu a leitura com reenvio idempotente. O teste também confirmou recusa da tentativa de leitura por outro operador. A suíte passou com 52 testes do executor Node e as suítes auxiliares.
 
 ## Estágio e retorno
 

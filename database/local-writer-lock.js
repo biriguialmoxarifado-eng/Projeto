@@ -5,13 +5,15 @@ const { mkdir, open, unlink } = require('node:fs/promises');
 const { join } = require('node:path');
 const { homedir } = require('node:os');
 const { setTimeout: delay } = require('node:timers/promises');
+const { StorageOperations } = require('./storage-operations');
 
 function createLocalWriterLock(spreadsheetId) {
   const directory = join(process.env.LOCALAPPDATA || homedir(), '.almoxa-writer-locks');
   const id = createHash('sha256').update(String(spreadsheetId)).digest('hex');
   const path = join(directory, id + '.lock');
+  const queue = new StorageOperations();
 
-  return async function coordinate(work) {
+  return work => queue.enqueue(async () => {
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const deadline = performance.now() + 15000;
     let file;
@@ -32,7 +34,7 @@ function createLocalWriterLock(spreadsheetId) {
       await file.close();
       await unlink(path);
     }
-  };
+  });
 }
 
 module.exports = { createLocalWriterLock };

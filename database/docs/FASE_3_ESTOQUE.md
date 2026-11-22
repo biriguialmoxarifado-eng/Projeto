@@ -340,3 +340,12 @@ npm test passou com 49 testes do executor Node, além das suítes do Core, sess�
 O Core expõe `compras.pedido` com o envelope de pedidos do Desktop. O evento persistido contém todas as linhas emitidas e a nova versão da pré-compra vinculada. O modo isolado aceita de 1 a 20 linhas, exige itens cadastrados, quantidades inteiras e a versão lida da pré-compra quando há vínculo. As consultas apresentam `versaoCore` para as operações seguintes.
 
 O teste HTTP com SQLite temporário verificou emissão manual e em lote, preço unitário zero, ausência de gravação parcial quando um item inexiste, reenvio concorrente, conflitos de versão e de segunda conversão, bloqueio de leitor e releitura após reinício. `npm test` passou com 51 testes do executor Node e as suítes auxiliares. Compras permanece PARCIAL até validar alçadas de emissão, o formulário do Desktop e a persistência deste fluxo no Sheets isolado.
+
+### Recebimento fiscal e notificações via HTTP — 22/11/2026
+
+| Motor | Evidência no Core V2 | Homologação | Pendências |
+| --- | --- | --- | --- |
+| NF e Estoque | Requisição, referência de compra e conferência fiscal via HTTP. O teste isolado confirmou uma única entrada de três unidades, inclusive após reenvio e reinício. | PARCIAL | Vínculo com pedidos do motor Compras, equivalência do formulário fiscal e escopo por obra. |
+| Notificações | Aviso visível somente ao solicitante autenticado, confirmação de leitura idempotente e persistência após reinício. | PARCIAL | Validação nos clientes e entrega pelos canais operacionais. |
+
+O coordenador local enfileira as chamadas do mesmo runtime antes de adquirir o lock em disco. O lock em disco continua coordenando processos locais. `npm test` passou com 52 testes do executor Node e as suítes auxiliares. Veja o contrato em [FASE_3_RECEBIMENTO.md](FASE_3_RECEBIMENTO.md). A matriz continua com 0 homologados, 33 parciais e biometria bloqueada.

@@ -666,3 +666,67 @@ test('compras emite o lote e converte a pré-compra no mesmo evento', { timeout:
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+test('recebimento HTTP confirma NF, saldo e notificação sem duplicar a entrada', { timeout: 45000 }, async () => {
+  const temp = await mkdtemp(join(tmpdir(), 'almoxa-recebimento-http-'));
+  const path = join(temp, 'recebimento.sqlite');
+  const sku = 'SYN-RECEBIMENTO';
+  const id = 'REQ-RECEBIMENTO';
+  const local = 'A';
+  const itens = [{ sku, quantidade: 3 }];
+  const request = { id, numero: 'REQ-01', operation: 'receber-requisitar', version: 0, itens,
+    solicitante: 'valor-fornecido-pelo-cliente' };
+  let server;
+  try {
+    server = await start(path, 'operator', true);
+    let call = await previewDispatch(server);
+    const note = await call('nf', 'salvar', { numero: '90807', fornecedor: 'TESTE CORE RECEBIMENTO',
+      itens, operacaoCore: 'receber-nf' });
+    assert.equal(note.status, 200);
+    assert.equal((await call('recebimento', 'requisitar', request)).dados.solicitante, 'integration-test');
+    const buy = { id, compra: 'COMPRA-01', version: 1, operation: 'receber-compra' };
+    assert.equal((await call('recebimento', 'comprar', buy)).versaoCore, 2);
+    const receive = { id, operation: 'receber-conferencia', version: 2, local, conferencia: true,
+      nfId: note.dados.id, nfVersion: note.dados.versaoCore, itens };
+    assert.equal((await call('recebimento', 'receber', { ...receive, local: null })).status, 400);
+    assert.equal((await call('recebimento', 'receber', { ...receive, itens: [{ sku, quantidade: 2 }] })).codigo,
+      'CONFERENCIA_DIVERGENTE');
+    assert.equal((await call('estoque', 'saldo', { sku, local })).dados.saldo, 0);
+    const confirmed = await call('recebimento', 'receber', receive);
+    assert.equal(confirmed.status, 200);
+    assert.equal(confirmed.dados.status, 'RECEBIDA');
+    assert.deepEqual(await call('recebimento', 'receber', receive), confirmed);
+    const notices = await call('notificacoes', 'listar');
+    assert.equal(notices.dados.length, 1);
+    const [notice] = notices.dados;
+    assert.equal(notice.evento, 'RECEBIMENTO_NF');
+    assert.equal(notice.lida, false);
+    const ack = { id: notice.id, version: notice.versaoCore, operation: 'receber-aviso-lido' };
+
+    await server.close();
+    server = await start(path, 'operator', true, true, '', 'outro-solicitante');
+    call = await previewDispatch(server);
+    assert.deepEqual((await call('notificacoes', 'listar')).dados, []);
+    assert.equal((await call('notificacoes', 'marcarLida', ack)).status, 404);
+
+    await server.close();
+    server = await start(path, 'operator', true);
+    call = await previewDispatch(server);
+    const marked = await call('notificacoes', 'marcarLida', ack);
+    assert.equal(marked.dados.lida, true);
+    assert.deepEqual(await call('notificacoes', 'marcarLida', ack), marked);
+
+    await server.close();
+    server = await start(path, 'reader', true);
+    call = await previewDispatch(server);
+    assert.equal((await call('recebimento', 'receber', receive)).status, 403);
+    assert.equal((await call('notificacoes', 'marcarLida', ack)).status, 403);
+    assert.deepEqual(await call('recebimento', 'consultar', { id }), confirmed);
+    assert.equal((await call('estoque', 'saldo', { sku, local })).dados.saldo, 3);
+    assert.deepEqual((await call('estoque', 'movimentacoes', { sku })).dados.map(row => row.qtd), [3]);
+    assert.equal((await call('notificacoes', 'listar')).dados[0].lida, true);
+  } finally {
+    await server?.close();
+    await rm(temp, { recursive: true, force: true });
+  }
+});

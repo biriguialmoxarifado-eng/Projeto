@@ -14,10 +14,13 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
     ['solicitacoes', new Set(['criar'])], ['aprovacoes', new Set(['decidirItens'])],
     ['retiradas', new Set(['confirmar'])],
     ['ferramentas', new Set(['salvar', 'retirar', 'devolver', 'retornarManutencao'])],
-    ['inventario', new Set(['criar', 'registrarContagem', 'encerrar'])]]);
+    ['inventario', new Set(['criar', 'registrarContagem', 'encerrar'])],
+    ['recebimento', new Set(['requisitar', 'comprar', 'receber'])],
+    ['notificacoes', new Set(['marcarLida'])]]);
   const read = new Map([
     ['nf', ['listar', 'obter', 'itens', ...(allowWrite ? ['salvar'] : [])]],
     ['nfed', allowWrite ? ['atualizar'] : []],
+    ['recebimento', ['consultar', ...flowWrites.get('recebimento')]],
     ['compras', ['listar', 'precompras', 'pedidos', ...flowWrites.get('compras')]],
     ['solicitacoes', ['listar', ...flowWrites.get('solicitacoes')]],
     ['estoque', ['listar', 'item', 'movimentacoes', 'saldo', ...(allowWrite ? ['movimentar'] : [])]],
@@ -29,7 +32,7 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
     ['config', ['obter', 'salvar']],
     ['auditoria', ['listar']],
     ['ocorrencias', ['listar', 'obter', ...(allowWrite ? ['criar', 'salvar'] : [])]],
-    ['notificacoes', ['listar']],
+    ['notificacoes', ['listar', ...flowWrites.get('notificacoes')]],
     ['kits', ['listar', 'obter', 'doPerfil']],
     ['calendario', ['listar']],
     ['centros', ['listar']],
@@ -199,6 +202,25 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
           }
         }
       }
+      else if (modulo === 'recebimento') {
+        const receiving = runtime.getReceivingEngine();
+        let entry;
+        if (acao === 'consultar') entry = await receiving.consultar(token, payload.id);
+        else {
+          await runtime.core.authorizeSession(token, 'receiving:write');
+          if (acao === 'receber' && (typeof payload.local !== 'string' || !/^[\w-]{1,80}$/.test(payload.local))) {
+            error(res, 400, 'RECEBIMENTO_LOCAL_INVALIDO', 'Informe o local de entrada no estoque.');
+            return true;
+          }
+          const input = acao === 'requisitar' ? { ...payload, solicitante: (await runtime.core.getSession(token))?.userId } : payload;
+          entry = await receiving[acao](token, input);
+        }
+        if (!entry) {
+          error(res, 404, 'REQUISICAO_NAO_ENCONTRADA', 'Requisição não localizada.');
+          return true;
+        }
+        result = { ok: true, dados: entry.note, versaoCore: entry.version };
+      }
       else if (modulo === 'estoque') {
         const stock = runtime.getStockEngine();
         if (acao === 'listar' || acao === 'item') {
@@ -347,6 +369,15 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
       }
       else if (['ATIVIDADE_NAO_ENCONTRADA', 'FERRAMENTA_NAO_ENCONTRADA'].includes(cause.code)) {
         error(res, 404, cause.code, 'Registro não localizado.');
+      }
+      else if (cause.code === 'NOTIFICACAO_NAO_ENCONTRADA') error(res, 404, cause.code, 'Notificação não localizada.');
+      else if (['RECEBIMENTO_OPERACAO_INVALIDA', 'REQUISICAO_INVALIDA', 'RECEBIMENTO_ITENS_INVALIDOS',
+        'NF_ITEM_INVALIDO', 'CONFERENCIA_INVALIDA'].includes(cause.code)) {
+        error(res, 400, cause.code, 'Dados de recebimento inválidos.');
+      }
+      else if (['RECEBIMENTO_CONFLITO_VERSAO', 'RECEBIMENTO_CONFLITO_IDEMPOTENCIA', 'COMPRA_INVALIDA',
+        'CONFERENCIA_DIVERGENTE', 'NF_VERSAO_INVALIDA', 'NF_JA_VINCULADA'].includes(cause.code)) {
+        error(res, 409, cause.code, 'Recebimento incompatível com os dados atuais.');
       }
       else if (['INVENTARIO_CONFLITO_VERSAO', 'INVENTARIO_CONFLITO_IDEMPOTENCIA', 'INVENTARIO_CONTAGEM_PENDENTE',
         'ATIVIDADE_CONFIRMADA', 'JA_EM_POSSE', 'FERRAMENTA_INDISPONIVEL', 'NAO_ESTA_EM_POSSE',

@@ -451,7 +451,8 @@ function createAdministrationEngine({ core, stores, catalog, backupSources, stoc
       if (action === 'listar') {
         const records = latest(await stores.notificacoes.events());
         const projected = await fromReceipts();
-        return { ok: true, dados: [...records.values()].filter(event => visible(event.note)).map(event => event.note)
+        return { ok: true, dados: [...records.values()].filter(event => visible(event.note))
+          .map(event => ({ ...event.note, versaoCore: event.version }))
           .concat(projected.filter(note => !records.has(note.id))) };
       }
       if (action === 'criar') {
