@@ -297,3 +297,21 @@ Resultado: **0 homologados, 33 parciais e 1 bloqueado (biometria)**.
 - Validação humana: equivalência de formulários, permissões por obra, assinaturas e fluxos completos dos perfis.
 - Dados e acesso: fonte de reservas e vínculos SKU/endereço, conteúdo autenticado de arquivos Drive e validação de escrita fora da planilha operacional.
 - A implantação operacional não foi alterada. O HTML atual foi preservado neste lote.
+
+### Lote de 23 consultas HTTP — 22/11/2026
+
+Em SQLite temporário e com escrita desativada, as consultas de NF, compras,
+estoque, itens, fornecedores, categorias, obras, usuários, configuração,
+auditoria, ocorrências, notificações, kits, calendário, centros, projetos,
+relatórios, mural, painel, automação, ferramentas, EPI e manutenção
+retornaram HTTP 200 com sessão de operador e HTTP 401 sem sessão.
+O teste reproduzível é o lote de 23 consultas em tests/sqlite-diagnostics.test.js.
+
+A primeira execução detectou recusa de auditoria sem módulo explícito.
+O Core agora agrega por padrão as fontes autorizadas config e obras,
+mantém a projeção de metadados e limita o resultado a 100 eventos.
+A lista de fontes permitidas continua a mesma.
+
+npm test passou com 46 testes no executor Node, além das suítes auxiliares.
+Este lote verifica rota, sessão e envelope em armazenamento isolado.
+A classificação operacional permanece 0 homologados, 33 parciais e 1 bloqueado.

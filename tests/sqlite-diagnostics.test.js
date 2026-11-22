@@ -306,3 +306,42 @@ test('entrega, devolução e estorno de EPI persistem em um único evento de est
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+test('lote de 23 consultas de homologação passa pelo Core e SQLite via HTTP', { timeout: 45000 }, async () => {
+  const temp = await mkdtemp(join(tmpdir(), 'almoxa-lote-23-'));
+  let server;
+  try {
+    server = await start(join(temp, 'homologacao.sqlite'), 'operator', true, false);
+    const login = await server.call('/api/v2/preview/session', { method: 'POST' });
+    assert.equal(login.status, 200);
+    const session = (await login.json()).dados.token;
+    const routes = [
+      ['nf', 'listar'], ['compras', 'listar'], ['estoque', 'movimentacoes'],
+      ['itens', 'listar'], ['fornecedores', 'listar'], ['categorias', 'listar'],
+      ['obras', 'listar'], ['usuarios', 'listar'], ['config', 'obter', { chave: 'PAINEL_CONFIG' }],
+      ['auditoria', 'listar'], ['ocorrencias', 'listar'], ['notificacoes', 'listar'],
+      ['kits', 'listar'], ['calendario', 'listar'], ['centros', 'listar'],
+      ['projetos', 'listar'], ['relatorios', 'listar'], ['mural', 'listar'],
+      ['painel', 'carregar'], ['automacao', 'regras'], ['ferramentas', 'listar'],
+      ['epi', 'fichas'], ['manutencao', 'status']
+    ];
+    assert.equal(new Set(routes.map(([modulo]) => modulo)).size, 23);
+    for (const [modulo, acao, payload = {}] of routes) {
+      const url = new URL('/api/v2/preview/dispatch', login.url);
+      const options = { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modulo, acao, payload }), signal: AbortSignal.timeout(5000) };
+      const denied = await fetch(url, options);
+      assert.equal(denied.status, 401, modulo + ' sem sessão');
+      await denied.text();
+      const response = await fetch(url, { ...options,
+        headers: { ...options.headers, Authorization: 'Bearer ' + session } });
+      const result = await response.json();
+      assert.equal(response.status, 200, modulo + ': ' + JSON.stringify(result));
+      assert.equal(result.ok, true, modulo + ': ' + JSON.stringify(result));
+      assert.ok(Object.hasOwn(result, 'dados'), modulo + ' sem envelope');
+    }
+  } finally {
+    await server?.close();
+    await rm(temp, { recursive: true, force: true });
+  }
+});

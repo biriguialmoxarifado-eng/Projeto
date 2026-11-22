@@ -396,13 +396,17 @@ function createAdministrationEngine({ core, stores, catalog, backupSources, stoc
       if (action !== 'listar') return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
       await authorize(token, 'auditoria', 'read');
       const { modulo } = input;
-      if (modulo !== 'config' && modulo !== 'obras') {
+      const supported = ['config', 'obras'];
+      if (modulo !== undefined && !supported.includes(modulo)) {
         return { ok: false, codigo: 'MODULO_FORA_DA_HOMOLOGACAO' };
       }
-      const events = await stores[modulo].events();
-      return { ok: true, dados: events.slice(-100).reverse().map(event => ({
-        modulo, id: event.id, acao: event.action, autor: event.actor, quando: event.at, versao: event.version
-      })) };
+      const modules = modulo === undefined ? supported : [modulo];
+      const groups = await Promise.all(modules.map(async name =>
+        (await stores[name].events()).slice(-100).reverse().map(event => ({
+          modulo: name, id: event.id, acao: event.action, autor: event.actor, quando: event.at, versao: event.version
+        }))));
+      const events = groups.flat().sort((a, b) => (Date.parse(b.quando) || 0) - (Date.parse(a.quando) || 0));
+      return { ok: true, dados: events.slice(0, 100) };
     },
 
     async config(token, action, input = {}) {
