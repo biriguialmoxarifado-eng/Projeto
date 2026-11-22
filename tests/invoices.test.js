@@ -31,7 +31,8 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
     ['RELATORIOS_CORE_TESTE', { sheetId: 25, rows: [['EVENTO_JSON']] }],
     ['MURAL_CORE_TESTE', { sheetId: 26, rows: [['EVENTO_JSON']] }],
     ['AUTOMACAO_CORE_TESTE', { sheetId: 27, rows: [['EVENTO_JSON']] }],
-    ['FERRAMENTAS_CORE_TESTE', { sheetId: 28, rows: [['EVENTO_JSON']] }]
+    ['FERRAMENTAS_CORE_TESTE', { sheetId: 28, rows: [['EVENTO_JSON']] }],
+    ['EPI_CORE_TESTE', { sheetId: 29, rows: [['EVENTO_JSON']] }]
   ]);
   const markers = new Set();
   let loseResponse = true;
@@ -55,7 +56,7 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
       const names = data.requests.slice(0, -1).map(request => request.addNamedRange.namedRange.namedRangeId);
       if (names.some(name => markers.has(name))) throw { response: { status: 400 } };
       names.forEach(name => markers.add(name));
-      assert.ok([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28].includes(append.appendCells.sheetId));
+      assert.ok([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29].includes(append.appendCells.sheetId));
       const admin = [...adminRows.values()].find(row => row.sheetId === append.appendCells.sheetId);
       const targetRows = append.appendCells.sheetId === 8 ? receivingRows : append.appendCells.sheetId === 9 ? stockRows : append.appendCells.sheetId === 10 ? itemRows : append.appendCells.sheetId === 11 ? supplierRows : append.appendCells.sheetId === 12 ? categoryRows : append.appendCells.sheetId === 13 ? purchaseRows : append.appendCells.sheetId === 14 ? requestRows : rows;
       (admin?.rows ?? targetRows).push([append.appendCells.rows[0].values[0].userEnteredValue.stringValue]);
@@ -613,4 +614,24 @@ test('ferramentaria serializa custódia, impede devolução de terceiro e regist
   await b.ferramentas(token, 'retornarManutencao', { ...take, operation: 'repair', version: 3 });
   assert.equal((await b.ferramentas(token, 'obter', { patrimonio })).dados.status, 'DISPONIVEL');
   assert.equal((await a.ferramentas(token, 'historico', { patrimonio })).dados.length, 4);
+});
+
+test('EPI grava uma ficha idempotente, preserva autoria e rejeita assinatura no ensaio', async () => {
+  const { provider } = fakeGoogle();
+  const load = role => createRuntime(provider, { invoiceTestStorage: provider, credential: { ...credential, role } });
+  const a = (await load('operator')).getAdministrationEngine();
+  const b = (await load('operator')).getAdministrationEngine();
+  const reader = (await load('reader')).getAdministrationEngine();
+  const token = credential.token;
+  const input = { operation: 'epi-create', version: 0, matricula: 'SYN01', sku: 'SYN-EPI', qtd: 2 };
+  await assert.rejects(reader.epi(token, 'criar', input), { code: 'ACCESS_DENIED' });
+  await assert.rejects(a.epi(token, 'criar', { ...input, assinatura: 'synthetic' }), { code: 'EPI_ASSINATURA_FORA_DO_ENSAIO' });
+  const [one, two] = await Promise.all([a.epi(token, 'criar', input), b.epi(token, 'criar', input)]);
+  assert.deepEqual(one, two);
+  assert.equal(one.dados.id, 'EPI00001');
+  await a.epi(token, 'salvar', { id: one.dados.id, operation: 'epi-update', version: 1, validade: '2027-01-01' });
+  const detail = await reader.epi(token, 'obter', { id: one.dados.id });
+  assert.equal(detail.dados.entreguePor, credential.actor);
+  assert.equal(detail.dados.validade, '2027-01-01');
+  assert.equal((await reader.epi(token, 'fichas')).dados.length, 1);
 });

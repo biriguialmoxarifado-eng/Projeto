@@ -26,7 +26,7 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | fornecedores | Integrado em teste. Cadastro por CNPJ e consultas. Contrato operacional de escrita e paridade pendentes. |
 | config | Parcial, integrado em teste. Chaves comuns leem e gravam; configuração especial SKU e precedência operacional pendentes. |
 | lojinha | Parcial, integrado em homologação local. Catálogo, busca, detalhe e saldo por local. Fotos, status e fluxo de pedidos pendentes. |
-| epi | Pendente. Executor legado preservado. |
+| epi | Parcial, integrado em teste. Cadastro, edição e consulta de fichas. Assinatura, entrega operacional e saldo pendentes. |
 | ferramentas | Parcial, integrado em teste. Cadastro, custódia, devolução com avaria e retorno da manutenção. Transferência e identificação operacional pendentes. |
 | ocorrencias | Parcial, integrado no Desktop local. Criar, atualizar e consultar; exclusão, alçadas operacionais e formulários publicados pendentes. |
 | projetos | Parcial, integrado em teste. Cadastro, progresso, consulta e exclusão lógica. Integração de abastecimento e clientes pendentes. |
@@ -148,3 +148,11 @@ npm test passou. O ensaio OAuth em ALMOXA_TESTE_CORE usou CONFIG_CORE_TESTE e AU
 A partir de 0b5a388, Ferramentaria passou a registrar cadastro por patrimônio, retirada, devolução, avaria e retorno da manutenção, com consultas de estado e histórico. Na retirada, a identidade da sessão vira o responsável. A devolução por terceiro e a avaria sem descrição são recusadas. Não aceitamos uma declaração do cliente como prova de identidade. Os contratos de autenticação operacional, transferência, cautelas e os campos de patrimônio ainda exigem homologação.
 
 npm test passou. No Sheets ALMOXA_TESTE_CORE, o patrimônio sintético SYN-c073f9a9-b6f8-48e0-988f-2df1802972fd teve quatro eventos em FERRAMENTAS_CORE_TESTE e terminou DISPONIVEL. Reenvios concorrentes da retirada devolveram o mesmo evento. Outra instância confirmou histórico e estado. Tempo de 10110 ms. Matriz: 28 parciais, 6 pendentes, nenhum homologado. Próximo ponto: fichas EPI em AP_Modulo_epi e AP_Modulo_epigestao, com autenticação individual e comprovante associado à operação. Ainda pendentes Aprovações, OCR, Manutenção, Retiradas e Biometria, mantida por último.
+
+## Fichas de EPI
+
+A partir de 2b6fa34, o Core implementa criar, salvar, listar, fichas e obter conforme os envelopes de AP_Modulo_epi. A ficha preserva identidade por ID, matrícula, SKU, quantidade e autoria. As consultas foram registradas no Desktop isolado. O ensaio rejeita assinatura e não movimenta saldo. AP_Modulo_epigestao, catálogo operacional, comprovantes, estornos e integração com estoque continuam no legado.
+
+npm test passou. Em EPI_CORE_TESTE de ALMOXA_TESTE_CORE, duas requisições concorrentes criaram apenas EPI00001; outra instância confirmou a edição, o autor e a validade em 5926 ms. Somente dados sintéticos. Matriz: 29 parciais, 5 pendentes e nenhum homologado.
+
+Retomar pela alçada por item de AP_Modulo_aprovacoes e a entrega parcial em AP_Modulo_reservas retirar. A decisão tem de ser persistida e auditada junto do vínculo com a reserva. A retirada deve reconciliar a baixa antes de confirmar. OCR exige leitura de conteúdo de arquivo isolado; Manutenção exige snapshot e restauração em cópia; contratos de Biometria vêm por último, sem captura física.

@@ -65,6 +65,42 @@ function createAdministrationEngine({ core, stores, coordinate, clock = () => ne
   return {
     ...createComplementaryMethods({ save, authorize, getRecords: async kind => latest(await stores[kind].events()) }),
     ...createWorkflowMethods({ save, authorize, getRecords: async kind => latest(await stores[kind].events()) }),
+    async epi(token, action, input = {}) {
+      if (['listar', 'fichas', 'obter'].includes(action)) {
+        await authorize(token, 'epi', 'read');
+        const records = latest(await stores.epi.events());
+        if (action === 'obter') {
+          const record = records.get(input.id)?.note;
+          return record ? { ok: true, dados: record } : { ok: false, codigo: 'NAO_ENCONTRADA' };
+        }
+        return { ok: true, dados: [...records.values()].map(event => event.note)
+          .filter(note => !input.status || note.status === input.status) };
+      }
+      if (!['salvar', 'criar'].includes(action)) return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
+      const { operation, version, id: requestedId } = input;
+      const values = textFields(input,
+        ['colaborador', 'matricula', 'cargo', 'setor', 'sku', 'item', 'ca', 'entrega', 'validade', 'status']);
+      if (input.assinatura) throw invalid('EPI_ASSINATURA_FORA_DO_ENSAIO');
+      if (input.qtd !== undefined) {
+        const amount = Number(input.qtd);
+        if (!Number.isSafeInteger(amount) || amount <= 0) throw invalid('EPI_QUANTIDADE_INVALIDA');
+        values.qtd = amount;
+      }
+      if (requestedId !== undefined && !key(requestedId)) throw invalid('ADMIN_DADOS_INVALIDOS');
+      return save(token, 'epi', { operation, version, requestedId, values }, (records, at, actor) => {
+        const id = requestedId ?? 'EPI' + String(records.size + 1).padStart(5, '0');
+        const current = records.get(id);
+        if (requestedId && !current) throw invalid('EPI_FICHA_NAO_ENCONTRADA');
+        const note = current ? { ...current.note, ...values } : {
+          id, colaborador: '', matricula: '', cargo: '', setor: '', sku: '', item: '', qtd: 1, ca: '',
+          entrega: at, validade: '', status: 'ENTREGUE', entreguePor: actor, assinatura: '', ...values
+        };
+        if (!note.matricula || !note.sku) throw invalid('EPI_IDENTIDADE_INVALIDA');
+        return { id, current, note, response: current ? { ok: true, dados: { id, ...values }, atualizado: true } :
+          { ok: true, dados: note, criado: true } };
+      });
+    },
+
     async ferramentas(token, action, payload = {}) {
       if (['listar', 'obter', 'historico'].includes(action)) {
         await authorize(token, 'ferramentas', 'read');

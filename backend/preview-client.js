@@ -18,6 +18,7 @@
     ['painel', new Set(['carregar'])],
     ['automacao', new Set(['regras'])],
     ['ferramentas', new Set(['listar', 'obter', 'historico'])],
+    ['epi', new Set(['listar', 'fichas', 'obter'])],
     ['lojinha', new Set(['catalogo', 'item'])],
     ['inventario', new Set(['listar', 'obter', 'divergencias'])]
   ]);
