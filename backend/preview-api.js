@@ -1,6 +1,7 @@
 'use strict';
 
 const { readFileSync } = require('node:fs');
+const { randomBytes } = require('node:crypto');
 const { join } = require('node:path');
 const { reply, readBody } = require('./diagnostic-api');
 
@@ -11,6 +12,9 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
     ['fornecedores', ['listar', 'porCnpj']],
     ['categorias', ['listar']],
     ['obras', ['listar']],
+    ['usuarios', ['listar', 'contar', 'obter']],
+    ['config', ['obter']],
+    ['auditoria', ['listar']],
     ['ocorrencias', ['listar', 'obter', ...(allowWrite ? ['criar', 'salvar'] : [])]],
     ['notificacoes', ['listar']],
     ['kits', ['listar', 'obter', 'doPerfil']],
@@ -43,7 +47,38 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
     'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer'
   };
   const error = (res, status, codigo, mensagem) => reply(res, status, { ok: false, codigo, mensagem });
+  const sessions = new Map();
+  const ttlMs = 15 * 60 * 1000;
+  const bearer = req => /^Bearer ([^\s]+)$/i.exec(req.headers.authorization || '')?.[1];
   return async (req, res) => {
+    if (req.url === '/api/v2/preview/session') {
+      const token = bearer(req);
+      if (req.method === 'DELETE') {
+        sessions.delete(token);
+        reply(res, 200, { ok: true });
+        return true;
+      }
+      if (req.method !== 'POST') {
+        error(res, 405, 'METODO_INVALIDO', 'Método de sessão inválido.');
+        return true;
+      }
+      try {
+        await runtime.core.authorizeSession(token, 'nf:read');
+      } catch {
+        error(res, 401, 'SEM_SESSAO', 'Credencial de homologação inválida.');
+        return true;
+      }
+      const now = Date.now();
+      for (const [id, value] of sessions) if (value.expires <= now) sessions.delete(id);
+      if (sessions.size >= 64) {
+        error(res, 429, 'SESSOES_LIMITADAS', 'Limite de sessões de homologação atingido.');
+        return true;
+      }
+      const id = randomBytes(32).toString('base64url');
+      sessions.set(id, { token, expires: now + ttlMs });
+      reply(res, 200, { ok: true, dados: { token: id, expiraEm: now + ttlMs } });
+      return true;
+    }
     if (req.method === 'GET' && Object.hasOwn(files, req.url)) {
       const html = readFileSync(join(root, files[req.url]), 'utf8');
       res.writeHead(200, pageHeaders).end(html.replace(/<head[^>]*>/i, tag => tag + guard(allowWrite && req.url.endsWith('/desktop'))));
@@ -63,7 +98,14 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
       error(res, 405, 'METODO_INVALIDO', 'Use POST para o despacho de homologação.');
       return true;
     }
-    const token = /^Bearer ([^\s]+)$/i.exec(req.headers.authorization || '')?.[1];
+    const presented = bearer(req);
+    const session = sessions.get(presented);
+    if (!session || session.expires <= Date.now()) {
+      sessions.delete(presented);
+      error(res, 401, 'SEM_SESSAO', 'Abra uma sessão de homologação.');
+      return true;
+    }
+    const { token } = session;
     try {
       await runtime.core.authorizeSession(token, 'nf:read');
       const { modulo, acao, payload = {} } = await readBody(req, upload ? 1450000 : 8192);
@@ -74,6 +116,15 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
       let result;
       if (modulo === 'ocr') result = await runtime.getOcrEngine()(token, acao, payload);
       else if (modulo === 'nf') result = await runtime.getInvoiceReadAdapter()(token, acao, payload);
+      else if (modulo === 'auditoria') result = await runtime.getAdministrationEngine().auditoria(token, acao, payload);
+      else if (modulo === 'usuarios') result = await runtime.getAdministrationEngine().usuarios(token, acao, payload);
+      else if (modulo === 'config') {
+        if (payload.chave !== 'PAINEL_CONFIG' && !/^synthetic-[\w-]{1,75}$/.test(payload.chave ?? '')) {
+          error(res, 403, 'ACESSO_NEGADO', 'Chave fora da homologação.');
+          return true;
+        }
+        result = await runtime.getAdministrationEngine().config(token, acao, payload);
+      }
       else if (modulo === 'obras') result = await runtime.getAdministrationEngine().obras(token, acao, payload);
       else if (['ocorrencias', 'notificacoes', 'kits', 'calendario', 'centros', 'projetos', 'relatorios', 'mural', 'painel', 'automacao', 'ferramentas', 'epi', 'manutencao', 'aprovacoes', 'retiradas', 'biometria'].includes(modulo)) {
         result = await runtime.getAdministrationEngine()[modulo](token, acao, payload);

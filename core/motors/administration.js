@@ -392,6 +392,19 @@ function createAdministrationEngine({ core, stores, catalog, backupSources, stoc
       });
     },
 
+    async auditoria(token, action, input = {}) {
+      if (action !== 'listar') return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
+      await authorize(token, 'auditoria', 'read');
+      const { modulo } = input;
+      if (modulo !== 'config' && modulo !== 'obras') {
+        return { ok: false, codigo: 'MODULO_FORA_DA_HOMOLOGACAO' };
+      }
+      const events = await stores[modulo].events();
+      return { ok: true, dados: events.slice(-100).reverse().map(event => ({
+        modulo, id: event.id, acao: event.action, autor: event.actor, quando: event.at, versao: event.version
+      })) };
+    },
+
     async config(token, action, input = {}) {
       if (!['obter', 'salvar'].includes(action)) return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
       const { chave, valor } = input;

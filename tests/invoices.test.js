@@ -389,6 +389,10 @@ test('configuração e obras preservam envelope e valores legados, com versão e
   assert.equal(first.dados.status, 'Mobilização');
   await admin.obras(token, 'salvar', { ...obra, id: first.dados.id, version: 1, operation: 'obra-edit', avanco: 40 });
   assert.equal((await reader.obras(token, 'listar')).dados[0].avanco, 40);
+  await assert.rejects(reader.auditoria(token, 'listar', { modulo: 'obras' }), { code: 'ACCESS_DENIED' });
+  const audit = (await admin.auditoria(token, 'listar', { modulo: 'obras' })).dados;
+  assert.deepEqual(audit.map(row => row.versao), [2, 1]);
+  assert.ok(audit.every(row => row.autor === credential.actor && !Object.hasOwn(row, 'note')));
 });
 
 test('consultas de usuários resolvem matrícula e perfil e omitem credenciais do envelope', async () => {
@@ -479,11 +483,22 @@ test('homologação HTTP exige credencial, atende leitura e bloqueia mutação',
     const denied = await call('listar');
     assert.equal(denied.status, 401);
     assert.equal((await denied.json()).codigo, 'SEM_SESSAO');
-    const allowed = await call('listar', credential.token);
+    const noSession = await call('listar', credential.token);
+    assert.equal(noSession.status, 401);
+    const login = await fetch(url.replace('/dispatch', '/session'), {
+      method: 'POST', headers: { Authorization: 'Bearer ' + credential.token }
+    });
+    assert.equal(login.status, 200);
+    const session = (await login.json()).dados.token;
+    const allowed = await call('listar', session);
     assert.deepEqual(await allowed.json(), { ok: true, dados: [] });
-    const write = await call('salvar', credential.token);
+    const write = await call('salvar', session);
     assert.equal(write.status, 400);
     assert.equal((await write.json()).codigo, 'OPERACAO_FORA_DA_HOMOLOGACAO');
+    await fetch(url.replace('/dispatch', '/session'), {
+      method: 'DELETE', headers: { Authorization: 'Bearer ' + session }
+    });
+    assert.equal((await call('listar', session)).status, 401);
   } finally {
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }

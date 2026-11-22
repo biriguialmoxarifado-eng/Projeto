@@ -7,6 +7,9 @@
     ['fornecedores', new Set(['listar', 'porCnpj'])],
     ['categorias', new Set(['listar'])],
     ['obras', new Set(['listar'])],
+    ['usuarios', new Set(['listar', 'contar', 'obter'])],
+    ['config', new Set(['obter'])],
+    ['auditoria', new Set(['listar'])],
     ['ocorrencias', new Set(['listar', 'obter', 'criar', 'salvar'])],
     ['notificacoes', new Set(['listar'])],
     ['kits', new Set(['listar', 'obter', 'doPerfil'])],
@@ -31,11 +34,32 @@
   let session = new AbortController();
   const pending = new Map();
   window.AlmoxaCorePreview = {
-    setToken(value) {
-      token = typeof value === 'string' ? value.trim() : '';
+    async logout() {
+      const previous = token;
+      token = '';
       session.abort();
       session = new AbortController();
       pending.clear();
+      if (previous) {
+        await fetch('/api/v2/preview/session', { method: 'DELETE', credentials: 'omit',
+          headers: { Authorization: 'Bearer ' + previous }, signal: AbortSignal.timeout(5000) }).catch(() => {});
+      }
+    },
+    async login(value) {
+      await this.logout();
+      const active = session;
+      const identifier = typeof value === 'string' ? value.trim() : '';
+      if (!identifier) return { ok: false, mensagem: 'Informe a credencial de homologação.' };
+      try {
+        const response = await fetch('/api/v2/preview/session', { method: 'POST', credentials: 'omit',
+          headers: { Authorization: 'Bearer ' + identifier },
+          signal: AbortSignal.any([active.signal, AbortSignal.timeout(5000)]) });
+        const result = await response.json();
+        if (active === session && result.ok) token = result.dados.token;
+        return result;
+      } catch {
+        return { ok: false, mensagem: 'O Core de homologação não respondeu.' };
+      }
     },
     call(module, action, payload) {
       if (!supported.get(module)?.has(action)) {
@@ -73,8 +97,16 @@
     button.type = 'button';
     button.textContent = 'Testar leitura de NF';
     button.addEventListener('click', async () => {
-      window.AlmoxaCorePreview.setToken(input.value);
+      const credential = input.value;
       input.value = '';
+      status.textContent = 'Autenticando…';
+      delete status.dataset.ok;
+      const login = await window.AlmoxaCorePreview.login(credential);
+      if (!login.ok) {
+        status.textContent = login.mensagem;
+        status.dataset.ok = 'false';
+        return;
+      }
       status.textContent = 'Consultando…';
       const useCampo = location.pathname.endsWith('/campo');
       const invoke = useCampo ? window.api : window.API?.call?.bind(window.API);
@@ -92,7 +124,7 @@
     clear.type = 'button';
     clear.textContent = 'Encerrar sessão de teste';
     clear.addEventListener('click', () => {
-      window.AlmoxaCorePreview.setToken('');
+      void window.AlmoxaCorePreview.logout();
       input.value = '';
       status.textContent = 'Sessão de teste encerrada.';
       delete status.dataset.ok;

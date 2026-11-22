@@ -10,42 +10,42 @@ O adaptador interno de NF cobre listar, obter e itens nos envelopes usados pelo 
 
 Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. Os estágios abaixo se aplicam à V2 isolada.
 
-| Motor | Estágio |
-| --- | --- |
-| nf | Integrado em teste. Busca e ordenação do legado e campos públicos de itens cobertos. Escrita operacional e recuperação de órfãs pendentes. |
-| estoque | Integrado em teste com recebimento por local. Paridade operacional pendente. |
-| compras | Pré-compra, reforço, filtros e alteração de status integrados em teste. Emissão de pedido e conversão de pré-compra pendentes. |
-| solicitacoes | Criação e listagem com reserva pendente integradas em teste. Aprovação e retirada operacionais pendentes. |
-| reservas | Criação pendente pela solicitação integrada em teste. Decisão, alçadas e retirada operacional pendentes. |
-| saidas | Testado no estoque isolado. Fluxo operacional legado pendente. |
-| auth | Parcial. Sessão Node testada, login operacional pendente. |
-| permissoes | Parcial. Escopos de teste aprovados, alçadas operacionais pendentes. |
-| auditoria | Parcial. Autoria de eventos testada, trilha operacional pendente. |
-| usuarios | Parcial, integrado em teste. Listagem, contagem e consulta com projeção pública; cadastro, permissões por obra e credenciais pendentes. |
-| itens | Integrado em teste. Cadastro explícito por SKU e consultas. Geração automática, imagem, exclusão e paridade operacional pendentes. |
-| fornecedores | Integrado em teste. Cadastro por CNPJ e consultas. Contrato operacional de escrita e paridade pendentes. |
-| config | Parcial, integrado em teste. Chaves comuns leem e gravam; configuração especial SKU e precedência operacional pendentes. |
-| lojinha | Parcial, integrado em homologação local. Catálogo, busca, detalhe e saldo por local. Fotos, status e fluxo de pedidos pendentes. |
-| epi | Parcial, integrado em teste. Cadastro, edição e consulta de fichas. Assinatura, entrega operacional e saldo pendentes. |
-| ferramentas | Parcial, integrado em teste. Cadastro, custódia, devolução com avaria e retorno da manutenção. Transferência e identificação operacional pendentes. |
-| ocorrencias | Parcial, integrado no Desktop local. Criar, atualizar e consultar; exclusão, alçadas operacionais e formulários publicados pendentes. |
-| projetos | Parcial, integrado em teste. Cadastro, progresso, consulta e exclusão lógica. Integração de abastecimento e clientes pendentes. |
-| inventario | Parcial, integrado em teste. Abertura, contagem, divergência e encerramento. QR, rotas, escopo de equipe e ajuste de saldo pendentes. |
-| relatorios | Parcial, integrado em teste. Registro e consulta de metadados e parâmetros. Geração e entrega de arquivos pendentes. |
-| painel | Parcial, integrado em teste. Carregar e salvar PAINEL_CONFIG. Agregados e homologação visual pendentes. |
-| mural | Parcial, integrado em teste. Publicações e referências de fotos com exclusão lógica. Acesso a conteúdo e paridade do cliente pendentes. |
-| aprovacoes | Parcial, integrado em teste. Alçada por item e decisão de reserva. Pré-compra e links legados pendentes. |
-| categorias | Integrado em teste. Cadastro, atualização e listagem. Exclusão com validação de itens em uso e paridade operacional pendentes. |
-| obras | Parcial, integrado em teste. Cadastro e atualização com IDs estáveis; escopo por obra e interfaces operacionais pendentes. |
-| ocr | Parcial, integrado em teste. OCR real de PNG/JPEG no Windows, interpretação DANFE e histórico. PDF, Drive e paridade Desktop pendentes. |
-| manutencao | Parcial, integrado em teste. Estado, versões e snapshot lógico limitado. Cópia Drive e restauração pendentes. |
-| kits | Parcial, integrado em teste. Cadastro, perfil, consultas e exclusão lógica. Validação com a Lojinha e os consumidores reais pendente. |
-| calendario | Parcial, integrado em teste. Criação, listagem e exclusão lógica. Paridade com os consumidores operacionais pendente. |
-| centros | Parcial, integrado em teste. Criação, edição, listagem e exclusão lógica. Vínculos e consumidores operacionais pendentes. |
-| retiradas | Parcial, integrado em teste. Entrega parcial por SKU e baixa única. Assinaturas, lote e paridade do cliente pendentes. |
-| notificacoes | Parcial, integrado em teste. Criar, listar e marcar lida; integração com eventos e contratos de perfis reais pendentes. |
-| automacao | Parcial, integrado em teste. Listar, cadastrar e alternar regras. Executor de eventos e efeitos permanecem no legado. |
-| biometria | Parcial, estrutura de teste. Identidade única e referência opaca auditada. Autenticação biométrica e leitor físico ficam para depois. |
+| Motor | Implementação Node | Paridade legado | Testes | Integração Desktop | Homologação | Pendências |
+| --- | --- | --- | --- | --- | --- | --- |
+| nf | Parcial | Recorte comparado | Suíte e armazenamento isolado | Leitura no Edge | Pendente | Integrado em teste. Busca e ordenação do legado e campos públicos de itens cobertos. Escrita operacional e recuperação de órfãs pendentes. |
+| estoque | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Integrado em teste com recebimento por local. Paridade operacional pendente. |
+| compras | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Pré-compra, reforço, filtros e alteração de status integrados em teste. Emissão de pedido e conversão de pré-compra pendentes. |
+| solicitacoes | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Criação e listagem com reserva pendente integradas em teste. Aprovação e retirada operacionais pendentes. |
+| reservas | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Criação pendente pela solicitação integrada em teste. Decisão, alçadas e retirada operacional pendentes. |
+| saidas | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Testado no estoque isolado. Fluxo operacional legado pendente. |
+| auth | Parcial | Recorte comparado | Suíte e diagnóstico | Sessão no Edge | Pendente | Parcial. Sessão Node testada, login operacional pendente. |
+| permissoes | Parcial | Recorte comparado | Suíte e diagnóstico | Bloqueios verificados no Edge e na API | Pendente | Parcial. Escopos de teste aprovados, alçadas operacionais pendentes. |
+| auditoria | Parcial | Pendente | Suíte e armazenamento isolado | Consulta de Obras no Edge | Pendente | Parcial. Autoria de eventos testada, trilha operacional pendente. |
+| usuarios | Parcial | Recorte comparado | Suíte e armazenamento isolado | Contagem no Edge | Pendente | Parcial, integrado em teste. Listagem, contagem e consulta com projeção pública; cadastro, permissões por obra e credenciais pendentes. |
+| itens | Parcial | Recorte comparado | Suíte e armazenamento isolado | Leitura no Edge | Pendente | Integrado em teste. Cadastro explícito por SKU e consultas. Geração automática, imagem, exclusão e paridade operacional pendentes. |
+| fornecedores | Parcial | Recorte comparado | Suíte e armazenamento isolado | Leitura no Edge | Pendente | Integrado em teste. Cadastro por CNPJ e consultas. Contrato operacional de escrita e paridade pendentes. |
+| config | Parcial | Recorte comparado | Suíte e armazenamento isolado | Leitura no Edge | Pendente | Parcial, integrado em teste. Chaves comuns leem e gravam; configuração especial SKU e precedência operacional pendentes. |
+| lojinha | Parcial | Recorte comparado | Suíte e armazenamento isolado | Leitura no Edge em lote anterior | Pendente | Parcial, integrado em homologação local. Catálogo, busca, detalhe e saldo por local. Fotos, status e fluxo de pedidos pendentes. |
+| epi | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Cadastro, edição e consulta de fichas. Assinatura, entrega operacional e saldo pendentes. |
+| ferramentas | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Cadastro, custódia, devolução com avaria e retorno da manutenção. Transferência e identificação operacional pendentes. |
+| ocorrencias | Parcial | Recorte comparado | Suíte e armazenamento isolado | Escrita sintética no Edge em lote anterior | Pendente | Parcial, integrado no Desktop local. Criar, atualizar e consultar; exclusão, alçadas operacionais e formulários publicados pendentes. |
+| projetos | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Cadastro, progresso, consulta e exclusão lógica. Integração de abastecimento e clientes pendentes. |
+| inventario | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Abertura, contagem, divergência e encerramento. QR, rotas, escopo de equipe e ajuste de saldo pendentes. |
+| relatorios | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Registro e consulta de metadados e parâmetros. Geração e entrega de arquivos pendentes. |
+| painel | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Carregar e salvar PAINEL_CONFIG. Agregados e homologação visual pendentes. |
+| mural | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Publicações e referências de fotos com exclusão lógica. Acesso a conteúdo e paridade do cliente pendentes. |
+| aprovacoes | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Alçada por item e decisão de reserva. Pré-compra e links legados pendentes. |
+| categorias | Parcial | Recorte comparado | Suíte e armazenamento isolado | Leitura no Edge | Pendente | Integrado em teste. Cadastro, atualização e listagem. Exclusão com validação de itens em uso e paridade operacional pendentes. |
+| obras | Parcial | Recorte comparado | Suíte e armazenamento isolado | Leitura no Edge | Pendente | Parcial, integrado em teste. Cadastro e atualização com IDs estáveis; escopo por obra e interfaces operacionais pendentes. |
+| ocr | Parcial | Recorte comparado | Suíte e armazenamento isolado | Disponibilidade no Edge | Pendente | Parcial, integrado em teste. OCR real de PNG/JPEG no Windows, interpretação DANFE e histórico. PDF, Drive e paridade Desktop pendentes. |
+| manutencao | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Estado, versões e snapshot lógico limitado. Cópia Drive e restauração pendentes. |
+| kits | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Cadastro, perfil, consultas e exclusão lógica. Validação com a Lojinha e os consumidores reais pendente. |
+| calendario | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Criação, listagem e exclusão lógica. Paridade com os consumidores operacionais pendente. |
+| centros | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Criação, edição, listagem e exclusão lógica. Vínculos e consumidores operacionais pendentes. |
+| retiradas | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Entrega parcial por SKU e baixa única. Assinaturas, lote e paridade do cliente pendentes. |
+| notificacoes | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Criar, listar e marcar lida; integração com eventos e contratos de perfis reais pendentes. |
+| automacao | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, integrado em teste. Listar, cadastrar e alternar regras. Executor de eventos e efeitos permanecem no legado. |
+| biometria | Parcial | Pendente | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Parcial, estrutura de teste. Identidade única e referência opaca auditada. Autenticação biométrica e leitor físico ficam para depois. |
 
 | Extensão | Estágio |
 | --- | --- |
@@ -172,3 +172,11 @@ Matriz: 33 parciais, 1 pendente e nenhum homologado. Próximo ponto: OCR. O OAut
 Partida em 3b0c965. O motor preserva as ações disponivel e ler e o envelope do legado. Windows OCR em pt-BR lê PNG e JPEG locais, o Core extrai campos da DANFE e grava o resultado auditado em OCR_CORE_TESTE para releitura e idempotência. A rota de upload só existe em modo local de homologação com escrita optativa e exige autorização. Os arquivos temporários são removidos. PDF, arquivamento e conversão no Drive continuam no executor legado. A configuração OAuth existente não foi ampliada.
 
 npm test passou. Um PNG sintético criado para o ensaio foi processado pelo OCR real do Windows. Reconheceu número 000000127, total 1234,50 e cinco campos. Nova instância retornou a mesma resposta e confirmou somente um evento auditado no Google Sheets de teste em 5105 ms. Matriz: 34 com implementação inicial parcial, zero pendentes e zero homologados. A homologação começa pelo lote Base.
+
+## Início da homologação: lote Base
+
+A partir de 2661e14, o Desktop de homologação troca a credencial de ensaio por uma sessão randômica de 15 minutos, mantida no servidor. O encerramento revoga a sessão e cancela requisições pendentes. O teste HTTP verificou que a credencial de abertura sozinha não despacha operações e que a sessão revogada recebe 401.
+
+No Edge, o HTML Desktop abriu e consultou, pelo Core e pelo Sheets isolado, Configuração, Usuários, Auditoria de Obras, Itens, Fornecedores, Categorias, Obras e seis notas de teste. O navegador também verificou disponibilidade OCR, bloqueio de escrita de NF e encerramento da sessão. A auditoria da Base expõe metadados autorizados, sem o conteúdo dos eventos. npm test passou. Isso valida o transporte e a sessão de homologação, sem homologar o login individual do legado nem a paridade das escritas.
+
+Retomada: completar a Base com sessões individuais e a comparação de escrita e efeitos do Apps Script em cópia. Em seguida, executar Operação, Gestão e Integrações especiais. No OCR faltam PDF, processamento de arquivo de teste no Drive e o formulário operacional. A integração física do leitor biométrico continua pendente. A matriz registra zero motores sem implementação inicial, 34 parciais e zero homologados.
