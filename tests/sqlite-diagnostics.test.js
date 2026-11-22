@@ -410,3 +410,60 @@ test('catálogo, configuração e obras gravam por HTTP e mantêm o escopo de le
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+test('compras e solicitações pelo HTTP preservam reenvio, reserva e recuperação', { timeout: 45000 }, async () => {
+  const temp = await mkdtemp(join(tmpdir(), 'almoxa-fluxos-http-'));
+  const path = join(temp, 'fluxos.sqlite');
+  let server;
+  let session;
+  async function boot(role, write) {
+    server = await start(path, role, true, write);
+    const response = await server.call('/api/v2/preview/session', { method: 'POST' });
+    assert.equal(response.status, 200);
+    session = { url: response.url, token: (await response.json()).dados.token };
+  }
+  async function call(modulo, acao, payload = {}) {
+    const r = await fetch(new URL('/api/v2/preview/dispatch', session.url), {
+      method:'POST', headers:{ Authorization:'Bearer '+session.token, 'Content-Type':'application/json' },
+      body:JSON.stringify({ modulo, acao, payload }), signal:AbortSignal.timeout(5000)
+    });
+    return { status:r.status, ...(await r.json()) };
+  }
+  try {
+    await boot('operator', true);
+    const sku = 'SYN-FLUXO';
+    assert.equal((await call('itens','salvar',{ operation:'synthetic-item',version:0,
+      data:{sku,descricao:'Material sintético',valorUnitario:5} })).ok,true);
+    assert.equal((await call('estoque','movimentar',{ sku,local:'A',tipo:'entrada',qtd:2,
+      operacaoCore:'synthetic-stock',versaoCore:0 })).ok,true);
+    const purchase = { sku, qtd:3, operation:'synthetic-purchase' };
+    const created = await call('compras','precompra',purchase);
+    assert.equal(created.ok,true);
+    assert.deepEqual(await call('compras','precompra',purchase),created);
+    assert.equal((await call('compras','precompra',{...purchase,qtd:4})).status,409);
+    assert.equal((await call('compras','alterarStatus',{id:created.dados.id,operation:'synthetic-transition',
+      version:1,status:'EM_COTACAO'})).ok,true);
+    const request = { local:'A', operation:'synthetic-request', itens:JSON.stringify([{sku,qtd:3,preco:5}]) };
+    const sent = await call('solicitacoes','criar',request);
+    assert.equal(sent.ok,true);
+    assert.equal(sent.reserva.reserva.status,'PENDENTE_APROVACAO');
+    assert.equal(sent.reserva.semSaldo.length,1);
+    assert.deepEqual(await call('solicitacoes','criar',request),sent);
+    assert.deepEqual((await call('estoque','saldo',{sku,local:'A'})).dados,
+      {saldo:2,reservado:0,disponivel:2,version:1});
+    await server.close();
+    await boot('reader',true);
+    assert.equal((await call('compras','precompra',purchase)).status,403);
+    assert.equal((await call('solicitacoes','criar',request)).status,403);
+    const loaded = await call('solicitacoes','listar');
+    assert.equal(loaded.dados.length,1);
+    assert.equal(loaded.dados[0].reserva,sent.reserva.protocolo);
+    assert.equal((await call('compras','listar',{status:'EM_COTACAO'})).dados.length,1);
+    await server.close();
+    await boot('operator',false);
+    assert.equal((await call('solicitacoes','criar',request)).status,403);
+  } finally {
+    await server?.close();
+    await rm(temp,{recursive:true,force:true});
+  }
+});

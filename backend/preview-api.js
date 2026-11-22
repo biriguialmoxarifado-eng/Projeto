@@ -10,10 +10,13 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
   const epiWrites = new Set(['entregarEstoque', 'devolverEstoque', 'estornarEstoque']);
   const catalogKinds = new Set(['itens', 'fornecedores', 'categorias']);
   const adminWrites = new Set([...catalogKinds, 'config', 'obras']);
+  const flowWrites = new Map([['compras', new Set(['precompra', 'alterarStatus'])],
+    ['solicitacoes', new Set(['criar'])]]);
   const read = new Map([
     ['nf', ['listar', 'obter', 'itens', ...(allowWrite ? ['salvar'] : [])]],
     ['nfed', allowWrite ? ['atualizar'] : []],
-    ['compras', ['listar', 'precompras', 'pedidos']],
+    ['compras', ['listar', 'precompras', 'pedidos', ...flowWrites.get('compras')]],
+    ['solicitacoes', ['listar', ...flowWrites.get('solicitacoes')]],
     ['estoque', ['listar', 'item', 'movimentacoes', 'saldo', ...(allowWrite ? ['movimentar'] : [])]],
     ['itens', ['listar', 'obter', 'salvar']],
     ['fornecedores', ['listar', 'porCnpj', 'salvar']],
@@ -137,7 +140,7 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
     try {
       await runtime.core.authorizeSession(token, 'preview:session');
       const { modulo, acao, payload = {} } = await readBody(req, upload ? 1450000 : 8192);
-      if (!allowWrite && acao === 'salvar' && adminWrites.has(modulo)) {
+      if (!allowWrite && ((acao === 'salvar' && adminWrites.has(modulo)) || flowWrites.get(modulo)?.has(acao))) {
         error(res, 403, 'ACESSO_NEGADO', 'Gravação desativada nesta homologação.');
         return true;
       }
@@ -213,7 +216,16 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
             operacaoCore: entry.operation } };
         }
       }
-      else if (modulo === 'compras') result = await runtime.getPurchaseEngine().consultarLegado(token, acao, payload);
+      else if (modulo === 'compras') {
+        const purchases = runtime.getPurchaseEngine();
+        if (acao === 'precompra') result = await purchases.precompra(token, payload);
+        else if (acao === 'alterarStatus') result = await purchases.alterarStatus(token, payload);
+        else result = await purchases.consultarLegado(token, acao, payload);
+      }
+      else if (modulo === 'solicitacoes') {
+        const requests = runtime.getRequestEngine();
+        result = acao === 'criar' ? await requests.criar(token, payload) : await requests.listar(token);
+      }
       else if (modulo === 'dashboard') {
         const panel = await runtime.getAdministrationEngine().painel(token, 'carregar');
         result = { ok: true, dados: panel.dados ?? {} };
@@ -310,6 +322,12 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
         error(res, 400, cause.code, 'Dados de cadastro inválidos.');
       }
       else if (cause.code === 'OBRA_NAO_ENCONTRADA') error(res, 404, cause.code, 'Obra não localizada.');
+      else if (['COMPRA_CONFLITO_IDEMPOTENCIA', 'COMPRA_CONFLITO_VERSAO', 'SOLICITACAO_CONFLITO_IDEMPOTENCIA'].includes(cause.code)) {
+        error(res, 409, cause.code, 'Operação já usada ou versão desatualizada.');
+      }
+      else if (['COMPRA_DADOS_INVALIDOS', 'SOLICITACAO_INVALIDA', 'SOLICITACAO_ITENS_INVALIDOS'].includes(cause.code)) {
+        error(res, 400, cause.code, 'Dados de fluxo inválidos.');
+      }
       else if (cause.status) error(res, cause.status, cause.code, 'Solicitação inválida.');
       else error(res, 503, 'CORE_INDISPONIVEL', 'O Core de homologação não conseguiu consultar os dados.');
     }
