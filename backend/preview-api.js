@@ -41,8 +41,12 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
     ['inventario', ['listar', 'obter', 'divergencias']]
   ]);
   const files = {
+    // A raiz abre o Desktop: quem sobe o Core V2 digita o endereço e usa
+    // o sistema, sem precisar saber de caminho de homologação.
+    '/': 'index.html',
     '/homologacao/desktop': 'index.html',
-    '/homologacao/campo': 'ALMOXA_CAMPO.html.html'
+    '/homologacao/campo': 'ALMOXA_CAMPO.html.html',
+    '/campo': 'ALMOXA_CAMPO.html.html'
   };
   const client = readFileSync(join(__dirname, 'preview-client.js'));
   const guard = write => '<script src="/homologacao/preview-client.js"' + (write ? ' data-write="1"' : '') + '></script>';

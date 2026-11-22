@@ -69,9 +69,13 @@ async function main() {
   }
   const runtime = await createRuntime(sqlite, { sqlite: Boolean(sqlite), credential: { token, actor, role, approvalProfile: previewId ? process.env.ALMOXA_PREVIEW_APPROVAL_PROFILE : undefined }, invoiceTestStorage });
   const { core, database } = runtime;
-  const preview = invoiceTestStorage && require('./preview-api').createPreview(runtime, join(__dirname, '..'), {
-    allowWrite: process.env.ALMOXA_PREVIEW_WRITE === '1'
-  });
+  // O Desktop e o Campo passam a ser servidos sempre que houver banco —
+  // SQLite basta. Antes dependiam de ALMOXA_PREVIEW_SHEET_ID, o que
+  // amarrava a interface a uma planilha do Google para simplesmente abrir.
+  const preview = (invoiceTestStorage || sqlite) &&
+    require('./preview-api').createPreview(runtime, join(__dirname, '..'), {
+      allowWrite: process.env.ALMOXA_PREVIEW_WRITE === '1'
+    });
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? '127.0.0.1';
   const handler = createHandler(core, process.env.ALMOXA_REVISION || null, sqlite && database, preview);

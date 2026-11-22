@@ -4,7 +4,10 @@ const { AlmoxaCore } = require('../core');
 const { StorageOperations } = require('../database/storage-operations');
 const { DataLayer } = require('../database/data-layer');
 const { DatabaseAdapter } = require('../database/adapters/database-adapter');
-const { GoogleSheetsProvider } = require('../database/adapters/google-sheets-provider');
+// O provedor do Google NÃO é carregado aqui de propósito: ele exige a
+// biblioteca google-auth-library, e quem roda só com SQLite não deve
+// precisar dela instalada. O require acontece em createRuntime, apenas
+// quando nenhum outro armazenamento foi informado.
 const { AuthorizationManager } = require('../core/security/authorization-manager');
 const { createHash, timingSafeEqual } = require('node:crypto');
 
@@ -34,7 +37,11 @@ function diagnosticSecurity(credential, invoices) {
   };
 }
 
-async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = false, credential, invoiceTestStorage } = {}) {
+async function createRuntime(storage, { sqlite = false, credential, invoiceTestStorage } = {}) {
+  if (!storage) {
+    const { GoogleSheetsProvider } = require('../database/adapters/google-sheets-provider');
+    storage = new GoogleSheetsProvider();
+  }
   const operations = sqlite ? new StorageOperations() : undefined;
   const database = new DataLayer(new DatabaseAdapter(storage, { operations }));
   const core = new AlmoxaCore(sqlite || invoiceTestStorage ? diagnosticSecurity(credential, Boolean(invoiceTestStorage)) : {});
