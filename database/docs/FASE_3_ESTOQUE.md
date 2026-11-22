@@ -349,3 +349,9 @@ O teste HTTP com SQLite temporário verificou emissão manual e em lote, preço 
 | Notificações | Aviso visível somente ao solicitante autenticado, confirmação de leitura idempotente e persistência após reinício. | PARCIAL | Validação nos clientes e entrega pelos canais operacionais. |
 
 O coordenador local enfileira as chamadas do mesmo runtime antes de adquirir o lock em disco. O lock em disco continua coordenando processos locais. `npm test` passou com 52 testes do executor Node e as suítes auxiliares. Veja o contrato em [FASE_3_RECEBIMENTO.md](FASE_3_RECEBIMENTO.md). A matriz continua com 0 homologados, 33 parciais e biometria bloqueada.
+
+## Marco de encerramento técnico da Fase 3
+
+A revisão `eef134329c31a012d0cdc782a88884f1dd4b595f` encerra a rodada de implementação e testes isolados. A matriz nominal dos 34 motores, com testes e pendências por motor, está na seção de reconciliação da V431 e nos lotes posteriores deste arquivo. O `npm test` aprovou 52 testes do executor Node e as suítes auxiliares. O GitHub Actions aprovou essa revisão na branch `arquitetura-v2`.
+
+Estado operacional no marco: **0 homologados, 33 parciais e 1 bloqueado (Biometria)**. A validação ponta a ponta passa para a Fase 4, começando por autenticação, usuários, estoque, movimentações e EPI no Desktop existente. A evidência de cada tela precisa identificar o ambiente, o Core, o perfil de acesso e os dados relidos após recarga antes de qualquer mudança de classificação.
