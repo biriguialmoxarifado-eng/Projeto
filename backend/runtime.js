@@ -10,8 +10,8 @@ const { createHash, timingSafeEqual } = require('node:crypto');
 
 function diagnosticSecurity(credential, invoices) {
   const authorizationProvider = new AuthorizationManager();
-  const invoiceRead = invoices ? ['nf:read', 'receiving:read'] : [];
-  const invoiceWrite = invoices ? ['nf:write', 'receiving:write'] : [];
+  const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read'] : [];
+  const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write'] : [];
   authorizationProvider.registerRole('reader', ['diagnostics:read', ...invoiceRead]);
   authorizationProvider.registerRole('operator', ['diagnostics:read', 'diagnostics:write', ...invoiceRead, ...invoiceWrite]);
   const digest = value => createHash('sha256').update(value).digest();
@@ -55,22 +55,40 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
     }
   });
   await core.start();
+  const coordinate = invoiceTestStorage
+    ? require('../database/local-writer-lock').createLocalWriterLock(invoiceTestStorage.testSpreadsheetId)
+    : undefined;
   let invoiceEngine;
   let receivingEngine;
+  let invoiceReadAdapter;
+  let stockEngine;
   return {
     core, diagnostics: storage, database,
     getInvoiceEngine() {
       if (!invoiceTestStorage) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'NF_TESTE_DESATIVADO' });
       const { createInvoiceEngine, TestInvoiceStore } = require('../core/motors/invoices');
-      invoiceEngine ??= createInvoiceEngine({ core, storage: new TestInvoiceStore(invoiceTestStorage) });
+      invoiceEngine ??= createInvoiceEngine({ core, coordinate, storage: new TestInvoiceStore(invoiceTestStorage) });
       return invoiceEngine;
+    },
+    getInvoiceReadAdapter() {
+      const engine = this.getInvoiceEngine();
+      const { createInvoiceReadAdapter } = require('../core/motors/invoice-read-adapter');
+      invoiceReadAdapter ??= createInvoiceReadAdapter(engine);
+      return invoiceReadAdapter;
+    },
+    getStockEngine() {
+      if (!invoiceTestStorage) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'ESTOQUE_TESTE_DESATIVADO' });
+      const { TestInvoiceStore } = require('../core/motors/invoices');
+      const { createStockEngine } = require('../core/motors/stock');
+      stockEngine ??= createStockEngine({ core, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'stock') });
+      return stockEngine;
     },
     getReceivingEngine() {
       const invoices = this.getInvoiceEngine();
       const { TestInvoiceStore } = require('../core/motors/invoices');
       const { createReceivingEngine } = require('../core/motors/receiving');
       receivingEngine ??= createReceivingEngine({
-        core, invoices, store: new TestInvoiceStore(invoiceTestStorage, 'receiving')
+        core, invoices, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'receiving')
       });
       return receivingEngine;
     }

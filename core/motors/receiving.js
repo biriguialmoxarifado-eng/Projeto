@@ -26,7 +26,7 @@ function lines(items) {
   return result;
 }
 
-function createReceivingEngine({ core, store, invoices, clock = () => new Date() }) {
+function createReceivingEngine({ core, store, invoices, coordinate = work => work(), clock = () => new Date() }) {
   const operations = new StorageOperations();
   async function actor(token, action) {
     await core.authorizeSession(token, 'receiving:' + action);
@@ -45,7 +45,7 @@ function createReceivingEngine({ core, store, invoices, clock = () => new Date()
 
     const { id, operation, version } = request;
     const fingerprint = createHash('sha256').update(JSON.stringify(canonical({ action, author, request }))).digest('hex');
-    return operations.mutate(async () => {
+    return operations.mutate(() => coordinate(async () => {
       const replay = events => {
         const prior = events.find(event => event.operation === operation);
         if (prior && prior.fingerprint !== fingerprint) throw error('RECEBIMENTO_CONFLITO_IDEMPOTENCIA');
@@ -103,6 +103,7 @@ function createReceivingEngine({ core, store, invoices, clock = () => new Date()
       const event = { id, operation, fingerprint, action, actor: author, version: version + 1, at: clock().toISOString(), note };
       if (exclusive) {
         event.exclusive = exclusive;
+        event.nfVersion = request.nfVersion;
         event.movimentos = request.itens.map(({ sku, quantidade }) => ({ sku, quantidade }));
         event.notificacao = { id: operation, solicitante: note.solicitante, requisicao: note.numero, status: 'PENDENTE' };
       }
@@ -114,8 +115,11 @@ function createReceivingEngine({ core, store, invoices, clock = () => new Date()
       if (persisted) return persisted;
       if (exclusive && after.some(item => item.exclusive === exclusive)) throw error('NF_JA_VINCULADA');
       if ((latest(after)?.version ?? 0) !== version) throw error('RECEBIMENTO_CONFLITO_VERSAO');
+      if (exclusive && (await invoices.consultar(token, exclusive))?.version !== request.nfVersion) {
+        throw error('NF_VERSAO_INVALIDA');
+      }
       throw appendError ?? error('RECEBIMENTO_NAO_CONFIRMADO');
-    });
+    }));
   }
 
   return {

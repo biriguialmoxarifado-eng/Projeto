@@ -3,7 +3,7 @@
 const { createHash } = require('node:crypto');
 const { StorageOperations } = require('../../database/storage-operations');
 
-const TEST_TABLES = { nf: 'NF_CORE_TESTE', receiving: 'RECEBIMENTO_CORE_TESTE' };
+const TEST_TABLES = { nf: 'NF_CORE_TESTE', receiving: 'RECEBIMENTO_CORE_TESTE', stock: 'ESTOQUE_CORE_TESTE' };
 const HEADERS = ['EVENTO_JSON'];
 const hash = value => createHash('sha256').update(value).digest('hex');
 const digits = value => String(value ?? '').replace(/\D/g, '');
@@ -72,6 +72,13 @@ class TestInvoiceStore {
     }
   }
 
+  async hasReceipt(invoiceId) {
+    const { id } = await this.target();
+    const marker = 'receiving_nf_' + hash(invoiceId);
+    const { namedRanges } = await this.provider.request(id, '?fields=namedRanges(namedRangeId)');
+    return (namedRanges ?? []).some(range => range.namedRangeId === marker);
+  }
+
   async append(event) {
     const { id, sheetId } = await this.target();
     const encoded = JSON.stringify(event);
@@ -80,7 +87,11 @@ class TestInvoiceStore {
       this.kind + '_op_' + hash(event.operation),
       this.kind + '_version_' + hash(event.id + ':' + event.version)
     ];
+    if (this.kind === 'nf' && event.version > 1) {
+      markers.push('nf_claim_' + hash(event.id + ':' + (event.version - 1)));
+    }
     if (this.kind === 'receiving' && event.exclusive) {
+      markers.push('nf_claim_' + hash(event.exclusive + ':' + event.nfVersion));
       markers.push('receiving_nf_' + hash(event.exclusive));
     }
     return this.provider.request(id, ':batchUpdate', {
@@ -101,7 +112,7 @@ function current(events, id) {
   return events.filter(event => event.id === id).sort((a, b) => b.version - a.version)[0];
 }
 
-function createInvoiceEngine({ core, storage, clock = () => new Date() }) {
+function createInvoiceEngine({ core, storage, coordinate = work => work(), clock = () => new Date() }) {
   const queue = new StorageOperations();
   async function authorize(token, action) {
     await core.authorizeSession(token, 'nf:' + action);
@@ -124,7 +135,7 @@ function createInvoiceEngine({ core, storage, clock = () => new Date() }) {
     const fingerprint = hash(JSON.stringify(canonical({
       actor, id, version, action: restore ? 'recuperar' : 'salvar', fromVersion: input.fromVersion, note: proposed
     })));
-    return queue.mutate(async () => {
+    return queue.mutate(() => coordinate(async () => {
       const replay = events => {
         const found = events.find(event => event.operation === operation);
         if (found && found.fingerprint !== fingerprint) throw fail('NF_CONFLITO_IDEMPOTENCIA');
@@ -134,6 +145,7 @@ function createInvoiceEngine({ core, storage, clock = () => new Date() }) {
       const previous = replay(before);
       if (previous) return previous;
       if ((current(before, id)?.version ?? 0) !== version) throw fail('NF_CONFLITO_VERSAO');
+      if (version && await storage.hasReceipt(id)) throw fail('NF_RECEBIDA');
       const note = restore ? before.find(e => e.id === id && e.version === input.fromVersion)?.note : proposed;
       if (!note) throw fail('NF_VERSAO_INEXISTENTE');
       const event = {
@@ -147,8 +159,9 @@ function createInvoiceEngine({ core, storage, clock = () => new Date() }) {
       const persisted = replay(after);
       if (persisted) return persisted;
       if ((current(after, id)?.version ?? 0) !== version) throw fail('NF_CONFLITO_VERSAO');
+      if (version && await storage.hasReceipt(id)) throw fail('NF_RECEBIDA');
       throw appendError ?? fail('NF_GRAVACAO_NAO_CONFIRMADA');
-    });
+    }));
   }
 
   return {
