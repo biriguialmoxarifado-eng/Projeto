@@ -8,10 +8,12 @@ const { GoogleSheetsProvider } = require('../database/adapters/google-sheets-pro
 const { AuthorizationManager } = require('../core/security/authorization-manager');
 const { createHash, timingSafeEqual } = require('node:crypto');
 
-function diagnosticSecurity(credential) {
+function diagnosticSecurity(credential, invoices) {
   const authorizationProvider = new AuthorizationManager();
-  authorizationProvider.registerRole('reader', ['diagnostics:read']);
-  authorizationProvider.registerRole('operator', ['diagnostics:read', 'diagnostics:write']);
+  const invoiceRead = invoices ? ['nf:read'] : [];
+  const invoiceWrite = invoices ? ['nf:write'] : [];
+  authorizationProvider.registerRole('reader', ['diagnostics:read', ...invoiceRead]);
+  authorizationProvider.registerRole('operator', ['diagnostics:read', 'diagnostics:write', ...invoiceRead, ...invoiceWrite]);
   const digest = value => createHash('sha256').update(value).digest();
   const expected = credential ? digest(credential.token) : null;
   return {
@@ -32,10 +34,10 @@ function diagnosticSecurity(credential) {
   };
 }
 
-async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = false, credential } = {}) {
+async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = false, credential, invoiceTestStorage } = {}) {
   const operations = sqlite ? new StorageOperations() : undefined;
   const database = new DataLayer(new DatabaseAdapter(storage, { operations }));
-  const core = new AlmoxaCore(sqlite ? diagnosticSecurity(credential) : {});
+  const core = new AlmoxaCore(sqlite || invoiceTestStorage ? diagnosticSecurity(credential, Boolean(invoiceTestStorage)) : {});
   core.registerModule({
     id: 'database',
     version: '2.1.0',
@@ -53,7 +55,16 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
     }
   });
   await core.start();
-  return { core, diagnostics: storage, database };
+  let invoiceEngine;
+  return {
+    core, diagnostics: storage, database,
+    getInvoiceEngine() {
+      if (!invoiceTestStorage) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'NF_TESTE_DESATIVADO' });
+      const { createInvoiceEngine, TestInvoiceStore } = require('../core/motors/invoices');
+      invoiceEngine ??= createInvoiceEngine({ core, storage: new TestInvoiceStore(invoiceTestStorage) });
+      return invoiceEngine;
+    }
+  };
 }
 
 module.exports = { createRuntime };
