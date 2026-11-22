@@ -3,7 +3,7 @@
 const { createHash } = require('node:crypto');
 const { StorageOperations } = require('../../database/storage-operations');
 
-const TABLE = 'NF_CORE_TESTE';
+const TEST_TABLES = { nf: 'NF_CORE_TESTE', receiving: 'RECEBIMENTO_CORE_TESTE' };
 const HEADERS = ['EVENTO_JSON'];
 const hash = value => createHash('sha256').update(value).digest('hex');
 const digits = value => String(value ?? '').replace(/\D/g, '');
@@ -33,8 +33,10 @@ function canonical(value) {
 }
 
 class TestInvoiceStore {
-  constructor(provider) {
-    if (!provider.testOnly) throw fail('NF_DESTINO_INSEGURO');
+  constructor(provider, kind = 'nf') {
+    if (!provider.testOnly || !Object.hasOwn(TEST_TABLES, kind)) throw fail('NF_DESTINO_INSEGURO');
+    this.table = TEST_TABLES[kind];
+    this.kind = kind;
     this.provider = provider;
   }
 
@@ -44,7 +46,7 @@ class TestInvoiceStore {
     provider.validateId(id, 'ALMOXA_TEST_SHEET_ID');
     if (id === provider.spreadsheetId) throw fail('NF_DESTINO_INSEGURO');
     const metadata = await provider.metadata(id);
-    const tab = metadata.sheets?.find(item => item.properties.title === TABLE);
+    const tab = metadata.sheets?.find(item => item.properties.title === this.table);
     if (metadata.spreadsheetId !== id || metadata.properties?.title !== 'ALMOXA_TESTE_CORE' || !tab) {
       throw fail('NF_DESTINO_INSEGURO');
     }
@@ -53,7 +55,7 @@ class TestInvoiceStore {
 
   async events() {
     const { id } = await this.target();
-    const range = encodeURIComponent("'" + TABLE + "'!A:A");
+    const range = encodeURIComponent("'" + this.table + "'!A:A");
     const { values = [] } = await this.provider.request(id, '/values/' + range + '?valueRenderOption=UNFORMATTED_VALUE');
     if (values[0]?.[0] !== HEADERS[0]) throw fail('NF_SCHEMA_INVALIDO');
     try {
@@ -75,9 +77,12 @@ class TestInvoiceStore {
     const encoded = JSON.stringify(event);
     if (encoded.length > 45000) throw fail('NF_LIMITE_DE_TAMANHO');
     const markers = [
-      'nf_op_' + hash(event.operation),
-      'nf_version_' + hash(event.id + ':' + event.version)
+      this.kind + '_op_' + hash(event.operation),
+      this.kind + '_version_' + hash(event.id + ':' + event.version)
     ];
+    if (this.kind === 'receiving' && event.exclusive) {
+      markers.push('receiving_nf_' + hash(event.exclusive));
+    }
     return this.provider.request(id, ':batchUpdate', {
       auth: this.provider.writeAuth,
       data: { requests: [

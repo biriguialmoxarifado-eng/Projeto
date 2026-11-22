@@ -10,6 +10,7 @@ const note = { numero: '123', serie: '1', itens: [{ sku: 'SYNTHETIC', quantidade
 
 function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
   const rows = [['EVENTO_JSON']];
+  const receivingRows = [['EVENTO_JSON']];
   const markers = new Set();
   let loseResponse = true;
   let writes = 0;
@@ -18,17 +19,18 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
       const path = decodeURIComponent(new URL(url).pathname);
       assert.ok(path.startsWith('/v4/spreadsheets/test-only'));
       if (method === 'GET') {
-        if (path.includes('/values/')) return { data: { values: structuredClone(rows) } };
+        if (path.includes('/values/')) return { data: { values: structuredClone(path.includes('RECEBIMENTO_CORE_TESTE') ? receivingRows : rows) } };
         return { data: { spreadsheetId: 'test-only', properties: { title },
-          sheets: [{ properties: { title: 'NF_CORE_TESTE', sheetId: 7 } }] } };
+          sheets: [{ properties: { title: 'NF_CORE_TESTE', sheetId: 7 } }, { properties: { title: 'RECEBIMENTO_CORE_TESTE', sheetId: 8 } }] } };
       }
       writes++;
-      const [op, version, append] = data.requests;
-      const names = [op, version].map(request => request.addNamedRange.namedRange.namedRangeId);
+      const append = data.requests.at(-1);
+      const names = data.requests.slice(0, -1).map(request => request.addNamedRange.namedRange.namedRangeId);
       if (names.some(name => markers.has(name))) throw { response: { status: 400 } };
       names.forEach(name => markers.add(name));
-      assert.equal(append.appendCells.sheetId, 7);
-      rows.push([append.appendCells.rows[0].values[0].userEnteredValue.stringValue]);
+      assert.ok([7, 8].includes(append.appendCells.sheetId));
+      const targetRows = append.appendCells.sheetId === 8 ? receivingRows : rows;
+      targetRows.push([append.appendCells.rows[0].values[0].userEnteredValue.stringValue]);
       if (loseResponse) {
         loseResponse = false;
         throw new Error('response lost');
@@ -83,4 +85,45 @@ test('motor inativo por padrão, proíbe escrita de leitor e rejeita título dif
   const operator = await createRuntime(provider, { invoiceTestStorage: provider, credential });
   await assert.rejects(operator.getInvoiceEngine().salvar(credential.token, input), { code: 'NF_DESTINO_INSEGURO' });
   assert.equal(writes(), 0);
+});
+
+test('requisição e compra só geram entrada após conferência e recebem em duas notas sem duplicar', async () => {
+  const { provider } = fakeGoogle();
+  const runtime = await createRuntime(provider, { invoiceTestStorage: provider, credential });
+  const invoices = runtime.getInvoiceEngine();
+  const receiving = runtime.getReceivingEngine();
+  const token = credential.token;
+  const id = 'request-1';
+  const makeInvoice = (numero, quantidade) => invoices.salvar(token, {
+    operation: 'nf-' + numero, version: 0, note: { numero, itens: [{ sku: 'SYNTHETIC', quantidade }] }
+  });
+  const first = await makeInvoice('201', 2);
+  const second = await makeInvoice('202', 3);
+  await receiving.requisitar(token, {
+    id, operation: 'request', version: 0, numero: 'RC-0007', solicitante: 'synthetic',
+    itens: [{ sku: 'SYNTHETIC', quantidade: 5 }]
+  });
+  await receiving.comprar(token, { id, operation: 'purchase', version: 1, compra: 'PO-01' });
+  assert.equal(await receiving.entradas(token, 'SYNTHETIC'), 0);
+  const input = {
+    id, operation: 'receipt-a', version: 2, nfId: first.id, nfVersion: 1,
+    conferencia: true, itens: [{ sku: 'SYNTHETIC', quantidade: 2 }]
+  };
+  await assert.rejects(receiving.receber(token, { ...input, conferencia: false }), { code: 'CONFERENCIA_INVALIDA' });
+  await assert.rejects(receiving.receber(token, { ...input, itens: [{ sku: 'SYNTHETIC', quantidade: 1 }] }),
+    { code: 'CONFERENCIA_DIVERGENTE' });
+  const partial = await receiving.receber(token, input);
+  assert.equal(partial.note.status, 'PARCIAL');
+  assert.equal(partial.note.itens[0].pendente, 3);
+  assert.equal(partial.notificacao.requisicao, 'RC-0007');
+  assert.deepEqual(await receiving.receber(token, input), partial);
+  await assert.rejects(receiving.receber(token, { ...input, version: 3, operation: 'duplicate-nf' }),
+    { code: 'NF_JA_VINCULADA' });
+  const final = await receiving.receber(token, {
+    ...input, version: 3, operation: 'receipt-b', nfId: second.id, itens: [{ sku: 'SYNTHETIC', quantidade: 3 }]
+  });
+  assert.equal(final.note.status, 'RECEBIDA');
+  assert.equal(final.note.itens[0].pendente, 0);
+  assert.equal(await receiving.entradas(token, 'SYNTHETIC'), 5);
+  assert.equal((await receiving.consultar(token, id)).version, 4);
 });

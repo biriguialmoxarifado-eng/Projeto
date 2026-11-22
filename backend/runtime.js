@@ -10,8 +10,8 @@ const { createHash, timingSafeEqual } = require('node:crypto');
 
 function diagnosticSecurity(credential, invoices) {
   const authorizationProvider = new AuthorizationManager();
-  const invoiceRead = invoices ? ['nf:read'] : [];
-  const invoiceWrite = invoices ? ['nf:write'] : [];
+  const invoiceRead = invoices ? ['nf:read', 'receiving:read'] : [];
+  const invoiceWrite = invoices ? ['nf:write', 'receiving:write'] : [];
   authorizationProvider.registerRole('reader', ['diagnostics:read', ...invoiceRead]);
   authorizationProvider.registerRole('operator', ['diagnostics:read', 'diagnostics:write', ...invoiceRead, ...invoiceWrite]);
   const digest = value => createHash('sha256').update(value).digest();
@@ -56,6 +56,7 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
   });
   await core.start();
   let invoiceEngine;
+  let receivingEngine;
   return {
     core, diagnostics: storage, database,
     getInvoiceEngine() {
@@ -63,6 +64,15 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
       const { createInvoiceEngine, TestInvoiceStore } = require('../core/motors/invoices');
       invoiceEngine ??= createInvoiceEngine({ core, storage: new TestInvoiceStore(invoiceTestStorage) });
       return invoiceEngine;
+    },
+    getReceivingEngine() {
+      const invoices = this.getInvoiceEngine();
+      const { TestInvoiceStore } = require('../core/motors/invoices');
+      const { createReceivingEngine } = require('../core/motors/receiving');
+      receivingEngine ??= createReceivingEngine({
+        core, invoices, store: new TestInvoiceStore(invoiceTestStorage, 'receiving')
+      });
+      return receivingEngine;
     }
   };
 }
