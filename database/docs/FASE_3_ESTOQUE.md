@@ -30,7 +30,7 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | ferramentas | Pendente. Executor legado preservado. |
 | ocorrencias | Pendente. Executor legado preservado. |
 | projetos | Pendente. Executor legado preservado. |
-| inventario | Pendente. Executor legado preservado. |
+| inventario | Parcial, integrado em teste. Abertura, contagem, divergência e encerramento. QR, rotas, escopo de equipe e ajuste de saldo pendentes. |
 | relatorios | Pendente. Executor legado preservado. |
 | painel | Pendente. Executor legado preservado. |
 | mural | Pendente. Executor legado preservado. |
@@ -96,3 +96,11 @@ Partida em a62aece. O runtime isolado carrega a administração sob demanda. AP_
 npm test passou. A suíte cobriu concorrência e reenvio de criação de obra, versão de configuração, perfis, matrícula com zeros e omissão de credenciais. No Sheets real, as abas CONFIG_CORE_TESTE, OBRAS_CORE_TESTE e USUARIOS_CORE_TESTE foram usadas exclusivamente. O ciclo sintético de 10538 ms confirmou, em outro runtime, a atualização da configuração, avanço 40 em OB01 e consulta do perfil público de uma fixture de usuário. A escrita de usuário na fixture foi feita diretamente no armazenamento para preparar o ensaio. O motor de Usuários oferece apenas consultas. O modo legado e os clientes publicados foram preservados.
 
 Contagem após o lote: 15 parciais e 19 pendentes. Nenhum motor recebeu homologação operacional. Próximo ponto: Inventário, começando por AP_Modulo_inventario em MÓDULOS DE FLUXO.js e AP_INV_registrarContagem no arquivo INVENTÁRIO MÓVEL POR ENDEREÇO. O saldo isolado por SKU e local está no motor de estoque já validado.
+
+## Lote de Inventário
+
+A partir de a93a254, o runtime isolado carrega Inventário sob demanda. AP_Modulo_inventario e AP_INV_registrarContagem foram as referências. A abertura registra uma leitura de saldo por SKU e local. A contagem usa operacaoId e versão esperada, e o responsável pode encerrar após contar todos os SKUs. O fechamento registra divergências sem alterar estoque. As leituras da abertura são individuais e não formam um snapshot transacional de todos os SKUs.
+
+npm test passou, incluindo reenvio por duas instâncias, recusa de fechamento antecipado e bloqueio de contagem após confirmação. No Sheets real, INV-0001 recebeu uma única contagem apesar do reenvio, confirmou divergência -2 e preservou o saldo 5. Outro runtime releu o estado. Tempo total 13871 ms em INVENTARIO_CORE_TESTE e ESTOQUE_CORE_TESTE com dados sintéticos.
+
+Contagem após o lote: 16 parciais, 18 pendentes e nenhum motor homologado. Próximo motor: Lojinha, em AP_Modulo_lojinha no arquivo MÓDULOS DE OPERAÇÃO.js. Reaproveitar catálogo, saldo por local e solicitação com reserva pendente. Para Retiradas, mapear AP_Modulo_retiradas e AP_Modulo_reservas retirar, incluindo aprovação, entrega parcial e coordenação entre reserva e baixa por SKU. Manter rotas operacionais legadas.

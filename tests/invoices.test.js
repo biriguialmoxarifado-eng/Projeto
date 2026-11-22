@@ -20,7 +20,8 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
   const adminRows = new Map([
     ['CONFIG_CORE_TESTE', { sheetId: 15, rows: [['EVENTO_JSON']] }],
     ['OBRAS_CORE_TESTE', { sheetId: 16, rows: [['EVENTO_JSON']] }],
-    ['USUARIOS_CORE_TESTE', { sheetId: 17, rows: [['EVENTO_JSON']] }]
+    ['USUARIOS_CORE_TESTE', { sheetId: 17, rows: [['EVENTO_JSON']] }],
+    ['INVENTARIO_CORE_TESTE', { sheetId: 18, rows: [['EVENTO_JSON']] }]
   ]);
   const markers = new Set();
   let loseResponse = true;
@@ -44,7 +45,7 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
       const names = data.requests.slice(0, -1).map(request => request.addNamedRange.namedRange.namedRangeId);
       if (names.some(name => markers.has(name))) throw { response: { status: 400 } };
       names.forEach(name => markers.add(name));
-      assert.ok([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].includes(append.appendCells.sheetId));
+      assert.ok([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].includes(append.appendCells.sheetId));
       const admin = [...adminRows.values()].find(row => row.sheetId === append.appendCells.sheetId);
       const targetRows = append.appendCells.sheetId === 8 ? receivingRows : append.appendCells.sheetId === 9 ? stockRows : append.appendCells.sheetId === 10 ? itemRows : append.appendCells.sheetId === 11 ? supplierRows : append.appendCells.sheetId === 12 ? categoryRows : append.appendCells.sheetId === 13 ? purchaseRows : append.appendCells.sheetId === 14 ? requestRows : rows;
       (admin?.rows ?? targetRows).push([append.appendCells.rows[0].values[0].userEnteredValue.stringValue]);
@@ -397,4 +398,28 @@ test('consultas de usuários resolvem matrícula e perfil e omitem credenciais d
   assert.equal((await admin.usuarios(token, 'listar')).dados.length, 1);
   const reader = await createRuntime(provider, { invoiceTestStorage: provider, credential: { ...credential, role: 'reader' } });
   await assert.rejects(reader.getAdministrationEngine().usuarios(token, 'listar'), { code: 'ACCESS_DENIED' });
+});
+
+test('inventário registra contagem offline uma vez, aponta divergência e não ajusta estoque ao encerrar', async () => {
+  const { provider } = fakeGoogle();
+  const start = () => createRuntime(provider, { invoiceTestStorage: provider, credential });
+  const a = await start(), b = await start(), token = credential.token;
+  const stock = a.getStockEngine(), inv = a.getInventoryEngine();
+  await stock.movimentar(token, { sku: 'SYN-INV', local: 'A', version: 0,
+    operation: 'inv-stock', action: 'entrada', quantidade: 5 });
+  const opened = await inv(token, 'criar', { operation: 'inv-open', version: 0,
+    obra: 'OB01', local: 'A', itens: [{ sku: 'SYN-INV' }] });
+  const id = opened.dados.id;
+  await assert.rejects(inv(token, 'encerrar', { id, operation: 'too-soon', version: 1 }),
+    { code: 'INVENTARIO_CONTAGEM_PENDENTE' });
+  const input = { id, operacaoId: 'offline-1', version: 1, sku: 'SYN-INV', quantidade: 3 };
+  const result = await Promise.all([inv(token, 'registrarContagem', input), b.getInventoryEngine()(token, 'registrarContagem', input)]);
+  assert.equal(result.filter(item => item.repetida).length, 1);
+  assert.deepEqual((await inv(token, 'divergencias', { id })).dados,
+    [{ sku: 'SYN-INV', saldo: 5, quantidade: 3, diferenca: -2 }]);
+  const closed = await b.getInventoryEngine()(token, 'encerrar', { id, version: 2, operation: 'inv-close' });
+  assert.equal(closed.dados.status, 'CONFIRMADA');
+  assert.equal((await stock.saldo(token, 'SYN-INV', 'A')).saldo, 5);
+  await assert.rejects(inv(token, 'registrarContagem', { ...input, operacaoId: 'offline-2', version: 3 }),
+    { code: 'ATIVIDADE_CONFIRMADA' });
 });

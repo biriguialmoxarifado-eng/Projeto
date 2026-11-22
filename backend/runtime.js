@@ -10,8 +10,8 @@ const { createHash, timingSafeEqual } = require('node:crypto');
 
 function diagnosticSecurity(credential, invoices) {
   const authorizationProvider = new AuthorizationManager();
-  const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read', 'catalog:read', 'purchases:read', 'requests:read', 'config:read', 'obras:read'] : [];
-  const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write', 'catalog:write', 'purchases:write', 'requests:write', 'config:write', 'obras:write', 'usuarios:read'] : [];
+  const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read', 'catalog:read', 'purchases:read', 'requests:read', 'config:read', 'obras:read', 'inventory:read'] : [];
+  const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write', 'catalog:write', 'purchases:write', 'requests:write', 'config:write', 'obras:write', 'usuarios:read', 'inventory:write'] : [];
   authorizationProvider.registerRole('reader', ['diagnostics:read', ...invoiceRead]);
   authorizationProvider.registerRole('operator', ['diagnostics:read', 'diagnostics:write', ...invoiceRead, ...invoiceWrite]);
   const digest = value => createHash('sha256').update(value).digest();
@@ -66,6 +66,7 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
   let purchaseEngine;
   let requestEngine;
   let administrationEngine;
+  let inventoryEngine;
   return {
     core, diagnostics: storage, database,
     getInvoiceEngine() {
@@ -101,6 +102,15 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
         core, catalog, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'compras')
       });
       return purchaseEngine;
+    },
+    getInventoryEngine() {
+      const stock = this.getStockEngine();
+      const { TestInvoiceStore } = require('../core/motors/invoices');
+      const { createInventoryEngine } = require('../core/motors/inventory');
+      inventoryEngine ??= createInventoryEngine({
+        core, stock, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'inventario')
+      });
+      return inventoryEngine;
     },
     getAdministrationEngine() {
       if (!invoiceTestStorage) throw Object.assign(new Error('Motores de teste desativados.'), { code: 'ADMIN_TESTE_DESATIVADO' });
