@@ -69,3 +69,9 @@ O catálogo ainda lista inteligência, backup, doutor, permissões, nfmotor, loj
 | `ALMOXA PRO —  V2 API ÚNICA.js` | Marcador histórico que encaminha a leitura para o arquivo da API Única. |
 
 O diagnóstico real usa registros isolados em SQLite. Migração dos registros operacionais e integração do login e das telas Desktop/Campo dependem da equivalência dos motores e da comprovação de acesso aos dados legados.
+
+## Camada de operações do Core
+
+O diagnóstico SQLite usa uma fila local limitada a 64 operações e um cache de até 128 leituras por ID com validade de um segundo. A fila serializa gravações e as leituras por ID atendidas pelo cache. Qualquer mutação processada invalida o cache, inclusive se a resposta falhar após persistir. O teste isolado de Sheets usa a mesma fila para gravação e atualização e consulta diretamente o provedor para confirmar persistência. O comando de teste restringe a escrita a ALMOXA_TESTE_CORE.
+
+A fila fica em memória e não reenvia operações após reinício. A proteção persistente contra duplicidade vem do provedor: identificador único e versões no SQLite, e marcador atômico e UUID no teste Sheets. Antes de distribuir o Core em vários processos, o provedor precisa assumir a concorrência entre instâncias. Um banco em servidor físico deve implementar o contrato do DatabaseAdapter e preservar as garantias de persistência e idempotência. Os módulos operacionais legados continuam conforme o inventário acima.

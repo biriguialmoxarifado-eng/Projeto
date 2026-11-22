@@ -17,11 +17,12 @@ class DatabaseAdapterError extends Error {
 }
 
 class DatabaseAdapter {
-  constructor(provider) {
+  constructor(provider, { operations } = {}) {
     if (!provider || typeof provider !== 'object') {
       throw new DatabaseAdapterError('PROVIDER_REQUIRED', 'O provedor de banco de dados é obrigatório.');
     }
     this.provider = provider;
+    this.operations = operations;
     this.connected = false;
   }
 
@@ -55,7 +56,7 @@ class DatabaseAdapter {
 
   async disconnect() {
     if (typeof this.provider.disconnect === 'function') {
-      const result = await this.call('disconnect');
+      const result = await this.mutate('disconnect');
       this.connected = false;
       return result ?? { connected: false };
     }
@@ -70,7 +71,8 @@ class DatabaseAdapter {
   async findById(table, id) {
     this.validateTable(table);
     this.validateId(id);
-    return this.call('findById', table, id);
+    const read = () => this.call('findById', table, id);
+    return this.operations && typeof id === 'string' ? this.operations.read(JSON.stringify([table, id]), read) : read();
   }
 
   async findMany(table, filters = {}, options = {}) {
@@ -86,7 +88,7 @@ class DatabaseAdapter {
   async insert(table, data, options = {}) {
     this.validateTable(table);
     this.validateData(data);
-    return this.call('insert', table, data, options);
+    return this.mutate('insert', table, data, options);
   }
 
   async insertMany(table, records, options = {}) {
@@ -95,27 +97,32 @@ class DatabaseAdapter {
       throw new DatabaseAdapterError('INVALID_BATCH', 'O lote precisa conter registros.');
     }
     records.forEach(record => this.validateData(record));
-    return this.call('insertMany', table, records, options);
+    return this.mutate('insertMany', table, records, options);
   }
 
   async update(table, id, data, options = {}) {
     this.validateTable(table);
     this.validateId(id);
     this.validateData(data);
-    return this.call('update', table, id, data, options);
+    return this.mutate('update', table, id, data, options);
   }
 
   async delete(table, id, options = {}) {
     this.validateTable(table);
     this.validateId(id);
-    return this.call('delete', table, id, options);
+    return this.mutate('delete', table, id, options);
   }
 
   async transaction(callback) {
     if (typeof callback !== 'function') {
       throw new DatabaseAdapterError('INVALID_TRANSACTION', 'Callback da transação inválido.');
     }
-    return this.call('transaction', callback);
+    return this.mutate('transaction', callback);
+  }
+
+  mutate(method, ...args) {
+    const write = () => this.call(method, ...args);
+    return this.operations ? this.operations.mutate(write) : write();
   }
 
   validateTable(table) {

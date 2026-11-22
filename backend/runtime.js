@@ -1,6 +1,7 @@
 'use strict';
 
 const { AlmoxaCore } = require('../core');
+const { StorageOperations } = require('../database/storage-operations');
 const { DataLayer } = require('../database/data-layer');
 const { DatabaseAdapter } = require('../database/adapters/database-adapter');
 const { GoogleSheetsProvider } = require('../database/adapters/google-sheets-provider');
@@ -32,7 +33,8 @@ function diagnosticSecurity(credential) {
 }
 
 async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = false, credential } = {}) {
-  const database = new DataLayer(new DatabaseAdapter(storage));
+  const operations = sqlite ? new StorageOperations() : undefined;
+  const database = new DataLayer(new DatabaseAdapter(storage, { operations }));
   const core = new AlmoxaCore(sqlite ? diagnosticSecurity(credential) : {});
   core.registerModule({
     id: 'database',

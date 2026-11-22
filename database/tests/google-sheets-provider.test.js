@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
+const { StorageOperations } = require('../storage-operations');
 const { randomUUID } = require('node:crypto');
 const { GoogleSheetsProvider } = require('../adapters/google-sheets-provider');
 const { GoogleDriveProvider } = require('../adapters/google-drive-provider');
@@ -23,6 +24,7 @@ async function validateDrive(fileId) {
 
 async function validateSheets(testSpreadsheetId, write) {
   const diagnostics = new GoogleSheetsProvider({ testSpreadsheetId, testOnly: true });
+  const operations = new StorageOperations();
   const start = performance.now();
   await diagnostics.testRows();
   console.log('Metadados e cabeçalhos de ALMOXA_TESTE_CORE validados em ' +
@@ -37,14 +39,14 @@ async function validateSheets(testSpreadsheetId, write) {
     origin: 'ALMOXA_PRO_V2',
     message: 'Teste pendente ' + id
   };
-  const written = await diagnostics.writeTestRecord(record);
+  const written = await operations.mutate(() => diagnostics.writeTestRecord(record));
   assert.equal(written.id, record.id);
   assert.deepEqual(await diagnostics.readTestRecord(record.id), record);
-  assert.deepEqual(await diagnostics.writeTestRecord(record), written);
+  assert.deepEqual(await operations.mutate(() => diagnostics.writeTestRecord(record)), written);
   assert.deepEqual(await diagnostics.readTestRecord(record.id), record);
   const expected = { ...record, message: 'Teste confirmado ' + id };
-  assert.deepEqual(await diagnostics.confirmTestRecord(id), expected);
-  assert.deepEqual(await diagnostics.confirmTestRecord(id), expected);
+  assert.deepEqual(await operations.mutate(() => diagnostics.confirmTestRecord(id)), expected);
+  assert.deepEqual(await operations.mutate(() => diagnostics.confirmTestRecord(id)), expected);
   const verification = spawnSync(process.execPath, [__filename, '--verify', id], { stdio: 'inherit', timeout: 60000 });
   assert.equal(verification.status, 0);
   console.log('Gravação, atualização, persistência em novo processo e retentativas aprovadas.');
