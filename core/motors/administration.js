@@ -22,7 +22,7 @@ function latest(events) {
   return records;
 }
 
-function createAdministrationEngine({ core, stores, coordinate, clock = () => new Date() }) {
+function createAdministrationEngine({ core, stores, catalog, backupSources, stockForWithdrawal, coordinate, clock = () => new Date() }) {
   async function authorize(token, module, access) {
     await core.authorizeSession(token, module + ':' + access);
     const session = await core.getSession(token);
@@ -48,10 +48,10 @@ function createAdministrationEngine({ core, stores, coordinate, clock = () => ne
       const duplicate = replay(before);
       if (duplicate) return duplicate.response;
       const at = clock().toISOString();
-      const { id, current, note, response } = prepare(latest(before), at, actor);
+      const { id, current, note, response, reserva, retirada } = await prepare(latest(before), at, actor);
       if ((current?.version ?? 0) !== version) throw invalid('ADMIN_CONFLITO_VERSAO');
       const event = { id, operation, version: version + 1, fingerprint, actor, at,
-        action: input.action ?? (version ? 'atualizar' : 'criar'), note, response };
+        action: input.action ?? (version ? 'atualizar' : 'criar'), note, response, ...(reserva ? { reserva } : {}), ...(retirada ? { retirada } : {}) };
       let writeError;
       try { await store.append(event); } catch (error) { writeError = error; }
       const after = await store.events().catch(error => { throw writeError ?? error; });
@@ -65,6 +65,197 @@ function createAdministrationEngine({ core, stores, coordinate, clock = () => ne
   return {
     ...createComplementaryMethods({ save, authorize, getRecords: async kind => latest(await stores[kind].events()) }),
     ...createWorkflowMethods({ save, authorize, getRecords: async kind => latest(await stores[kind].events()) }),
+    async biometria(token, action, input = {}) {
+      const actor = await authorize(token, 'biometria', 'read');
+      const { colaboradorId } = input;
+      if (!key(colaboradorId)) throw invalid('BIOMETRIA_IDENTIDADE_INVALIDA');
+      const identify = async () => {
+        const user = latest(await stores.usuarios.events()).get(colaboradorId)?.note;
+        if (!user || user.ativo === false || ['INATIVO', 'BLOQUEADO'].includes(String(user.status || '').toUpperCase())) {
+          throw invalid('BIOMETRIA_IDENTIDADE_INVALIDA');
+        }
+      };
+      if (action === 'status') {
+        await identify();
+        const entry = latest(await stores.biometria.events()).get(colaboradorId);
+        return { ok: true, dados: { colaboradorId, vinculada: Boolean(entry?.note.credencialRef),
+          leitorIntegrado: false } };
+      }
+      if (action !== 'vincular') return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
+      const { operation, version, credencialRef } = input;
+      // A referência é opaca. A comprovação do leitor ou do cadastro será feita por um serviço confiável.
+      if (typeof credencialRef !== 'string' || !/^cred-[a-z0-9-]{8,64}$/.test(credencialRef)) {
+        throw invalid('BIOMETRIA_REFERENCIA_INVALIDA');
+      }
+      return save(token, 'biometria', { colaboradorId, operation, version, credencialRef,
+        action: 'BIOMETRIA_REFERENCIA_VINCULADA' }, async (records, at) => {
+        await identify();
+        if ([...records.values()].some(event => event.id !== colaboradorId && event.note.credencialRef === credencialRef)) {
+          throw invalid('BIOMETRIA_REFERENCIA_JA_VINCULADA');
+        }
+        return { id: colaboradorId, current: records.get(colaboradorId),
+          note: { id: colaboradorId, credencialRef, vinculadoEm: at, vinculadoPor: actor },
+          response: { ok: true, dados: { colaboradorId, vinculada: true, leitorIntegrado: false } } };
+      });
+    },
+
+    async manutencao(token, action, input = {}) {
+      if (['status', 'versoes', 'backups'].includes(action)) {
+        await authorize(token, 'manutencao', 'read');
+        const records = [...latest(await stores.manutencao.events()).values()];
+        const versoes = records.filter(event => event.note.tipo === 'versao').map(event => event.note);
+        if (action === 'versoes') return { ok: true, dados: { versoes, modulos: Object.keys(backupSources) } };
+        if (action === 'backups') return { ok: true, dados: records.filter(event => event.note.tipo === 'snapshot')
+          .map(({ note: { copia, ...summary } }) => summary) };
+        const mode = records.find(event => event.id === 'MODO_MANUTENCAO')?.note;
+        return { ok: true, dados: { ativo: mode?.ativo ?? false, mensagem: mode?.mensagem ?? '',
+          desde: mode?.desde ?? null, por: mode?.por ?? null, versoes, modulos: Object.keys(backupSources) } };
+      }
+      if (!['ativar', 'desativar', 'registrarVersao', 'snapshot'].includes(action)) {
+        return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
+      }
+      const { operation, version } = input;
+      const fields = textFields(input, ['mensagem', 'descricao', 'versao']);
+      const id = ['ativar', 'desativar'].includes(action) ? 'MODO_MANUTENCAO' :
+        (action === 'snapshot' ? 'SNP-' : 'VER-') + createHash('sha256').update(String(operation)).digest('hex').slice(0, 24);
+      return save(token, 'manutencao', { action, operation, version, fields }, async (records, at, actor) => {
+        let note;
+        let result;
+        if (action === 'snapshot') {
+          const copia = {};
+          for (const [kind, source] of Object.entries(backupSources)) copia[kind] = await source.events();
+          if (JSON.stringify(copia).length > 20000) throw invalid('SNAPSHOT_LIMITE');
+          const linhas = Object.values(copia).reduce((sum, rows) => sum + rows.length, 0);
+          const summary = { id, tipo: 'snapshot', quando: at, autor: actor,
+            descricao: fields.descricao || '', abas: Object.keys(copia), linhas };
+          note = { ...summary, copia };
+          result = summary;
+        } else if (action === 'registrarVersao') {
+          if (!fields.versao?.trim()) throw invalid('VERSAO_OBRIGATORIA');
+          note = { id, tipo: 'versao', quando: at, autor: actor, versao: fields.versao,
+            descricao: fields.descricao || '', situacao: 'TESTE' };
+          result = note;
+        } else {
+          const ativo = action === 'ativar';
+          note = { id, tipo: 'estado', ativo, mensagem: ativo ? fields.mensagem || 'Sistema em manutenção.' : '',
+            desde: at, por: actor };
+          result = { ativo };
+        }
+        return { id, current: records.get(id), note, response: { ok: true, dados: result } };
+      });
+    },
+
+    async retiradas(token, action, input = {}) {
+      await authorize(token, 'retiradas', 'read');
+      const { protocolo } = input;
+      if (typeof protocolo !== 'string' || !/^#?RES-\d+$/.test(protocolo)) throw invalid('RETIRADA_INVALIDA');
+      const normalized = protocolo.startsWith('#') ? protocolo : '#' + protocolo;
+      const find = records => [...records.values()].find(row => row.reserva?.protocolo === normalized);
+      const approved = reserva => ['APROVADA', 'DISPONIBILIZADA', 'PARCIALMENTE_RETIRADA'].includes(reserva.status);
+      if (action === 'itensLiberados') {
+        const current = find(latest(await stores.retiradas.events()));
+        if (!current) return { ok: false, codigo: 'NAO_ENCONTRADA' };
+        const { reserva } = current;
+        const itens = JSON.parse(reserva.itens);
+        const liberados = approved(reserva) ? itens.filter(item => item.decisao === 'APROVADO' && item.qtd > (item.retirada ?? 0)) : [];
+        return { ok: true, dados: { liberados, bloqueados: itens.filter(item => !liberados.includes(item)),
+          pendentes: [], motivo: approved(reserva) ? null : 'Reserva em ' + reserva.status } };
+      }
+      if (action !== 'confirmar') return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
+      const { version, operation, sku, qtd } = input;
+      if (!key(sku) || !Number.isSafeInteger(qtd) || qtd <= 0) throw invalid('RETIRADA_INVALIDA');
+      return save(token, 'retiradas', { protocolo: normalized, version, operation, sku, qtd,
+        action: 'RETIRADA_CONFIRMADA' }, async (records, at, actor) => {
+        const current = find(records);
+        if (!current) throw invalid('RESERVA_NAO_ENCONTRADA');
+        const { reserva } = current;
+        if (!approved(reserva)) throw invalid('RESERVA_NAO_APROVADA');
+        if (!key(reserva.local)) throw invalid('RETIRADA_LOCAL_NAO_INFORMADO');
+        const itens = JSON.parse(reserva.itens);
+        const matching = itens.filter(item => item.sku === sku && item.decisao === 'APROVADO');
+        if (matching.length !== 1) throw invalid('RETIRADA_ITEM_AMBIGUO');
+        const item = matching[0];
+        if ((item.retirada ?? 0) + qtd > item.qtd) throw invalid('RETIRADA_ACIMA_DO_PENDENTE');
+        const saldo = (await stockForWithdrawal.saldos(token, [sku], reserva.local)).get(sku);
+        if (saldo.saldo - saldo.reservado < qtd) throw invalid('ESTOQUE_SALDO_INSUFICIENTE');
+        item.retirada = (item.retirada ?? 0) + qtd;
+        const status = itens.every(row => row.decisao !== 'APROVADO' || row.qtd === row.retirada)
+          ? 'RETIRADA' : 'PARCIALMENTE_RETIRADA';
+        return { id: current.id, current, note: current.note,
+          reserva: { ...reserva, itens: JSON.stringify(itens), status, retiradoPor: actor, retiradoEm: at },
+          retirada: { sku, local: reserva.local, quantidade: qtd },
+          response: { ok: true, dados: { protocolo: normalized, status, sku, qtd } } };
+      });
+    },
+
+    async aprovacoes(token, action, input = {}) {
+      const actor = await authorize(token, 'aprovacoes', 'read');
+      const { approvalProfile } = await core.getSession(token);
+      const groups = {
+        seguranca: { nome: 'EPI e segurança', perfis: ['SEGURANCA', 'ADMINISTRADOR', 'GESTOR'] },
+        material: { nome: 'Material e ferramentas', perfis: ['MESTRE', 'ALMOXARIFE', 'ADMINISTRADOR', 'GESTOR', 'COMPRADOR'] }
+      };
+      const allowed = group => groups[group].perfis.includes(approvalProfile);
+      if (!Object.keys(groups).some(allowed)) throw invalid('ACCESS_DENIED');
+      const classify = async items => {
+        const categories = new Map();
+        for (const item of items) {
+          if (!categories.has(item.sku)) categories.set(item.sku,
+            (await catalog.obter(token, 'itens', item.sku))?.note.categoria ?? '');
+        }
+        return items.map(item => ({ item, category: categories.get(item.sku), group:
+          /epi|seguran|uniform/i.test(categories.get(item.sku)) ? 'seguranca' : 'material' }));
+      };
+      if (['listar', 'pendentes', 'porPerfil'].includes(action)) {
+        const rows = [];
+        for (const event of latest(await stores.aprovacoes.events()).values()) {
+          if (event.reserva?.status !== 'PENDENTE_APROVACAO') continue;
+          const reserva = { ...event.reserva, itens: JSON.parse(event.reserva.itens) };
+          const classification = (await classify(reserva.itens)).filter(entry =>
+            allowed(entry.group) && (!entry.item.decisao || entry.item.decisao === 'PENDENTE'));
+          if (!classification.length) continue;
+          if (action !== 'porPerfil') {
+            rows.push({ ...reserva, itens: classification.map(entry => entry.item) });
+            continue;
+          }
+          for (const group of Object.keys(groups).filter(allowed)) {
+            const scoped = classification.filter(entry => entry.group === group);
+            if (!scoped.length) continue;
+            const itens = scoped.map(entry => entry.item);
+            rows.push({ tipo: 'RESERVA', reserva: { ...reserva, itens }, alcada: group,
+              grupo: { nome: groups[group].nome, itens, categorias: [...new Set(scoped.map(entry => entry.category || 'Sem categoria'))],
+                valor: itens.reduce((sum, item) => sum + item.qtd * item.preco, 0) } });
+          }
+        }
+        return { ok: true, dados: rows };
+      }
+      if (action !== 'decidirItens') return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
+      const { protocolo, itens, decisao, version, operation } = input;
+      if (typeof protocolo !== 'string' || !/^#?RES-\d+$/.test(protocolo) ||
+          !Array.isArray(itens) || !itens.length || itens.some(item => !key(item)) ||
+          !['APROVADA', 'CANCELADA'].includes(decisao)) throw invalid('APROVACAO_INVALIDA');
+      const normalized = protocolo.startsWith('#') ? protocolo : '#' + protocolo;
+      return save(token, 'aprovacoes', { protocolo: normalized, itens, decisao, version, operation,
+        action: 'APROVACAO_ITENS' }, async (records, at) => {
+        const current = [...records.values()].find(row => row.reserva?.protocolo === normalized);
+        if (!current) throw invalid('RESERVA_NAO_ENCONTRADA');
+        if (current.reserva.status !== 'PENDENTE_APROVACAO') throw invalid('RESERVA_JA_DECIDIDA');
+        const list = JSON.parse(current.reserva.itens);
+        const selected = (await classify(list)).filter(entry => itens.includes(entry.item.sku));
+        if (new Set(selected.map(entry => entry.item.sku)).size !== new Set(itens).size ||
+            selected.some(entry => !allowed(entry.group))) throw invalid('ACCESS_DENIED');
+        if (selected.some(entry => entry.item.decisao && entry.item.decisao !== 'PENDENTE')) throw invalid('ITEM_JA_DECIDIDO');
+        for (const entry of selected) Object.assign(entry.item, {
+          decisao: decisao === 'APROVADA' ? 'APROVADO' : 'RECUSADO', decididoPor: actor, decididoEm: at
+        });
+        const pendentes = list.filter(item => !item.decisao || item.decisao === 'PENDENTE').length;
+        const status = pendentes ? 'PENDENTE_APROVACAO' : list.some(item => item.decisao === 'APROVADO') ? 'APROVADA' : 'CANCELADA';
+        const reserva = { ...current.reserva, itens: JSON.stringify(list), status, aprovador: actor, aprovadoEm: at };
+        return { id: current.id, current, note: current.note, reserva,
+          response: { ok: true, dados: { protocolo: normalized, decididos: selected.length, status, pendentes } } };
+      });
+    },
+
     async epi(token, action, input = {}) {
       if (['listar', 'fichas', 'obter'].includes(action)) {
         await authorize(token, 'epi', 'read');

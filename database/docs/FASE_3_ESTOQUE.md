@@ -34,18 +34,18 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | relatorios | Parcial, integrado em teste. Registro e consulta de metadados e parâmetros. Geração e entrega de arquivos pendentes. |
 | painel | Parcial, integrado em teste. Carregar e salvar PAINEL_CONFIG. Agregados e homologação visual pendentes. |
 | mural | Parcial, integrado em teste. Publicações e referências de fotos com exclusão lógica. Acesso a conteúdo e paridade do cliente pendentes. |
-| aprovacoes | Pendente. Executor legado preservado. |
+| aprovacoes | Parcial, integrado em teste. Alçada por item e decisão de reserva. Pré-compra e links legados pendentes. |
 | categorias | Integrado em teste. Cadastro, atualização e listagem. Exclusão com validação de itens em uso e paridade operacional pendentes. |
 | obras | Parcial, integrado em teste. Cadastro e atualização com IDs estáveis; escopo por obra e interfaces operacionais pendentes. |
 | ocr | Pendente. Executor legado preservado. |
-| manutencao | Pendente. Executor legado preservado. |
+| manutencao | Parcial, integrado em teste. Estado, versões e snapshot lógico limitado. Cópia Drive e restauração pendentes. |
 | kits | Parcial, integrado em teste. Cadastro, perfil, consultas e exclusão lógica. Validação com a Lojinha e os consumidores reais pendente. |
 | calendario | Parcial, integrado em teste. Criação, listagem e exclusão lógica. Paridade com os consumidores operacionais pendente. |
 | centros | Parcial, integrado em teste. Criação, edição, listagem e exclusão lógica. Vínculos e consumidores operacionais pendentes. |
-| retiradas | Pendente. Executor legado preservado. |
+| retiradas | Parcial, integrado em teste. Entrega parcial por SKU e baixa única. Assinaturas, lote e paridade do cliente pendentes. |
 | notificacoes | Parcial, integrado em teste. Criar, listar e marcar lida; integração com eventos e contratos de perfis reais pendentes. |
 | automacao | Parcial, integrado em teste. Listar, cadastrar e alternar regras. Executor de eventos e efeitos permanecem no legado. |
-| biometria | Pendente. Executor legado preservado. |
+| biometria | Parcial, estrutura de teste. Identidade única e referência opaca auditada. Autenticação biométrica e leitor físico ficam para depois. |
 
 | Extensão | Estágio |
 | --- | --- |
@@ -156,3 +156,13 @@ A partir de 2b6fa34, o Core implementa criar, salvar, listar, fichas e obter con
 npm test passou. Em EPI_CORE_TESTE de ALMOXA_TESTE_CORE, duas requisições concorrentes criaram apenas EPI00001; outra instância confirmou a edição, o autor e a validade em 5926 ms. Somente dados sintéticos. Matriz: 29 parciais, 5 pendentes e nenhum homologado.
 
 Retomar pela alçada por item de AP_Modulo_aprovacoes e a entrega parcial em AP_Modulo_reservas retirar. A decisão tem de ser persistida e auditada junto do vínculo com a reserva. A retirada deve reconciliar a baixa antes de confirmar. OCR exige leitura de conteúdo de arquivo isolado; Manutenção exige snapshot e restauração em cópia; contratos de Biometria vêm por último, sem captura física.
+
+## Aprovações, Retiradas, Manutenção e estrutura de Biometria
+
+Partida em e973559. O recorte de Aprovações usa as alçadas por categoria do legado e deriva o perfil da sessão de teste. A decisão por SKU atualiza o mesmo histórico da reserva. A retirada de um SKU por operação grava, em um único evento, a mudança da reserva e a saída projetada no saldo de estoque. O Core exige reserva aprovada, local, saldo disponível e versão esperada sob lock local. Versões de movimentos manuais do estoque têm sua própria sequência. Reservas sintéticas antigas sem local não são baixadas. Pré-compra, links, assinaturas e entrega em lote ainda precisam de paridade.
+
+Manutenção registra estado e versões de ensaio. O snapshot lógico copia apenas CONFIG_CORE_TESTE e OBRAS_CORE_TESTE para MANUTENCAO_CORE_TESTE, limitado a 20000 caracteres. Retorna metadados e mantém o conteúdo fora das consultas HTTP. O estado do ensaio não bloqueia a aplicação operacional. Cópia no Drive e restauração seguem pendentes. Biometria registra uma referência opaca por identidade ativa sintética, com versão e autoria. Nenhuma imagem, digital ou prova biométrica foi coletada. A API não autentica via leitor.
+
+npm test passou com 40 testes no executor Node e sem falhas. Uma regressão inicial em Obras e Ocorrências foi corrigida. O primeiro ensaio real atingiu HTTP 429. A repetição respeitou a janela de cota usando a mesma chave da operação e confirmou #RES-000003 como RETIRADA, saldo 2 após duas baixas e snapshot SNP-f54f8073280b6a0d45ea4eac com cinco eventos copiados (90205 ms). A validação de vínculo biométrico sintético confirmou um único evento auditado, relido por segunda instância (4812 ms).
+
+Matriz: 33 parciais, 1 pendente e nenhum homologado. Próximo ponto: OCR. O OAuth atual tem drive.metadata.readonly e o adaptador não baixa nem converte conteúdo. O legado usa conversão OCR via Drive. Para retomar, definir o acesso mínimo a um arquivo de teste, autorizar a leitura e a conversão isoladas para a identidade apropriada, e validar o conteúdo sintético extraído. Não iniciar a revisão geral de paridade enquanto OCR estiver pendente.

@@ -32,7 +32,9 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
     ['MURAL_CORE_TESTE', { sheetId: 26, rows: [['EVENTO_JSON']] }],
     ['AUTOMACAO_CORE_TESTE', { sheetId: 27, rows: [['EVENTO_JSON']] }],
     ['FERRAMENTAS_CORE_TESTE', { sheetId: 28, rows: [['EVENTO_JSON']] }],
-    ['EPI_CORE_TESTE', { sheetId: 29, rows: [['EVENTO_JSON']] }]
+    ['EPI_CORE_TESTE', { sheetId: 29, rows: [['EVENTO_JSON']] }],
+    ['MANUTENCAO_CORE_TESTE', { sheetId: 30, rows: [['EVENTO_JSON']] }],
+    ['BIOMETRIA_CORE_TESTE', { sheetId: 31, rows: [['EVENTO_JSON']] }]
   ]);
   const markers = new Set();
   let loseResponse = true;
@@ -56,7 +58,7 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
       const names = data.requests.slice(0, -1).map(request => request.addNamedRange.namedRange.namedRangeId);
       if (names.some(name => markers.has(name))) throw { response: { status: 400 } };
       names.forEach(name => markers.add(name));
-      assert.ok([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29].includes(append.appendCells.sheetId));
+      assert.ok([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31].includes(append.appendCells.sheetId));
       const admin = [...adminRows.values()].find(row => row.sheetId === append.appendCells.sheetId);
       const targetRows = append.appendCells.sheetId === 8 ? receivingRows : append.appendCells.sheetId === 9 ? stockRows : append.appendCells.sheetId === 10 ? itemRows : append.appendCells.sheetId === 11 ? supplierRows : append.appendCells.sheetId === 12 ? categoryRows : append.appendCells.sheetId === 13 ? purchaseRows : append.appendCells.sheetId === 14 ? requestRows : rows;
       (admin?.rows ?? targetRows).push([append.appendCells.rows[0].values[0].userEnteredValue.stringValue]);
@@ -634,4 +636,104 @@ test('EPI grava uma ficha idempotente, preserva autoria e rejeita assinatura no 
   assert.equal(detail.dados.entreguePor, credential.actor);
   assert.equal(detail.dados.validade, '2027-01-01');
   assert.equal((await reader.epi(token, 'fichas')).dados.length, 1);
+});
+
+test('aprovação por item deriva alçada da sessão e conserva reserva e reenvio', async () => {
+  const { provider } = fakeGoogle();
+  const load = approvalProfile => createRuntime(provider, { invoiceTestStorage: provider, credential: { ...credential, approvalProfile } });
+  const a = await load('SEGURANCA'), b = await load('MESTRE'), token = credential.token;
+  for (const [sku, categoria] of [['SYN-EPI', 'Segurança'], ['SYN-MAT', 'Material']]) {
+    await a.getCatalogEngine().salvar(token, 'itens', {
+      operation: 'approval-cat-' + sku, version: 0, data: { sku, descricao: sku, categoria }
+    });
+  }
+  const created = await a.getRequestEngine().criar(token, { operation: 'approval-request', local: 'A',
+    itens: [{ sku: 'SYN-EPI', qtd: 1 }, { sku: 'SYN-MAT', qtd: 2 }] });
+  const protocolo = created.reserva.protocolo;
+  const one = a.getAdministrationEngine(), two = b.getAdministrationEngine();
+  assert.deepEqual((await one.aprovacoes(token, 'porPerfil')).dados.map(row => row.alcada), ['seguranca']);
+  const decision = { protocolo, operation: 'approve-epi', version: 1, itens: ['SYN-EPI'], decisao: 'APROVADA' };
+  await assert.rejects(two.aprovacoes(token, 'decidirItens', decision), { code: 'ACCESS_DENIED' });
+  const approved = await one.aprovacoes(token, 'decidirItens', decision);
+  assert.deepEqual(await one.aprovacoes(token, 'decidirItens', decision), approved);
+  assert.equal(approved.dados.pendentes, 1);
+  const done = await two.aprovacoes(token, 'decidirItens', { ...decision, operation: 'deny-mat', version: 2,
+    itens: ['SYN-MAT'], decisao: 'CANCELADA' });
+  assert.equal(done.dados.status, 'APROVADA');
+  assert.deepEqual((await one.aprovacoes(token, 'pendentes')).dados, []);
+  assert.equal((await a.getRequestEngine().listar(token)).dados.length, 1);
+});
+
+test('manutenção versiona o modo e faz snapshot auditado exclusivamente de fontes allowlist', async () => {
+  const { provider } = fakeGoogle();
+  const load = role => createRuntime(provider, { invoiceTestStorage: provider, credential: { ...credential, role } });
+  const a = (await load('operator')).getAdministrationEngine(), b = (await load('reader')).getAdministrationEngine();
+  const token = credential.token;
+  await a.config(token, 'salvar', { chave: 'SYN', valor: 3, operation: 'snapshot-config', version: 0 });
+  assert.deepEqual(await a.manutencao(token, 'ativar', { operation: 'maintenance-on', version: 0 }),
+    { ok: true, dados: { ativo: true } });
+  assert.equal((await b.manutencao(token, 'status')).dados.ativo, true);
+  await assert.rejects(b.manutencao(token, 'snapshot', { operation: 'snapshot-denied', version: 0 }), { code: 'ACCESS_DENIED' });
+  const request = { operation: 'snapshot-1', version: 0 };
+  const result = await a.manutencao(token, 'snapshot', request);
+  assert.deepEqual(await a.manutencao(token, 'snapshot', request), result);
+  assert.deepEqual(result.dados.abas, ['CONFIG_CORE_TESTE', 'OBRAS_CORE_TESTE']);
+  assert.equal(result.dados.linhas, 1);
+  assert.equal((await b.manutencao(token, 'backups')).dados[0].copia, undefined);
+  await a.manutencao(token, 'desativar', { operation: 'maintenance-off', version: 1 });
+  assert.equal((await b.manutencao(token, 'status')).dados.ativo, false);
+});
+
+test('retirada parcial usa uma baixa por evento e conclui apenas itens aprovados', async () => {
+  const { provider } = fakeGoogle();
+  const load = () => createRuntime(provider, { invoiceTestStorage: provider,
+    credential: { ...credential, approvalProfile: 'MESTRE' } });
+  const a = await load(), b = await load(), token = credential.token, sku = 'SYN-WITHDRAW';
+  await a.getCatalogEngine().salvar(token, 'itens', { operation: 'withdraw-item', version: 0,
+    data: { sku, descricao: 'Sintético', categoria: 'Material' } });
+  await a.getStockEngine().movimentar(token, { sku, local: 'A', operation: 'withdraw-stock', version: 0,
+    action: 'entrada', quantidade: 5 });
+  const created = await a.getRequestEngine().criar(token, { operation: 'withdraw-req', local: 'A', itens: [{ sku, qtd: 3 }] });
+  const protocolo = created.reserva.protocolo;
+  const admin = a.getAdministrationEngine(), other = b.getAdministrationEngine();
+  const part = { protocolo, sku, qtd: 1, version: 2, operation: 'withdraw-first' };
+  await assert.rejects(admin.retiradas(token, 'confirmar', part), { code: 'RESERVA_NAO_APROVADA' });
+  await admin.aprovacoes(token, 'decidirItens', { protocolo, itens: [sku], decisao: 'APROVADA',
+    version: 1, operation: 'withdraw-approval' });
+  assert.equal((await admin.retiradas(token, 'itensLiberados', { protocolo })).dados.liberados.length, 1);
+  const [one, two] = await Promise.all([admin.retiradas(token, 'confirmar', part), other.retiradas(token, 'confirmar', part)]);
+  assert.deepEqual(one, two);
+  assert.equal(one.dados.status, 'PARCIALMENTE_RETIRADA');
+  assert.equal((await b.getStockEngine().saldo(token, sku, 'A')).saldo, 4);
+  await assert.rejects(admin.retiradas(token, 'confirmar', { ...part, qtd: 3, operation: 'excesso', version: 3 }),
+    { code: 'RETIRADA_ACIMA_DO_PENDENTE' });
+  const final = await admin.retiradas(token, 'confirmar', { ...part, qtd: 2, operation: 'withdraw-final', version: 3 });
+  assert.equal(final.dados.status, 'RETIRADA');
+  assert.equal((await b.getStockEngine().saldo(token, sku, 'A')).saldo, 2);
+  assert.deepEqual((await b.getStockEngine().movimentacoes(token, { sku, somenteSaidas: true })).dados
+    .map(row => row.qtd).sort(), [-1, -2]);
+});
+
+test('biometria estrutural vincula referência opaca a identidade única e mantém leitor desativado', async () => {
+  const { provider } = fakeGoogle();
+  const { TestInvoiceStore } = require('../core/motors/invoices');
+  const users = new TestInvoiceStore(provider, 'usuarios');
+  for (const id of ['SYN-A', 'SYN-B']) {
+    await users.append({ id, operation: 'fixture-' + id, version: 1, fingerprint: id,
+      actor: 'fixture', note: { id, ativo: true } }).catch(error => {
+      if (error.code !== 'GOOGLE_SHEETS_UNAVAILABLE') throw error;
+    });
+  }
+  const load = role => createRuntime(provider, { invoiceTestStorage: provider, credential: { ...credential, role } });
+  const a = (await load('operator')).getAdministrationEngine(), reader = (await load('reader')).getAdministrationEngine();
+  const token = credential.token, request = { colaboradorId: 'SYN-A', credencialRef: 'cred-fixture-1234', operation: 'bind', version: 0 };
+  await assert.rejects(reader.biometria(token, 'vincular', request), { code: 'ACCESS_DENIED' });
+  const linked = await a.biometria(token, 'vincular', request);
+  assert.deepEqual(await a.biometria(token, 'vincular', request), linked);
+  assert.deepEqual(await a.biometria(token, 'status', request), linked);
+  assert.equal(linked.dados.leitorIntegrado, false);
+  assert.equal(Object.hasOwn(linked.dados, 'credencialRef'), false);
+  await assert.rejects(a.biometria(token, 'vincular', { ...request, colaboradorId: 'SYN-B', operation: 'duplicate-bind' }),
+    { code: 'BIOMETRIA_REFERENCIA_JA_VINCULADA' });
+  assert.equal((await a.biometria(token, 'autenticar', request)).codigo, 'ACAO_DESCONHECIDA');
 });

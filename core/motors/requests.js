@@ -15,7 +15,7 @@ function createRequestEngine({ core, store, stock, coordinate, clock = () => new
   return {
     async listar(token) {
       await authorize(token, 'read');
-      return { ok: true, dados: (await store.events()).map(event => ({
+      return { ok: true, dados: (await store.events()).filter(event => event.action === 'solicitacaoCriada').map(event => ({
         ...event.note, itens: JSON.parse(event.note.itens)
       })) };
     },
@@ -63,12 +63,12 @@ function createRequestEngine({ core, store, stock, coordinate, clock = () => new
         const before = await store.events();
         const duplicate = replay(before);
         if (duplicate) return duplicate.response;
-        const number = String(before.length + 1).padStart(6, '0');
+        const number = String(before.filter(event => event.action === 'solicitacaoCriada').length + 1).padStart(6, '0');
         const id = '#SOL-' + number, protocolo = '#RES-' + number, at = clock().toISOString();
         const valor = itens.reduce((sum, item) => sum + item.qtd * item.preco, 0);
         if (!Number.isFinite(valor)) throw fail('SOLICITACAO_ITENS_INVALIDOS');
         const common = { data: at, solicitante, matricula, obra, itens: JSON.stringify(itens), valor };
-        const reserva = { ...common, protocolo, centro: '', projeto: '', motivo: 'Solicitação ' + id,
+        const reserva = { ...common, protocolo, local, centro: '', projeto: '', motivo: 'Solicitação ' + id,
           status: 'PENDENTE_APROVACAO', aprovadoPor: '', aprovadoEm: '', retiradoPor: '', retiradoEm: '',
           observacao: semSaldo.length ? 'Sem saldo: ' + semSaldo.join(' | ') : '' };
         const note = { ...common, id, status: 'CONVERTIDA', observacao: 'Reserva ' + protocolo, reserva: protocolo };

@@ -66,7 +66,7 @@ async function main() {
     const { GoogleSheetsProvider } = require('../database/adapters/google-sheets-provider');
     invoiceTestStorage = new GoogleSheetsProvider({ testSpreadsheetId: previewId, testOnly: true });
   }
-  const runtime = await createRuntime(sqlite, { sqlite: Boolean(sqlite), credential: { token, actor, role }, invoiceTestStorage });
+  const runtime = await createRuntime(sqlite, { sqlite: Boolean(sqlite), credential: { token, actor, role, approvalProfile: previewId ? process.env.ALMOXA_PREVIEW_APPROVAL_PROFILE : undefined }, invoiceTestStorage });
   const { core, database } = runtime;
   const preview = invoiceTestStorage && require('./preview-api').createPreview(runtime, join(__dirname, '..'), {
     allowWrite: process.env.ALMOXA_PREVIEW_WRITE === '1'

@@ -23,6 +23,10 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
     ['automacao', ['regras']],
     ['ferramentas', ['listar', 'obter', 'historico']],
     ['epi', ['listar', 'fichas', 'obter']],
+    ['manutencao', ['status', 'versoes', 'backups']],
+    ['aprovacoes', ['listar', 'pendentes', 'porPerfil']],
+    ['retiradas', ['itensLiberados']],
+    ['biometria', ['status']],
     ['lojinha', ['catalogo', 'item']],
     ['inventario', ['listar', 'obter', 'divergencias']]
   ]);
@@ -64,7 +68,7 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
       let result;
       if (modulo === 'nf') result = await runtime.getInvoiceReadAdapter()(token, acao, payload);
       else if (modulo === 'obras') result = await runtime.getAdministrationEngine().obras(token, acao, payload);
-      else if (['ocorrencias', 'notificacoes', 'kits', 'calendario', 'centros', 'projetos', 'relatorios', 'mural', 'painel', 'automacao', 'ferramentas', 'epi'].includes(modulo)) {
+      else if (['ocorrencias', 'notificacoes', 'kits', 'calendario', 'centros', 'projetos', 'relatorios', 'mural', 'painel', 'automacao', 'ferramentas', 'epi', 'manutencao', 'aprovacoes', 'retiradas', 'biometria'].includes(modulo)) {
         result = await runtime.getAdministrationEngine()[modulo](token, acao, payload);
       }
       else if (modulo === 'lojinha') result = await runtime.getShopEngine()(token, acao, payload);

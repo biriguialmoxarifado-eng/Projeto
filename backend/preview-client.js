@@ -19,6 +19,10 @@
     ['automacao', new Set(['regras'])],
     ['ferramentas', new Set(['listar', 'obter', 'historico'])],
     ['epi', new Set(['listar', 'fichas', 'obter'])],
+    ['manutencao', new Set(['status', 'versoes', 'backups'])],
+    ['aprovacoes', new Set(['listar', 'pendentes', 'porPerfil'])],
+    ['retiradas', new Set(['itensLiberados'])],
+    ['biometria', new Set(['status'])],
     ['lojinha', new Set(['catalogo', 'item'])],
     ['inventario', new Set(['listar', 'obter', 'divergencias'])]
   ]);

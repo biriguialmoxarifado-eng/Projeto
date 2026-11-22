@@ -7,7 +7,7 @@ const fail = code => Object.assign(new Error(code), { code });
 const valid = value => typeof value === 'string' && /^[\w-]{1,80}$/.test(value);
 const newBalance = () => ({ saldo: 0, reservado: 0 });
 
-function createStockEngine({ core, store, receipts, coordinate = work => work(), clock = () => new Date() }) {
+function createStockEngine({ core, store, receipts, withdrawals, coordinate = work => work(), clock = () => new Date() }) {
   const queue = new StorageOperations();
   async function authorize(token, access) {
     await core.authorizeSession(token, 'stock:' + access);
@@ -16,7 +16,7 @@ function createStockEngine({ core, store, receipts, coordinate = work => work(),
     return String(session.userId);
   }
 
-  async function receivedByLocation(sku, events) {
+  async function receivedByLocation(sku, events, withdrawalEvents) {
     const balances = new Map();
     for (const receipt of events ?? await receipts.events()) {
       if (receipt.action !== 'receber' || !valid(receipt.local)) continue;
@@ -28,6 +28,14 @@ function createStockEngine({ core, store, receipts, coordinate = work => work(),
         }
         balances.set(receipt.local, total);
       }
+    }
+    for (const withdrawal of withdrawalEvents ?? await withdrawals.events()) {
+      const movement = withdrawal.retirada;
+      if (withdrawal.action !== 'RETIRADA_CONFIRMADA' || movement?.sku !== sku) continue;
+      const total = (balances.get(movement.local) ?? 0) - movement.quantidade;
+      if (!valid(movement.local) || !Number.isSafeInteger(movement.quantidade) || movement.quantidade <= 0 ||
+          !Number.isSafeInteger(total)) throw fail('ESTOQUE_RETIRADA_INVALIDA');
+      balances.set(movement.local, total);
     }
     return balances;
   }
@@ -128,6 +136,12 @@ function createStockEngine({ core, store, receipts, coordinate = work => work(),
             qtd: item.quantidade, local: receipt.local, usuario: receipt.actor, documento: receipt.exclusive
           });
         }
+        for (const event of await withdrawals.events()) {
+          const movement = event.retirada;
+          if (event.action !== 'RETIRADA_CONFIRMADA' || !movement) continue;
+          movements.push({ id: event.operation, data: event.at, sku: movement.sku, tipo: 'SAIDA',
+            qtd: -movement.quantidade, local: movement.local, usuario: event.actor, documento: event.reserva.protocolo });
+        }
         const filtered = movements.filter(movement =>
           (sku === undefined || movement.sku === sku) && (!somenteSaidas || movement.qtd < 0));
         filtered.sort((a, b) => Date.parse(b.data) - Date.parse(a.data));
@@ -138,7 +152,7 @@ function createStockEngine({ core, store, receipts, coordinate = work => work(),
       await authorize(token, 'read');
       if (!valid(local) || !Array.isArray(skus) || skus.some(sku => !valid(sku))) throw fail('ESTOQUE_OPERACAO_INVALIDA');
       return coordinate(async () => {
-        const [moves, received] = await Promise.all([store.events(), receipts.events()]);
+        const [moves, received, delivered] = await Promise.all([store.events(), receipts.events(), withdrawals.events()]);
         const latest = new Map();
         for (const entry of moves) {
           if (entry.version > (latest.get(entry.id)?.version ?? 0)) latest.set(entry.id, entry);
@@ -147,7 +161,7 @@ function createStockEngine({ core, store, receipts, coordinate = work => work(),
         for (const sku of new Set(skus)) {
           const snapshot = latest.get(sku)?.note.locais ?? {};
           const balance = Object.hasOwn(snapshot, local) ? snapshot[local] : newBalance();
-          const saldo = balance.saldo + ((await receivedByLocation(sku, received)).get(local) ?? 0);
+          const saldo = balance.saldo + ((await receivedByLocation(sku, received, delivered)).get(local) ?? 0);
           if (!Number.isSafeInteger(saldo) || saldo < balance.reservado) throw fail('ESTOQUE_SALDO_INVALIDO');
           result.set(sku, { saldo, reservado: balance.reservado });
         }

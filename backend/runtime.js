@@ -10,8 +10,8 @@ const { createHash, timingSafeEqual } = require('node:crypto');
 
 function diagnosticSecurity(credential, invoices) {
   const authorizationProvider = new AuthorizationManager();
-  const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read', 'catalog:read', 'purchases:read', 'requests:read', 'config:read', 'obras:read', 'inventory:read', 'ocorrencias:read', 'notificacoes:read', 'kits:read', 'calendario:read', 'centros:read', 'projetos:read', 'relatorios:read', 'mural:read', 'painel:read', 'automacao:read', 'ferramentas:read', 'epi:read'] : [];
-  const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write', 'catalog:write', 'purchases:write', 'requests:write', 'config:write', 'obras:write', 'usuarios:read', 'inventory:write', 'ocorrencias:write', 'notificacoes:write', 'kits:write', 'calendario:write', 'centros:write', 'projetos:write', 'relatorios:write', 'mural:write', 'painel:write', 'automacao:write', 'ferramentas:write', 'epi:write'] : [];
+  const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read', 'catalog:read', 'purchases:read', 'requests:read', 'config:read', 'obras:read', 'inventory:read', 'ocorrencias:read', 'notificacoes:read', 'kits:read', 'calendario:read', 'centros:read', 'projetos:read', 'relatorios:read', 'mural:read', 'painel:read', 'automacao:read', 'ferramentas:read', 'epi:read', 'aprovacoes:read', 'manutencao:read', 'retiradas:read'] : [];
+  const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write', 'catalog:write', 'purchases:write', 'requests:write', 'config:write', 'obras:write', 'usuarios:read', 'inventory:write', 'ocorrencias:write', 'notificacoes:write', 'kits:write', 'calendario:write', 'centros:write', 'projetos:write', 'relatorios:write', 'mural:write', 'painel:write', 'automacao:write', 'ferramentas:write', 'epi:write', 'aprovacoes:write', 'manutencao:write', 'retiradas:write', 'biometria:read', 'biometria:write'] : [];
   authorizationProvider.registerRole('reader', ['diagnostics:read', ...invoiceRead]);
   authorizationProvider.registerRole('operator', ['diagnostics:read', 'diagnostics:write', ...invoiceRead, ...invoiceWrite]);
   const digest = value => createHash('sha256').update(value).digest();
@@ -22,7 +22,7 @@ function diagnosticSecurity(credential, invoices) {
       validate(token) {
         if (!expected || !token || !timingSafeEqual(expected, digest(token))) return { valid: false };
         return { valid: true, session: {
-          userId: credential.actor, role: credential.role, status: 'ACTIVE'
+          userId: credential.actor, role: credential.role, status: 'ACTIVE', approvalProfile: credential.approvalProfile
         } };
       }
     },
@@ -125,7 +125,10 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
       const { TestInvoiceStore } = require('../core/motors/invoices');
       const { createAdministrationEngine } = require('../core/motors/administration');
       administrationEngine ??= createAdministrationEngine({
-        core, coordinate, stores: {
+        core, catalog: this.getCatalogEngine(), coordinate, stockForWithdrawal: this.getWithdrawalStockReader(), backupSources: {
+          CONFIG_CORE_TESTE: new TestInvoiceStore(invoiceTestStorage, 'config'),
+          OBRAS_CORE_TESTE: new TestInvoiceStore(invoiceTestStorage, 'obras')
+        }, stores: {
           config: new TestInvoiceStore(invoiceTestStorage, 'config'),
           obras: new TestInvoiceStore(invoiceTestStorage, 'obras'),
           usuarios: new TestInvoiceStore(invoiceTestStorage, 'usuarios'),
@@ -140,7 +143,11 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
           painel: new TestInvoiceStore(invoiceTestStorage, 'config'),
           automacao: new TestInvoiceStore(invoiceTestStorage, 'automacao'),
           ferramentas: new TestInvoiceStore(invoiceTestStorage, 'ferramentas'),
-          epi: new TestInvoiceStore(invoiceTestStorage, 'epi')
+          epi: new TestInvoiceStore(invoiceTestStorage, 'epi'),
+          aprovacoes: new TestInvoiceStore(invoiceTestStorage, 'solicitacoes'),
+          manutencao: new TestInvoiceStore(invoiceTestStorage, 'manutencao'),
+          retiradas: new TestInvoiceStore(invoiceTestStorage, 'solicitacoes'),
+          biometria: new TestInvoiceStore(invoiceTestStorage, 'biometria')
         }
       });
       return administrationEngine;
@@ -154,13 +161,24 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
       });
       return requestEngine;
     },
+    getWithdrawalStockReader() {
+      if (!invoiceTestStorage) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'ESTOQUE_TESTE_DESATIVADO' });
+      const { TestInvoiceStore } = require('../core/motors/invoices');
+      const { createStockEngine } = require('../core/motors/stock');
+      const reader = createStockEngine({ core, store: new TestInvoiceStore(invoiceTestStorage, 'stock'),
+        receipts: new TestInvoiceStore(invoiceTestStorage, 'receiving'),
+        withdrawals: new TestInvoiceStore(invoiceTestStorage, 'solicitacoes') });
+      // Chamado somente enquanto a retirada já detém o lock compartilhado.
+      return { saldos: reader.saldos };
+    },
     getStockEngine() {
       if (!invoiceTestStorage) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'ESTOQUE_TESTE_DESATIVADO' });
       const { TestInvoiceStore } = require('../core/motors/invoices');
       const { createStockEngine } = require('../core/motors/stock');
       stockEngine ??= createStockEngine({
         core, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'stock'),
-        receipts: new TestInvoiceStore(invoiceTestStorage, 'receiving')
+        receipts: new TestInvoiceStore(invoiceTestStorage, 'receiving'),
+        withdrawals: new TestInvoiceStore(invoiceTestStorage, 'solicitacoes')
       });
       return stockEngine;
     },
