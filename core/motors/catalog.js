@@ -5,6 +5,7 @@ const { createHash } = require('node:crypto');
 const fail = code => Object.assign(new Error(code), { code });
 const validKey = id => typeof id === 'string' && /^[\w.-]{1,80}$/.test(id);
 const fields = {
+  categorias: ['nome', 'icone', 'cor', 'visivel'],
   itens: ['sku', 'descricao', 'codigoBarras', 'categoria', 'subcategoria', 'marca', 'modelo', 'unidade', 'ncm', 'status'],
   fornecedores: ['cnpj', 'razaoSocial', 'nomeFantasia', 'email', 'telefone', 'contato', 'categoria', 'prazoEntrega', 'status']
 };
@@ -36,13 +37,15 @@ function createCatalogEngine({ core, stores, coordinate, clock = () => new Date(
           version >= Number.MAX_SAFE_INTEGER || !data || typeof data !== 'object' || Array.isArray(data)) {
         throw fail('CADASTRO_OPERACAO_INVALIDA');
       }
-      const id = kind === 'itens' ? data.sku : String(data.cnpj ?? '').replace(/\D/g, '');
-      const name = kind === 'itens' ? data.descricao : data.razaoSocial;
+      const id = kind === 'categorias' ? (data.id ?? 'CAT-' + createHash('sha256').update(operation).digest('hex').slice(0, 24))
+        : kind === 'itens' ? data.sku : String(data.cnpj ?? '').replace(/\D/g, '');
+      const name = kind === 'categorias' ? data.nome : kind === 'itens' ? data.descricao : data.razaoSocial;
       if (!validKey(id) || (kind === 'fornecedores' && id.length !== 14) ||
           typeof name !== 'string' || !name.trim()) throw fail('CADASTRO_DADOS_INVALIDOS');
       const changes = Object.fromEntries(fields[kind].filter(key => Object.hasOwn(data, key))
         .map(key => {
-          if (typeof data[key] !== 'string' && !Number.isFinite(data[key])) throw fail('CADASTRO_DADOS_INVALIDOS');
+          if (key === 'visivel' ? typeof data[key] !== 'boolean' :
+            typeof data[key] !== 'string' && !Number.isFinite(data[key])) throw fail('CADASTRO_DADOS_INVALIDOS');
           return [key, data[key]];
         }));
       if (kind === 'fornecedores') changes.cnpj = id;
@@ -58,7 +61,19 @@ function createCatalogEngine({ core, stores, coordinate, clock = () => new Date(
         if (duplicate) return duplicate;
         const previous = current(before, id);
         if ((previous?.version ?? 0) !== version) throw fail('CADASTRO_CONFLITO_VERSAO');
-        const event = { id, operation, version: version + 1, fingerprint, actor, at: clock().toISOString(),
+        const at = clock().toISOString();
+        if (kind === 'categorias') {
+          const sameName = before.some(event => event.id !== id &&
+            event === current(before, event.id) && String(event.note.nome).toLowerCase() === name.toLowerCase());
+          if (sameName) throw fail('CATEGORIA_DUPLICADA');
+          if (!previous) {
+            changes.icone ||= 'caixa';
+            changes.cor ||= 'ico-navy';
+            changes.visivel ??= true;
+            changes.criadoEm = at;
+          }
+        }
+        const event = { id, operation, version: version + 1, fingerprint, actor, at,
           action: version ? 'atualizar' : 'criar', note: { ...previous?.note, ...changes, id } };
         let writeError;
         try { await store.append(event); } catch (error) { writeError = error; }

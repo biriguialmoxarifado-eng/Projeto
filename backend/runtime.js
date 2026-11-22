@@ -84,7 +84,8 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
       catalogEngine ??= createCatalogEngine({
         core, coordinate, stores: {
           itens: new TestInvoiceStore(invoiceTestStorage, 'itens'),
-          fornecedores: new TestInvoiceStore(invoiceTestStorage, 'fornecedores')
+          fornecedores: new TestInvoiceStore(invoiceTestStorage, 'fornecedores'),
+          categorias: new TestInvoiceStore(invoiceTestStorage, 'categorias')
         }
       });
       return catalogEngine;
@@ -93,7 +94,10 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
       if (!invoiceTestStorage) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'ESTOQUE_TESTE_DESATIVADO' });
       const { TestInvoiceStore } = require('../core/motors/invoices');
       const { createStockEngine } = require('../core/motors/stock');
-      stockEngine ??= createStockEngine({ core, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'stock') });
+      stockEngine ??= createStockEngine({
+        core, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'stock'),
+        receipts: new TestInvoiceStore(invoiceTestStorage, 'receiving')
+      });
       return stockEngine;
     },
     getReceivingEngine() {

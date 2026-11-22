@@ -2,7 +2,7 @@
 
 No Sheets real, o primeiro ciclo de estoque encontrou HTTP 429. A repetição isolada com um novo SKU sintético completou sete movimentos e a releitura por outro runtime confirmou saldo 8, reservado 1 e disponível 7 no local A, e saldo zero em B. Tempo total de 14301 ms. O ensaio de estoque e a suíte npm test passaram.
 
-O motor de estoque isolado controla quantidade inteira por SKU e local. Abrange entrada, saída, transferência entre locais do mesmo SKU, reserva, liberação, retirada de reserva, devolução e estorno. A transferência registra os dois lados em um evento. Saldo e reserva usam versões por SKU, autoria, confirmação por releitura e idempotência. A aba de teste é ESTOQUE_CORE_TESTE da planilha ALMOXA_TESTE_CORE. O saldo do novo motor segue separado da projeção de entradas por NF. Cadastro real, unidades fracionárias, transferência entre SKUs e reserva por pedido ainda precisam de paridade.
+O motor de estoque isolado controla quantidade inteira por SKU e local. Abrange entrada, saída, transferência entre locais do mesmo SKU, reserva, liberação, retirada de reserva, devolução e estorno. A transferência registra os dois lados em um evento. Saldo e reserva usam versões por SKU, autoria, confirmação por releitura e idempotência. A aba de teste é ESTOQUE_CORE_TESTE da planilha ALMOXA_TESTE_CORE. O saldo do novo motor incorpora recebimentos confirmados que informam o local, preservando a projeção histórica sem local. Cadastro real, unidades fracionárias, transferência entre SKUs e reserva por pedido ainda precisam de paridade.
 
 O primeiro ensaio real de edição simultânea com recebimento persistiu ambas as mutações, contrariando a simulação de unicidade dos marcadores do Sheets. Os eventos sintéticos foram preservados. Os motores agora compartilham um lock por planilha no mesmo perfil local e conservam os marcadores para identificar operações. Uma edição ou restauração é recusada depois que existe vínculo de recebimento. Na repetição real, a NF:388041441-95 foi recebida na versão 1 e a edição foi rejeitada com NF_RECEBIDA. Disputa de 3490 ms, duas unidades na projeção isolada. O lock coordena processos locais sob o mesmo perfil. A ativação exige um único executor de escrita ou coordenação distribuída validada. Uma queda abrupta pode deixar o lock em disco. Antes de liberar manualmente, confirmar que o processo encerrou e reconciliar a escrita pelo histórico de operações.
 
@@ -13,7 +13,7 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | Motor | Estágio |
 | --- | --- |
 | nf | Integrado em teste. Compatibilidade de leitura parcial. |
-| estoque | Integrado em teste. Falta unir o saldo ao recebimento e fazer paridade operacional. |
+| estoque | Integrado em teste com recebimento por local. Paridade operacional pendente. |
 | compras | Integrado em teste no vínculo de recebimento. Contrato completo pendente. |
 | solicitacoes | Integrado em teste no vínculo de recebimento. Contrato completo pendente. |
 | reservas | Testado no estoque isolado. Alçadas e fluxo de reserva legado pendentes. |
@@ -35,7 +35,7 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | painel | Pendente. Executor legado preservado. |
 | mural | Pendente. Executor legado preservado. |
 | aprovacoes | Pendente. Executor legado preservado. |
-| categorias | Pendente. Executor legado preservado. |
+| categorias | Integrado em teste. Cadastro, atualização e listagem. Exclusão com validação de itens em uso e paridade operacional pendentes. |
 | obras | Pendente. Executor legado preservado. |
 | ocr | Pendente. Executor legado preservado. |
 | manutencao | Pendente. Executor legado preservado. |
@@ -70,3 +70,11 @@ O runtime carrega o catálogo quando solicitado no modo isolado. Os nomes origin
 npm test passou. O ensaio Google real com dados sintéticos gravou, repetiu e atualizou um item até a versão 2, criou um fornecedor na versão 1 e releu ambos por outro runtime. Tempo total 8972 ms. O adaptador repete até duas leituras após HTTP 429 ou 503, com atraso exponencial e aleatoriedade. Respeita Retry-After dentro do limite de espera de dez segundos. Uma escrita limitada continua retornando erro para reconciliação pelo identificador da operação. O teste de cota foi simulado. O limite do Google continua aplicável.
 
 As gravações do catálogo usam o mesmo lock local do estoque e do recebimento. Coordenação distribuída e equivalência ponta a ponta no navegador e Android WebView seguem pendentes. O armazenamento operacional e a publicação continuam no fluxo legado.
+
+## Continuação a partir de a6d1386
+
+O recebimento confirmado com código de local passa a compor o saldo isolado do estoque diretamente do evento de recebimento. A saída e as reservas validam esse saldo composto sob o mesmo lock local. A retentativa usa o mesmo identificador de operação. Eventos antigos de teste sem local continuam na projeção histórica e ficam fora do saldo por endereço. O controle de versão apresentado pelo estoque continua sendo a versão do histórico de movimentos do SKU. Em teste real, NF:107364834-94 e requisição 188468fd-2c7a-4234-bf2a-57e8aee010c1 produziram saldo 0 antes da conferência, 5 depois de confirmar e 1 após saída repetida de quatro unidades (19084 ms). Outro runtime confirmou os saldos nos locais A e B.
+
+Categorias agora reutiliza o catálogo Node e o lock compartilhado. A implementação preserva os padrões de ícone, cor e visibilidade encontrados em AP_Modulo_categorias, além de impedir nome duplicado. No Sheets real, CAT-a9febe5b9fa243d4c1652a40 foi criada, repetida, verificada contra um nome duplicado e atualizada para versão 2, em 6230 ms. A exclusão com verificação dos itens que usam a categoria permanece no legado. npm test passou.
+
+Para retomar, a próxima dependência do inventário é validar o contrato de locais e o vínculo da contagem ao saldo por local. A matriz acima distingue os recortes validados da migração operacional. Nenhum motor tem paridade operacional completa demonstrada.

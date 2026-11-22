@@ -7,13 +7,29 @@ const fail = code => Object.assign(new Error(code), { code });
 const valid = value => typeof value === 'string' && /^[\w-]{1,80}$/.test(value);
 const newBalance = () => ({ saldo: 0, reservado: 0 });
 
-function createStockEngine({ core, store, coordinate = work => work(), clock = () => new Date() }) {
+function createStockEngine({ core, store, receipts, coordinate = work => work(), clock = () => new Date() }) {
   const queue = new StorageOperations();
   async function authorize(token, access) {
     await core.authorizeSession(token, 'stock:' + access);
     const session = await core.getSession(token);
     if (!session?.userId) throw fail('SESSION_INVALID');
     return String(session.userId);
+  }
+
+  async function receivedByLocation(sku) {
+    const balances = new Map();
+    for (const receipt of await receipts.events()) {
+      if (receipt.action !== 'receber' || !valid(receipt.local)) continue;
+      for (const item of receipt.movimentos ?? []) {
+        if (item.sku !== sku) continue;
+        const total = (balances.get(receipt.local) ?? 0) + item.quantidade;
+        if (!Number.isSafeInteger(item.quantidade) || item.quantidade <= 0 || !Number.isSafeInteger(total)) {
+          throw fail('ESTOQUE_RECEBIMENTO_INVALIDO');
+        }
+        balances.set(receipt.local, total);
+      }
+    }
+    return balances;
   }
 
   async function movimentar(token, input) {
@@ -63,12 +79,14 @@ function createStockEngine({ core, store, coordinate = work => work(), clock = (
         default: throw fail('ESTOQUE_ACAO_INVALIDA');
       }
 
+      const received = await receivedByLocation(sku);
       for (const delta of deltas) {
         const prior = balances.get(delta.local) ?? newBalance();
         const saldo = prior.saldo + delta.saldo;
         const reservado = prior.reservado + delta.reservado;
-        if (!Number.isSafeInteger(saldo) || !Number.isSafeInteger(reservado) ||
-            saldo < 0 || reservado < 0 || reservado > saldo) throw fail('ESTOQUE_SALDO_INSUFICIENTE');
+        const total = saldo + (received.get(delta.local) ?? 0);
+        if (!Number.isSafeInteger(saldo) || !Number.isSafeInteger(reservado) || !Number.isSafeInteger(total) ||
+            total < 0 || reservado < 0 || reservado > total) throw fail('ESTOQUE_SALDO_INSUFICIENTE');
         balances.set(delta.local, { saldo, reservado });
       }
 
@@ -90,10 +108,14 @@ function createStockEngine({ core, store, coordinate = work => work(), clock = (
     async saldo(token, sku, local) {
       await authorize(token, 'read');
       if (!valid(sku) || !valid(local)) throw fail('ESTOQUE_OPERACAO_INVALIDA');
-      const latest = (await store.events()).reduce((prior, event) =>
-        event.id === sku && event.version > (prior?.version ?? 0) ? event : prior, null);
-      const balance = Object.hasOwn(latest?.note.locais ?? {}, local) ? latest.note.locais[local] : newBalance();
-      return { ...balance, disponivel: balance.saldo - balance.reservado, version: latest?.version ?? 0 };
+      return coordinate(async () => {
+        const latest = (await store.events()).reduce((prior, event) =>
+          event.id === sku && event.version > (prior?.version ?? 0) ? event : prior, null);
+        const balance = Object.hasOwn(latest?.note.locais ?? {}, local) ? latest.note.locais[local] : newBalance();
+        const saldo = balance.saldo + ((await receivedByLocation(sku)).get(local) ?? 0);
+        if (!Number.isSafeInteger(saldo) || saldo < balance.reservado) throw fail('ESTOQUE_SALDO_INVALIDO');
+        return { saldo, reservado: balance.reservado, disponivel: saldo - balance.reservado, version: latest?.version ?? 0 };
+      });
     }
   };
 }

@@ -3,7 +3,7 @@
 const { createHash } = require('node:crypto');
 const { StorageOperations } = require('../../database/storage-operations');
 
-const TEST_TABLES = { nf: 'NF_CORE_TESTE', receiving: 'RECEBIMENTO_CORE_TESTE', stock: 'ESTOQUE_CORE_TESTE', itens: 'ITENS_CORE_TESTE', fornecedores: 'FORNECEDORES_CORE_TESTE' };
+const TEST_TABLES = { nf: 'NF_CORE_TESTE', receiving: 'RECEBIMENTO_CORE_TESTE', stock: 'ESTOQUE_CORE_TESTE', itens: 'ITENS_CORE_TESTE', fornecedores: 'FORNECEDORES_CORE_TESTE', categorias: 'CATEGORIAS_CORE_TESTE' };
 const HEADERS = ['EVENTO_JSON'];
 const hash = value => createHash('sha256').update(value).digest('hex');
 const digits = value => String(value ?? '').replace(/\D/g, '');

@@ -14,6 +14,7 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
   const stockRows = [['EVENTO_JSON']];
   const itemRows = [['EVENTO_JSON']];
   const supplierRows = [['EVENTO_JSON']];
+  const categoryRows = [['EVENTO_JSON']];
   const markers = new Set();
   let loseResponse = true;
   let writes = 0;
@@ -25,17 +26,17 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
         if (new URL(url).searchParams.has('fields') && new URL(url).searchParams.get('fields').startsWith('namedRanges')) {
           return { data: { namedRanges: [...markers].map(namedRangeId => ({ namedRangeId })) } };
         }
-        if (path.includes('/values/')) return { data: { values: structuredClone(path.includes('RECEBIMENTO_CORE_TESTE') ? receivingRows : path.includes('ESTOQUE_CORE_TESTE') ? stockRows : path.includes('ITENS_CORE_TESTE') ? itemRows : path.includes('FORNECEDORES_CORE_TESTE') ? supplierRows : rows) } };
+        if (path.includes('/values/')) return { data: { values: structuredClone(path.includes('RECEBIMENTO_CORE_TESTE') ? receivingRows : path.includes('ESTOQUE_CORE_TESTE') ? stockRows : path.includes('ITENS_CORE_TESTE') ? itemRows : path.includes('FORNECEDORES_CORE_TESTE') ? supplierRows : path.includes('CATEGORIAS_CORE_TESTE') ? categoryRows : rows) } };
         return { data: { spreadsheetId: 'test-only', properties: { title },
-          sheets: [{ properties: { title: 'NF_CORE_TESTE', sheetId: 7 } }, { properties: { title: 'RECEBIMENTO_CORE_TESTE', sheetId: 8 } }, { properties: { title: 'ESTOQUE_CORE_TESTE', sheetId: 9 } }, { properties: { title: 'ITENS_CORE_TESTE', sheetId: 10 } }, { properties: { title: 'FORNECEDORES_CORE_TESTE', sheetId: 11 } }] } };
+          sheets: [{ properties: { title: 'NF_CORE_TESTE', sheetId: 7 } }, { properties: { title: 'RECEBIMENTO_CORE_TESTE', sheetId: 8 } }, { properties: { title: 'ESTOQUE_CORE_TESTE', sheetId: 9 } }, { properties: { title: 'ITENS_CORE_TESTE', sheetId: 10 } }, { properties: { title: 'FORNECEDORES_CORE_TESTE', sheetId: 11 } }, { properties: { title: 'CATEGORIAS_CORE_TESTE', sheetId: 12 } }] } };
       }
       writes++;
       const append = data.requests.at(-1);
       const names = data.requests.slice(0, -1).map(request => request.addNamedRange.namedRange.namedRangeId);
       if (names.some(name => markers.has(name))) throw { response: { status: 400 } };
       names.forEach(name => markers.add(name));
-      assert.ok([7, 8, 9, 10, 11].includes(append.appendCells.sheetId));
-      const targetRows = append.appendCells.sheetId === 8 ? receivingRows : append.appendCells.sheetId === 9 ? stockRows : append.appendCells.sheetId === 10 ? itemRows : append.appendCells.sheetId === 11 ? supplierRows : rows;
+      assert.ok([7, 8, 9, 10, 11, 12].includes(append.appendCells.sheetId));
+      const targetRows = append.appendCells.sheetId === 8 ? receivingRows : append.appendCells.sheetId === 9 ? stockRows : append.appendCells.sheetId === 10 ? itemRows : append.appendCells.sheetId === 11 ? supplierRows : append.appendCells.sheetId === 12 ? categoryRows : rows;
       targetRows.push([append.appendCells.rows[0].values[0].userEnteredValue.stringValue]);
       if (loseResponse) {
         loseResponse = false;
@@ -111,9 +112,11 @@ test('requisição e compra só geram entrada após conferência e recebem em du
   });
   await receiving.comprar(token, { id, operation: 'purchase', version: 1, compra: 'PO-01' });
   assert.equal(await receiving.entradas(token, 'SYNTHETIC'), 0);
+  const stock = runtime.getStockEngine();
+  assert.equal((await stock.saldo(token, 'SYNTHETIC', 'A')).saldo, 0);
   const input = {
     id, operation: 'receipt-a', version: 2, nfId: first.id, nfVersion: 1,
-    conferencia: true, itens: [{ sku: 'SYNTHETIC', quantidade: 2 }]
+    conferencia: true, local: 'A', itens: [{ sku: 'SYNTHETIC', quantidade: 2 }]
   };
   await assert.rejects(receiving.receber(token, { ...input, conferencia: false }), { code: 'CONFERENCIA_INVALIDA' });
   await assert.rejects(receiving.receber(token, { ...input, itens: [{ sku: 'SYNTHETIC', quantidade: 1 }] }),
@@ -135,6 +138,13 @@ test('requisição e compra só geram entrada após conferência e recebem em du
   assert.equal(final.note.itens[0].pendente, 0);
   assert.equal(await receiving.entradas(token, 'SYNTHETIC'), 5);
   assert.equal((await receiving.consultar(token, id)).version, 4);
+  const reopened = (await createRuntime(provider, { invoiceTestStorage: provider, credential })).getStockEngine();
+  assert.equal((await reopened.saldo(token, 'SYNTHETIC', 'A')).saldo, 5);
+  assert.equal((await reopened.saldo(token, 'SYNTHETIC', 'B')).saldo, 0);
+  const movement = { sku: 'SYNTHETIC', local: 'A', version: 0, action: 'saida', quantidade: 4, operation: 'receipt-spend' };
+  await reopened.movimentar(token, movement);
+  await reopened.movimentar(token, movement);
+  assert.deepEqual(await stock.saldo(token, 'SYNTHETIC', 'A'), { saldo: 1, reservado: 0, disponivel: 1, version: 1 });
 });
 
 test('edição e recebimento simultâneos disputam a mesma versão da NF em duas instâncias', async () => {
@@ -241,4 +251,26 @@ test('itens e fornecedores passam pelo Core, deduplicam e preservam a versão e 
     { ok: true, dados: supplier.note, cadastrado: true });
   assert.equal((await engine.consultarLegado(token, 'fornecedores', 'porCnpj', { cnpj: '11111111111111' })).cadastrado, false);
   await assert.rejects(engine.salvar('wrong', 'itens', item), { code: 'SESSION_INVALID' });
+});
+
+test('categorias são versionadas com nome único e valores padrão do legado', async () => {
+  const { provider } = fakeGoogle();
+  const runtime = await createRuntime(provider, { invoiceTestStorage: provider, credential });
+  const catalog = runtime.getCatalogEngine(), token = credential.token;
+  const input = { operation: 'category-create', version: 0, data: { nome: 'Sintética' } };
+  const event = await catalog.salvar(token, 'categorias', input);
+  assert.deepEqual(await catalog.salvar(token, 'categorias', input), event);
+  assert.equal(event.note.icone, 'caixa');
+  assert.equal(event.note.cor, 'ico-navy');
+  assert.equal(event.note.visivel, true);
+  await assert.rejects(catalog.salvar(token, 'categorias', {
+    operation: 'category-duplicate', version: 0, data: { nome: 'SINTÉTICA' }
+  }), { code: 'CATEGORIA_DUPLICADA' });
+  const updated = await catalog.salvar(token, 'categorias', {
+    operation: 'category-edit', version: 1, data: { id: event.id, nome: event.note.nome, visivel: false }
+  });
+  assert.equal(updated.note.criadoEm, event.note.criadoEm);
+  assert.equal(updated.note.visivel, false);
+  assert.deepEqual(await catalog.consultarLegado(token, 'categorias', 'listar'),
+    { ok: true, dados: [updated.note] });
 });

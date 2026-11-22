@@ -74,6 +74,7 @@ function createReceivingEngine({ core, store, invoices, coordinate = work => wor
       } else {
         if (!['COMPRADA', 'PARCIAL'].includes(prior?.note.status) || request.conferencia !== true ||
             typeof request.nfId !== 'string' || !quantity(request.nfVersion)) throw error('CONFERENCIA_INVALIDA');
+        if (request.local !== undefined && !identifier(request.local)) throw error('RECEBIMENTO_LOCAL_INVALIDO');
         exclusive = request.nfId;
         if (before.some(event => event.exclusive === exclusive)) throw error('NF_JA_VINCULADA');
         const received = lines(request.itens);
@@ -104,6 +105,7 @@ function createReceivingEngine({ core, store, invoices, coordinate = work => wor
       if (exclusive) {
         event.exclusive = exclusive;
         event.nfVersion = request.nfVersion;
+        if (request.local !== undefined) event.local = request.local;
         event.movimentos = request.itens.map(({ sku, quantidade }) => ({ sku, quantidade }));
         event.notificacao = { id: operation, solicitante: note.solicitante, requisicao: note.numero, status: 'PENDENTE' };
       }
