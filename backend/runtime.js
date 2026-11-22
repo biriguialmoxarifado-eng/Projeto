@@ -44,7 +44,15 @@ async function createRuntime(storage, { sqlite = false, credential, invoiceTestS
   }
   const operations = sqlite ? new StorageOperations() : undefined;
   const database = new DataLayer(new DatabaseAdapter(storage, { operations }));
-  const core = new AlmoxaCore(sqlite || invoiceTestStorage ? diagnosticSecurity(credential, Boolean(invoiceTestStorage)) : {});
+  // As permissões dos módulos vinham amarradas a invoiceTestStorage, ou
+  // seja, só existiam quando havia planilha do Google. Sem ela o papel
+  // ficava apenas com diagnostics:read, e a sessão era recusada antes de
+  // qualquer tela abrir. Rodar em SQLite concede o mesmo conjunto.
+  //
+  // O acesso continua protegido pelo que já protegia: o servidor só
+  // escuta em 127.0.0.1 e exige o token local de 32 caracteres ou mais.
+  const comModulos = Boolean(invoiceTestStorage || sqlite);
+  const core = new AlmoxaCore(sqlite || invoiceTestStorage ? diagnosticSecurity(credential, comModulos) : {});
   core.registerModule({
     id: 'database',
     version: '2.1.0',
