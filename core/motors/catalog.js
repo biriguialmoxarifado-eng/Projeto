@@ -6,7 +6,7 @@ const fail = code => Object.assign(new Error(code), { code });
 const validKey = id => typeof id === 'string' && /^[\w.-]{1,80}$/.test(id);
 const fields = {
   categorias: ['nome', 'icone', 'cor', 'visivel'],
-  itens: ['sku', 'descricao', 'codigoBarras', 'categoria', 'subcategoria', 'marca', 'modelo', 'unidade', 'ncm', 'status'],
+  itens: ['sku', 'descricao', 'codigoBarras', 'categoria', 'subcategoria', 'marca', 'modelo', 'unidade', 'ncm', 'status', 'valorUnitario', 'fornecedor'],
   fornecedores: ['cnpj', 'razaoSocial', 'nomeFantasia', 'email', 'telefone', 'contato', 'categoria', 'prazoEntrega', 'status']
 };
 

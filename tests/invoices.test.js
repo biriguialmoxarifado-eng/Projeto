@@ -15,6 +15,8 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
   const itemRows = [['EVENTO_JSON']];
   const supplierRows = [['EVENTO_JSON']];
   const categoryRows = [['EVENTO_JSON']];
+  const purchaseRows = [['EVENTO_JSON']];
+  const requestRows = [['EVENTO_JSON']];
   const markers = new Set();
   let loseResponse = true;
   let writes = 0;
@@ -26,17 +28,17 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
         if (new URL(url).searchParams.has('fields') && new URL(url).searchParams.get('fields').startsWith('namedRanges')) {
           return { data: { namedRanges: [...markers].map(namedRangeId => ({ namedRangeId })) } };
         }
-        if (path.includes('/values/')) return { data: { values: structuredClone(path.includes('RECEBIMENTO_CORE_TESTE') ? receivingRows : path.includes('ESTOQUE_CORE_TESTE') ? stockRows : path.includes('ITENS_CORE_TESTE') ? itemRows : path.includes('FORNECEDORES_CORE_TESTE') ? supplierRows : path.includes('CATEGORIAS_CORE_TESTE') ? categoryRows : rows) } };
+        if (path.includes('/values/')) return { data: { values: structuredClone(path.includes('RECEBIMENTO_CORE_TESTE') ? receivingRows : path.includes('ESTOQUE_CORE_TESTE') ? stockRows : path.includes('ITENS_CORE_TESTE') ? itemRows : path.includes('FORNECEDORES_CORE_TESTE') ? supplierRows : path.includes('CATEGORIAS_CORE_TESTE') ? categoryRows : path.includes('COMPRAS_CORE_TESTE') ? purchaseRows : path.includes('SOLICITACOES_CORE_TESTE') ? requestRows : rows) } };
         return { data: { spreadsheetId: 'test-only', properties: { title },
-          sheets: [{ properties: { title: 'NF_CORE_TESTE', sheetId: 7 } }, { properties: { title: 'RECEBIMENTO_CORE_TESTE', sheetId: 8 } }, { properties: { title: 'ESTOQUE_CORE_TESTE', sheetId: 9 } }, { properties: { title: 'ITENS_CORE_TESTE', sheetId: 10 } }, { properties: { title: 'FORNECEDORES_CORE_TESTE', sheetId: 11 } }, { properties: { title: 'CATEGORIAS_CORE_TESTE', sheetId: 12 } }] } };
+          sheets: [{ properties: { title: 'NF_CORE_TESTE', sheetId: 7 } }, { properties: { title: 'RECEBIMENTO_CORE_TESTE', sheetId: 8 } }, { properties: { title: 'ESTOQUE_CORE_TESTE', sheetId: 9 } }, { properties: { title: 'ITENS_CORE_TESTE', sheetId: 10 } }, { properties: { title: 'FORNECEDORES_CORE_TESTE', sheetId: 11 } }, { properties: { title: 'CATEGORIAS_CORE_TESTE', sheetId: 12 } }, { properties: { title: 'COMPRAS_CORE_TESTE', sheetId: 13 } }, { properties: { title: 'SOLICITACOES_CORE_TESTE', sheetId: 14 } }] } };
       }
       writes++;
       const append = data.requests.at(-1);
       const names = data.requests.slice(0, -1).map(request => request.addNamedRange.namedRange.namedRangeId);
       if (names.some(name => markers.has(name))) throw { response: { status: 400 } };
       names.forEach(name => markers.add(name));
-      assert.ok([7, 8, 9, 10, 11, 12].includes(append.appendCells.sheetId));
-      const targetRows = append.appendCells.sheetId === 8 ? receivingRows : append.appendCells.sheetId === 9 ? stockRows : append.appendCells.sheetId === 10 ? itemRows : append.appendCells.sheetId === 11 ? supplierRows : append.appendCells.sheetId === 12 ? categoryRows : rows;
+      assert.ok([7, 8, 9, 10, 11, 12, 13, 14].includes(append.appendCells.sheetId));
+      const targetRows = append.appendCells.sheetId === 8 ? receivingRows : append.appendCells.sheetId === 9 ? stockRows : append.appendCells.sheetId === 10 ? itemRows : append.appendCells.sheetId === 11 ? supplierRows : append.appendCells.sheetId === 12 ? categoryRows : append.appendCells.sheetId === 13 ? purchaseRows : append.appendCells.sheetId === 14 ? requestRows : rows;
       targetRows.push([append.appendCells.rows[0].values[0].userEnteredValue.stringValue]);
       if (loseResponse) {
         loseResponse = false;
@@ -195,6 +197,10 @@ test('adaptador de leitura preserva o envelope dos clientes para lista, detalhe 
   assert.equal(desktop.ok, true);
   assert.equal(desktop.dados[0].idNF, invoice.id);
   assert.equal(desktop.dados[0].valorItens, 6);
+  assert.equal(desktop.dados[0].itens[0].qtd, 2);
+  assert.equal(desktop.dados[0].itens[0].idNF, invoice.id);
+  assert.deepEqual(await api(token, 'listar', { busca: ' synthetic ' }), desktop);
+  assert.deepEqual(await api(token, 'listar', { busca: 'ausente' }), { ok: true, dados: [] });
   const campo = await api(token, 'obter', { numero: '555', serie: '2' });
   assert.deepEqual(campo, { ok: true, dados: desktop.dados[0] });
   assert.deepEqual(await api(token, 'itens', { idNF: invoice.id }), { ok: true, dados: campo.dados.itens });
@@ -222,6 +228,12 @@ test('estoque isolado protege reservas, transfere em um evento e estorna uma ún
     { code: 'ESTOQUE_ESTORNO_INVALIDO' });
   assert.deepEqual(await stock.saldo(token, 'SYNTHETIC', 'A'), { saldo: 8, reservado: 1, disponivel: 7, version: 7 });
   assert.deepEqual(await stock.saldo(token, 'SYNTHETIC', 'B'), { saldo: 0, reservado: 0, disponivel: 0, version: 7 });
+  await assert.rejects(move(7, 'ajuste', 0), { code: 'ESTOQUE_SALDO_INSUFICIENTE' });
+  await move(7, 'ajuste', 5);
+  assert.equal((await stock.saldo(token, 'SYNTHETIC', 'A')).saldo, 5);
+  const result = await stock.movimentacoes(token, { sku: 'SYNTHETIC', somenteSaidas: true, limite: 200 });
+  assert.ok(result.dados.every(movement => movement.qtd < 0));
+  assert.ok(result.dados.some(movement => movement.tipo === 'AJUSTE' && movement.qtd === -3));
 });
 
 test('itens e fornecedores passam pelo Core, deduplicam e preservam a versão e a identidade', async () => {
@@ -273,4 +285,65 @@ test('categorias são versionadas com nome único e valores padrão do legado', 
   assert.equal(updated.note.visivel, false);
   assert.deepEqual(await catalog.consultarLegado(token, 'categorias', 'listar'),
     { ok: true, dados: [updated.note] });
+});
+
+test('pré-compra reforça a necessidade máxima e mantém histórico e envelope do legado', async () => {
+  const { provider } = fakeGoogle();
+  const load = () => createRuntime(provider, { invoiceTestStorage: provider, credential });
+  const runtime = await load(), token = credential.token;
+  const purchases = runtime.getPurchaseEngine();
+  const catalog = runtime.getCatalogEngine();
+  const first = { operation: 'pre-one', sku: 'SYN-PURCHASE', qtd: 3 };
+  assert.equal((await purchases.precompra(token, first)).codigo, 'ITEM_NAO_ENCONTRADO');
+  await catalog.salvar(token, 'itens', { operation: 'make-purchase-item', version: 0,
+    data: { sku: first.sku, descricao: 'Sintético', valorUnitario: 5, fornecedor: 'Teste' } });
+  const created = await purchases.precompra(token, first);
+  assert.equal(created.criado, true);
+  assert.equal(created.dados.id, '#PC-000001');
+  assert.equal(created.dados.valorEstimado, 15);
+  assert.deepEqual(await purchases.precompra(token, first), created);
+  const second = (await load()).getPurchaseEngine();
+  const reinforced = await Promise.all([
+    purchases.precompra(token, { ...first, operation: 'pre-two', qtd: 7 }),
+    second.precompra(token, { ...first, operation: 'pre-three', qtd: 2 })
+  ]);
+  assert.ok(reinforced.every(result => result.dados.reforcada && result.dados.id === created.dados.id));
+  const result = await second.consultarLegado(token, 'listar', { tipo: 'PRE_COMPRA', status: 'AGUARDANDO_APROVACAO' });
+  assert.equal(result.dados.length, 1);
+  assert.equal(result.dados[0].qtd, 7);
+  assert.equal(JSON.parse(result.dados[0].historico).length, 3);
+  assert.deepEqual(await second.consultarLegado(token, 'pedidos'), { ok: true, dados: [] });
+  await assert.rejects(second.precompra(token, { ...first, qtd: 4 }), { code: 'COMPRA_CONFLITO_IDEMPOTENCIA' });
+  const transition = { id: created.dados.id, operation: 'pre-approve', version: 3, status: 'EM_COTACAO' };
+  const changed = await second.alterarStatus(token, transition);
+  assert.deepEqual(await purchases.alterarStatus(token, transition), changed);
+  assert.deepEqual(changed, { ok: true, dados: { id: created.dados.id, status: 'EM_COTACAO' } });
+  await assert.rejects(purchases.alterarStatus(token, { ...transition, operation: 'pre-stale' }),
+    { code: 'COMPRA_CONFLITO_VERSAO' });
+  assert.equal((await purchases.consultarLegado(token, 'listar', { status: 'EM_COTACAO' })).dados.length, 1);
+});
+
+test('solicitação abre uma única reserva pendente, informa falta e deixa saldo intacto', async () => {
+  const { provider } = fakeGoogle();
+  const load = () => createRuntime(provider, { invoiceTestStorage: provider, credential });
+  const first = await load(), second = await load(), token = credential.token;
+  const stock = first.getStockEngine();
+  await stock.movimentar(token, { sku: 'SYN-REQUEST', local: 'A', version: 0,
+    operation: 'request-stock', action: 'entrada', quantidade: 2 });
+  const request = { operation: 'request-shop', local: 'A',
+    itens: JSON.stringify([{ sku: 'SYN-REQUEST', qtd: 3, preco: 5 }]) };
+  const [a, b] = await Promise.all([
+    first.getRequestEngine().criar(token, request), second.getRequestEngine().criar(token, request)
+  ]);
+  assert.deepEqual(a, b);
+  assert.equal(a.dados.valor, 15);
+  assert.equal(a.dados.status, 'ABERTA');
+  assert.equal(a.reserva.reserva.status, 'PENDENTE_APROVACAO');
+  assert.equal(a.reserva.semSaldo.length, 1);
+  const { dados } = await second.getRequestEngine().listar(token);
+  assert.equal(dados.length, 1);
+  assert.equal(dados[0].status, 'CONVERTIDA');
+  assert.equal(dados[0].reserva, a.reserva.protocolo);
+  assert.equal(dados[0].itens[0].qtd, 3);
+  assert.deepEqual(await stock.saldo(token, 'SYN-REQUEST', 'A'), { saldo: 2, reservado: 0, disponivel: 2, version: 1 });
 });

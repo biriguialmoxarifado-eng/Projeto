@@ -12,11 +12,11 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 
 | Motor | Estágio |
 | --- | --- |
-| nf | Integrado em teste. Compatibilidade de leitura parcial. |
+| nf | Integrado em teste. Busca e ordenação do legado e campos públicos de itens cobertos. Escrita operacional e recuperação de órfãs pendentes. |
 | estoque | Integrado em teste com recebimento por local. Paridade operacional pendente. |
-| compras | Integrado em teste no vínculo de recebimento. Contrato completo pendente. |
-| solicitacoes | Integrado em teste no vínculo de recebimento. Contrato completo pendente. |
-| reservas | Testado no estoque isolado. Alçadas e fluxo de reserva legado pendentes. |
+| compras | Pré-compra, reforço, filtros e alteração de status integrados em teste. Emissão de pedido e conversão de pré-compra pendentes. |
+| solicitacoes | Criação e listagem com reserva pendente integradas em teste. Aprovação e retirada operacionais pendentes. |
+| reservas | Criação pendente pela solicitação integrada em teste. Decisão, alçadas e retirada operacional pendentes. |
 | saidas | Testado no estoque isolado. Fluxo operacional legado pendente. |
 | auth | Parcial. Sessão Node testada, login operacional pendente. |
 | permissoes | Parcial. Escopos de teste aprovados, alçadas operacionais pendentes. |
@@ -78,3 +78,13 @@ O recebimento confirmado com código de local passa a compor o saldo isolado do 
 Categorias agora reutiliza o catálogo Node e o lock compartilhado. A implementação preserva os padrões de ícone, cor e visibilidade encontrados em AP_Modulo_categorias, além de impedir nome duplicado. No Sheets real, CAT-a9febe5b9fa243d4c1652a40 foi criada, repetida, verificada contra um nome duplicado e atualizada para versão 2, em 6230 ms. A exclusão com verificação dos itens que usam a categoria permanece no legado. npm test passou.
 
 Para retomar, a próxima dependência do inventário é validar o contrato de locais e o vínculo da contagem ao saldo por local. A matriz acima distingue os recortes validados da migração operacional. Nenhum motor tem paridade operacional completa demonstrada.
+
+## Continuação a partir de 211b1ac
+
+A leitura NF usa o contrato de AP_NF_listar e AP_NF_itemPublico_: busca por cabeçalho ou item, ordenação por entrada ou emissão e campos públicos. A regressão automatizada validou busca e envelope básico. O ajuste de estoque define o saldo desejado no local e recusa quantidades que deixariam a reserva descoberta. Movimentações incluem recebimentos confirmados e permitem filtrar saídas negativas.
+
+Ao portar AP_Modulo_compras, a pré-compra mantém um registro aberto por SKU e reforça a quantidade pelo máximo, com histórico e releitura. No Sheets real, #PC-000001 manteve uma linha com quantidade 7 após dois reforços concorrentes, e o estoque sintético confirmou saldo 5 e ajuste -3 (17406 ms). O segundo ensaio confirmou a alteração para EM_COTACAO e retentativa.
+
+AP_Modulo_solicitacoes foi usado como referência para criação e listagem. O ensaio grava solicitação e reserva pendente no mesmo evento. A falta de saldo é informativa e a criação não movimenta estoque. No Sheets real, duas submissões da mesma operação resultaram em #SOL-000001 e #RES-000001, com saldo preservado em 2 (11526 ms, incluindo a alteração de status de compra). npm test passou.
+
+A emissão de pedidos em lote e a conversão da pré-compra requerem persistência coordenada de todas as linhas e do vínculo. A aprovação e a retirada da reserva ainda precisam dos contratos e das regras de alçada. Mantenha a escrita operacional no Apps Script até validar esses fluxos, NF com órfãs, formato completo de movimentos e os clientes publicados.

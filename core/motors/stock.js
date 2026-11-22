@@ -38,7 +38,7 @@ function createStockEngine({ core, store, receipts, coordinate = work => work(),
     if (!valid(sku) || !valid(operation) || !Number.isSafeInteger(version) || version < 0 ||
         version >= Number.MAX_SAFE_INTEGER) throw fail('ESTOQUE_OPERACAO_INVALIDA');
     if (action === 'estorno' ? !valid(original) :
-      !valid(local) || !Number.isSafeInteger(quantidade) || quantidade <= 0) throw fail('ESTOQUE_MOVIMENTO_INVALIDO');
+      !valid(local) || !Number.isSafeInteger(quantidade) || quantidade < (action === 'ajuste' ? 0 : 1)) throw fail('ESTOQUE_MOVIMENTO_INVALIDO');
     const fingerprint = createHash('sha256')
       .update(JSON.stringify([actor, sku, local, destino, action, version, quantidade, original])).digest('hex');
 
@@ -56,10 +56,16 @@ function createStockEngine({ core, store, receipts, coordinate = work => work(),
       const previous = latest(before);
       if ((previous?.version ?? 0) !== version) throw fail('ESTOQUE_CONFLITO_VERSAO');
       const balances = new Map(Object.entries(previous?.note.locais ?? {}));
+      const received = await receivedByLocation(sku);
       let deltas;
       switch (action) {
         case 'entrada':
         case 'devolucao': deltas = [{ local, saldo: quantidade, reservado: 0 }]; break;
+        case 'ajuste': {
+          const previousTotal = (balances.get(local)?.saldo ?? 0) + (received.get(local) ?? 0);
+          deltas = [{ local, saldo: quantidade - previousTotal, reservado: 0 }];
+          break;
+        }
         case 'saida': deltas = [{ local, saldo: -quantidade, reservado: 0 }]; break;
         case 'reservar': deltas = [{ local, saldo: 0, reservado: quantidade }]; break;
         case 'liberar': deltas = [{ local, saldo: 0, reservado: -quantidade }]; break;
@@ -79,7 +85,6 @@ function createStockEngine({ core, store, receipts, coordinate = work => work(),
         default: throw fail('ESTOQUE_ACAO_INVALIDA');
       }
 
-      const received = await receivedByLocation(sku);
       for (const delta of deltas) {
         const prior = balances.get(delta.local) ?? newBalance();
         const saldo = prior.saldo + delta.saldo;
@@ -105,6 +110,30 @@ function createStockEngine({ core, store, receipts, coordinate = work => work(),
 
   return {
     movimentar,
+    async movimentacoes(token, { sku, limite = 200, somenteSaidas = false } = {}) {
+      await authorize(token, 'read');
+      if ((sku !== undefined && !valid(sku)) || !Number.isSafeInteger(limite) || limite < 1 || limite > 200) {
+        throw fail('ESTOQUE_OPERACAO_INVALIDA');
+      }
+      return coordinate(async () => {
+        const events = await store.events();
+        const movements = events.flatMap(event => (event.deltas ?? []).map(delta => ({
+          id: event.operation, data: event.at, sku: event.id, tipo: event.action.toUpperCase(),
+          qtd: delta.saldo, local: delta.local, usuario: event.actor
+        })));
+        for (const receipt of await receipts.events()) {
+          if (receipt.action !== 'receber' || !valid(receipt.local)) continue;
+          for (const item of receipt.movimentos ?? []) movements.push({
+            id: receipt.operation, data: receipt.at, sku: item.sku, tipo: 'ENTRADA',
+            qtd: item.quantidade, local: receipt.local, usuario: receipt.actor, documento: receipt.exclusive
+          });
+        }
+        const filtered = movements.filter(movement =>
+          (sku === undefined || movement.sku === sku) && (!somenteSaidas || movement.qtd < 0));
+        filtered.sort((a, b) => Date.parse(b.data) - Date.parse(a.data));
+        return { ok: true, dados: filtered.slice(0, limite) };
+      });
+    },
     async saldo(token, sku, local) {
       await authorize(token, 'read');
       if (!valid(sku) || !valid(local)) throw fail('ESTOQUE_OPERACAO_INVALIDA');

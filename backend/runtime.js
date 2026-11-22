@@ -10,8 +10,8 @@ const { createHash, timingSafeEqual } = require('node:crypto');
 
 function diagnosticSecurity(credential, invoices) {
   const authorizationProvider = new AuthorizationManager();
-  const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read', 'catalog:read'] : [];
-  const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write', 'catalog:write'] : [];
+  const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read', 'catalog:read', 'purchases:read', 'requests:read'] : [];
+  const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write', 'catalog:write', 'purchases:write', 'requests:write'] : [];
   authorizationProvider.registerRole('reader', ['diagnostics:read', ...invoiceRead]);
   authorizationProvider.registerRole('operator', ['diagnostics:read', 'diagnostics:write', ...invoiceRead, ...invoiceWrite]);
   const digest = value => createHash('sha256').update(value).digest();
@@ -63,6 +63,8 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
   let invoiceReadAdapter;
   let stockEngine;
   let catalogEngine;
+  let purchaseEngine;
+  let requestEngine;
   return {
     core, diagnostics: storage, database,
     getInvoiceEngine() {
@@ -89,6 +91,24 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
         }
       });
       return catalogEngine;
+    },
+    getPurchaseEngine() {
+      const catalog = this.getCatalogEngine();
+      const { TestInvoiceStore } = require('../core/motors/invoices');
+      const { createPurchaseEngine } = require('../core/motors/purchases');
+      purchaseEngine ??= createPurchaseEngine({
+        core, catalog, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'compras')
+      });
+      return purchaseEngine;
+    },
+    getRequestEngine() {
+      const stock = this.getStockEngine();
+      const { TestInvoiceStore } = require('../core/motors/invoices');
+      const { createRequestEngine } = require('../core/motors/requests');
+      requestEngine ??= createRequestEngine({
+        core, stock, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'solicitacoes')
+      });
+      return requestEngine;
     },
     getStockEngine() {
       if (!invoiceTestStorage) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'ESTOQUE_TESTE_DESATIVADO' });
