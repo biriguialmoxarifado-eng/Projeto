@@ -11,7 +11,7 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
     ['nf', ['listar', 'obter', 'itens', ...(allowWrite ? ['salvar'] : [])]],
     ['nfed', allowWrite ? ['atualizar'] : []],
     ['compras', ['listar', 'precompras', 'pedidos']],
-    ['estoque', ['movimentacoes']],
+    ['estoque', ['movimentacoes', 'saldo', ...(allowWrite ? ['movimentar'] : [])]],
     ['itens', ['listar', 'obter']],
     ['fornecedores', ['listar', 'porCnpj']],
     ['categorias', ['listar']],
@@ -161,7 +161,24 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
           }
         }
       }
-      else if (modulo === 'estoque') result = await runtime.getStockEngine().movimentacoes(token, payload);
+      else if (modulo === 'estoque') {
+        const stock = runtime.getStockEngine();
+        if (acao === 'movimentacoes') result = await stock.movimentacoes(token, payload);
+        else if (acao === 'saldo') result = { ok: true, dados: await stock.saldo(token, payload.sku, payload.local) };
+        else {
+          const { sku, local, tipo, qtd, operacaoCore, versaoCore } = payload;
+          const action = typeof tipo === 'string' ? tipo.toLowerCase() : '';
+          if (typeof sku !== 'string' || !/^SYN-[a-zA-Z0-9-]+$/.test(sku) ||
+              !['entrada', 'saida', 'ajuste'].includes(action)) {
+            error(res, 400, 'ESTOQUE_OPERACAO_INVALIDA', 'Use um SKU sintetico e um tipo de movimento permitido.');
+            return true;
+          }
+          const entry = await stock.movimentar(token, { sku, local, action, quantidade: qtd,
+            operation: operacaoCore, version: versaoCore });
+          result = { ok: true, dados: { sku, local, tipo: action.toUpperCase(), versaoCore: entry.version,
+            operacaoCore: entry.operation } };
+        }
+      }
       else if (modulo === 'compras') result = await runtime.getPurchaseEngine().consultarLegado(token, acao, payload);
       else if (modulo === 'auditoria') result = await runtime.getAdministrationEngine().auditoria(token, acao, payload);
       else if (modulo === 'usuarios') result = await runtime.getAdministrationEngine().usuarios(token, acao, payload);
@@ -200,7 +217,12 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
       else if (['NF_OPERACAO_INVALIDA', 'NF_INVALIDA', 'NF_IDENTIDADE_ALTERADA'].includes(cause.code)) {
         error(res, 400, cause.code, 'Dados da nota invalidos.');
       }
-      else if (cause.code === 'ESTOQUE_OPERACAO_INVALIDA') error(res, 400, cause.code, 'Filtro de estoque invalido.');
+      else if (['ESTOQUE_OPERACAO_INVALIDA', 'ESTOQUE_MOVIMENTO_INVALIDO'].includes(cause.code)) {
+        error(res, 400, cause.code, 'Dados de estoque invalidos.');
+      }
+      else if (['ESTOQUE_CONFLITO_VERSAO', 'ESTOQUE_CONFLITO_IDEMPOTENCIA', 'ESTOQUE_SALDO_INSUFICIENTE'].includes(cause.code)) {
+        error(res, 409, cause.code, 'O movimento conflita com os dados atuais do estoque.');
+      }
       else if (cause.status) error(res, cause.status, cause.code, 'Solicitação inválida.');
       else error(res, 503, 'CORE_INDISPONIVEL', 'O Core de homologação não conseguiu consultar os dados.');
     }

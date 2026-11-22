@@ -5,7 +5,7 @@
     ['nf', new Set(['listar', 'obter', 'itens', ...(writeEnabled ? ['salvar'] : [])])],
     ['nfed', new Set(writeEnabled ? ['atualizar'] : [])],
     ['compras', new Set(['listar', 'precompras', 'pedidos'])],
-    ['estoque', new Set(['movimentacoes'])],
+    ['estoque', new Set(['movimentacoes', 'saldo', ...(writeEnabled ? ['movimentar'] : [])])],
     ['itens', new Set(['listar', 'obter'])],
     ['fornecedores', new Set(['listar', 'porCnpj'])],
     ['categorias', new Set(['listar'])],

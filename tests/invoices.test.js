@@ -566,6 +566,16 @@ test('HTTP preview fiscal exige opt-in e preserva a versao', async () => {
     const session = (await login.json()).dados.token;
     const allowed = await call('listar', session);
     assert.deepEqual(await allowed.json(), { ok: true, dados: [] });
+    const stock = (acao, payload) => call(acao, session, payload, 'estoque');
+    const entrada = { sku: 'SYN-HTTP', local: 'A', tipo: 'ENTRADA', qtd: 5, operacaoCore: 'stock-http', versaoCore: 0 };
+    const registered = await (await stock('movimentar', entrada)).json();
+    assert.equal(registered.dados?.versaoCore, 1);
+    assert.deepEqual(await (await stock('movimentar', entrada)).json(), registered);
+    assert.equal((await stock('movimentar', { ...entrada, operacaoCore: 'stock-stale' })).status, 409);
+    const saida = { ...entrada, tipo: 'SAIDA', qtd: 2, operacaoCore: 'stock-out', versaoCore: 1 };
+    assert.equal((await (await stock('movimentar', saida)).json()).dados?.versaoCore, 2);
+    assert.equal((await (await stock('saldo', entrada)).json()).dados.saldo, 3);
+    assert.equal((await (await stock('movimentacoes', { sku: entrada.sku })).json()).dados.length, 2);
     const note = { numero: '90801', fornecedor: 'TESTE CORE NF', itens: [{ sku: 'SYN' }], operacaoCore: 'fiscal-create' };
     const created = await (await call('salvar', session, note)).json();
     assert.equal(created.dados?.versaoCore, 1, JSON.stringify(created));
