@@ -1,6 +1,7 @@
 'use strict';
 
 const { createHash } = require('node:crypto');
+const { createComplementaryMethods } = require('./complementary');
 const invalid = code => Object.assign(new Error(code), { code });
 const key = value => typeof value === 'string' && /^[\w.-]{1,100}$/.test(value);
 const obraFields = ['nome', 'codigo', 'cliente', 'local', 'almoxarifado', 'responsavel', 'status', 'inicio', 'previsao'];
@@ -49,7 +50,7 @@ function createAdministrationEngine({ core, stores, coordinate, clock = () => ne
       const { id, current, note, response } = prepare(latest(before), at, actor);
       if ((current?.version ?? 0) !== version) throw invalid('ADMIN_CONFLITO_VERSAO');
       const event = { id, operation, version: version + 1, fingerprint, actor, at,
-        action: version ? 'atualizar' : 'criar', note, response };
+        action: input.action ?? (version ? 'atualizar' : 'criar'), note, response };
       let writeError;
       try { await store.append(event); } catch (error) { writeError = error; }
       const after = await store.events().catch(error => { throw writeError ?? error; });
@@ -61,6 +62,7 @@ function createAdministrationEngine({ core, stores, coordinate, clock = () => ne
   }
 
   return {
+    ...createComplementaryMethods({ save, authorize, getRecords: async kind => latest(await stores[kind].events()) }),
     async config(token, action, input = {}) {
       if (!['obter', 'salvar'].includes(action)) return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
       const { chave, valor } = input;

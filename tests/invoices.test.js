@@ -23,7 +23,10 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
     ['USUARIOS_CORE_TESTE', { sheetId: 17, rows: [['EVENTO_JSON']] }],
     ['INVENTARIO_CORE_TESTE', { sheetId: 18, rows: [['EVENTO_JSON']] }],
     ['OCORRENCIAS_CORE_TESTE', { sheetId: 19, rows: [['EVENTO_JSON']] }],
-    ['NOTIFICACOES_CORE_TESTE', { sheetId: 20, rows: [['EVENTO_JSON']] }]
+    ['NOTIFICACOES_CORE_TESTE', { sheetId: 20, rows: [['EVENTO_JSON']] }],
+    ['KITS_CORE_TESTE', { sheetId: 21, rows: [['EVENTO_JSON']] }],
+    ['CALENDARIO_CORE_TESTE', { sheetId: 22, rows: [['EVENTO_JSON']] }],
+    ['CENTROS_CORE_TESTE', { sheetId: 23, rows: [['EVENTO_JSON']] }]
   ]);
   const markers = new Set();
   let loseResponse = true;
@@ -47,7 +50,7 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
       const names = data.requests.slice(0, -1).map(request => request.addNamedRange.namedRange.namedRangeId);
       if (names.some(name => markers.has(name))) throw { response: { status: 400 } };
       names.forEach(name => markers.add(name));
-      assert.ok([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].includes(append.appendCells.sheetId));
+      assert.ok([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23].includes(append.appendCells.sheetId));
       const admin = [...adminRows.values()].find(row => row.sheetId === append.appendCells.sheetId);
       const targetRows = append.appendCells.sheetId === 8 ? receivingRows : append.appendCells.sheetId === 9 ? stockRows : append.appendCells.sheetId === 10 ? itemRows : append.appendCells.sheetId === 11 ? supplierRows : append.appendCells.sheetId === 12 ? categoryRows : append.appendCells.sheetId === 13 ? purchaseRows : append.appendCells.sheetId === 14 ? requestRows : rows;
       (admin?.rows ?? targetRows).push([append.appendCells.rows[0].values[0].userEnteredValue.stringValue]);
@@ -503,4 +506,34 @@ test('ocorrências e notificações persistem com controle de acesso e retentati
   }), { code: 'ACCESS_DENIED' });
   await a.notificacoes(token, 'marcarLida', { id: createdNotice.dados.id, version: 1, operation: 'notice-read' });
   assert.equal((await a.notificacoes(token, 'listar')).dados[0].lida, true);
+});
+
+test('kits, calendário e centros preservam contratos de leitura, idempotência e exclusão auditável', async () => {
+  const { provider } = fakeGoogle();
+  const load = (role = 'operator') => createRuntime(provider, {
+    invoiceTestStorage: provider, credential: { ...credential, role }
+  });
+  const a = (await load()).getAdministrationEngine(), b = (await load()).getAdministrationEngine();
+  const token = credential.token;
+  const kit = { operation: 'kit-one', version: 0, nome: 'Kit Sintético', cargo: 'Operador',
+    itens: JSON.stringify([{ sku: 'SYN', qtd: 2 }]) };
+  const [x, y] = await Promise.all([a.kits(token, 'salvar', kit), b.kits(token, 'salvar', kit)]);
+  assert.deepEqual(x, y);
+  assert.equal(x.dados.codigo, 'KIT-001');
+  assert.deepEqual((await b.kits(token, 'doPerfil', { perfil: 'operador' })).dados.itens, [{ sku: 'SYN', qtd: 2 }]);
+  assert.equal((await a.kits(token, 'obter', { codigo: 'KIT-001' })).dados.id, x.dados.id);
+  await assert.rejects(a.kits(token, 'salvar', { ...kit, operation: 'kit-duplicate' }), { code: 'KIT_DUPLICADO' });
+  const ev = await a.calendario(token, 'criar', { operation: 'calendar-one', version: 0, titulo: 'Ensaio', data: '2026-11-22' });
+  assert.equal(ev.dados.status, 'PROGRAMADO');
+  const remove = { id: ev.dados.id, operation: 'calendar-delete', version: 1 };
+  assert.deepEqual(await a.calendario(token, 'excluir', remove), await b.calendario(token, 'excluir', remove));
+  assert.deepEqual(await a.calendario(token, 'listar'), { ok: true, dados: [] });
+  const input = { codigo: 'SYN-01', nome: 'Frente sintética', orcamento: '25', operation: 'center-one', version: 0 };
+  assert.equal((await a.centros(token, 'salvar', input)).dados.orcamento, 25);
+  await assert.rejects(b.centros(token, 'salvar', { ...input, operation: 'center-duplicate' }), { code: 'CENTRO_DUPLICADO' });
+  await b.centros(token, 'salvar', { ...input, operation: 'center-edit', version: 1, editando: true, nome: 'Revisada' });
+  assert.equal((await a.centros(token, 'listar')).dados[0].nome, 'Revisada');
+  const reader = (await load('reader')).getAdministrationEngine();
+  await assert.rejects(reader.centros(token, 'excluir', { codigo: input.codigo, operation: 'denied', version: 2 }),
+    { code: 'ACCESS_DENIED' });
 });

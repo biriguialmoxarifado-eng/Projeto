@@ -39,9 +39,9 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | obras | Parcial, integrado em teste. Cadastro e atualização com IDs estáveis; escopo por obra e interfaces operacionais pendentes. |
 | ocr | Pendente. Executor legado preservado. |
 | manutencao | Pendente. Executor legado preservado. |
-| kits | Pendente. Executor legado preservado. |
-| calendario | Pendente. Executor legado preservado. |
-| centros | Pendente. Executor legado preservado. |
+| kits | Parcial, integrado em teste. Cadastro, perfil, consultas e exclusão lógica. Validação com a Lojinha e os consumidores reais pendente. |
+| calendario | Parcial, integrado em teste. Criação, listagem e exclusão lógica. Paridade com os consumidores operacionais pendente. |
+| centros | Parcial, integrado em teste. Criação, edição, listagem e exclusão lógica. Vínculos e consumidores operacionais pendentes. |
 | retiradas | Pendente. Executor legado preservado. |
 | notificacoes | Parcial, integrado em teste. Criar, listar e marcar lida; integração com eventos e contratos de perfis reais pendentes. |
 | automacao | Pendente. Executor legado preservado. |
@@ -122,3 +122,9 @@ Para verificar no Desktop, inicie o Core local com as variáveis do modo de homo
 npm test passou. No Edge com os HTMLs reais, o Desktop leu seis NFs, gravou e releu a ocorrência #OC-000001 no Sheets de teste, bloqueou escrita de NF e encerrou a sessão de homologação. A API também comprovou criação, retentativa e marcação como lida de uma notificação sintética. Foram usadas somente as abas OCORRENCIAS_CORE_TESTE e NOTIFICACOES_CORE_TESTE para escrita. Nenhuma mensagem externa foi emitida.
 
 Matriz após o lote: 19 parciais, 15 pendentes e nenhum motor homologado. Próximo ponto: Retiradas e Aprovações, pela regra de alçada em AP_Modulo_aprovacoes e pela entrega parcial em AP_Modulo_reservas retirar. Para o Desktop, validar a autenticação do usuário e migrar o primeiro formulário operacional com um piloto isolado, usando o transporte central e um esquema de sessão que não dependa da credencial compartilhada de ensaio.
+
+## Kits, Calendário e Centros de Custo
+
+Partida em d2ebdab. O lote reutiliza armazenamento de eventos, lock local, autor e releitura. As ações de consulta são permitidas no Desktop de homologação. As mutações continuam disponíveis somente pelo Core isolado. Exclusões lógicas preservam o histórico sintético. Nenhum módulo mudou de executor operacional.
+
+npm test passou. No Sheets ALMOXA_TESTE_CORE, a retentativa concorrente gerou um único KIT-001, a consulta de perfil retornou o kit, a exclusão de calendário foi relida sem o evento na lista e outro runtime confirmou a versão 2 do centro. Tempo de 12066 ms. Somente as abas KITS_CORE_TESTE, CALENDARIO_CORE_TESTE e CENTROS_CORE_TESTE receberam gravações. Matriz: 22 parciais, 12 pendentes e nenhum homologado. Próximos motores independentes: Projetos, Relatórios e Mural, pelos contratos de AP_Modulo_projetos, AP_Modulo_relatorios e AP_Modulo_mural e pela função AP_FLUXO_crud_.

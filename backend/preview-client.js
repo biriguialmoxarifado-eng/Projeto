@@ -9,6 +9,9 @@
     ['obras', new Set(['listar'])],
     ['ocorrencias', new Set(['listar', 'obter', 'criar', 'salvar'])],
     ['notificacoes', new Set(['listar'])],
+    ['kits', new Set(['listar', 'obter', 'doPerfil'])],
+    ['calendario', new Set(['listar'])],
+    ['centros', new Set(['listar'])],
     ['lojinha', new Set(['catalogo', 'item'])],
     ['inventario', new Set(['listar', 'obter', 'divergencias'])]
   ]);
