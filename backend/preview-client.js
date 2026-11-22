@@ -73,11 +73,19 @@
       const body = JSON.stringify({ modulo: module, acao: action, payload: payload ?? {} });
       if (pending.has(body)) return pending.get(body);
       const upload = module === 'ocr' && action === 'ler';
+      const active = session;
       const request = fetch(upload ? '/api/v2/preview/ocr' : '/api/v2/preview/dispatch', {
         method: 'POST', credentials: 'omit', cache: 'no-store',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body, signal: AbortSignal.any([session.signal, AbortSignal.timeout(upload ? 40000 : 12000)])
-      }).then(response => response.json()).catch(() => ({
+      }).then(async response => {
+        const result = await response.json();
+        if (response.status === 401 && active === session) {
+          void window.AlmoxaCorePreview.logout();
+          document.querySelector('#almoxa-preview output')?.replaceChildren('Sessao expirada. Identifique-se novamente.');
+        }
+        return result;
+      }).catch(() => ({
         ok: false, codigo: 'CORE_INDISPONIVEL', mensagem: 'O Core de homologação não respondeu.'
       })).finally(() => {
         if (pending.get(body) === request) pending.delete(body);
@@ -134,7 +142,20 @@
       delete status.dataset.ok;
     });
     panel.id = 'almoxa-preview';
-    panel.append(label, button, clear, status);
+    const diagnostics = document.createElement('small');
+    diagnostics.id = 'almoxa-preview-diagnostics';
+    const frontend = location.pathname.endsWith('/campo') ? 'ALMOX CAMPO' : (window.ALMOXA_VERSAO || 'Desktop V430');
+    diagnostics.textContent = frontend + ' | Core: verificando';
+    panel.append(label, button, clear, status, diagnostics);
+    void fetch('/health', { credentials: 'omit', cache: 'no-store', signal: AbortSignal.timeout(5000) })
+      .then(async response => {
+        const health = await response.json();
+        if (health.environment !== 'homologacao-local' || !health.coreVersion) throw new Error();
+        const revision = /^[a-f0-9]{7,40}$/i.test(health.revision ?? '') ? ' (' + health.revision.slice(0, 12) + ')' : '';
+        diagnostics.textContent = frontend + ' | Core Node.js ' + health.coreVersion + revision +
+          ' | Homologacao local | ' + location.origin + '/api/v2/preview/dispatch | Health HTTP ' + response.status;
+      })
+      .catch(() => { diagnostics.textContent = frontend + ' | Core de homologacao indisponivel'; });
     if (writeEnabled) {
       const write = document.createElement('button');
       write.type = 'button';

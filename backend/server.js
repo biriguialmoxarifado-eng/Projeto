@@ -38,7 +38,8 @@ function createHandler(core, revision, database, preview) {
     res.end(JSON.stringify({
       status,
       coreVersion: CORE_VERSION,
-      revision
+      revision,
+      ...(preview ? { environment: 'homologacao-local' } : {})
     }));
   };
 }
