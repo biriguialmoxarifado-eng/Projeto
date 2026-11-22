@@ -22,7 +22,10 @@
 
 var PONTE_CRACHA_SEM_SESSAO = ['validar', 'autorizar', 'niveis'];
 
-function doPost(e) {
+/* RENOMEADA pelo ROTEADOR UNICO — antes se chamava doPost.
+   Chamado pelo ROTEADOR UNICO (parte 00) como ultima opcao, para compatibilidade. */
+
+function PONTE_doPost_(e) {
   var resposta;
   try {
     var corpo = JSON.parse((e && e.postData && e.postData.contents) || '{}');

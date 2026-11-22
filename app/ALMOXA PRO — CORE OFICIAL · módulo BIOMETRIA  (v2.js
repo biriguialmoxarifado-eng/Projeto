@@ -48,7 +48,9 @@ var PLANILHA_ID = 'https://docs.google.com/spreadsheets/d/1tqz_6yUJf6skL0ouoAs_g
  *   sem parâmetro           -> sistema principal
  *   ?pagina=biometria       -> Central de Biometria
  */
-function doGet(e) {
+/* RENOMEADA pelo ROTEADOR UNICO — antes se chamava doGet.
+   Chamado pelo ROTEADOR UNICO (parte 00) quando o endereco traz ?pagina=biometria. */
+function AXBIO_doGet_(e) {
   var pagina = (e && e.parameter && e.parameter.pagina) ? e.parameter.pagina : '';
 
   if (pagina === 'biometria') {
@@ -69,7 +71,9 @@ function doGet(e) {
  *
  *     var r = axbioPost(e); if (r) return r;
  */
-function doPost(e) {
+/* RENOMEADA pelo ROTEADOR UNICO — antes se chamava doPost.
+   NAO e mais chamado: o roteador usa axbioPost direto. Mantido so como referencia. */
+function AXBIO_doPost_LEGADO_(e) {
   var r = axbioPost(e);
   if (r) return r;
   return ContentService

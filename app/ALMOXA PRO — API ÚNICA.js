@@ -75,7 +75,10 @@ var APIX_VERSAO = 4;
    1. A PORTA — a única do projeto
    ============================================================ */
 
-function doPost(e) {
+/* RENOMEADA pelo ROTEADOR UNICO — antes se chamava doPost.
+   Chamado PRIMEIRO pelo ROTEADOR UNICO (parte 00). E o canal oficial da V2. */
+
+function APIX_doPost_(e) {
   var corpo;
   try {
     corpo = JSON.parse((e && e.postData && e.postData.contents) || '{}');

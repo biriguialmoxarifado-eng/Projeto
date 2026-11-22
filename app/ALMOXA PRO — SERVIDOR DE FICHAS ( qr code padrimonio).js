@@ -75,7 +75,9 @@ var FICHA_CFG = {
  *
  * Assim, colar no lugar errado deixa de derrubar o sistema.
  */
-function doGet(e) {
+/* RENOMEADA pelo ROTEADOR UNICO — antes se chamava doGet.
+   Chamado pelo ROTEADOR UNICO (parte 00) quando o endereco traz um codigo de ficha. */
+function FICHA_doGet_(e) {
   var params = (e && e.parameter) ? e.parameter : {};
 
   var codigo = String(
