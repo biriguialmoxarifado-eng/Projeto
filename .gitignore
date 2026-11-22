@@ -1,0 +1,49 @@
+# ============================================================
+#  ALMOXA PRO — arquivos que NÃO vão para o GitHub
+# ============================================================
+
+# --- Segredos --------------------------------------------------------------
+# Nunca versionar: chaves, tokens e credenciais.
+.env
+.env.*
+!.env.example
+.clasprc.json
+*.pem
+*.key
+credentials.json
+service-account*.json
+
+# --- Configuração do clasp -------------------------------------------------
+# .clasp.json FICA versionado de propósito: o workflow apps-script-sync.yml
+# valida a existência dele antes de publicar. O scriptId sozinho não dá
+# acesso a nada — quem publica precisa do secret CLASPRC_JSON.
+# Já o .clasprc.json (credencial de verdade) está bloqueado acima.
+
+# --- Dependências ----------------------------------------------------------
+# Recriadas com "npm install". Não pertencem ao histórico.
+node_modules/
+.npm/
+.pnp.*
+
+# --- Build e cache ---------------------------------------------------------
+dist/
+build/
+.cache/
+*.tsbuildinfo
+
+# --- Sistema operacional ---------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Editores --------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+
+# --- Registros e temporários -----------------------------------------------
+*.log
+npm-debug.log*
+tmp/
+temp/
