@@ -34,7 +34,8 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
     ['FERRAMENTAS_CORE_TESTE', { sheetId: 28, rows: [['EVENTO_JSON']] }],
     ['EPI_CORE_TESTE', { sheetId: 29, rows: [['EVENTO_JSON']] }],
     ['MANUTENCAO_CORE_TESTE', { sheetId: 30, rows: [['EVENTO_JSON']] }],
-    ['BIOMETRIA_CORE_TESTE', { sheetId: 31, rows: [['EVENTO_JSON']] }]
+    ['BIOMETRIA_CORE_TESTE', { sheetId: 31, rows: [['EVENTO_JSON']] }],
+    ['OCR_CORE_TESTE', { sheetId: 32, rows: [['EVENTO_JSON']] }]
   ]);
   const markers = new Set();
   let loseResponse = true;
@@ -58,7 +59,7 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
       const names = data.requests.slice(0, -1).map(request => request.addNamedRange.namedRange.namedRangeId);
       if (names.some(name => markers.has(name))) throw { response: { status: 400 } };
       names.forEach(name => markers.add(name));
-      assert.ok([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31].includes(append.appendCells.sheetId));
+      assert.ok([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32].includes(append.appendCells.sheetId));
       const admin = [...adminRows.values()].find(row => row.sheetId === append.appendCells.sheetId);
       const targetRows = append.appendCells.sheetId === 8 ? receivingRows : append.appendCells.sheetId === 9 ? stockRows : append.appendCells.sheetId === 10 ? itemRows : append.appendCells.sheetId === 11 ? supplierRows : append.appendCells.sheetId === 12 ? categoryRows : append.appendCells.sheetId === 13 ? purchaseRows : append.appendCells.sheetId === 14 ? requestRows : rows;
       (admin?.rows ?? targetRows).push([append.appendCells.rows[0].values[0].userEnteredValue.stringValue]);
@@ -736,4 +737,30 @@ test('biometria estrutural vincula referência opaca a identidade única e mant�
   await assert.rejects(a.biometria(token, 'vincular', { ...request, colaboradorId: 'SYN-B', operation: 'duplicate-bind' }),
     { code: 'BIOMETRIA_REFERENCIA_JA_VINCULADA' });
   assert.equal((await a.biometria(token, 'autenticar', request)).codigo, 'ACAO_DESCONHECIDA');
+});
+
+test('OCR extrai DANFE, exige escrita autorizada e relê um único evento auditado', async () => {
+  const { provider } = fakeGoogle();
+  const { createOcrEngine } = require('../core/motors/ocr');
+  const { TestInvoiceStore } = require('../core/motors/invoices');
+  const store = new TestInvoiceStore(provider, 'ocr');
+  const text = 'SINTETICA LTDA\nNº 000.000.127\nSERIE 001\nVALOR TOTAL DA NF 1.234,50';
+  let runs = 0;
+  const extract = async image => { if (image) runs++; return text; };
+  const runtime = role => createRuntime(provider, { invoiceTestStorage: provider, credential: { ...credential, role } });
+  const core = (await runtime('operator')).core;
+  const reader = (await runtime('reader')).core;
+  const engine = createOcrEngine({ core, store, coordinate: work => work(), extract });
+  const blocked = createOcrEngine({ core: reader, store, coordinate: work => work(), extract });
+  const token = credential.token;
+  const input = { tipo: 'image/png', base64: Buffer.from('89504e470d0a1a00', 'hex').toString('base64'), operation: 'ocr-1' };
+  await assert.rejects(engine(token, 'ler', input), { code: 'OCR_ARQUIVO_INVALIDO' });
+  input.base64 = Buffer.from('89504e470d0a1a0a', 'hex').toString('base64');
+  await assert.rejects(blocked(token, 'ler', input), { code: 'ACCESS_DENIED' });
+  const result = await engine(token, 'ler', input);
+  assert.equal(result.dados.campos.numero, '000.000.127');
+  assert.equal(result.dados.campos.valor, 1234.5);
+  assert.deepEqual(await engine(token, 'ler', input), result);
+  assert.equal(runs, 1);
+  assert.deepEqual((await store.events()).map(event => event.action), ['OCR_EXECUTADO']);
 });

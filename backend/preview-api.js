@@ -27,6 +27,7 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
     ['aprovacoes', ['listar', 'pendentes', 'porPerfil']],
     ['retiradas', ['itensLiberados']],
     ['biometria', ['status']],
+    ['ocr', ['disponivel', ...(allowWrite ? ['ler'] : [])]],
     ['lojinha', ['catalogo', 'item']],
     ['inventario', ['listar', 'obter', 'divergencias']]
   ]);
@@ -52,7 +53,12 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
       res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' }).end(client);
       return true;
     }
-    if (req.url !== '/api/v2/preview/dispatch') return false;
+    const upload = req.url === '/api/v2/preview/ocr';
+    if (!upload && req.url !== '/api/v2/preview/dispatch') return false;
+    if (upload && !allowWrite) {
+      error(res, 404, 'OPERACAO_FORA_DA_HOMOLOGACAO', 'Processamento OCR desativado.');
+      return true;
+    }
     if (req.method !== 'POST') {
       error(res, 405, 'METODO_INVALIDO', 'Use POST para o despacho de homologação.');
       return true;
@@ -60,13 +66,14 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
     const token = /^Bearer ([^\s]+)$/i.exec(req.headers.authorization || '')?.[1];
     try {
       await runtime.core.authorizeSession(token, 'nf:read');
-      const { modulo, acao, payload = {} } = await readBody(req);
-      if (!read.get(modulo)?.includes(acao) || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      const { modulo, acao, payload = {} } = await readBody(req, upload ? 1450000 : 8192);
+      if (!read.get(modulo)?.includes(acao) || (upload !== (modulo === 'ocr' && acao === 'ler')) || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
         error(res, 400, 'OPERACAO_FORA_DA_HOMOLOGACAO', 'Operação indisponível no ambiente de homologação.');
         return true;
       }
       let result;
-      if (modulo === 'nf') result = await runtime.getInvoiceReadAdapter()(token, acao, payload);
+      if (modulo === 'ocr') result = await runtime.getOcrEngine()(token, acao, payload);
+      else if (modulo === 'nf') result = await runtime.getInvoiceReadAdapter()(token, acao, payload);
       else if (modulo === 'obras') result = await runtime.getAdministrationEngine().obras(token, acao, payload);
       else if (['ocorrencias', 'notificacoes', 'kits', 'calendario', 'centros', 'projetos', 'relatorios', 'mural', 'painel', 'automacao', 'ferramentas', 'epi', 'manutencao', 'aprovacoes', 'retiradas', 'biometria'].includes(modulo)) {
         result = await runtime.getAdministrationEngine()[modulo](token, acao, payload);
@@ -78,6 +85,8 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
     } catch (cause) {
       if (cause.code === 'SESSION_INVALID') error(res, 401, 'SEM_SESSAO', 'Credencial de homologação inválida.');
       else if (cause.code === 'ACCESS_DENIED') error(res, 403, 'ACESSO_NEGADO', 'Operação sem permissão.');
+      else if (cause.code === 'OCR_CONFLITO_IDEMPOTENCIA') error(res, 409, cause.code, 'A operação OCR já usa outro arquivo.');
+      else if (cause.code?.startsWith('OCR_')) error(res, 400, cause.code, 'Não foi possível processar a imagem em homologação.');
       else if (cause.code === 'ADMIN_CONFLITO_IDEMPOTENCIA' || cause.code === 'ADMIN_CONFLITO_VERSAO') {
         error(res, 409, cause.code, 'A operação conflita com a versão armazenada.');
       }

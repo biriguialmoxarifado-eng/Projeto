@@ -10,8 +10,8 @@ const { createHash, timingSafeEqual } = require('node:crypto');
 
 function diagnosticSecurity(credential, invoices) {
   const authorizationProvider = new AuthorizationManager();
-  const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read', 'catalog:read', 'purchases:read', 'requests:read', 'config:read', 'obras:read', 'inventory:read', 'ocorrencias:read', 'notificacoes:read', 'kits:read', 'calendario:read', 'centros:read', 'projetos:read', 'relatorios:read', 'mural:read', 'painel:read', 'automacao:read', 'ferramentas:read', 'epi:read', 'aprovacoes:read', 'manutencao:read', 'retiradas:read'] : [];
-  const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write', 'catalog:write', 'purchases:write', 'requests:write', 'config:write', 'obras:write', 'usuarios:read', 'inventory:write', 'ocorrencias:write', 'notificacoes:write', 'kits:write', 'calendario:write', 'centros:write', 'projetos:write', 'relatorios:write', 'mural:write', 'painel:write', 'automacao:write', 'ferramentas:write', 'epi:write', 'aprovacoes:write', 'manutencao:write', 'retiradas:write', 'biometria:read', 'biometria:write'] : [];
+  const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read', 'catalog:read', 'purchases:read', 'requests:read', 'config:read', 'obras:read', 'inventory:read', 'ocorrencias:read', 'notificacoes:read', 'kits:read', 'calendario:read', 'centros:read', 'projetos:read', 'relatorios:read', 'mural:read', 'painel:read', 'automacao:read', 'ferramentas:read', 'epi:read', 'aprovacoes:read', 'manutencao:read', 'retiradas:read', 'ocr:read'] : [];
+  const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write', 'catalog:write', 'purchases:write', 'requests:write', 'config:write', 'obras:write', 'usuarios:read', 'inventory:write', 'ocorrencias:write', 'notificacoes:write', 'kits:write', 'calendario:write', 'centros:write', 'projetos:write', 'relatorios:write', 'mural:write', 'painel:write', 'automacao:write', 'ferramentas:write', 'epi:write', 'aprovacoes:write', 'manutencao:write', 'retiradas:write', 'biometria:read', 'biometria:write', 'ocr:write'] : [];
   authorizationProvider.registerRole('reader', ['diagnostics:read', ...invoiceRead]);
   authorizationProvider.registerRole('operator', ['diagnostics:read', 'diagnostics:write', ...invoiceRead, ...invoiceWrite]);
   const digest = value => createHash('sha256').update(value).digest();
@@ -66,6 +66,7 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
   let purchaseEngine;
   let requestEngine;
   let administrationEngine;
+  let ocrEngine;
   let inventoryEngine;
   let shopEngine;
   return {
@@ -119,6 +120,13 @@ async function createRuntime(storage = new GoogleSheetsProvider(), { sqlite = fa
         core, stock, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'inventario')
       });
       return inventoryEngine;
+    },
+    getOcrEngine() {
+      if (!invoiceTestStorage) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'OCR_TESTE_DESATIVADO' });
+      const { TestInvoiceStore } = require('../core/motors/invoices');
+      const { createOcrEngine } = require('../core/motors/ocr');
+      ocrEngine ??= createOcrEngine({ core, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'ocr') });
+      return ocrEngine;
     },
     getAdministrationEngine() {
       if (!invoiceTestStorage) throw Object.assign(new Error('Motores de teste desativados.'), { code: 'ADMIN_TESTE_DESATIVADO' });

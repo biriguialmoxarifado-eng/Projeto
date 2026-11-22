@@ -37,7 +37,7 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | aprovacoes | Parcial, integrado em teste. Alçada por item e decisão de reserva. Pré-compra e links legados pendentes. |
 | categorias | Integrado em teste. Cadastro, atualização e listagem. Exclusão com validação de itens em uso e paridade operacional pendentes. |
 | obras | Parcial, integrado em teste. Cadastro e atualização com IDs estáveis; escopo por obra e interfaces operacionais pendentes. |
-| ocr | Pendente. Executor legado preservado. |
+| ocr | Parcial, integrado em teste. OCR real de PNG/JPEG no Windows, interpretação DANFE e histórico. PDF, Drive e paridade Desktop pendentes. |
 | manutencao | Parcial, integrado em teste. Estado, versões e snapshot lógico limitado. Cópia Drive e restauração pendentes. |
 | kits | Parcial, integrado em teste. Cadastro, perfil, consultas e exclusão lógica. Validação com a Lojinha e os consumidores reais pendente. |
 | calendario | Parcial, integrado em teste. Criação, listagem e exclusão lógica. Paridade com os consumidores operacionais pendente. |
@@ -166,3 +166,9 @@ Manutenção registra estado e versões de ensaio. O snapshot lógico copia apen
 npm test passou com 40 testes no executor Node e sem falhas. Uma regressão inicial em Obras e Ocorrências foi corrigida. O primeiro ensaio real atingiu HTTP 429. A repetição respeitou a janela de cota usando a mesma chave da operação e confirmou #RES-000003 como RETIRADA, saldo 2 após duas baixas e snapshot SNP-f54f8073280b6a0d45ea4eac com cinco eventos copiados (90205 ms). A validação de vínculo biométrico sintético confirmou um único evento auditado, relido por segunda instância (4812 ms).
 
 Matriz: 33 parciais, 1 pendente e nenhum homologado. Próximo ponto: OCR. O OAuth atual tem drive.metadata.readonly e o adaptador não baixa nem converte conteúdo. O legado usa conversão OCR via Drive. Para retomar, definir o acesso mínimo a um arquivo de teste, autorizar a leitura e a conversão isoladas para a identidade apropriada, e validar o conteúdo sintético extraído. Não iniciar a revisão geral de paridade enquanto OCR estiver pendente.
+
+## OCR: implementação inicial
+
+Partida em 3b0c965. O motor preserva as ações disponivel e ler e o envelope do legado. Windows OCR em pt-BR lê PNG e JPEG locais, o Core extrai campos da DANFE e grava o resultado auditado em OCR_CORE_TESTE para releitura e idempotência. A rota de upload só existe em modo local de homologação com escrita optativa e exige autorização. Os arquivos temporários são removidos. PDF, arquivamento e conversão no Drive continuam no executor legado. A configuração OAuth existente não foi ampliada.
+
+npm test passou. Um PNG sintético criado para o ensaio foi processado pelo OCR real do Windows. Reconheceu número 000000127, total 1234,50 e cinco campos. Nova instância retornou a mesma resposta e confirmou somente um evento auditado no Google Sheets de teste em 5105 ms. Matriz: 34 com implementação inicial parcial, zero pendentes e zero homologados. A homologação começa pelo lote Base.

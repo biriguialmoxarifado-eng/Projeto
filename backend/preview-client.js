@@ -23,6 +23,7 @@
     ['aprovacoes', new Set(['listar', 'pendentes', 'porPerfil'])],
     ['retiradas', new Set(['itensLiberados'])],
     ['biometria', new Set(['status'])],
+    ['ocr', new Set(['disponivel', ...(writeEnabled ? ['ler'] : [])])],
     ['lojinha', new Set(['catalogo', 'item'])],
     ['inventario', new Set(['listar', 'obter', 'divergencias'])]
   ]);
@@ -43,10 +44,11 @@
       if (!token) return Promise.resolve({ ok: false, codigo: 'SEM_SESSAO', mensagem: 'Informe a credencial de homologação.' });
       const body = JSON.stringify({ modulo: module, acao: action, payload: payload ?? {} });
       if (pending.has(body)) return pending.get(body);
-      const request = fetch('/api/v2/preview/dispatch', {
+      const upload = module === 'ocr' && action === 'ler';
+      const request = fetch(upload ? '/api/v2/preview/ocr' : '/api/v2/preview/dispatch', {
         method: 'POST', credentials: 'omit', cache: 'no-store',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body, signal: AbortSignal.any([session.signal, AbortSignal.timeout(12000)])
+        body, signal: AbortSignal.any([session.signal, AbortSignal.timeout(upload ? 40000 : 12000)])
       }).then(response => response.json()).catch(() => ({
         ok: false, codigo: 'CORE_INDISPONIVEL', mensagem: 'O Core de homologação não respondeu.'
       })).finally(() => {

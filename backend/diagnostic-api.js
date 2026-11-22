@@ -17,7 +17,7 @@ function reject(res, status, code) {
   return reply(res, status, { ok: false, error: { code } });
 }
 
-async function readBody(req) {
+async function readBody(req, limit = 8192) {
   if (!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] || '')) {
     throw { status: 415, code: 'JSON_REQUIRED' };
   }
@@ -25,7 +25,7 @@ async function readBody(req) {
   let length = 0;
   for await (const chunk of req.iterator({ destroyOnReturn: false })) {
     length += chunk.length;
-    if (length > 8192) {
+    if (length > limit) {
       req.resume();
       throw { status: 413, code: 'PAYLOAD_TOO_LARGE' };
     }
