@@ -50,3 +50,18 @@ jobs:
 
       - name: Sincronizar Apps Script
         run: npx clasp push --force
+
+      # O push atualiza o código no editor, mas o /exec continua servindo
+      # a versão IMPLANTADA. Sem este passo, nada que sobe chega ao ar:
+      # o editor mostra o código novo e o sistema roda o antigo.
+      #
+      # O id abaixo é o da implantação que já existe — o mesmo trecho que
+      # aparece na URL do web app. Usá-lo preserva o endereço; criar uma
+      # implantação nova geraria outra URL e quebraria quem já usa.
+      - name: Publicar a nova versão
+        env:
+          DEPLOY_ID: AKfycbwWahYJywIsbRGc3t8taMWTXNgLd_1JtFJ93VmGNfAA-bXcgMlUoW6OZszZWEWMULA1
+        run: |
+          npx clasp deploy \
+            --deploymentId "$DEPLOY_ID" \
+            --description "sync $(date -u +%Y-%m-%d\ %H:%M) · ${GITHUB_SHA::8}"
