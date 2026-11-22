@@ -33,6 +33,16 @@ function fixture({ testSpreadsheetId = 'test-only', loseResponse = false, testOn
           assert.equal(writable, true);
           assert.equal(path, '/v4/spreadsheets/test-only:batchUpdate');
           const [marker, append] = data.requests;
+          if (marker.findReplace) {
+            const { find, replacement, range, matchEntireCell } = marker.findReplace;
+            assert.deepEqual(range, { sheetId: 42, startRowIndex: 1, startColumnIndex: 3, endColumnIndex: 4 });
+            assert.equal(matchEntireCell, true);
+            for (const row of rows.slice(1)) {
+              if (row[3] === find) row[3] = replacement;
+            }
+            if (loseResponse) throw new Error('response lost');
+            return { data: {} };
+          }
           const { namedRangeId } = marker.addNamedRange.namedRange;
           if (markers.has(namedRangeId)) throw { response: { status: 400 } };
           markers.add(namedRangeId);
@@ -189,4 +199,18 @@ test('o modo isolado valida o título e nunca consulta o ID operacional', async 
   await assert.rejects(invalid.provider.writeTestRecord(record), { code: 'TEST_TARGET_UNSAFE' });
   assert.equal(invalid.calls.length, 1);
   assert.equal(invalid.calls[0].method, 'GET');
+});
+
+test('confirma somente o UUID de teste e reconcilia a perda da resposta sem gravar novamente', async () => {
+  const { provider, rows, calls } = fixture({ testOnly: true, loseResponse: true });
+  const id = '1dd88a31-76d0-4f5a-a01e-ce0e94dccc32';
+  const created = { ...record, id, origin: 'ALMOXA_PRO_V2', message: 'Teste pendente ' + id };
+  await provider.writeTestRecord(created);
+  const expected = { ...created, message: 'Teste confirmado ' + id };
+  assert.deepEqual(await provider.confirmTestRecord(id), expected);
+  assert.deepEqual(await provider.readTestRecord(id), expected);
+  assert.deepEqual(await provider.confirmTestRecord(id), expected);
+  assert.equal(rows.length, 2);
+  assert.equal(calls.filter(call => call.method === 'POST').length, 2);
+  await assert.rejects(provider.confirmTestRecord('12345'), { code: 'TEST_RECORD_INVALID' });
 });

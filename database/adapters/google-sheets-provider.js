@@ -166,6 +166,50 @@ class GoogleSheetsProvider {
     return { id: recordId, createdAt, origin, message };
   }
 
+  async confirmTestRecord(id) {
+    if (!this.testOnly || typeof id !== 'string' ||
+        !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id)) {
+      throw new GoogleSheetsProviderError('TEST_RECORD_INVALID', 'A confirmação exige um UUID de teste isolado.');
+    }
+    const previous = 'Teste pendente ' + id;
+    const next = 'Teste confirmado ' + id;
+    const record = await this.readTestRecord(id);
+    if (record.origin !== 'ALMOXA_PRO_V2' || ![previous, next].includes(record.message)) {
+      throw new GoogleSheetsProviderError('TEST_RECORD_CONFLICT', 'O registro não pertence a este teste.');
+    }
+    if (record.message === next) return record;
+
+    const metadata = await this.metadata(this.testSpreadsheetId);
+    const sheet = metadata.sheets?.find(item => item.properties.title === TEST_SHEET);
+    if (!sheet || metadata.spreadsheetId !== this.testSpreadsheetId ||
+        metadata.properties?.title !== 'ALMOXA_TESTE_CORE') {
+      throw new GoogleSheetsProviderError('TEST_TARGET_UNSAFE', 'Destino de teste inválido.');
+    }
+
+    let requestError;
+    try {
+      await this.request(this.testSpreadsheetId, ':batchUpdate', {
+        auth: this.writeAuth,
+        data: { requests: [{ findReplace: {
+          find: previous,
+          replacement: next,
+          matchCase: true,
+          matchEntireCell: true,
+          range: { sheetId: sheet.properties.sheetId, startRowIndex: 1, startColumnIndex: 3, endColumnIndex: 4 }
+        } }] }
+      });
+    } catch (error) {
+      requestError = error;
+    }
+
+    const confirmed = await this.readTestRecord(id).catch(error => { throw requestError ?? error; });
+    if (confirmed.message === next && confirmed.origin === record.origin && confirmed.createdAt === record.createdAt) {
+      return confirmed;
+    }
+    throw requestError ?? new GoogleSheetsProviderError('TEST_UPDATE_NOT_CONFIRMED', 'A atualização não foi confirmada.');
+  }
+
+
   async writeTestRecord(record) {
     if (!record?.id || !record.createdAt) {
       throw new GoogleSheetsProviderError('TEST_RECORD_INVALID', 'ID e data são obrigatórios.');

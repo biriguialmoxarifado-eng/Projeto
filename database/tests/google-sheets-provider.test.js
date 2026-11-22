@@ -29,18 +29,24 @@ async function validateSheets(testSpreadsheetId, write) {
 
   if (!write) return;
 
+  const id = randomUUID();
   const record = {
-    id: randomUUID(),
+    id,
     createdAt: new Date().toISOString(),
     origin: 'ALMOXA_PRO_V2',
-    message: 'Teste real de conexão Google Sheets'
+    message: 'Teste pendente ' + id
   };
   const written = await diagnostics.writeTestRecord(record);
   assert.equal(written.id, record.id);
   assert.deepEqual(await diagnostics.readTestRecord(record.id), record);
   assert.deepEqual(await diagnostics.writeTestRecord(record), written);
   assert.deepEqual(await diagnostics.readTestRecord(record.id), record);
-  console.log('Gravação, releitura e retentativa na planilha de teste aprovadas.');
+  const expected = { ...record, message: 'Teste confirmado ' + id };
+  assert.deepEqual(await diagnostics.confirmTestRecord(id), expected);
+  const reopened = new GoogleSheetsProvider({ testSpreadsheetId, testOnly: true });
+  assert.deepEqual(await reopened.readTestRecord(id), expected);
+  assert.deepEqual(await reopened.confirmTestRecord(id), expected);
+  console.log('Gravação, atualização, releitura por novo cliente e retentativas aprovadas.');
 }
 
 async function run() {
