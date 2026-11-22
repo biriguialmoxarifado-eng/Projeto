@@ -32,7 +32,7 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | projetos | Parcial, integrado em teste. Cadastro, progresso, consulta e exclusão lógica. Integração de abastecimento e clientes pendentes. |
 | inventario | Parcial, integrado em teste. Abertura, contagem, divergência e encerramento. QR, rotas, escopo de equipe e ajuste de saldo pendentes. |
 | relatorios | Parcial, integrado em teste. Registro e consulta de metadados e parâmetros. Geração e entrega de arquivos pendentes. |
-| painel | Pendente. Executor legado preservado. |
+| painel | Parcial, integrado em teste. Carregar e salvar PAINEL_CONFIG. Agregados e homologação visual pendentes. |
 | mural | Parcial, integrado em teste. Publicações e referências de fotos com exclusão lógica. Acesso a conteúdo e paridade do cliente pendentes. |
 | aprovacoes | Pendente. Executor legado preservado. |
 | categorias | Integrado em teste. Cadastro, atualização e listagem. Exclusão com validação de itens em uso e paridade operacional pendentes. |
@@ -44,7 +44,7 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | centros | Parcial, integrado em teste. Criação, edição, listagem e exclusão lógica. Vínculos e consumidores operacionais pendentes. |
 | retiradas | Pendente. Executor legado preservado. |
 | notificacoes | Parcial, integrado em teste. Criar, listar e marcar lida; integração com eventos e contratos de perfis reais pendentes. |
-| automacao | Pendente. Executor legado preservado. |
+| automacao | Parcial, integrado em teste. Listar, cadastrar e alternar regras. Executor de eventos e efeitos permanecem no legado. |
 | biometria | Pendente. Executor legado preservado. |
 
 | Extensão | Estágio |
@@ -136,3 +136,9 @@ A partir de ccaa35f, o segundo lote implementa criar, consultar, atualizar e exc
 npm test passou. No Sheets ALMOXA_TESTE_CORE, PRJ-001 foi criado, repetido, atualizado e relido com progresso 30; REL00001 foi registrado e apareceu em gerados; Mural exibiu referência sintética de foto e confirmou exclusão lógica. Tempo total de 11252 ms. Somente as abas PROJETOS_CORE_TESTE, RELATORIOS_CORE_TESTE e MURAL_CORE_TESTE foram gravadas. A matriz passa a 25 parciais, 9 pendentes e nenhum homologado.
 
 Próxima retomada: Painel, pelos contratos carregar/salvar de AP_Modulo_painel e pelos agregados de AP_Modulo_dashboard. Reaproveitar a configuração PAINEL_CONFIG, as obras e a projeção de estoque. Outros pendentes são EPI, Ferramentaria, Aprovações, OCR, Manutenção, Retiradas, Automação e Biometria. Manter Biometria por último e o Apps Script como executor operacional.
+
+## Painel e Automação
+
+Partida em 30f7aff. Painel preserva a chave PAINEL_CONFIG e os contratos carregar/salvar. Automação implementa regras, salvar e alternar com histórico de autoria, versão e reenvio. Consultas disponíveis no Desktop local de homologação. Gravações permanecem no Core isolado. Gatilhos operacionais continuam no executor legado.
+
+npm test passou. O ensaio OAuth em ALMOXA_TESTE_CORE usou CONFIG_CORE_TESTE e AUTOMACAO_CORE_TESTE, confirmou Painel versão 1 por releitura e alternância concorrente com somente dois eventos de auditoria na regra: AUT-f7c8d163d4a01184763c0258. Tempo de 8385 ms. Nenhuma regra foi disparada. Matriz: 27 parciais, 7 pendentes e nenhum homologado. Próximo ponto: fichas de EPI e Ferramentaria, começando pelos contratos AP_Modulo_epi, AP_Modulo_ferramentas e AP_FER_retirar_ para preservar entrega, custódia e saldo.

@@ -65,6 +65,56 @@ function createAdministrationEngine({ core, stores, coordinate, clock = () => ne
   return {
     ...createComplementaryMethods({ save, authorize, getRecords: async kind => latest(await stores[kind].events()) }),
     ...createWorkflowMethods({ save, authorize, getRecords: async kind => latest(await stores[kind].events()) }),
+    async painel(token, action, payload = {}) {
+      if (action === 'carregar') {
+        await authorize(token, 'painel', 'read');
+        const value = latest(await stores.painel.events()).get('PAINEL_CONFIG')?.note.valor;
+        try { return { ok: true, dados: value === undefined ? null : JSON.parse(value) }; }
+        catch { return { ok: true, dados: null }; }
+      }
+      if (action !== 'salvar') return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
+      const config = payload.config ?? {};
+      if (!config || typeof config !== 'object' || Array.isArray(config)) throw invalid('ADMIN_DADOS_INVALIDOS');
+      const valor = JSON.stringify(config);
+      if (valor.length > 12000) throw invalid('ADMIN_DADOS_INVALIDOS');
+      const id = 'PAINEL_CONFIG';
+      return save(token, 'painel', { operation: payload.operation, version: payload.version, valor,
+        action: 'PAINEL_CONFIGURADO' }, (records, at) => ({
+        id, current: records.get(id), note: { id, chave: id, valor, atualizadoEm: at },
+        response: { ok: true, dados: config }
+      }));
+    },
+
+    async automacao(token, action, payload = {}) {
+      if (action === 'regras') {
+        await authorize(token, 'automacao', 'read');
+        return { ok: true, dados: [...latest(await stores.automacao.events()).values()].map(event => event.note) };
+      }
+      const { operation, version } = payload;
+      if (action === 'alternar') {
+        const { id } = payload;
+        if (!key(id)) throw invalid('ADMIN_DADOS_INVALIDOS');
+        return save(token, 'automacao', { operation, version, id, action: 'AUTOMACAO_ALTERADA' }, records => {
+          const current = records.get(id);
+          if (!current) throw invalid('REGRA_NAO_ENCONTRADA');
+          const ativa = !(current.note.ativa === true || current.note.ativa === 'TRUE');
+          return { id, current, note: { ...current.note, ativa }, response: { ok: true, dados: { id, ativa } } };
+        });
+      }
+      if (action !== 'salvar') return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
+      const fields = textFields(payload, ['nome', 'evento', 'condicao', 'acaoRegra']);
+      const canais = payload.canais ?? [];
+      if (!Array.isArray(canais) || canais.length > 32 || canais.some(channel => !key(channel)) ||
+          (payload.ativa !== undefined && typeof payload.ativa !== 'boolean')) throw invalid('ADMIN_DADOS_INVALIDOS');
+      const ativa = payload.ativa !== false;
+      const id = 'AUT-' + createHash('sha256').update(String(operation)).digest('hex').slice(0, 24);
+      return save(token, 'automacao', { operation, version, fields, canais, ativa, action: 'AUTOMACAO_CRIADA' }, (records, at) => {
+        const { nome = '', evento = '', condicao = '', acaoRegra = '' } = fields;
+        const note = { id, nome, evento, condicao, acao: acaoRegra, canais: canais.join(','), ativa, criadoEm: at };
+        return { id, current: records.get(id), note, response: { ok: true, dados: note } };
+      });
+    },
+
     async config(token, action, input = {}) {
       if (!['obter', 'salvar'].includes(action)) return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
       const { chave, valor } = input;

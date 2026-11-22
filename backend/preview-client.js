@@ -15,6 +15,8 @@
     ['projetos', new Set(['listar', 'obter', 'detalhe'])],
     ['relatorios', new Set(['listar', 'obter', 'gerados'])],
     ['mural', new Set(['listar', 'obter'])],
+    ['painel', new Set(['carregar'])],
+    ['automacao', new Set(['regras'])],
     ['lojinha', new Set(['catalogo', 'item'])],
     ['inventario', new Set(['listar', 'obter', 'divergencias'])]
   ]);

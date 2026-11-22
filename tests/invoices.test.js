@@ -29,7 +29,8 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
     ['CENTROS_CORE_TESTE', { sheetId: 23, rows: [['EVENTO_JSON']] }],
     ['PROJETOS_CORE_TESTE', { sheetId: 24, rows: [['EVENTO_JSON']] }],
     ['RELATORIOS_CORE_TESTE', { sheetId: 25, rows: [['EVENTO_JSON']] }],
-    ['MURAL_CORE_TESTE', { sheetId: 26, rows: [['EVENTO_JSON']] }]
+    ['MURAL_CORE_TESTE', { sheetId: 26, rows: [['EVENTO_JSON']] }],
+    ['AUTOMACAO_CORE_TESTE', { sheetId: 27, rows: [['EVENTO_JSON']] }]
   ]);
   const markers = new Set();
   let loseResponse = true;
@@ -53,7 +54,7 @@ function fakeGoogle({ title = 'ALMOXA_TESTE_CORE' } = {}) {
       const names = data.requests.slice(0, -1).map(request => request.addNamedRange.namedRange.namedRangeId);
       if (names.some(name => markers.has(name))) throw { response: { status: 400 } };
       names.forEach(name => markers.add(name));
-      assert.ok([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26].includes(append.appendCells.sheetId));
+      assert.ok([7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27].includes(append.appendCells.sheetId));
       const admin = [...adminRows.values()].find(row => row.sheetId === append.appendCells.sheetId);
       const targetRows = append.appendCells.sheetId === 8 ? receivingRows : append.appendCells.sheetId === 9 ? stockRows : append.appendCells.sheetId === 10 ? itemRows : append.appendCells.sheetId === 11 ? supplierRows : append.appendCells.sheetId === 12 ? categoryRows : append.appendCells.sheetId === 13 ? purchaseRows : append.appendCells.sheetId === 14 ? requestRows : rows;
       (admin?.rows ?? targetRows).push([append.appendCells.rows[0].values[0].userEnteredValue.stringValue]);
@@ -559,4 +560,31 @@ test('projetos, relatórios e mural preservam aliases, formato e histórico de r
   const remove = { id: mural.dados.id, operation: 'mural-remove', version: 1 };
   assert.deepEqual(await a.mural(token, 'excluir', remove), await b.mural(token, 'excluir', remove));
   assert.deepEqual(await b.mural(token, 'listar'), { ok: true, dados: [] });
+});
+
+test('painel compartilha a chave legada e regras alternam uma única vez sob concorrência', async () => {
+  const { provider } = fakeGoogle();
+  const load = role => createRuntime(provider, { invoiceTestStorage: provider, credential: { ...credential, role } });
+  const a = (await load('operator')).getAdministrationEngine();
+  const b = (await load('operator')).getAdministrationEngine();
+  const reader = (await load('reader')).getAdministrationEngine();
+  const token = credential.token;
+  assert.deepEqual(await a.painel(token, 'carregar'), { ok: true, dados: null });
+  const config = { banners: [{ titulo: 'Sintético' }] };
+  await a.painel(token, 'salvar', { config, operation: 'panel-write', version: 0 });
+  assert.deepEqual(await b.config(token, 'obter', { chave: 'PAINEL_CONFIG' }), { ok: true, dados: config });
+  assert.deepEqual(await reader.painel(token, 'carregar'), { ok: true, dados: config });
+  await assert.rejects(reader.painel(token, 'salvar', { config, operation: 'denied', version: 1 }),
+    { code: 'ACCESS_DENIED' });
+  const rule = await a.automacao(token, 'salvar', {
+    operation: 'rule-new', version: 0, nome: 'Sintética', evento: 'TESTE', acaoRegra: 'NENHUMA', canais: ['painel']
+  });
+  const toggle = { id: rule.dados.id, operation: 'rule-toggle', version: 1 };
+  const choices = await Promise.all([a.automacao(token, 'alternar', toggle), b.automacao(token, 'alternar', toggle)]);
+  assert.deepEqual(choices[0], choices[1]);
+  assert.equal(choices[0].dados.ativa, false);
+  assert.deepEqual((await reader.automacao(token, 'regras')).dados[0], { ...rule.dados, ativa: false });
+  const { TestInvoiceStore } = require('../core/motors/invoices');
+  assert.deepEqual((await new TestInvoiceStore(provider, 'automacao').events()).map(event => event.action),
+    ['AUTOMACAO_CRIADA', 'AUTOMACAO_ALTERADA']);
 });
