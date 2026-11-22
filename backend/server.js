@@ -74,7 +74,8 @@ async function main() {
   // amarrava a interface a uma planilha do Google para simplesmente abrir.
   const preview = (invoiceTestStorage || sqlite) &&
     require('./preview-api').createPreview(runtime, join(__dirname, '..'), {
-      allowWrite: process.env.ALMOXA_PREVIEW_WRITE === '1'
+      modulesAvailable: Boolean(invoiceTestStorage),
+      allowWrite: Boolean(invoiceTestStorage) && process.env.ALMOXA_PREVIEW_WRITE === '1'
     });
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? '127.0.0.1';

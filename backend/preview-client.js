@@ -129,7 +129,7 @@
       const active = session;
       const result = await invoke('nf', 'listar', {});
       if (active !== session) return;
-      status.textContent = result.ok ? 'Core conectado. Notas de teste: ' + result.dados.length : result.mensagem;
+      status.textContent = result.ok ? 'Core conectado. Notas de teste: ' + result.dados.length : 'Sessao aberta. ' + result.mensagem;
       status.dataset.ok = String(result.ok);
     });
     const clear = document.createElement('button');

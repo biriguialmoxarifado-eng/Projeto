@@ -6,7 +6,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { join } = require('node:path');
 const { reply, readBody } = require('./diagnostic-api');
 
-function createPreview(runtime, root, { allowWrite = false } = {}) {
+function createPreview(runtime, root, { allowWrite = false, modulesAvailable = true } = {}) {
   const read = new Map([
     ['nf', ['listar', 'obter', 'itens', ...(allowWrite ? ['salvar'] : [])]],
     ['nfed', allowWrite ? ['atualizar'] : []],
@@ -90,7 +90,7 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
     }
     if (req.method === 'GET' && Object.hasOwn(files, req.url)) {
       const html = readFileSync(join(root, files[req.url]), 'utf8');
-      res.writeHead(200, pageHeaders).end(html.replace(/<head[^>]*>/i, tag => tag + guard(allowWrite && req.url.endsWith('/desktop'))));
+      res.writeHead(200, pageHeaders).end(html.replace(/<head[^>]*>/i, tag => tag + guard(allowWrite && files[req.url] === 'index.html')));
       return true;
     }
     if (req.method === 'GET' && req.url === '/homologacao/preview-client.js') {
@@ -112,6 +112,10 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
     if (!session || session.expires <= Date.now()) {
       sessions.delete(presented);
       error(res, 401, 'SEM_SESSAO', 'Abra uma sessão de homologação.');
+      return true;
+    }
+    if (!modulesAvailable) {
+      error(res, 503, 'ARMAZENAMENTO_OPERACIONAL_INDISPONIVEL', 'Configure ALMOXA_PREVIEW_SHEET_ID para consultar os motores nesta homologacao.');
       return true;
     }
     const { token } = session;
