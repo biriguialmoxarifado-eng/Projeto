@@ -22545,6 +22545,7 @@ return seg < 60 ? "agora" : Math.floor(seg / 60) + " min";
 (function instalarCache() {
 var original = API.call;
 API.call = function(modulo, acao, payload, opcoes) {
+if (window.AlmoxaCorePreview) return original(modulo, acao, payload, opcoes);
 if (!CACHE.pode(acao)) CACHE.invalidar(modulo);
 if (CACHE.pode(acao)) {
 var emCache = CACHE.ler(modulo, acao, payload);

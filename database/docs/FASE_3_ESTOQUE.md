@@ -14,7 +14,7 @@ Os 34 motores usam o inventário de referência em FASE_2_CORE_INDEPENDENTE.md. 
 | --- | --- | --- | --- | --- | --- | --- |
 | nf | Parcial | Recorte comparado | HTTP e Sheets isolado | Leitura e escrita sintetica via transporte no Edge | Pendente | Formularios legados, recuperacao de orfas e escrita operacional pendentes. |
 | estoque | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Integrado em teste com recebimento por local. Paridade operacional pendente. |
-| compras | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Pré-compra, reforço, filtros e alteração de status integrados em teste. Emissão de pedido e conversão de pré-compra pendentes. |
+| compras | Parcial | Recorte comparado | Suite HTTP e Sheets real isolado | Consultas listar, precompras e pedidos no Edge | Pendente | Emissao, conversao e alteracao de status pela interface ainda exigem teste de paridade. |
 | solicitacoes | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Criação e listagem com reserva pendente integradas em teste. Aprovação e retirada operacionais pendentes. |
 | reservas | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Criação pendente pela solicitação integrada em teste. Decisão, alçadas e retirada operacional pendentes. |
 | saidas | Parcial | Recorte comparado | Suíte e armazenamento isolado | Pendente no cliente | Pendente | Testado no estoque isolado. Fluxo operacional legado pendente. |
@@ -196,3 +196,7 @@ Usar o ID permanente do colaborador como vinculo para matriculas, foto, cracha, 
 O Core deve emitir um desafio descartavel com validade curta, vinculado ao colaborador, terminal e resumo da operacao de EPI ou ferramenta. Confirmar permissao, verificar resposta e consumir o desafio uma vez. Vincular a evidencia de autenticacao ao evento auditado. Gerar uma cautela por operacao confirmada com identificador idempotente. A assinatura eletronica e sua evidencia exigem fluxo proprio e validacao da finalidade, base legal, acesso e retencao antes de coletar biometria. O sinal de verificacao do WebAuthn pode corresponder a PIN ou biometria.
 
 Referencias: https://www.w3.org/TR/webauthn-2/ e https://www.gov.br/anpd/pt-br/acesso-a-informacao/perguntas-frequentes
+
+### Consultas de compras no Desktop V430
+
+A V430 em homologacao usa os contratos de consulta do Core para compras.listar, compras.precompras e compras.pedidos. O cache legado do HTML e ignorado apenas no modo de homologacao, que continua deduplicando chamadas simultaneas identicas no transporte proprio. No Edge, apos abrir sessao, as tres consultas retornaram listas via Sheets de teste em 1.749 ms no total. Escrita fiscal permaneceu bloqueada nesse ensaio de leitura e logout encerrou o acesso. A suite npm test passou com 42 casos no executor node --test. A matriz permanece em 34 parciais, 0 sem implementacao inicial e 0 homologados.

@@ -4,6 +4,7 @@
   const supported = new Map([
     ['nf', new Set(['listar', 'obter', 'itens', ...(writeEnabled ? ['salvar'] : [])])],
     ['nfed', new Set(writeEnabled ? ['atualizar'] : [])],
+    ['compras', new Set(['listar', 'precompras', 'pedidos'])],
     ['itens', new Set(['listar', 'obter'])],
     ['fornecedores', new Set(['listar', 'porCnpj'])],
     ['categorias', new Set(['listar'])],

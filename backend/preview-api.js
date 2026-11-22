@@ -10,6 +10,7 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
   const read = new Map([
     ['nf', ['listar', 'obter', 'itens', ...(allowWrite ? ['salvar'] : [])]],
     ['nfed', allowWrite ? ['atualizar'] : []],
+    ['compras', ['listar', 'precompras', 'pedidos']],
     ['itens', ['listar', 'obter']],
     ['fornecedores', ['listar', 'porCnpj']],
     ['categorias', ['listar']],
@@ -159,6 +160,7 @@ function createPreview(runtime, root, { allowWrite = false } = {}) {
           }
         }
       }
+      else if (modulo === 'compras') result = await runtime.getPurchaseEngine().consultarLegado(token, acao, payload);
       else if (modulo === 'auditoria') result = await runtime.getAdministrationEngine().auditoria(token, acao, payload);
       else if (modulo === 'usuarios') result = await runtime.getAdministrationEngine().usuarios(token, acao, payload);
       else if (modulo === 'config') {
