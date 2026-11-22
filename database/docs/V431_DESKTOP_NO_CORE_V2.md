@@ -39,6 +39,27 @@ manutencao, aprovacoes, retiradas, biometria, ocr, lojinha, inventario.
 
 ---
 
+## Homologação SQLite sem Google
+
+Use um arquivo SQLite exclusivo de teste. Além da credencial local
+já descrita neste guia, configure `ALMOXA_PREVIEW_SQLITE=1` e deixe
+`ALMOXA_PREVIEW_SHEET_ID` vazio. O servidor exige loopback nesse modo.
+As consultas do Desktop e do Campo usam os mesmos motores, no mesmo
+arquivo SQLite do Core. A gravação sintética exige ainda
+`ALMOXA_PREVIEW_WRITE=1`. O esquema de homologação não importa nem
+substitui as planilhas operacionais.
+
+A credencial de homologação identifica o operador ou leitor definido
+no backend. O texto do perfil em um cadastro não passa a ser uma
+credencial de login nem um privilégio. O motor de cada operação
+continua aplicando sua própria permissão.
+
+Para uma candidata hospedada fora do Node, configure no servidor
+`ALMOXA_PREVIEW_ORIGIN` com a origem HTTPS exata da interface, sem
+caminho. O frontend também precisa da origem HTTPS real do backend
+no meta `almoxa-core-v2`. CORS não substitui a autenticação e não
+habilita login operacional.
+
 ## Como subir
 
 ### 1. Configurar

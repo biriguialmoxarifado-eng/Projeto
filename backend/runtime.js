@@ -15,8 +15,8 @@ function diagnosticSecurity(credential, invoices) {
   const authorizationProvider = new AuthorizationManager();
   const invoiceRead = invoices ? ['nf:read', 'receiving:read', 'stock:read', 'catalog:read', 'purchases:read', 'requests:read', 'config:read', 'obras:read', 'inventory:read', 'ocorrencias:read', 'notificacoes:read', 'kits:read', 'calendario:read', 'centros:read', 'projetos:read', 'relatorios:read', 'mural:read', 'painel:read', 'automacao:read', 'ferramentas:read', 'epi:read', 'aprovacoes:read', 'manutencao:read', 'retiradas:read', 'ocr:read'] : [];
   const invoiceWrite = invoices ? ['nf:write', 'receiving:write', 'stock:write', 'catalog:write', 'purchases:write', 'requests:write', 'config:write', 'obras:write', 'usuarios:read', 'inventory:write', 'ocorrencias:write', 'notificacoes:write', 'kits:write', 'calendario:write', 'centros:write', 'projetos:write', 'relatorios:write', 'mural:write', 'painel:write', 'automacao:write', 'ferramentas:write', 'epi:write', 'aprovacoes:write', 'manutencao:write', 'retiradas:write', 'biometria:read', 'biometria:write', 'ocr:write', 'auditoria:read'] : [];
-  authorizationProvider.registerRole('reader', ['diagnostics:read', ...invoiceRead]);
-  authorizationProvider.registerRole('operator', ['diagnostics:read', 'diagnostics:write', ...invoiceRead, ...invoiceWrite]);
+  authorizationProvider.registerRole('reader', ['diagnostics:read', 'preview:session', ...invoiceRead]);
+  authorizationProvider.registerRole('operator', ['diagnostics:read', 'diagnostics:write', 'preview:session', ...invoiceRead, ...invoiceWrite]);
   const digest = value => createHash('sha256').update(value).digest();
   const expected = credential ? digest(credential.token) : null;
   return {
@@ -37,7 +37,7 @@ function diagnosticSecurity(credential, invoices) {
   };
 }
 
-async function createRuntime(storage, { sqlite = false, credential, invoiceTestStorage } = {}) {
+async function createRuntime(storage, { sqlite = false, credential, invoiceTestStorage, sqlitePreview = false } = {}) {
   if (!storage) {
     const { GoogleSheetsProvider } = require('../database/adapters/google-sheets-provider');
     storage = new GoogleSheetsProvider();
@@ -79,7 +79,10 @@ async function createRuntime(storage, { sqlite = false, credential, invoiceTestS
   await core.start();
   const coordinate = invoiceTestStorage
     ? require('../database/local-writer-lock').createLocalWriterLock(invoiceTestStorage.testSpreadsheetId)
-    : undefined;
+    : sqlitePreview ? require('../database/local-writer-lock').createLocalWriterLock('sqlite:' + storage.path) : undefined;
+  const operationalStore = invoiceTestStorage
+    ? kind => new (require('../core/motors/invoices').TestInvoiceStore)(invoiceTestStorage, kind)
+    : sqlitePreview ? kind => storage.previewStore(kind) : null;
   let invoiceEngine;
   let receivingEngine;
   let invoiceReadAdapter;
@@ -94,9 +97,9 @@ async function createRuntime(storage, { sqlite = false, credential, invoiceTestS
   return {
     core, diagnostics: storage, database,
     getInvoiceEngine() {
-      if (!invoiceTestStorage) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'NF_TESTE_DESATIVADO' });
-      const { createInvoiceEngine, TestInvoiceStore } = require('../core/motors/invoices');
-      invoiceEngine ??= createInvoiceEngine({ core, coordinate, storage: new TestInvoiceStore(invoiceTestStorage) });
+      if (!operationalStore) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'NF_TESTE_DESATIVADO' });
+      const { createInvoiceEngine } = require('../core/motors/invoices');
+      invoiceEngine ??= createInvoiceEngine({ core, coordinate, storage: operationalStore('nf') });
       return invoiceEngine;
     },
     getInvoiceReadAdapter() {
@@ -106,14 +109,14 @@ async function createRuntime(storage, { sqlite = false, credential, invoiceTestS
       return invoiceReadAdapter;
     },
     getCatalogEngine() {
-      if (!invoiceTestStorage) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'CATALOGO_TESTE_DESATIVADO' });
+      if (!operationalStore) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'CATALOGO_TESTE_DESATIVADO' });
       const { TestInvoiceStore } = require('../core/motors/invoices');
       const { createCatalogEngine } = require('../core/motors/catalog');
       catalogEngine ??= createCatalogEngine({
         core, coordinate, stores: {
-          itens: new TestInvoiceStore(invoiceTestStorage, 'itens'),
-          fornecedores: new TestInvoiceStore(invoiceTestStorage, 'fornecedores'),
-          categorias: new TestInvoiceStore(invoiceTestStorage, 'categorias')
+          itens: operationalStore('itens'),
+          fornecedores: operationalStore('fornecedores'),
+          categorias: operationalStore('categorias')
         }
       });
       return catalogEngine;
@@ -123,7 +126,7 @@ async function createRuntime(storage, { sqlite = false, credential, invoiceTestS
       const { TestInvoiceStore } = require('../core/motors/invoices');
       const { createPurchaseEngine } = require('../core/motors/purchases');
       purchaseEngine ??= createPurchaseEngine({
-        core, catalog, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'compras')
+        core, catalog, coordinate, store: operationalStore('compras')
       });
       return purchaseEngine;
     },
@@ -139,46 +142,46 @@ async function createRuntime(storage, { sqlite = false, credential, invoiceTestS
       const { TestInvoiceStore } = require('../core/motors/invoices');
       const { createInventoryEngine } = require('../core/motors/inventory');
       inventoryEngine ??= createInventoryEngine({
-        core, stock, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'inventario')
+        core, stock, coordinate, store: operationalStore('inventario')
       });
       return inventoryEngine;
     },
     getOcrEngine() {
-      if (!invoiceTestStorage) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'OCR_TESTE_DESATIVADO' });
+      if (!operationalStore) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'OCR_TESTE_DESATIVADO' });
       const { TestInvoiceStore } = require('../core/motors/invoices');
       const { createOcrEngine } = require('../core/motors/ocr');
-      ocrEngine ??= createOcrEngine({ core, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'ocr') });
+      ocrEngine ??= createOcrEngine({ core, coordinate, store: operationalStore('ocr') });
       return ocrEngine;
     },
     getAdministrationEngine() {
-      if (!invoiceTestStorage) throw Object.assign(new Error('Motores de teste desativados.'), { code: 'ADMIN_TESTE_DESATIVADO' });
+      if (!operationalStore) throw Object.assign(new Error('Motores de teste desativados.'), { code: 'ADMIN_TESTE_DESATIVADO' });
       const { TestInvoiceStore } = require('../core/motors/invoices');
       const { createAdministrationEngine } = require('../core/motors/administration');
       administrationEngine ??= createAdministrationEngine({
         core, catalog: this.getCatalogEngine(), coordinate,
-        receiptNotifications: new TestInvoiceStore(invoiceTestStorage, 'receiving'), stockForWithdrawal: this.getWithdrawalStockReader(), backupSources: {
-          CONFIG_CORE_TESTE: new TestInvoiceStore(invoiceTestStorage, 'config'),
-          OBRAS_CORE_TESTE: new TestInvoiceStore(invoiceTestStorage, 'obras')
+        receiptNotifications: operationalStore('receiving'), stockForWithdrawal: this.getWithdrawalStockReader(), backupSources: {
+          CONFIG_CORE_TESTE: operationalStore('config'),
+          OBRAS_CORE_TESTE: operationalStore('obras')
         }, stores: {
-          config: new TestInvoiceStore(invoiceTestStorage, 'config'),
-          obras: new TestInvoiceStore(invoiceTestStorage, 'obras'),
-          usuarios: new TestInvoiceStore(invoiceTestStorage, 'usuarios'),
-          ocorrencias: new TestInvoiceStore(invoiceTestStorage, 'ocorrencias'),
-          notificacoes: new TestInvoiceStore(invoiceTestStorage, 'notificacoes'),
-          kits: new TestInvoiceStore(invoiceTestStorage, 'kits'),
-          calendario: new TestInvoiceStore(invoiceTestStorage, 'calendario'),
-          centros: new TestInvoiceStore(invoiceTestStorage, 'centros'),
-          projetos: new TestInvoiceStore(invoiceTestStorage, 'projetos'),
-          relatorios: new TestInvoiceStore(invoiceTestStorage, 'relatorios'),
-          mural: new TestInvoiceStore(invoiceTestStorage, 'mural'),
-          painel: new TestInvoiceStore(invoiceTestStorage, 'config'),
-          automacao: new TestInvoiceStore(invoiceTestStorage, 'automacao'),
-          ferramentas: new TestInvoiceStore(invoiceTestStorage, 'ferramentas'),
-          epi: new TestInvoiceStore(invoiceTestStorage, 'epi'),
-          aprovacoes: new TestInvoiceStore(invoiceTestStorage, 'solicitacoes'),
-          manutencao: new TestInvoiceStore(invoiceTestStorage, 'manutencao'),
-          retiradas: new TestInvoiceStore(invoiceTestStorage, 'solicitacoes'),
-          biometria: new TestInvoiceStore(invoiceTestStorage, 'biometria')
+          config: operationalStore('config'),
+          obras: operationalStore('obras'),
+          usuarios: operationalStore('usuarios'),
+          ocorrencias: operationalStore('ocorrencias'),
+          notificacoes: operationalStore('notificacoes'),
+          kits: operationalStore('kits'),
+          calendario: operationalStore('calendario'),
+          centros: operationalStore('centros'),
+          projetos: operationalStore('projetos'),
+          relatorios: operationalStore('relatorios'),
+          mural: operationalStore('mural'),
+          painel: operationalStore('config'),
+          automacao: operationalStore('automacao'),
+          ferramentas: operationalStore('ferramentas'),
+          epi: operationalStore('epi'),
+          aprovacoes: operationalStore('solicitacoes'),
+          manutencao: operationalStore('manutencao'),
+          retiradas: operationalStore('solicitacoes'),
+          biometria: operationalStore('biometria')
         }
       });
       return administrationEngine;
@@ -188,28 +191,28 @@ async function createRuntime(storage, { sqlite = false, credential, invoiceTestS
       const { TestInvoiceStore } = require('../core/motors/invoices');
       const { createRequestEngine } = require('../core/motors/requests');
       requestEngine ??= createRequestEngine({
-        core, stock, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'solicitacoes')
+        core, stock, coordinate, store: operationalStore('solicitacoes')
       });
       return requestEngine;
     },
     getWithdrawalStockReader() {
-      if (!invoiceTestStorage) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'ESTOQUE_TESTE_DESATIVADO' });
+      if (!operationalStore) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'ESTOQUE_TESTE_DESATIVADO' });
       const { TestInvoiceStore } = require('../core/motors/invoices');
       const { createStockEngine } = require('../core/motors/stock');
-      const reader = createStockEngine({ core, store: new TestInvoiceStore(invoiceTestStorage, 'stock'),
-        receipts: new TestInvoiceStore(invoiceTestStorage, 'receiving'),
-        withdrawals: new TestInvoiceStore(invoiceTestStorage, 'solicitacoes') });
+      const reader = createStockEngine({ core, store: operationalStore('stock'),
+        receipts: operationalStore('receiving'),
+        withdrawals: operationalStore('solicitacoes') });
       // Chamado somente enquanto a retirada já detém o lock compartilhado.
       return { saldos: reader.saldos };
     },
     getStockEngine() {
-      if (!invoiceTestStorage) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'ESTOQUE_TESTE_DESATIVADO' });
+      if (!operationalStore) throw Object.assign(new Error('Motor de teste desativado.'), { code: 'ESTOQUE_TESTE_DESATIVADO' });
       const { TestInvoiceStore } = require('../core/motors/invoices');
       const { createStockEngine } = require('../core/motors/stock');
       stockEngine ??= createStockEngine({
-        core, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'stock'),
-        receipts: new TestInvoiceStore(invoiceTestStorage, 'receiving'),
-        withdrawals: new TestInvoiceStore(invoiceTestStorage, 'solicitacoes')
+        core, coordinate, store: operationalStore('stock'),
+        receipts: operationalStore('receiving'),
+        withdrawals: operationalStore('solicitacoes')
       });
       return stockEngine;
     },
@@ -218,7 +221,7 @@ async function createRuntime(storage, { sqlite = false, credential, invoiceTestS
       const { TestInvoiceStore } = require('../core/motors/invoices');
       const { createReceivingEngine } = require('../core/motors/receiving');
       receivingEngine ??= createReceivingEngine({
-        core, invoices, coordinate, store: new TestInvoiceStore(invoiceTestStorage, 'receiving')
+        core, invoices, coordinate, store: operationalStore('receiving')
       });
       return receivingEngine;
     }

@@ -13,11 +13,13 @@ const { SqliteDiagnosticsProvider } = require('../database/adapters/sqlite-diagn
 
 const token = 'test-only-credential-for-sqlite-suite';
 
-async function start(path, role = 'operator') {
+async function start(path, role = 'operator', preview = false) {
   const processEnv = {
     ...process.env, ALMOXA_SQLITE_PATH: path, ALMOXA_DIAGNOSTICS_TOKEN: token,
     ALMOXA_DIAGNOSTICS_ACTOR: 'integration-test', ALMOXA_DIAGNOSTICS_ROLE: role,
-    HOST: '127.0.0.1', PORT: '0'
+    ALMOXA_PREVIEW_SHEET_ID: '', ALMOXA_PREVIEW_SQLITE: preview ? '1' : '',
+    ALMOXA_PREVIEW_WRITE: preview ? '1' : '',
+    ALMOXA_PREVIEW_ORIGIN: preview ? 'https://candidate.example' : '', HOST: '127.0.0.1', PORT: '0'
   };
   const child = spawn(process.execPath, ['backend/server.js'], {
     env: processEnv, stdio: ['ignore', 'pipe', 'pipe']
@@ -39,8 +41,7 @@ async function start(path, role = 'operator') {
   }
   child.stdout.resume();
   return {
-    async call(route, { method = 'GET', body, authenticated = true } = {}) {
-      const headers = {};
+    async call(route, { method = 'GET', body, authenticated = true, headers = {} } = {}) {
       if (authenticated) headers.Authorization = 'Bearer ' + token;
       if (body) headers['Content-Type'] = 'application/json';
       return fetch('http://127.0.0.1:' + port + route, {
@@ -148,6 +149,89 @@ test('servidor real persiste, autoriza, faz backup e reabre SQLite após reinici
     assert.equal(persisted.data.version, 2);
     assert.equal(persisted.data.updatedBy, 'integration-test');
     assert.equal((await patch({ message: 'bloqueado', version: 2 })).status, 403);
+  } finally {
+    await server?.close();
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test('Desktop e Campo usam os motores do Core no mesmo SQLite isolado', { timeout: 45000 }, async () => {
+  const temp = await mkdtemp(join(tmpdir(), 'almoxa-preview-'));
+  const path = join(temp, 'preview.sqlite');
+  let server;
+  try {
+    server = await start(path, 'operator', true);
+    for (const page of ['/', '/campo']) {
+      const response = await server.call(page);
+      assert.equal(response.status, 200);
+      assert.match(await response.text(), /homologacao\/preview-client\.js/);
+    }
+    for (const name of [
+      'ALMOXA PRO — MÓDULO DE SINCRONIZAÇÃO E RENDERIZAÇÃO VISUAL.js',
+      'ALMOX-PRO — BOOTSYNC.js',
+      'ALMOX-PRO — MOTOR DE LEITURA DE NOTA FISCAL.js'
+    ]) assert.equal((await server.call('/' + encodeURIComponent(name))).status, 200);
+    const db = new DatabaseSync(path);
+    try {
+      const append = db.prepare('INSERT INTO v2_preview_events (motor,id,version,operation,payload) VALUES (?,?,1,?,?)');
+      for (const [motor, note] of [
+        ['config', { id: 'PAINEL_CONFIG', valor: JSON.stringify({ titulo: 'Painel sintético' }) }],
+        ['usuarios', { id: 'SYN-COLAB', nome: 'Colaborador sintético', perfil: 'ADMINISTRADOR', senha: 'fixture' }]
+      ]) {
+        append.run(motor, note.id, note.id, JSON.stringify({
+          id: note.id, operation: note.id, version: 1, actor: 'fixture', fingerprint: 'fixture', note
+        }));
+      }
+    } finally {
+      db.close();
+    }
+    const sessionPath = '/api/v2/preview/session';
+    const options = { method: 'OPTIONS', authenticated: false, headers: {
+      Origin: 'https://candidate.example', 'Access-Control-Request-Method': 'POST'
+    } };
+    const preflight = await server.call(sessionPath, options);
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get('access-control-allow-origin'), options.headers.Origin);
+    const denied = await server.call(sessionPath, { ...options, headers: { ...options.headers, Origin: 'https://other.example' } });
+    assert.equal(denied.status, 403);
+    assert.equal(denied.headers.has('access-control-allow-origin'), false);
+    const health = await server.call('/health', { headers: { Origin: options.headers.Origin } });
+    assert.equal(health.headers.get('access-control-allow-origin'), options.headers.Origin);
+    assert.equal((await server.call(sessionPath, { method: 'POST', authenticated: false })).status, 401);
+    async function signIn() {
+      const response = await server.call(sessionPath, { method: 'POST' });
+      assert.equal(response.status, 200);
+      return { url: response.url, token: (await response.json()).dados.token };
+    }
+    const dispatch = (session, modulo, acao, payload = {}) => fetch(
+      new URL('/api/v2/preview/dispatch', session.url), {
+        method: 'POST', headers: { Authorization: 'Bearer ' + session.token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modulo, acao, payload }), signal: AbortSignal.timeout(10000)
+      });
+    let session = await signIn();
+    const call = async (...args) => {
+      const response = await dispatch(session, ...args);
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.ok, true);
+      return body.dados;
+    };
+    assert.equal((await call('dashboard', 'mural')).titulo, 'Painel sintético');
+    const users = await call('usuarios', 'listar');
+    assert.equal(users[0].perfilCore, 'ADMINISTRADOR');
+    assert.equal(users[0].senha, undefined);
+    assert.deepEqual(await call('estoque', 'movimentacoes'), []);
+    assert.deepEqual(await call('epi', 'fichas'), []);
+    assert.deepEqual(await call('nf', 'listar'), []);
+    const request = { operation: 'v431-test-operation', version: 0, titulo: 'Ocorrência sintética' };
+    const created = await call('ocorrencias', 'criar', request);
+    assert.equal((await call('ocorrencias', 'criar', request)).id, created.id);
+    await server.close();
+    server = await start(path, 'reader', true);
+    session = await signIn();
+    assert.equal((await call('ocorrencias', 'obter', { id: created.id })).titulo, request.titulo);
+    assert.equal((await dispatch(session, 'usuarios', 'listar')).status, 403);
+    assert.equal((await dispatch(session, 'ocorrencias', 'criar', request)).status, 403);
   } finally {
     await server?.close();
     await rm(temp, { recursive: true, force: true });

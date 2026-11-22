@@ -73,7 +73,7 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
         return true;
       }
       try {
-        await runtime.core.authorizeSession(token, 'nf:read');
+        await runtime.core.authorizeSession(token, 'preview:session');
       } catch {
         error(res, 401, 'SEM_SESSAO', 'Credencial de homologação inválida.');
         return true;
@@ -94,7 +94,7 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
       const desktopScript = '<script src="./backend/preview-client.js" data-deployment="pages"></script>';
       const page = html.includes(desktopScript)
         ? html.replace(desktopScript, guard(allowWrite))
-        : html.replace(/<head[^>]*>/i, tag => tag + guard(false));
+        : html.replace(/<head[^>]*>/i, tag => tag + '<meta name="almoxa-core-v2">' + guard(false));
       res.writeHead(200, pageHeaders).end(page);
       return true;
     }
@@ -126,12 +126,12 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
       return true;
     }
     if (!modulesAvailable) {
-      error(res, 503, 'ARMAZENAMENTO_OPERACIONAL_INDISPONIVEL', 'Configure ALMOXA_PREVIEW_SHEET_ID para consultar os motores nesta homologacao.');
+      error(res, 503, 'ARMAZENAMENTO_OPERACIONAL_INDISPONIVEL', 'Configure a planilha de teste ou o SQLite isolado desta homologação.');
       return true;
     }
     const { token } = session;
     try {
-      await runtime.core.authorizeSession(token, 'nf:read');
+      await runtime.core.authorizeSession(token, 'preview:session');
       const { modulo, acao, payload = {} } = await readBody(req, upload ? 1450000 : 8192);
       if (!read.get(modulo)?.includes(acao) || (upload !== (modulo === 'ocr' && acao === 'ler')) || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
         error(res, 400, 'OPERACAO_FORA_DA_HOMOLOGACAO', 'Operação indisponível no ambiente de homologação.');

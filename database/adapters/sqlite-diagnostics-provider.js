@@ -42,11 +42,53 @@ class SqliteDiagnosticsProvider {
           PRIMARY KEY (recordId, version)
         ) STRICT;
       `);
+      if (this.previewEnabled && !readOnly) db.exec(`
+        CREATE TABLE IF NOT EXISTS v2_preview_events (
+          motor TEXT NOT NULL,
+          id TEXT NOT NULL,
+          version INTEGER NOT NULL CHECK (version > 0),
+          operation TEXT NOT NULL,
+          exclusive TEXT,
+          payload TEXT NOT NULL CHECK (json_valid(payload)),
+          UNIQUE (motor, operation),
+          UNIQUE (motor, id, version),
+          UNIQUE (motor, exclusive)
+        ) STRICT;
+      `);
       this.db = db;
     } catch (error) {
       db.close();
       throw error;
     }
+  }
+
+  enablePreview() {
+    this.previewEnabled = true;
+  }
+
+  previewStore(kind) {
+    if (!this.previewEnabled) throw new Error('Homologação SQLite desativada.');
+    const db = this.db;
+    return {
+      async events() {
+        return db.prepare(
+          'SELECT payload FROM v2_preview_events WHERE motor = ? ORDER BY rowid'
+        ).all(kind).map(row => JSON.parse(row.payload));
+      },
+      async hasReceipt(invoiceId) {
+        return Boolean(db.prepare(
+          "SELECT 1 FROM v2_preview_events WHERE motor = 'receiving' AND exclusive = ?"
+        ).get(invoiceId));
+      },
+      async append(event) {
+        const encoded = JSON.stringify(event);
+        if (encoded.length > 45000) throw Object.assign(new Error('Evento excede limite.'), { code: 'NF_LIMITE_DE_TAMANHO' });
+        db.prepare(
+          'INSERT INTO v2_preview_events (motor, id, version, operation, exclusive, payload) VALUES (?, ?, ?, ?, ?, ?)'
+        ).run(kind, event.id, event.version, event.operation,
+          kind === 'receiving' ? event.exclusive ?? null : null, encoded);
+      }
+    };
   }
 
   disconnect() {

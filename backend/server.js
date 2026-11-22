@@ -44,6 +44,37 @@ function createHandler(core, revision, database, preview) {
   };
 }
 
+function previewCors(configured) {
+  if (!configured) return () => false;
+  const url = new URL(configured);
+  if (url.protocol !== 'https:' || url.origin !== configured) {
+    throw new Error('ALMOXA_PREVIEW_ORIGIN deve conter somente a origem HTTPS publicada.');
+  }
+  const allowed = new Map([
+    ['/health', ['GET']],
+    ['/api/v2/preview/session', ['POST', 'DELETE']],
+    ['/api/v2/preview/dispatch', ['POST']]
+  ]);
+  return (req, res) => {
+    const methods = allowed.get(req.url);
+    if (!methods) return false;
+    res.setHeader('Vary', 'Origin');
+    const trusted = req.headers.origin === configured;
+    if (trusted) res.setHeader('Access-Control-Allow-Origin', configured);
+    if (req.method !== 'OPTIONS') return false;
+    if (!trusted || !methods.includes(req.headers['access-control-request-method'])) {
+      res.writeHead(403).end();
+      return true;
+    }
+    res.writeHead(204, {
+      'Access-Control-Allow-Methods': methods.join(', '),
+      'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+      'Cache-Control': 'no-store'
+    }).end();
+    return true;
+  };
+}
+
 async function main() {
   const sqlitePath = process.env.ALMOXA_SQLITE_PATH;
   const { ALMOXA_DIAGNOSTICS_TOKEN: token, ALMOXA_DIAGNOSTICS_ACTOR: actor,
@@ -58,6 +89,11 @@ async function main() {
     sqlite = new SqliteDiagnosticsProvider(sqlitePath);
   }
   const previewId = process.env.ALMOXA_PREVIEW_SHEET_ID;
+  const sqlitePreview = process.env.ALMOXA_PREVIEW_SQLITE === '1';
+  if (sqlitePreview && (!sqlite || previewId || (process.env.HOST ?? '127.0.0.1') !== '127.0.0.1')) {
+    throw new Error('Homologação SQLite exige banco isolado, loopback e ausência de planilha de teste.');
+  }
+  if (sqlitePreview) sqlite.enablePreview();
   let invoiceTestStorage;
   if (previewId) {
     if ((process.env.HOST ?? '127.0.0.1') !== '127.0.0.1' || !token || token.length < 32 ||
@@ -67,20 +103,22 @@ async function main() {
     const { GoogleSheetsProvider } = require('../database/adapters/google-sheets-provider');
     invoiceTestStorage = new GoogleSheetsProvider({ testSpreadsheetId: previewId, testOnly: true });
   }
-  const runtime = await createRuntime(sqlite, { sqlite: Boolean(sqlite), credential: { token, actor, role, approvalProfile: previewId ? process.env.ALMOXA_PREVIEW_APPROVAL_PROFILE : undefined }, invoiceTestStorage });
+  const runtime = await createRuntime(sqlite, { sqlite: Boolean(sqlite), credential: { token, actor, role, approvalProfile: previewId ? process.env.ALMOXA_PREVIEW_APPROVAL_PROFILE : undefined }, invoiceTestStorage, sqlitePreview });
   const { core, database } = runtime;
   // O Desktop e o Campo passam a ser servidos sempre que houver banco —
   // SQLite basta. Antes dependiam de ALMOXA_PREVIEW_SHEET_ID, o que
   // amarrava a interface a uma planilha do Google para simplesmente abrir.
   const preview = (invoiceTestStorage || sqlite) &&
     require('./preview-api').createPreview(runtime, join(__dirname, '..'), {
-      modulesAvailable: Boolean(invoiceTestStorage),
-      allowWrite: Boolean(invoiceTestStorage) && process.env.ALMOXA_PREVIEW_WRITE === '1'
+      modulesAvailable: Boolean(invoiceTestStorage || sqlitePreview),
+      allowWrite: Boolean(invoiceTestStorage || sqlitePreview) && process.env.ALMOXA_PREVIEW_WRITE === '1'
     });
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? '127.0.0.1';
   const handler = createHandler(core, process.env.ALMOXA_REVISION || null, sqlite && database, preview);
+  const cors = previewCors(preview ? process.env.ALMOXA_PREVIEW_ORIGIN : undefined);
   const server = createServer({ requestTimeout: 15000, headersTimeout: 10000 }, (req, res) => {
+    if (cors(req, res)) return;
     const diagnostic = req.url.startsWith('/api/v2/diagnostics');
     const previewRequest = req.url.startsWith('/api/v2/preview/');
     if (diagnostic || previewRequest) {

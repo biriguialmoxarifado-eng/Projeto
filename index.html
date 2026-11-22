@@ -2039,6 +2039,7 @@ return API.disponivelCore() || PONTE.pronta();
 PONTE: PONTE,
 call: function(modulo, acao, payload, opcoes) {
 if (window.AlmoxaCorePreview) return window.AlmoxaCorePreview.call(modulo, acao, payload);
+if (document.querySelector('meta[name="almoxa-core-v2"]')) return Promise.resolve({ok:false,codigo:'CORE_V2_INDISPONIVEL',mensagem:'O cliente do Core V2 não inicializou. Recarregue a página para tentar novamente.'});
 var req = {
 modulo: modulo,
 acao: acao,
