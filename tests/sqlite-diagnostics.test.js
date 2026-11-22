@@ -345,3 +345,68 @@ test('lote de 23 consultas de homologação passa pelo Core e SQLite via HTTP', 
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+test('catálogo, configuração e obras gravam por HTTP e mantêm o escopo de leitura', { timeout: 45000 }, async () => {
+  const temp = await mkdtemp(join(tmpdir(), 'almoxa-catalogo-http-'));
+  const path = join(temp, 'catalogo.sqlite');
+  let server;
+  let session;
+  async function boot(role, write) {
+    server = await start(path, role, true, write);
+    const response = await server.call('/api/v2/preview/session', { method: 'POST' });
+    assert.equal(response.status, 200);
+    session = { url: response.url, token: (await response.json()).dados.token };
+  }
+  async function call(modulo, acao, payload = {}) {
+    const response = await fetch(new URL('/api/v2/preview/dispatch', session.url), {
+      method: 'POST', headers: { Authorization: 'Bearer ' + session.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ modulo, acao, payload }), signal: AbortSignal.timeout(5000)
+    });
+    return { status: response.status, ...(await response.json()) };
+  }
+  try {
+    await boot('operator', true);
+    const seeds = [
+      ['categorias', { data: { id: 'SYN-CAT', nome: 'Categoria sintética' } }],
+      ['itens', { data: { sku: 'SYN-CATALOG', descricao: 'Item sintético', categoria: 'SYN-CAT' } }],
+      ['fornecedores', { data: { cnpj: '00000000000001', razaoSocial: 'Fornecedor sintético' } }],
+      ['config', { chave: 'synthetic-display', valor: { modo: 'teste' } }],
+      ['obras', { nome: 'Obra sintética' }]
+    ];
+    for (const [motor, data] of seeds) {
+      const body = { operation: 'synthetic-' + motor, version: 0, ...data };
+      const created = await call(motor, 'salvar', body);
+      assert.equal(created.status, 200, motor);
+      assert.equal(created.ok, true, motor);
+      assert.deepEqual(await call(motor, 'salvar', body), created);
+    }
+    const stale = await call('itens', 'salvar', { operation:'synthetic-update', version:0,
+      data:{sku:'SYN-CATALOG', descricao:'Alteração defasada'} });
+    assert.equal(stale.status, 409);
+    const invalid = await call('itens', 'salvar', { operation:'synthetic-invalid', version:0, data:{} });
+    assert.equal(invalid.status, 400);
+    const changed = await call('itens', 'salvar', { operation:'synthetic-update', version:1,
+      data:{sku:'SYN-CATALOG', descricao:'Item atualizado'} });
+    assert.equal(changed.versaoCore, 2);
+    const audit = await call('auditoria','listar');
+    assert.deepEqual(new Set(audit.dados.map(row=>row.modulo)), new Set(['config','obras']));
+
+    await server.close();
+    await boot('reader', true);
+    for (const [motor, data] of seeds) {
+      const denied = await call(motor, 'salvar', { operation: 'synthetic-denied', version: 0, ...data });
+      assert.equal(denied.status, 403, motor);
+    }
+    assert.equal((await call('itens','obter',{sku:'SYN-CATALOG'})).dados.descricao, 'Item atualizado');
+    assert.equal((await call('fornecedores','listar')).dados.length, 1);
+    assert.equal((await call('categorias','listar')).dados.length, 1);
+    assert.deepEqual((await call('config','obter',{chave:'synthetic-display'})).dados, { modo:'teste' });
+    assert.equal((await call('obras','listar')).dados.length, 1);
+    await server.close();
+    await boot('operator', false);
+    assert.equal((await call('obras','salvar',{nome:'Não gravar'})).status, 403);
+  } finally {
+    await server?.close();
+    await rm(temp, { recursive: true, force: true });
+  }
+});

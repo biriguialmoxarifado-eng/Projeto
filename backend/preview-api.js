@@ -8,17 +8,19 @@ const { reply, readBody } = require('./diagnostic-api');
 
 function createPreview(runtime, root, { allowWrite = false, modulesAvailable = true, operational } = {}) {
   const epiWrites = new Set(['entregarEstoque', 'devolverEstoque', 'estornarEstoque']);
+  const catalogKinds = new Set(['itens', 'fornecedores', 'categorias']);
+  const adminWrites = new Set([...catalogKinds, 'config', 'obras']);
   const read = new Map([
     ['nf', ['listar', 'obter', 'itens', ...(allowWrite ? ['salvar'] : [])]],
     ['nfed', allowWrite ? ['atualizar'] : []],
     ['compras', ['listar', 'precompras', 'pedidos']],
     ['estoque', ['listar', 'item', 'movimentacoes', 'saldo', ...(allowWrite ? ['movimentar'] : [])]],
-    ['itens', ['listar', 'obter']],
-    ['fornecedores', ['listar', 'porCnpj']],
-    ['categorias', ['listar']],
-    ['obras', ['listar']],
+    ['itens', ['listar', 'obter', 'salvar']],
+    ['fornecedores', ['listar', 'porCnpj', 'salvar']],
+    ['categorias', ['listar', 'salvar']],
+    ['obras', ['listar', 'salvar']],
     ['usuarios', ['listar', 'contar', 'obter']],
-    ['config', ['obter']],
+    ['config', ['obter', 'salvar']],
     ['auditoria', ['listar']],
     ['ocorrencias', ['listar', 'obter', ...(allowWrite ? ['criar', 'salvar'] : [])]],
     ['notificacoes', ['listar']],
@@ -135,6 +137,10 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
     try {
       await runtime.core.authorizeSession(token, 'preview:session');
       const { modulo, acao, payload = {} } = await readBody(req, upload ? 1450000 : 8192);
+      if (!allowWrite && acao === 'salvar' && adminWrites.has(modulo)) {
+        error(res, 403, 'ACESSO_NEGADO', 'Gravação desativada nesta homologação.');
+        return true;
+      }
       if (!allowWrite && modulo === 'epi' && epiWrites.has(acao)) {
         error(res, 403, 'ACESSO_NEGADO', 'Gravações de EPI indisponíveis nesta homologação.');
         return true;
@@ -250,6 +256,10 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
       }
       else if (modulo === 'auditoria') result = await runtime.getAdministrationEngine().auditoria(token, acao, payload);
       else if (modulo === 'usuarios') result = await runtime.getAdministrationEngine().usuarios(token, acao, payload);
+      else if (catalogKinds.has(modulo) && acao === 'salvar') {
+        const event = await runtime.getCatalogEngine().salvar(token, modulo, payload);
+        result = { ok: true, dados: event.note, versaoCore: event.version, operacaoCore: event.operation };
+      }
       else if (modulo === 'config') {
         if (payload.chave !== 'PAINEL_CONFIG' && !/^synthetic-[\w-]{1,75}$/.test(payload.chave ?? '')) {
           error(res, 403, 'ACESSO_NEGADO', 'Chave fora da homologação.');
@@ -293,6 +303,13 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
       }
       else if (cause.code === 'EPI_REVERSAO_INVALIDA') error(res, 409, cause.code, 'Entrega já revertida ou incompatível.');
       else if (['EPI_MOVIMENTO_INVALIDO', 'EPI_COLABORADOR_INVALIDO'].includes(cause.code)) error(res, 400, cause.code, 'Dados de EPI inválidos.');
+      else if (['CADASTRO_CONFLITO_VERSAO', 'CADASTRO_CONFLITO_IDEMPOTENCIA', 'CATEGORIA_DUPLICADA'].includes(cause.code)) {
+        error(res, 409, cause.code, 'Cadastro em conflito com a versão armazenada.');
+      }
+      else if (['CADASTRO_OPERACAO_INVALIDA', 'CADASTRO_DADOS_INVALIDOS', 'CONFIG_VALOR_INVALIDO', 'CONFIG_CHAVE_NAO_SUPORTADA', 'OBRA_DADOS_INVALIDOS'].includes(cause.code)) {
+        error(res, 400, cause.code, 'Dados de cadastro inválidos.');
+      }
+      else if (cause.code === 'OBRA_NAO_ENCONTRADA') error(res, 404, cause.code, 'Obra não localizada.');
       else if (cause.status) error(res, cause.status, cause.code, 'Solicitação inválida.');
       else error(res, 503, 'CORE_INDISPONIVEL', 'O Core de homologação não conseguiu consultar os dados.');
     }
