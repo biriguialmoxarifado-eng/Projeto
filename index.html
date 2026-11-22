@@ -2036,6 +2036,7 @@ return API.disponivelCore() || PONTE.pronta();
 },
 PONTE: PONTE,
 call: function(modulo, acao, payload, opcoes) {
+if (window.AlmoxaCorePreview) return window.AlmoxaCorePreview.call(modulo, acao, payload);
 var req = {
 modulo: modulo,
 acao: acao,
@@ -10280,7 +10281,8 @@ SCREENS["estoque"] = {
 titulo: "Estoque Geral",
 modulo: "estoque",
 render: function() {
-return API.call("estoque", "listar", {}).then(function(r) {
+var filtroCore = window.AlmoxaCorePreview ? { local: APP.STATE.obra?.id } : {};
+return API.call("estoque", "listar", filtroCore).then(function(r) {
 if (!r.ok) return UI.estado("erro", "Estoque indisponível", r.mensagem);
 var todos = r.dados;
 var filtros = {
@@ -10473,11 +10475,24 @@ modalAjuste(b.getAttribute("data-ajuste"));
 }
 };
 
-function modalAjuste(id) {
-var p = MOCK.produtos.filter(function(x) {
-return x.id === id;
-})[0];
+async function modalAjuste(id) {
+var preview = window.AlmoxaCorePreview;
+var local = preview && APP.STATE.obra && APP.STATE.obra.id;
+var versaoCore;
+var p;
+if (preview) {
+if (!/^SYN-[a-zA-Z0-9-]+$/.test(id) || !local) {
+toast("err", "Ajuste indisponível", "Selecione uma obra de teste e um SKU sintético.");
+return;
+}
+var saldo = await preview.call("estoque", "saldo", { sku: id, local: local });
+if (!saldo.ok) { toast("err", "Saldo indisponível", saldo.mensagem); return; }
+versaoCore = saldo.dados.version;
+p = { nome: id, codigo: id, estoque: saldo.dados.saldo, reservado: saldo.dados.reservado, minimo: 0 };
+} else {
+p = MOCK.produtos.filter(function(x) { return x.id === id; })[0];
 if (!p) return;
+}
 UI.modal({
 titulo: "Ajuste de estoque",
 sub: p.nome + " · " + p.codigo,
@@ -10492,7 +10507,36 @@ var d = Number(novo.value) - p.estoque;
 dif.value = (d > 0 ? "+" : "") + d + " un.";
 });
 w.querySelector("[data-x]").addEventListener("click", fechar);
-w.querySelector("[data-ok]").addEventListener("click", function() {
+var botao = w.querySelector("[data-ok]");
+var tentativa = null;
+botao.addEventListener("click", async function() {
+if (preview) {
+if (botao.disabled) return;
+var qtd = Number(novo.value);
+if (!novo.value.trim() || !Number.isSafeInteger(qtd) || qtd < 0) {
+toast("err", "Ajuste recusado", "Informe uma quantidade inteira válida.");
+return;
+}
+var motivo = w.querySelector("#ajMotivo").value;
+var justificativa = w.querySelector("#ajJust").value.trim();
+if (justificativa) motivo += ": " + justificativa;
+if (!tentativa || tentativa.qtd !== qtd || tentativa.motivo !== motivo) {
+tentativa = { sku: id, local: local, tipo: "AJUSTE", qtd: qtd, motivo: motivo,
+operacaoCore: crypto.randomUUID(), versaoCore: versaoCore };
+}
+botao.disabled = true;
+try {
+var ajuste = await preview.call("estoque", "movimentar", tentativa);
+if (!ajuste.ok) {
+toast("err", "Ajuste recusado", ajuste.mensagem);
+return;
+}
+fechar();
+toast("ok", "Saldo ajustado", p.nome + " agora tem " + qtd + " un.");
+ROUTER.render();
+} finally { botao.disabled = false; }
+return;
+}
 API.call("estoque", "ajustar", {
 id: id,
 novo: Number(novo.value),
@@ -10522,7 +10566,7 @@ render: function(params) {
    usar a mesma fonte. Se o Core não responder, a lista vem vazia:
    melhor vazia que inventada. */
 return Promise.all([
-API.call("estoque", "item", { id: params.id }),
+API.call("estoque", "item", window.AlmoxaCorePreview ? { id: params.id, local: APP.STATE.obra?.id } : { id: params.id }),
 API.call("estoque", "movimentacoes", {})
 ]).then(function(resIt) {
 var r = resIt[0];
@@ -10645,7 +10689,13 @@ modulo: "estoque",
 render: function() {
 return API.call("estoque", "movimentacoes", {}).then(function(r) {
 if (!r.ok) return UI.estado("erro", "Não foi possível carregar as movimentações", r.mensagem);
-var todas = listaSegura(r.dados).map(normalizarMovimento);
+var todas = listaSegura(r.dados).map(function(movimento) {
+var row = normalizarMovimento(movimento);
+if (window.AlmoxaCorePreview && !movimento.descricao && !movimento.item && !movimento.nome && row.codigo) {
+row.item = row.codigo;
+}
+return row;
+});
 todas.sort(function(a, b) {
 return String(b.data || "").localeCompare(String(a.data || ""));
 });
@@ -11539,6 +11589,7 @@ resolve(null);
 });
 }
 function chamar(acao, payload) {
+  if (window.AlmoxaCorePreview) return window.AlmoxaCorePreview.call('nf', acao, payload);
 var pelaPorta = direto(acao, payload);
 if (!pelaPorta) return API.call("nf", acao, payload || {});
 return pelaPorta.then(function(r) {
@@ -11605,6 +11656,7 @@ resolve(null);
 });
 }
 function porEdicao(acao, payload) {
+  if (window.AlmoxaCorePreview) return window.AlmoxaCorePreview.call('nfed', acao, payload);
 var p = portaDeEdicao(acao, payload);
 if (!p) return Promise.resolve({
 ok: false,
@@ -17545,7 +17597,7 @@ try {
 var semComunicado = comunicados.length === 0;
 var hora = (new Date).getHours();
 var saudacao = hora < 12 ? "Bom dia" : hora < 18 ? "Boa tarde" : "Boa noite";
-var quem = ST.publico ? "" : ", " + ST.usuario.nome.split(" ")[0];
+var quem = ST.publico || !ST.usuario?.nome ? "" : ", " + ST.usuario.nome.split(" ")[0];
 var criticos = MOCK.produtos.filter(function(p) {
 return p.status === "critico";
 }).length;
@@ -22542,6 +22594,7 @@ return seg < 60 ? "agora" : Math.floor(seg / 60) + " min";
 (function instalarCache() {
 var original = API.call;
 API.call = function(modulo, acao, payload, opcoes) {
+if (window.AlmoxaCorePreview) return original(modulo, acao, payload, opcoes);
 if (!CACHE.pode(acao)) CACHE.invalidar(modulo);
 if (CACHE.pode(acao)) {
 var emCache = CACHE.ler(modulo, acao, payload);
@@ -65218,8 +65271,10 @@ window.__ALMOXA_SCRIPT_COMPLETO = true;
    dizendo 267 — sem jeito de saber se a instalacao pegou. Agora o
    numero vem junto da lista do que entrou, para a conferencia ser
    possivel sem depender da minha palavra. */
-var ALMOXA_VERSAO = "sistema 430 · 15/11";
+var ALMOXA_VERSAO = "sistema 431 · 22/11";
 var ALMOXA_NOVIDADES = [
+  "431 · o Desktop fala com o Core V2 em Node: sem Apps Script no caminho",
+  "431 · ?core= aponta para outro Core sem reimplantar nada",
   "384 · data so embaixo de etapa concluida; o que nao aconteceu nao ganha hora",
   "383 · o layout ja vem pronto: logo, foto e icones viajam dentro do e-mail",
   "382 · a tela le e grava a configuracao no proprio modulo de envio, e manda o teste",
