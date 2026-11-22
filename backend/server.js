@@ -92,7 +92,18 @@ async function main() {
     console.error('Falha ao iniciar o servidor ALMOXA PRO V2.');
     process.exitCode = 1;
   });
-  server.listen(port, host, () => console.log(`ALMOXA PRO V2 disponível na porta ${server.address().port}.`));
+  server.listen(port, host, () => {
+    console.log(`ALMOXA PRO V2 disponível na porta ${server.address().port}.`);
+    // Sem banco não há diagnóstico: o servidor responderia 404 a tudo
+    // sem dizer por quê. Avisar aqui evita a caça ao erro.
+    if (!sqlite && !invoiceTestStorage) {
+      console.warn(
+        'ATENÇÃO: nenhum banco configurado — todas as rotas vão responder 404.\n' +
+        '  Falta a variável ALMOXA_SQLITE_PATH (e a credencial do diagnóstico).\n' +
+        '  Copie .env.example para .env, preencha, e suba com: npm run start:local'
+      );
+    }
+  });
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.once(signal, () => server.close(() => sqlite?.disconnect()));
   }

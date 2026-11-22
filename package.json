@@ -6,6 +6,7 @@
   "scripts": {
     "test": "node tests/core.test.js && node tests/session-manager.test.js && node tests/authorization-manager.test.js && node database/tests/database.test.js && node --test database/tests/storage-operations.test.js database/tests/google-sheets-provider.local.test.js tests/sqlite-diagnostics.test.js tests/invoices.test.js",
     "start": "node backend/server.js",
+    "start:local": "node --env-file=.env backend/server.js",
     "auth:google": "node database/adapters/google-desktop-auth.js",
     "test:google": "node database/tests/google-sheets-provider.test.js",
     "backup:diagnostics": "node backend/backup-diagnostics.js"
