@@ -10,7 +10,7 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
   const epiWrites = new Set(['entregarEstoque', 'devolverEstoque', 'estornarEstoque']);
   const catalogKinds = new Set(['itens', 'fornecedores', 'categorias']);
   const adminWrites = new Set([...catalogKinds, 'config', 'obras']);
-  const flowWrites = new Map([['compras', new Set(['precompra', 'alterarStatus'])],
+  const flowWrites = new Map([['compras', new Set(['precompra', 'alterarStatus', 'pedido'])],
     ['solicitacoes', new Set(['criar'])], ['aprovacoes', new Set(['decidirItens'])],
     ['retiradas', new Set(['confirmar'])],
     ['ferramentas', new Set(['salvar', 'retirar', 'devolver', 'retornarManutencao'])],
@@ -222,6 +222,7 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
       else if (modulo === 'compras') {
         const purchases = runtime.getPurchaseEngine();
         if (acao === 'precompra') result = await purchases.precompra(token, payload);
+        else if (acao === 'pedido') result = await purchases.pedido(token, payload);
         else if (acao === 'alterarStatus') result = await purchases.alterarStatus(token, payload);
         else result = await purchases.consultarLegado(token, acao, payload);
       }
@@ -325,11 +326,15 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
         error(res, 400, cause.code, 'Dados de cadastro inválidos.');
       }
       else if (cause.code === 'OBRA_NAO_ENCONTRADA') error(res, 404, cause.code, 'Obra não localizada.');
-      else if (['COMPRA_CONFLITO_IDEMPOTENCIA', 'COMPRA_CONFLITO_VERSAO', 'SOLICITACAO_CONFLITO_IDEMPOTENCIA'].includes(cause.code)) {
+      else if (['COMPRA_CONFLITO_IDEMPOTENCIA', 'COMPRA_CONFLITO_VERSAO', 'PRECOMPRA_INCOMPATIVEL',
+        'SOLICITACAO_CONFLITO_IDEMPOTENCIA'].includes(cause.code)) {
         error(res, 409, cause.code, 'Operação já usada ou versão desatualizada.');
       }
       else if (['COMPRA_DADOS_INVALIDOS', 'SOLICITACAO_INVALIDA', 'SOLICITACAO_ITENS_INVALIDOS'].includes(cause.code)) {
         error(res, 400, cause.code, 'Dados de fluxo inválidos.');
+      }
+      else if (['PRECOMPRA_NAO_ENCONTRADA', 'ITEM_NAO_ENCONTRADO'].includes(cause.code)) {
+        error(res, 404, cause.code, 'Registro de compra ou item não localizado.');
       }
       else if (cause.code === 'RESERVA_NAO_ENCONTRADA') error(res, 404, cause.code, 'Reserva não localizada.');
       else if (['RESERVA_NAO_APROVADA', 'RETIRADA_ACIMA_DO_PENDENTE', 'RETIRADA_LOCAL_NAO_INFORMADO', 'RETIRADA_ITEM_AMBIGUO'].includes(cause.code)) {

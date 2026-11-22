@@ -607,3 +607,62 @@ test('inventário e ferramentas pela API aplicam versões, custódia e restriç�
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+test('compras emite o lote e converte a pré-compra no mesmo evento', { timeout: 45000 }, async () => {
+  const temp = await mkdtemp(join(tmpdir(), 'almoxa-pedidos-http-'));
+  const path = join(temp, 'compras.sqlite');
+  let server;
+  try {
+    server = await start(path, 'operator', true);
+    let call = await previewDispatch(server);
+    const sku = 'SYN-PEDIDO';
+    const other = 'SYN-ACESSORIO';
+    for (const key of [sku, other]) {
+      assert.equal((await call('itens', 'salvar', { operation: 'item-' + key, version: 0,
+        data: { sku: key, descricao: 'Material sintético', valorUnitario: 5 } })).ok, true);
+    }
+    const source = await call('compras', 'precompra', { sku, qtd: 2, operation: 'pc-pedido' });
+    assert.equal(source.ok, true);
+    const [precompra] = (await call('compras', 'precompras')).dados;
+    const request = { operation: 'emitir-pedido', precompra: precompra.id, version: precompra.versaoCore,
+      itens: [{ sku, qtd: 2 }, { sku: other, qtd: 1, valorUnitario: 0 }] };
+    const missing = { ...request, itens: [request.itens[0], { sku: 'SYN-INEXISTENTE', qtd: 1 }] };
+    assert.equal((await call('compras', 'pedido', missing)).status, 404);
+    assert.deepEqual((await call('compras', 'pedidos')).dados, []);
+    assert.equal((await call('compras', 'precompras')).dados[0].status, 'AGUARDANDO_APROVACAO');
+    assert.equal((await call('compras', 'pedido', { ...request, version: 2 })).codigo, 'COMPRA_CONFLITO_VERSAO');
+    const [order, replay] = await Promise.all([call('compras', 'pedido', request), call('compras', 'pedido', request)]);
+    assert.equal(order.status, 200);
+    assert.deepEqual(replay, order);
+    assert.equal(order.dados.quantidade, 2);
+    assert.deepEqual(order.dados.pedidos.map(note => [note.sku, note.valorEstimado, note.precompra]),
+      [[sku, 10, precompra.id], [other, 0, precompra.id]]);
+    const [, accessory] = order.dados.pedidos;
+    assert.equal((await call('compras', 'alterarStatus', { id: accessory.id, status: 'EM_TRANSITO', version: 1,
+      operation: 'pedido-transito' })).ok, true);
+    assert.equal((await call('compras', 'pedido', { ...request, operation: 'pedido-novo', version: 2 })).codigo,
+      'PRECOMPRA_INCOMPATIVEL');
+    assert.equal((await call('compras', 'alterarStatus', { id: precompra.id, status: 'EM_COTACAO', version: 2,
+      operation: 'pc-reabrir' })).status, 409);
+
+    await server.close();
+    server = await start(path, 'operator', true);
+    call = await previewDispatch(server);
+    assert.deepEqual(await call('compras', 'pedido', request), order);
+    const manual = await call('compras', 'pedido', { sku, qtd: 1, operation: 'pedido-manual' });
+    assert.equal(manual.dados.pedidos[0].origem, 'MANUAL');
+    await server.close();
+    server = await start(path, 'reader', true);
+    call = await previewDispatch(server);
+    assert.equal((await call('compras', 'pedido', request)).status, 403);
+    const orders = (await call('compras', 'pedidos')).dados;
+    assert.equal(new Set(orders.map(note => note.id)).size, 3);
+    assert.equal(orders.find(note => note.id === accessory.id).status, 'EM_TRANSITO');
+    const sourceAfterRestart = (await call('compras', 'precompras')).dados[0];
+    assert.equal(sourceAfterRestart.status, 'CONVERTIDA_EM_PEDIDO');
+    assert.equal(sourceAfterRestart.versaoCore, 2);
+  } finally {
+    await server?.close();
+    await rm(temp, { recursive: true, force: true });
+  }
+});

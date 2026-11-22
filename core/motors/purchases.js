@@ -5,11 +5,14 @@ const { createHash } = require('node:crypto');
 const fail = code => Object.assign(new Error(code), { code });
 const idValid = value => typeof value === 'string' && /^[\w.-]{1,80}$/.test(value);
 const open = status => ['AGUARDANDO_APROVACAO', 'EM_COTACAO'].includes(status);
+const converted = 'CONVERTIDA_EM_PEDIDO';
 
 function latest(events) {
   const result = new Map();
   for (const event of events) {
-    if (event.version > (result.get(event.id)?.version ?? 0)) result.set(event.id, event);
+    for (const entry of [event, ...(event.changes ?? [])]) {
+      if (entry.version > (result.get(entry.id)?.version ?? 0)) result.set(entry.id, entry);
+    }
   }
   return result;
 }
@@ -27,8 +30,82 @@ function createPurchaseEngine({ core, store, catalog, coordinate, clock = () => 
       await authorize(token, 'read');
       if (!['listar', 'precompras', 'pedidos'].includes(action)) return { ok: false, codigo: 'ACAO_DESCONHECIDA' };
       const tipo = action === 'precompras' ? 'PRE_COMPRA' : action === 'pedidos' ? 'PEDIDO' : filter.tipo;
-      return { ok: true, dados: [...latest(await store.events()).values()].map(event => event.note)
+      return { ok: true, dados: [...latest(await store.events()).values()].map(event => ({ ...event.note, versaoCore: event.version }))
         .filter(note => (!tipo || note.tipo === tipo) && (action !== 'listar' || !filter.status || note.status === filter.status)) };
+    },
+
+    async pedido(token, input = {}) {
+      const actor = await authorize(token, 'write');
+      const { operation, precompra = null, version, fornecedor = '', previsao = '', observacao = '' } = input;
+      const items = input.itens ?? [{ sku: input.sku, qtd: input.qtd, valorUnitario: input.valorUnitario }];
+      if (!idValid(operation) || !Array.isArray(items) || !items.length || items.length > 20 ||
+          [fornecedor, previsao, observacao].some(value => typeof value !== 'string' || value.length > 160) ||
+          (precompra !== null && (typeof precompra !== 'string' || !/^#PC-\d+$/.test(precompra) ||
+            !Number.isSafeInteger(version) || version < 1 || version >= Number.MAX_SAFE_INTEGER))) {
+        throw fail('COMPRA_DADOS_INVALIDOS');
+      }
+      const lines = items.map(item => {
+        const valorUnitario = item?.valorUnitario ?? input.valorUnitario ?? null;
+        if (!idValid(item?.sku) || !Number.isSafeInteger(item.qtd) || item.qtd <= 0 ||
+            (valorUnitario !== null && (!Number.isFinite(valorUnitario) || valorUnitario < 0))) {
+          throw fail('COMPRA_DADOS_INVALIDOS');
+        }
+        return { sku: item.sku, qtd: item.qtd, valorUnitario };
+      });
+      const fingerprint = createHash('sha256').update(JSON.stringify([
+        'pedido', actor, precompra, version, fornecedor, previsao, observacao, lines
+      ])).digest('hex');
+      return coordinate(async () => {
+        const replay = events => {
+          const event = events.find(candidate => candidate.operation === operation);
+          if (event && event.fingerprint !== fingerprint) throw fail('COMPRA_CONFLITO_IDEMPOTENCIA');
+          return event;
+        };
+        const response = event => {
+          const pedidos = [event, ...event.changes].filter(entry => entry.note.tipo === 'PEDIDO').map(entry => entry.note);
+          return { ok: true, dados: { pedidos, quantidade: pedidos.length } };
+        };
+        const before = await store.events();
+        const duplicate = replay(before);
+        if (duplicate) return response(duplicate);
+        const records = latest(before);
+        const source = precompra && records.get(precompra);
+        if (precompra && !source) throw fail('PRECOMPRA_NAO_ENCONTRADA');
+        if (source && source.version !== version) throw fail('COMPRA_CONFLITO_VERSAO');
+        if (source && (!open(source.note.status) || !lines.some(line => line.sku === source.note.sku))) {
+          throw fail('PRECOMPRA_INCOMPATIVEL');
+        }
+        const at = clock().toISOString();
+        const changes = [];
+        let sequence = records.size;
+        for (const line of lines) {
+          const item = await catalog.obter(token, 'itens', line.sku);
+          if (!item) throw fail('ITEM_NAO_ENCONTRADO');
+          let id;
+          do { id = '#CP-' + String(++sequence).padStart(6, '0'); } while (records.has(id));
+          const valorEstimado = line.qtd * (line.valorUnitario ?? (Number(item.note.valorUnitario) || 0));
+          if (!Number.isFinite(valorEstimado)) throw fail('COMPRA_DADOS_INVALIDOS');
+          const note = { id, data: at, tipo: 'PEDIDO', sku: line.sku, descricao: item.note.descricao, qtd: line.qtd,
+            valorEstimado, valor: valorEstimado, fornecedor: fornecedor || item.note.fornecedor || '', status: 'EMITIDO',
+            previsao, observacao, origem: precompra || 'MANUAL', precompra, solicitante: actor, aprovadoPor: '',
+            historico: JSON.stringify([{ quando: at, texto: 'Pedido emitido' }]) };
+          changes.push({ id, version: 1, note });
+        }
+        const [first, ...rest] = changes;
+        if (source) {
+          const history = JSON.parse(source.note.historico);
+          history.push({ quando: at, texto: 'Convertida em pedido: ' + changes.map(entry => entry.id).join(', ') });
+          rest.push({ id: source.id, version: source.version + 1, note: { ...source.note, status: converted,
+            historico: JSON.stringify(history) } });
+        }
+        const event = { ...first, operation, fingerprint, actor, at, action: 'pedido', changes: rest };
+        let writeError;
+        try { await store.append(event); } catch (error) { writeError = error; }
+        const after = await store.events().catch(error => { throw writeError ?? error; });
+        const persisted = replay(after);
+        if (persisted) return response(persisted);
+        throw writeError ?? fail('COMPRA_NAO_CONFIRMADA');
+      });
     },
 
     async alterarStatus(token, input) {
@@ -54,6 +131,7 @@ function createPurchaseEngine({ core, store, catalog, coordinate, clock = () => 
         const current = latest(before).get(id);
         if (!current) return { ok: false, codigo: 'NAO_ENCONTRADO', mensagem: 'Registro de compra não localizado.' };
         if (current.version !== version) throw fail('COMPRA_CONFLITO_VERSAO');
+        if (current.note.status === converted || status === converted) throw fail('PRECOMPRA_INCOMPATIVEL');
         const at = clock().toISOString();
         const history = JSON.parse(current.note.historico);
         history.push({ quando: at, texto: 'Status: ' + current.note.status + ' → ' + status });
@@ -88,9 +166,10 @@ function createPurchaseEngine({ core, store, catalog, coordinate, clock = () => 
         if (duplicate) return duplicate.response;
         const item = await catalog.obter(token, 'itens', sku);
         if (!item) return { ok: false, codigo: 'ITEM_NAO_ENCONTRADO', mensagem: 'Item não localizado no cadastro.' };
-        const existing = [...latest(before).values()].find(event =>
+        const records = latest(before);
+        const existing = [...records.values()].find(event =>
           event.note.tipo === 'PRE_COMPRA' && event.note.sku === sku && open(event.note.status));
-        const id = existing?.id ?? '#PC-' + String(new Set(before.map(event => event.id)).size + 1).padStart(6, '0');
+        const id = existing?.id ?? '#PC-' + String(records.size + 1).padStart(6, '0');
         const at = clock().toISOString();
         const record = existing ? {
           ...existing.note, qtd: Math.max(existing.note.qtd, qtd),

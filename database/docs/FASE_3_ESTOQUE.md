@@ -334,3 +334,9 @@ npm test passou com 49 testes do executor Node, além das suítes do Core, sess�
 | Ferramentaria | Cadastro, retirada, devolução com avaria e retorno da manutenção. A API recusou devolução por outro operador. O histórico relido após reinício confirmou quatro eventos com autoria. | PARCIAL | Transferência, identificação operacional e fluxo no cliente. |
 
 `npm test` passou com 50 testes do executor Node e as suítes auxiliares. O ensaio HTTP usou SQLite temporário e confirmou HTTP 403 para perfil leitor e modo sem escrita. Contagem oficial de 0 homologados, 33 parciais e 1 bloqueado.
+
+### Emissão e conversão de Compras via HTTP — 22/11/2026
+
+O Core expõe `compras.pedido` com o envelope de pedidos do Desktop. O evento persistido contém todas as linhas emitidas e a nova versão da pré-compra vinculada. O modo isolado aceita de 1 a 20 linhas, exige itens cadastrados, quantidades inteiras e a versão lida da pré-compra quando há vínculo. As consultas apresentam `versaoCore` para as operações seguintes.
+
+O teste HTTP com SQLite temporário verificou emissão manual e em lote, preço unitário zero, ausência de gravação parcial quando um item inexiste, reenvio concorrente, conflitos de versão e de segunda conversão, bloqueio de leitor e releitura após reinício. `npm test` passou com 51 testes do executor Node e as suítes auxiliares. Compras permanece PARCIAL até validar alçadas de emissão, o formulário do Desktop e a persistência deste fluxo no Sheets isolado.
