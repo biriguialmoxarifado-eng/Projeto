@@ -1,6 +1,7 @@
 'use strict';
 
 const { GoogleAuth } = require('google-auth-library');
+const { desktopGoogleAuth } = require('./google-desktop-auth');
 
 const METADATA_SCOPE = 'https://www.googleapis.com/auth/drive.metadata.readonly';
 
@@ -9,7 +10,7 @@ function driveError(code, message) {
 }
 
 class GoogleDriveProvider {
-  constructor({ auth = new GoogleAuth({ scopes: [METADATA_SCOPE] }) } = {}) {
+  constructor({ auth = desktopGoogleAuth() ?? new GoogleAuth({ scopes: [METADATA_SCOPE] }) } = {}) {
     this.auth = auth;
   }
 
@@ -22,7 +23,7 @@ class GoogleDriveProvider {
     try {
       client = await this.auth.getClient();
     } catch {
-      throw driveError('GOOGLE_AUTH_FAILED', 'Configure Application Default Credentials no backend.');
+      throw driveError('GOOGLE_AUTH_FAILED', 'Configure a autenticação Google no backend.');
     }
 
     const url = new URL('https://www.googleapis.com/drive/v3/files/' + fileId);

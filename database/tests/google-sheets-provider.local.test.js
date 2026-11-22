@@ -214,3 +214,11 @@ test('confirma somente o UUID de teste e reconcilia a perda da resposta sem grav
   assert.equal(calls.filter(call => call.method === 'POST').length, 2);
   await assert.rejects(provider.confirmTestRecord('12345'), { code: 'TEST_RECORD_INVALID' });
 });
+
+test('callback OAuth local só aceita o caminho e o estado da autorização ativa', () => {
+  const { callbackResult } = require('../adapters/google-desktop-auth');
+  assert.equal(callbackResult('/oauth/callback?state=wrong&code=x', 'expected'), null);
+  assert.equal(callbackResult('/other?state=expected&code=x', 'expected'), null);
+  assert.deepEqual(callbackResult('/oauth/callback?state=expected&code=x', 'expected'), { code: 'x', denied: false });
+  assert.deepEqual(callbackResult('/oauth/callback?state=expected&error=access_denied', 'expected'), { code: null, denied: true });
+});

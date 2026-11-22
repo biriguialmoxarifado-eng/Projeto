@@ -2,6 +2,7 @@
 
 const { createHash } = require('node:crypto');
 const { GoogleAuth } = require('google-auth-library');
+const { desktopGoogleAuth } = require('./google-desktop-auth');
 
 const TEST_SHEET = 'ALMOXA_TESTE_CONEXAO';
 const HEADERS = ['ID', 'CRIADO_EM', 'ORIGEM', 'MENSAGEM'];
@@ -20,8 +21,9 @@ class GoogleSheetsProvider {
     this.spreadsheetId = options.spreadsheetId ?? process.env.ALMOXA_SPREADSHEET_ID;
     this.testSpreadsheetId = options.testSpreadsheetId ?? process.env.ALMOXA_TEST_SPREADSHEET_ID;
     this.testOnly = options.testOnly === true;
-    this.readAuth = options.readAuth ?? new GoogleAuth({ scopes: [SCOPE + '.readonly'] });
-    this.writeAuth = options.writeAuth ?? new GoogleAuth({ scopes: [SCOPE] });
+    const localAuth = desktopGoogleAuth();
+    this.readAuth = options.readAuth ?? localAuth ?? new GoogleAuth({ scopes: [SCOPE + '.readonly'] });
+    this.writeAuth = options.writeAuth ?? localAuth ?? new GoogleAuth({ scopes: [SCOPE] });
     this.connected = false;
   }
 
@@ -36,7 +38,7 @@ class GoogleSheetsProvider {
     try {
       client = await auth.getClient();
     } catch {
-      throw new GoogleSheetsProviderError('GOOGLE_AUTH_FAILED', 'Configure Application Default Credentials no backend.');
+      throw new GoogleSheetsProviderError('GOOGLE_AUTH_FAILED', 'Configure a autenticação Google no backend.');
     }
     try {
       const result = await client.request({
