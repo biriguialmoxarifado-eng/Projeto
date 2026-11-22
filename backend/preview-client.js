@@ -4,7 +4,6 @@
   const script = document.currentScript;
   const remote = script?.dataset.deployment === 'pages';
   const configured = remote ? document.querySelector('meta[name="almoxa-core-v2"]')?.content?.trim() : '';
-  if (remote && !configured) return;
   let origin = location.origin;
   if (remote) {
     try {
@@ -14,13 +13,13 @@
         throw new Error('Invalid Core origin');
       }
       origin = url.origin;
-      const policy = document.createElement('meta');
-      policy.httpEquiv = 'Content-Security-Policy';
-      policy.content = 'connect-src ' + origin;
-      document.head.append(policy);
     } catch {
       origin = null;
     }
+    const policy = document.createElement('meta');
+    policy.httpEquiv = 'Content-Security-Policy';
+    policy.content = 'connect-src ' + (origin || "'none'");
+    document.head.append(policy);
   }
   const endpoint = path => {
     if (!origin) throw new Error('Core origin unavailable');
@@ -60,6 +59,8 @@
     ['lojinha', new Set(['catalogo', 'item'])],
     ['inventario', new Set(['listar', 'obter', 'divergencias'])]
   ]);
+  const unavailable = () => ({ ok: false, codigo: 'CORE_V2_SEM_ENDERECO',
+    mensagem: 'Configure o endereco HTTPS do Core V2 para abrir a sessao.' });
   let token = '';
   let session = new AbortController();
   const pending = new Map();
@@ -76,6 +77,7 @@
       }
     },
     async login(value) {
+      if (!origin) return unavailable();
       await this.logout();
       const active = session;
       const identifier = typeof value === 'string' ? value.trim() : '';
@@ -92,6 +94,7 @@
       }
     },
     call(module, action, payload) {
+      if (!origin) return Promise.resolve(unavailable());
       if (!supported.get(module)?.has(action)) {
         return Promise.resolve({ ok: false, codigo: 'OPERACAO_FORA_DA_HOMOLOGACAO', mensagem: 'Operação indisponível no ambiente de homologação.' });
       }
@@ -173,7 +176,7 @@
     const frontend = location.pathname.endsWith('/campo') ? 'ALMOX CAMPO' : (window.ALMOXA_VERSAO || 'Desktop V430');
     diagnostics.textContent = frontend + ' | Core: verificando';
     panel.append(label, button, clear, status, diagnostics);
-    if (!origin) diagnostics.textContent = frontend + ' | Endereco HTTPS do Core invalido';
+    if (!origin) diagnostics.textContent = frontend + ' | Core V2 sem endereco HTTPS configurado';
     else void fetch(endpoint('/health'), { credentials: 'omit', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(5000) })
       .then(async response => {
         const health = await response.json();
