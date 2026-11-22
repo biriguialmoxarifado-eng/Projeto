@@ -48,6 +48,7 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
     '/homologacao/campo': 'ALMOXA_CAMPO.html.html',
     '/campo': 'ALMOXA_CAMPO.html.html'
   };
+  const desktopScripts = new Map(["ALMOXA PRO — MÓDULO DE SINCRONIZAÇÃO E RENDERIZAÇÃO VISUAL.js","ALMOX-PRO — BOOTSYNC.js","ALMOX-PRO — MOTOR DE LEITURA DE NOTA FISCAL.js"].map(name => [encodeURIComponent(name), name]));
   const client = readFileSync(join(__dirname, 'preview-client.js'));
   const guard = write => '<script src="/homologacao/preview-client.js"' + (write ? ' data-write="1"' : '') + '></script>';
   const pageHeaders = {
@@ -99,6 +100,12 @@ function createPreview(runtime, root, { allowWrite = false, modulesAvailable = t
     }
     if (req.method === 'GET' && req.url === '/homologacao/preview-client.js') {
       res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' }).end(client);
+      return true;
+    }
+    const script = desktopScripts.get(req.url.replace(/^\/(?:homologacao\/)?/, ''));
+    if (req.method === 'GET' && script) {
+      res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'no-store' }).end(readFileSync(join(root, script)));
       return true;
     }
     const upload = req.url === '/api/v2/preview/ocr';
