@@ -101,6 +101,11 @@ test('leitura operacional exige administrador autenticado e retorna somente camp
     assert.equal(index[0].itens, undefined);
     const detail = (await call('epi', 'detalhe', { chave: index[0].chave })).dados;
     assert.equal(detail.itens[0].sku, 'SYN-1');
+    const refusedDelivery = await call('epi', 'entregarEstoque', { sku: 'SYN-1', quantidade: 1, usuarioId: '1' });
+    assert.equal(refusedDelivery.status, 403);
+    assert.equal(refusedDelivery.codigo, 'OPERACAO_INDISPONIVEL');
+    assert.equal((await dispatch('estoque', 'listar')).dados[0].estoque, 8);
+    assert.equal((await call('epi', 'detalhe', { chave: index[0].chave })).dados.itens.length, 1);
     assert.equal((await call('usuarios', 'fotoEpi', { id: detail.usuarioId })).dados.foto, 'data:image/png;base64,aW1n');
     assert.equal((await dispatch('estoque', 'movimentar')).status, 403);
     await send('session', null, 'DELETE');

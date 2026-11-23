@@ -6245,7 +6245,7 @@ if (estado.storage?.status === "unavailable") return {cls:"err", txt:"Planilha i
 if (estado.signIn === "refused") return {cls:"off", txt:"Login recusado", detalhe:"Confira sua identificação e senha no ALMOXA PRO."};
 if (estado.core === "checking" || !estado.storage) return {cls:"off", txt:"Verificando Core e planilha…", detalhe:detalhe};
 if (estado.signIn !== "authenticated") return {cls:"off", txt:"Planilha conectada · entre no sistema", detalhe:detalhe};
-return {cls:"", txt:"Core e planilha conectados", detalhe:detalhe};
+return {cls:"", txt:"Core e planilha conectados · somente leitura", detalhe:detalhe};
 }
 
 function atualizarCore() {
@@ -34006,6 +34006,11 @@ function epiRetratoDoCatalogo_() {
 }
 
 function modalEntregarEPI(matriculaPreset, preSelecao, jaSincronizou, todosOsItens) {
+if (window.AlmoxaCorePreview?.operational) {
+toast("warn", "Entrega de EPI indisponível neste endereço",
+  "Este acesso é somente leitura. Registre a entrega no sistema operacional autorizado.");
+return;
+}
 /* Antes de dizer que o catálogo está vazio, PERGUNTA ao Core. */
 if (!jaSincronizou && !catalogoEPI().length && typeof sincronizarCadastro === "function") {
 var espera = UI.modal({
@@ -44744,7 +44749,10 @@ trilha: [ "EPI's / Uniformes", "Painel" ],
 titulo: "EPI por colaborador",
 sub: "Quem recebeu o quê, quando, e o que está vencendo.",
 acoes: '<button class="btn btn-ghost" data-ir="#/epi-catalogo">' + ic("grade") + "Catálogo de EPI</button>" + '<button class="btn btn-ghost" data-ir="#/epi-retiradas">' + ic("calendario") + "Retiradas agendadas</button>" + '<button class="btn btn-ghost" data-gerar-massa>' + ic("usuarios") + "Gerar fichas em massa</button>" + '<button class="btn btn-orange" data-entregar-epi>' + ic("mais") + "Entregar EPI</button>"
-}) + epiAvisoCoreFora_() + (/* A AGENDA É UM AVISO OPCIONAL — E DERRUBAVA A TELA INTEIRA.
+}) + (window.AlmoxaCorePreview?.operational
+  ? '<div class="alert a-blue mb16" role="status"><div><b>Consulta de EPI · somente leitura.</b> ' +
+    'Use o sistema operacional autorizado para registrar entregas e baixar estoque.</div></div>'
+  : "") + epiAvisoCoreFora_() + (/* A AGENDA É UM AVISO OPCIONAL — E DERRUBAVA A TELA INTEIRA.
      Bastava o Core responder ok sem "totais" (módulo de EPI antigo,
      resposta vazia, meia instalação) para esta linha estourar e a
      tela de EPI não abrir. Um enfeite no topo não pode levar junto
