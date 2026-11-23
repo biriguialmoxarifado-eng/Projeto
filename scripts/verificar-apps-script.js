@@ -23,6 +23,7 @@
 
 const { readFileSync, readdirSync, statSync } = require('node:fs');
 const { join } = require('node:path');
+const { parse } = require('acorn');
 
 const RAIZ = join(__dirname, '..', 'app');
 const problemas = [];
@@ -59,71 +60,42 @@ function arquivosDoApp() {
     .map(nome => ({ nome, texto: readFileSync(join(RAIZ, nome), 'utf8') }));
 }
 
-function semComentarios(texto) {
-  return texto
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^\s*\/\/.*$/gm, '');
-}
-
 /* ------------------------------------------------------------
-   1. Sintaxe
+   1 a 3. Sintaxe e nomes globais
    ------------------------------------------------------------ */
 
-function verificarSintaxe(arquivos) {
-  const { execFileSync } = require('node:child_process');
-  const { writeFileSync, mkdtempSync } = require('node:fs');
-  const { tmpdir } = require('node:os');
-  const pasta = mkdtempSync(join(tmpdir(), 'almoxa-check-'));
-
-  for (const { nome, texto } of arquivos) {
-    const alvo = join(pasta, 'arquivo.js');
-    writeFileSync(alvo, texto);
-    try {
-      execFileSync(process.execPath, ['--check', alvo], { stdio: 'pipe' });
-    } catch (erro) {
-      const detalhe = String(erro.stderr || '').split('\n').slice(1, 3).join(' ').trim();
-      problemas.push(`Erro de sintaxe em "${nome}": ${detalhe}`);
-    }
-  }
-}
-
-/* ------------------------------------------------------------
-   2 e 3. Nomes globais em disputa
-   ------------------------------------------------------------ */
-
-function mapearFuncoes(arquivos) {
+function mapearFuncoes(arquivos, errosSintaxe) {
   const onde = new Map();
   for (const { nome, texto } of arquivos) {
-    const limpo = semComentarios(texto);
-    // Sem indentação: só o que está no nível raiz do arquivo é global.
-    // Uma função indentada vive dentro de outra e não disputa nome.
-    const encontradas = limpo.matchAll(/^function\s+([A-Za-z_$][\w$]*)\s*\(/gm);
-    for (const achada of encontradas) {
-      const fn = achada[1];
+    let programa;
+    try {
+      programa = parse(texto, { ecmaVersion: 'latest', sourceType: 'script', locations: true });
+    } catch (erro) {
+      errosSintaxe.push(`Erro de sintaxe em "${nome}": ${erro.message}`);
+      continue;
+    }
+    for (const declaracao of programa.body) {
+      if (declaracao.type !== 'FunctionDeclaration') continue;
+      const fn = declaracao.id.name;
       if (!onde.has(fn)) onde.set(fn, []);
-      if (!onde.get(fn).includes(nome)) onde.get(fn).push(nome);
+      onde.get(fn).push({ nome, linha: declaracao.loc.start.line });
     }
   }
   return onde;
 }
 
-/**
- * Cada entrada HTTP precisa existir uma única vez.
- */
-function verificarEntradas(onde) {
-  for (const entrada of ['doGet', 'doPost']) {
-    const arquivos = onde.get(entrada) || [];
-    if (arquivos.length > 1) {
-      problemas.push(
-        `${entrada} declarado em ${arquivos.length} arquivos — o Apps Script fica ` +
-        `com um só, e qual depende da ordem:\n       ${arquivos.join('\n       ')}`
-      );
-    }
-    if (arquivos.length === 0) {
-      problemas.push(
-        `Nenhum arquivo declara ${entrada}. Sem isso o sistema não atende ` +
-        `nenhum pedido por essa via.`
-      );
+const FUNCOES_CRITICAS = [
+  'doGet', 'doPost', 'AP_Core_boot', 'AP_Core_withLock',
+  'APIX_atender_', 'almoxaApi', 'almoxaApiWeb'
+];
+
+function verificarFuncoesCriticas(onde, erros) {
+  for (const fn of FUNCOES_CRITICAS) {
+    const declaracoes = onde.get(fn) || [];
+    if (declaracoes.length === 0) erros.push(`Nenhuma declaração global de ${fn}.`);
+    if (declaracoes.length > 1) {
+      const locais = declaracoes.map(({ nome, linha }) => `${nome}:${linha}`);
+      erros.push(`${fn} tem ${declaracoes.length} declarações:\n       ${locais.join('\n       ')}`);
     }
   }
 }
@@ -140,18 +112,20 @@ function verificarEntradas(onde) {
  */
 function verificarDuplicadas(onde) {
   const repetidas = [...onde.entries()]
-    .filter(([fn, arquivos]) => arquivos.length > 1 && fn !== 'doGet' && fn !== 'doPost');
+    .filter(([fn, declaracoes]) => declaracoes.length > 1 && !FUNCOES_CRITICAS.includes(fn));
 
   if (!repetidas.length) return;
 
   const porArquivo = new Map();
-  for (const [, arquivos] of repetidas) {
-    for (const a of arquivos) porArquivo.set(a, (porArquivo.get(a) || 0) + 1);
+  for (const [, declaracoes] of repetidas) {
+    for (const nome of new Set(declaracoes.map(d => d.nome))) {
+      porArquivo.set(nome, (porArquivo.get(nome) || 0) + 1);
+    }
   }
 
   const ranking = [...porArquivo.entries()].sort((x, y) => y[1] - x[1]);
   avisos.push(
-    `${repetidas.length} funções declaradas em mais de um arquivo. ` +
+    `${repetidas.length} funções com declarações globais duplicadas. ` +
     `No Apps Script uma apaga a outra, e qual sobrevive depende da ordem.\n` +
     `       Arquivos com mais casos:\n` +
     ranking.slice(0, 6).map(([a, n]) => `         ${String(n).padStart(3)} em ${a}`).join('\n')
@@ -203,11 +177,10 @@ function principal() {
   const arquivos = arquivosDoApp();
   console.log(`  ${arquivos.length} arquivos encontrados`);
 
-  verificarSintaxe(arquivos);
-  const onde = mapearFuncoes(arquivos);
+  const onde = mapearFuncoes(arquivos, problemas);
   console.log(`  ${onde.size} funções globais mapeadas`);
 
-  verificarEntradas(onde);
+  verificarFuncoesCriticas(onde, problemas);
   verificarDuplicadas(onde);
   verificarCapacidades(arquivos, onde);
 
@@ -224,7 +197,9 @@ function principal() {
     process.exit(1);
   }
 
-  console.log('Tudo certo para publicar.');
+  console.log('Verificação estática concluída.');
 }
 
-principal();
+if (require.main === module) principal();
+
+module.exports = { mapearFuncoes, verificarFuncoesCriticas };

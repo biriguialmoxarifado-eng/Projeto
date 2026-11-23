@@ -12,6 +12,7 @@
   "type": "commonjs",
   "devDependencies": {
     "@google/clasp": "^3.4.1",
-    "@types/google-apps-script": "^2.0.13"
+    "@types/google-apps-script": "^2.0.13",
+    "acorn": "8.19.0"
   }
 }

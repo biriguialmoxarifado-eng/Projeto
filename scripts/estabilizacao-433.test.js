@@ -5,6 +5,32 @@ const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { mapearFuncoes, verificarFuncoesCriticas } = require('./verificar-apps-script');
+
+test('verificador distingue declarações globais de exemplos e funções internas', () => {
+  const erros = [];
+  const onde = mapearFuncoes([{
+    nome: 'entrada.js',
+    texto: [
+      '// function doGet() {}',
+      'const exemplo = "function doGet() {}";',
+      'function interna() { function doGet() {} }',
+      '  function doGet() {}',
+      '  function doGet() {}'
+    ].join('\n')
+  }], erros);
+  assert.deepEqual(erros, []);
+  verificarFuncoesCriticas(onde, erros);
+  assert.match(erros.join('\n'), /doGet tem 2 declarações:[\s\S]*entrada\.js:4[\s\S]*entrada\.js:5/);
+  assert.ok(erros.includes('Nenhuma declaração global de doPost.'));
+  assert.ok(erros.includes('Nenhuma declaração global de AP_Core_withLock.'));
+});
+
+test('verificador sinaliza erro de sintaxe com o arquivo e a linha', () => {
+  const erros = [];
+  mapearFuncoes([{ nome: 'invalido.gs', texto: 'function doPost() {\n  const = 1;\n}' }], erros);
+  assert.match(erros[0], /Erro de sintaxe em "invalido\.gs": .*\(2:/);
+});
 
 function carregar(arquivos, globais) {
   const contexto = vm.createContext(globais);
