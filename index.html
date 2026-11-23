@@ -13176,12 +13176,18 @@ var limit = 12;
 var plain = function(s) { return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase(); };
 var rows = index.map(function(ficha) { return {ficha:ficha, search:plain([ficha.colaborador,ficha.matricula,ficha.materiais].join(" "))}; });
 var detailsCache = new Map();
-var photoCache = new Map();
+function mostrarAssinatura(el, src, rotulo) {
+var figura = document.createElement("figure"), titulo = document.createElement("figcaption");
+titulo.textContent = rotulo;
+figura.append(titulo, imagemHistoricaCore(src, rotulo, 180));
+el.append(figura);
+}
 function addRow(row) {
 var f = row.ficha;
 var detail = document.createElement("details");
 var summary = document.createElement("summary");
 summary.textContent = f.colaborador + " · " + f.matricula + " · " + f.total + " entregas";
+summary.dataset.coreFicha = f.chave;
 detail.append(summary);
 var panel = document.createElement("div");
 detail.append(panel);
@@ -13201,23 +13207,81 @@ return;
 }
 panel.replaceChildren();
 var table = document.createElement("ul");
+var linhas = new Map();
 for (var item of result.dados.itens) {
 var line = document.createElement("li");
 line.textContent = [item.item || item.sku, item.qtd, item.entrega, item.status].filter(Boolean).join(" · ");
+line.dataset.coreEntrega = item.id;
+linhas.set(String(item.id), line);
+if (item.confirmacao) {
+var confirmacao = document.createElement("small");
+confirmacao.textContent = " · Confirmação registrada: " + item.confirmacao;
+line.append(confirmacao);
+}
+if (item.sku) {
+var material = document.createElement("span");
+material.dataset.coreFotoMaterial = item.sku;
+line.append(material);
+}
+if (item.temAssinatura && item.id) {
+var entrega = document.createElement("span");
+entrega.dataset.coreAssinaturaEntrega = item.id;
+line.append(entrega);
+}
 table.append(line);
 }
 panel.append(table);
-if (!f.usuarioId) return;
-if (!photoCache.has(f.usuarioId)) photoCache.set(f.usuarioId, API.call("usuarios", "fotoEpi", {id:f.usuarioId}));
-var photo = await photoCache.get(f.usuarioId);
-if (!photo.ok) photoCache.delete(f.usuarioId);
+observarMidiaCore(panel.querySelectorAll("[data-core-foto-material]"), "itens", "foto", function(el) { return {sku:el.dataset.coreFotoMaterial}; }, function(el, src) {
+el.append(imagemHistoricaCore(src, "Foto do material", 48));
+});
+observarMidiaCore(panel.querySelectorAll("[data-core-assinatura-entrega]"), "epi", "assinaturas", function(el) { return {chave:f.chave, entregaId:el.dataset.coreAssinaturaEntrega}; }, function(el, src) {
+mostrarAssinatura(el, src, "Assinatura original da entrega");
+});
+void window.AlmoxaCorePreview.call("epi", "foto", {chave:f.chave}).then(function(photo) {
 if (photo.ok && photo.dados?.foto) {
-var img = document.createElement("img");
-img.alt = ""; img.width = 64; img.height = 64; img.loading = "lazy"; img.src = photo.dados.foto;
+var img = imagemHistoricaCore(photo.dados.foto, "Foto do colaborador", 64);
+img.dataset.coreFotoColaborador = "1";
 panel.prepend(img);
 }
 });
+void window.AlmoxaCorePreview.call("epi", "assinaturas", {chave:f.chave}).then(function(resposta) {
+if (resposta.dados?.rubricaCadastrada) {
+var rubrica = document.createElement("div");
+rubrica.dataset.coreRubrica = "1";
+mostrarAssinatura(rubrica, resposta.dados.rubricaCadastrada, "Rubrica cadastrada do colaborador");
+panel.append(rubrica);
+}
+for (var assinatura of resposta.dados?.entregas || []) {
+var vinculadas = assinatura.itens.map(function(id) { return linhas.get(String(id)); }).filter(Boolean);
+for (var destino of vinculadas) mostrarAssinatura(destino, assinatura.imagem, "Assinatura da entrega · " + assinatura.papel);
+}
+});
+});
 list.append(detail);
+}
+
+function imagemHistoricaCore(src, alt, largura) {
+var img = document.createElement("img");
+img.src = src;
+img.alt = alt;
+img.width = largura;
+img.loading = "lazy";
+return img;
+}
+
+function observarMidiaCore(elementos, modulo, acao, payload, mostrar) {
+async function carregar(el) {
+var r = await window.AlmoxaCorePreview.call(modulo, acao, payload(el));
+if (r.ok && r.dados?.foto && el.isConnected) mostrar(el, r.dados.foto);
+}
+if (typeof IntersectionObserver !== "function") return elementos.forEach(carregar);
+var observer = new IntersectionObserver(function(entradas) {
+for (var entrada of entradas) {
+if (!entrada.target.isConnected || entrada.isIntersecting) observer.unobserve(entrada.target);
+if (entrada.target.isConnected && entrada.isIntersecting) void carregar(entrada.target);
+}
+});
+elementos.forEach(function(el) { observer.observe(el); });
 }
 function refresh() {
 var query = plain(input.value).trim();

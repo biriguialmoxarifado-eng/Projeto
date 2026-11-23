@@ -6,6 +6,7 @@ const { readBody, reply } = require('./diagnostic-api');
 
 const text = value => String(value ?? '').trim();
 const normalized = value => text(value).toLowerCase();
+const registration = value => normalized(value).replace(/^0+(?=\d+$)/, '');
 const number = value => {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   const formatted = text(value).replace(/^R\$\s*/, '');
@@ -35,7 +36,8 @@ function createOperationalReader(provider, { expectedTitle, drive } = {}) {
   const sessions = new Map();
   const allowed = {
     dashboard: ['mural'], estoque: ['listar', 'item', 'movimentacoes'],
-    usuarios: ['listar', 'obter', 'contar', 'fotoEpi'], epi: ['fichas', 'listar', 'indice', 'detalhe'], itens: ['listar', 'obter'],
+    usuarios: ['listar', 'obter', 'contar', 'fotoEpi'], epi: ['fichas', 'listar', 'indice', 'detalhe', 'assinaturas', 'foto'],
+    itens: ['listar', 'obter', 'foto'],
     obras: ['listar'], lojinha: ['catalogo', 'item', 'foto']
   };
   const authorizationProvider = new AuthorizationManager();
@@ -45,6 +47,7 @@ function createOperationalReader(provider, { expectedTitle, drive } = {}) {
   let authenticating = 0;
   let identity;
   let imageProvider = drive;
+  let readLegacySignatures;
 
   function identify() {
     if (identity && identity.until > Date.now()) return identity.result;
@@ -85,6 +88,7 @@ function createOperationalReader(provider, { expectedTitle, drive } = {}) {
   const categories = sample => rows('ALMOXA_CATEGORIAS', ['nome', 'visivel'], sample);
   const works = () => rows('ALMOXA_OBRAS', ['id', 'nome']);
   const epi = () => rows('ALMOXA_EPI_FICHAS', ['id', 'matricula', 'colaborador', 'sku', 'item']);
+  const badges = () => rows('ALMOXA_CRACHAS', ['codigo', 'matricula', 'foto']);
   const isAdmin = user => user && text(user.id) && normalized(user.status) === 'ativo' &&
     ['administrador', 'admin'].includes(normalized(user.perfil)) &&
     !['false', 'não', 'nao', '0', 'bloqueado'].includes(normalized(user.acesso_desktop));
@@ -109,32 +113,56 @@ function createOperationalReader(provider, { expectedTitle, drive } = {}) {
   const fail = (res, status, codigo, mensagem) => reply(res, status, { ok: false, codigo, mensagem });
   const publicUser = user => ({ ...select(user, userFields), perfil: normalized(user.perfil) === 'administrador' ? 'admin' : normalized(user.perfil) });
   function imageSource(id, value) {
-    const source = text(value);
-    if (source.length <= 1400000 && /^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(source)) return { inline: source };
+    let source = text(value);
+    if (source.length <= 1400000 && /^data:image\/(?:png|jpeg|webp|gif|avif);base64,[A-Za-z0-9+/]+={0,2}$/i.test(source)) return { inline: source };
     if (/^[\w-]{10,200}$/.test(text(id))) return { fileId: text(id) };
     if (!source || source.length > 500) return {};
+    const formula = /^=IMAGE\(\s*"([^"]+)"(?:\s*[,;][\d\s,;]+)?\s*\)$/i.exec(source);
+    if (formula) source = formula[1];
     try {
       const url = new URL(source);
       if (url.protocol === 'https:' && url.hostname === 'drive.google.com' && !url.username && !url.password) {
         const fileId = /^\/file\/d\/([\w-]+)(?:\/|$)/.exec(url.pathname)?.[1] ||
-          (['/uc', '/open'].includes(url.pathname) ? url.searchParams.get('id') : null);
+          (['/uc', '/open', '/thumbnail'].includes(url.pathname) ? url.searchParams.get('id') : null);
         if (/^[\w-]{10,200}$/.test(fileId ?? '')) return { fileId };
       }
     } catch { /* Sem endereço de imagem reconhecido. */ }
     return {};
   }
-  const productImage = row => imageSource(row.fotoDriveId, row.fotoUrl || row.foto);
+  function imageDrive() {
+    const { GoogleDriveProvider } = require('../database/adapters/google-drive-provider');
+    return imageProvider ??= new GoogleDriveProvider();
+  }
+  function itemSources(row) {
+    return [imageSource(row.fotoDriveId, row.fotoUrl), imageSource(null, row.foto)].filter(source => source.inline || source.fileId);
+  }
   async function image({ inline, fileId }) {
     if (inline) return { foto: inline };
     if (!fileId) return { foto: null };
     try {
-      const { GoogleDriveProvider } = require('../database/adapters/google-drive-provider');
-      imageProvider ??= new GoogleDriveProvider();
-      return { foto: await imageProvider.readImage(fileId) };
+      return { foto: await imageDrive().readImage(fileId) };
     } catch (error) {
       return { foto: null, estado: 'FOTO_INDISPONIVEL', codigo: /^GOOGLE_(?:DRIVE_[A-Z_\d]+|AUTH_FAILED)$/.test(error.code ?? '') ?
         error.code : 'GOOGLE_DRIVE_UNAVAILABLE' };
     }
+  }
+  async function firstPhoto(sources) {
+    let result = { foto: null };
+    for (const source of sources) {
+      if (!source.inline && !source.fileId) continue;
+      result = await image(source);
+      if (result.foto) break;
+    }
+    return result;
+  }
+  async function personPhoto(user, allowRegistration) {
+    const personal = await firstPhoto([imageSource(null, user.foto), imageSource(user.crachaFotoId, user.crachaFotoUrl)]);
+    if (personal.foto || (!user.cracha && (!allowRegistration || !registration(user.matricula)))) return personal;
+    const mat = registration(user.matricula);
+    const candidates = (await badges()).filter(row => row.foto && (!mat || registration(row.matricula) === mat));
+    const matches = user.cracha ? candidates.filter(row => normalized(row.codigo) === normalized(user.cracha)) : candidates;
+    if (matches.length !== 1) return personal;
+    return image(imageSource(null, matches[0].foto));
   }
   const stockItem = row => {
     const estoque = number(row.estoqueAtual);
@@ -142,7 +170,7 @@ function createOperationalReader(provider, { expectedTitle, drive } = {}) {
     return { ...select(row, ['sku', 'descricao', 'categoria', 'unidade', 'ca', 'codigoBarras', 'marca']), id: row.sku,
       codigo: row.sku, nome: row.descricao, local: row.localizacao || '', estoque, estoqueAtual: estoque, minimo,
       preco: number(row.valorUnitario), valorUnitario: number(row.valorUnitario), reservado: null, disponivel: null,
-      temFoto: Object.keys(productImage(row)).length > 0,
+      temFoto: itemSources(row).length > 0,
       status: estoque === null ? 'desconhecido' : estoque <= 0 ? 'critico' : minimo !== null && estoque < minimo ? 'atencao' : 'ok' };
   };
 
@@ -233,22 +261,25 @@ function createOperationalReader(provider, { expectedTitle, drive } = {}) {
               .map(stockItem);
           } else {
             const product = visible.find(row => text(row.sku) === text(payload?.sku || payload?.id));
-            data = acao === 'foto' ? await image(product ? productImage(product) : {}) : product ? stockItem(product) : null;
+            data = acao === 'foto' ? await firstPhoto(product ? itemSources(product) : []) : product ? stockItem(product) : null;
           }
         } else if (modulo === 'estoque' && acao === 'movimentacoes') {
           data = (await rows('ALMOXA_MOVIMENTACOES', ['id', 'sku', 'qtd']))
             .map(row => ({ ...select(row, ['id', 'data', 'tipo', 'sku', 'descricao', 'saldo', 'obra', 'documento', 'usuario']),
               qtd: number(row.qtd), valorUnitario: number(row.valorUnitario) }));
+        } else if (modulo === 'itens' && acao === 'foto') {
+          const matches = (await items()).filter(row => text(row.sku) && text(row.sku) === text(payload?.sku));
+          data = await firstPhoto(matches.length === 1 ? itemSources(matches[0]) : []);
         } else if (modulo === 'estoque' || modulo === 'itens') {
           const list = (await items()).filter(row => text(row.sku)).map(stockItem);
           const term = normalized(payload?.busca);
           data = ['item', 'obter'].includes(acao) ? list.find(row => row.sku === (payload?.sku || payload?.id)) ?? null :
             term ? list.filter(row => [row.sku, row.nome, row.codigoBarras].some(value => normalized(value).includes(term))) : list;
         } else if (modulo === 'usuarios' && acao === 'fotoEpi') {
-          const candidates = (await users()).filter(row => text(row.id) && text(row.id) === text(payload?.id));
-          const user = candidates.length === 1 ? candidates[0] : {};
-          const personal = imageSource(null, user.foto);
-          data = await image(personal.inline || personal.fileId ? personal : imageSource(user.crachaFotoId, user.crachaFotoUrl));
+          const directory = await users();
+          const candidates = directory.filter(row => text(row.id) && text(row.id) === text(payload?.id));
+          const user = candidates.length === 1 ? candidates[0] : null;
+          data = user ? await personPhoto(user, directory.filter(row => registration(row.matricula) === registration(user.matricula)).length === 1) : { foto: null };
         } else if (modulo === 'usuarios') {
           const list = (await users()).filter(row => text(row.id)).map(publicUser);
           data = acao === 'listar' ? list : acao === 'contar' ? { total: list.length } :
@@ -258,7 +289,7 @@ function createOperationalReader(provider, { expectedTitle, drive } = {}) {
         } else {
           const people = new Map();
           for (const user of await users()) {
-            const matricula = text(user.matricula);
+            const matricula = registration(user.matricula);
             if (!matricula || !text(user.id)) continue;
             people.set(matricula, people.has(matricula) ? null : user);
           }
@@ -266,15 +297,35 @@ function createOperationalReader(provider, { expectedTitle, drive } = {}) {
           for (const row of await epi()) {
             const matricula = text(row.matricula);
             if (!matricula) continue;
-            const user = people.get(matricula);
+            const user = people.get(registration(matricula));
             const key = user ? 'u:' + text(user.id) : 'm:' + matricula;
             const ficha = groups.get(key) ?? { id: row.id, chave: key, usuarioId: user ? text(user.id) : null,
               matricula, colaborador: user?.nome || row.colaborador,
               cargo: row.cargo, setor: row.setor, status: row.status, itens: [] };
-            ficha.itens.push(select(row, ['id', 'sku', 'item', 'qtd', 'ca', 'entrega', 'validade', 'status']));
+            const evidence = text(row.assinatura);
+            ficha.itens.push({ ...select(row, ['id', 'sku', 'item', 'qtd', 'ca', 'entrega', 'validade', 'status']),
+              confirmacao: evidence.length <= 160 && !/^(?:https?:|data:|=|ASS:)/i.test(evidence) ? evidence : '',
+              temAssinatura: Boolean(imageSource(null, evidence).inline || imageSource(null, evidence).fileId) });
             groups.set(key, ficha);
           }
-          if (acao === 'detalhe') {
+          if (acao === 'assinaturas') {
+            const ficha = groups.get(text(payload?.chave));
+            if (!ficha) data = null;
+            else if (payload?.entregaId) {
+              const id = text(payload.entregaId);
+              const matches = (await epi()).filter(row => text(row.id) === id);
+              data = await image(matches.length === 1 && ficha.itens.some(item => text(item.id) === id) ? imageSource(null, matches[0].assinatura) : {});
+            } else {
+              const { createLegacyEpiSignatures } = require('./legacy-epi-signatures');
+              readLegacySignatures ??= createLegacyEpiSignatures(imageDrive(), imageSource);
+              try { data = await readLegacySignatures(ficha); }
+              catch { data = { rubricaCadastrada: null, entregas: [], estado: 'REPOSITORIO_INDISPONIVEL' }; }
+            }
+          } else if (acao === 'foto') {
+            const ficha = groups.get(text(payload?.chave));
+            const user = ficha && people.get(registration(ficha.matricula));
+            data = ficha && ficha.usuarioId && text(user?.id) === ficha.usuarioId ? await personPhoto(user, true) : { foto: null };
+          } else if (acao === 'detalhe') {
             data = groups.get(text(payload?.chave)) ?? null;
           } else if (acao === 'indice') {
             data = [...groups.values()].map(({ itens, ...ficha }) => ({
