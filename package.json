@@ -4,7 +4,7 @@
   "description": "ALMOXA PRO — legado em Apps Script",
   "main": "index.js",
   "scripts": {
-    "test": "node scripts/verificar-apps-script.js && node --test scripts/estabilizacao-433.test.js"
+    "test": "node scripts/verificar-apps-script.js && node --test scripts/estabilizacao-433.test.js scripts/campo-pwa.test.js"
   },
   "keywords": [],
   "author": "",
