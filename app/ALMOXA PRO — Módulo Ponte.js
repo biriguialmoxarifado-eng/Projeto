@@ -22,7 +22,7 @@
 
 var PONTE_CRACHA_SEM_SESSAO = ['validar', 'autorizar', 'niveis'];
 
-function doPost(e) {
+function PONTE_postLegado_(e) {
   var resposta;
   try {
     var corpo = JSON.parse((e && e.postData && e.postData.contents) || '{}');

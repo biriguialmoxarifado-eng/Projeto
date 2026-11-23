@@ -75,7 +75,7 @@ var FICHA_CFG = {
  *
  * Assim, colar no lugar errado deixa de derrubar o sistema.
  */
-function doGet(e) {
+function FICHA_servirGet_(e) {
   var params = (e && e.parameter) ? e.parameter : {};
 
   var codigo = String(

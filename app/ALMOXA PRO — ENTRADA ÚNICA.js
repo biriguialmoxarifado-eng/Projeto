@@ -317,16 +317,9 @@ function AP_ENTRADA_servir(e) {
   }
 
   if (!html) {
-    var disp = AP_ENTRADA_htmlDisponiveis_();
-    return AP_ENTRADA_telaErro_({
-      titulo: 'Frontend não encontrado',
-      funcao: 'AP_ENTRADA_servir',
-      arquivo: 'ALMOXA_PRO_Entrada.gs',
-      erro: 'Nenhum dos arquivos HTML esperados existe no projeto.',
-      dependencia: 'Arquivo HTML: ' + AP_ENTRADA.htmlCandidatos.join(', '),
-      sugestao: 'Adicione o arquivo ALMOXA_PRO_DESKTOP (o Apps Script acrescenta o .html sozinho). ' +
-        'Procurados e não encontrados: ' + disp.ausentes.join(', ')
-    });
+    return HtmlService.createHtmlOutput(
+      '<a href="https://biriguialmoxarifado-eng.github.io/Projeto/" target="_top">Abrir ALMOXA PRO</a>'
+    ).setTitle(AP_ENTRADA.titulo);
   }
 
   try {
@@ -801,6 +794,7 @@ function AP_ENTRADA_servirModulo3D_(params) {
    * fácil de cometer e chato de descobrir.
    */
   var nomes = [
+    'ALMOX PRO 3D — Mapa do almoxarifado',
     'ALMOXA_3D', 'ALMOXA_3D.html', 'ALMOXA_3D.html.html',
     'ALMOXA3D', 'ALMOXA3D.html',
     'almoxa_3d', 'ALMOXA_PRO_3D', 'MAPA_3D', 'mapa3d'
