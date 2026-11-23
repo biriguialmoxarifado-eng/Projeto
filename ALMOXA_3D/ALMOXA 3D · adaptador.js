@@ -137,7 +137,7 @@
               resolve(fim({ ok: false, codigo: 'ERRO_GAS',
                 mensagem: (e && e.message) || 'o Apps Script recusou a chamada' }));
             })
-            .APIX_atender_(JSON.stringify(envelope(modulo, acao, payload)));
+            .almoxaApiWeb(JSON.stringify(envelope(modulo, acao, payload)));
         } catch (e) {
           respondeu = true; clearTimeout(relogio);
           resolve(fim({ ok: false, codigo: 'ERRO_GAS', mensagem: String(e && e.message) }));

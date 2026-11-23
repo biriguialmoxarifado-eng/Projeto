@@ -4,7 +4,7 @@
   "description": "ALMOXA PRO — legado em Apps Script",
   "main": "index.js",
   "scripts": {
-    "test": "node scripts/verificar-apps-script.js"
+    "test": "node scripts/verificar-apps-script.js && node --test scripts/estabilizacao-433.test.js scripts/campo-pwa.test.js"
   },
   "keywords": [],
   "author": "",
@@ -12,6 +12,7 @@
   "type": "commonjs",
   "devDependencies": {
     "@google/clasp": "^3.4.1",
-    "@types/google-apps-script": "^2.0.13"
+    "@types/google-apps-script": "^2.0.13",
+    "acorn": "8.19.0"
   }
 }

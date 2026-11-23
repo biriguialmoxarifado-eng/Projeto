@@ -4,7 +4,7 @@
   "description": "Almoxarifado em campo: recebimento, inventário, crachá e mapa 3D do galpão. A fonte dos dados é o ALMOX PRO.",
   "lang": "pt-BR",
   "dir": "ltr",
-  "start_url": "./ALMOXA_CAMPO.html",
+  "start_url": "./ALMOXA_CAMPO.html.html",
   "scope": "./",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],

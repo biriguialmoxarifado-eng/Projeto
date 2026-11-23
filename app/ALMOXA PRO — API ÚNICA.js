@@ -75,31 +75,35 @@ var APIX_VERSAO = 4;
    1. A PORTA — a única do projeto
    ============================================================ */
 
-function doPost(e) {
+// Entrada de google.script.run para o mapa 3D servido pelo Apps Script.
+function almoxaApiWeb(requisicaoJson) {
   var corpo;
   try {
-    corpo = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    corpo = JSON.parse(requisicaoJson);
   } catch (err) {
-    return APIX_json_(APIX_erro_('CORPO_INVALIDO', 'O pedido não veio em JSON.'));
+    return APIX_erro_('CORPO_INVALIDO', 'O pedido não veio em JSON.');
   }
+  return APIX_processarPedido_(corpo);
+}
 
-  if (corpo.ponte !== 'ALMOXA') {
-    return APIX_json_(APIX_erro_('NAO_E_PONTE',
+function APIX_processarPedido_(corpo) {
+  if (!corpo || corpo.ponte !== 'ALMOXA') {
+    return APIX_erro_('NAO_E_PONTE',
       'Pedido fora do formato da ponte. Confira se o endereço em ALMOXA_CONFIG.API_URL '
-      + 'é o /exec deste script.'));
+      + 'é o /exec deste script.');
   }
 
   if (!APIX_chaveConfere_(corpo.chave)) {
-    return APIX_json_(APIX_erro_('CHAVE_APP_INVALIDA',
+    return APIX_erro_('CHAVE_APP_INVALIDA',
       'Este servidor está exigindo uma chave de aplicativo e a que chegou não confere. '
       + 'Rode ALMOXA_LIBERAR_FASE1 para dispensar a exigência, ou ALMOXA_VER_CHAVE para '
-      + 'ver qual é. (Isto não tem relação com a chave do crachá.)'));
+      + 'ver qual é. (Isto não tem relação com a chave do crachá.)');
   }
 
   try {
-    return APIX_json_(APIX_atender_(corpo));
+    return APIX_atender_(corpo);
   } catch (err) {
-    return APIX_json_(APIX_erro_('API_ERRO', String((err && err.message) || err)));
+    return APIX_erro_('API_ERRO', String((err && err.message) || err));
   }
 }
 

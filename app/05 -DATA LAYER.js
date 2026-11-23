@@ -442,16 +442,20 @@ function AP_Data_blocos_(alvos) {
   return blocos;
 }
 
-/** A trava da gravação. Documento quando há; senão, do script. */
+/** A gravação usa a mesma trava das operações compostas do Core. */
 function AP_Data_travar_() {
+  if (AP_Core_travaAtiva_) {
+    // A operação externa ainda pode precisar gravar outras abas.
+    return { releaseLock: function () {} };
+  }
   var ms = 10000;
   try { ms = Number(AP_Config_get('LOCK_TIMEOUT_MS', 10000)) || 10000; } catch (e) {}
-  var trava = null;
-  try { trava = LockService.getDocumentLock(); } catch (e) { trava = null; }
-  if (!trava) { try { trava = LockService.getScriptLock(); } catch (e2) { trava = null; } }
-  if (!trava) return null;
-  try { trava.waitLock(ms); } catch (e3) { return false; }
-  return trava;
+  try {
+    var trava = LockService.getScriptLock();
+    return trava.tryLock(ms) ? trava : false;
+  } catch (erro) {
+    return false;
+  }
 }
 
 /** O que foi gravado é o que se pediu? Compara sem implicância. */

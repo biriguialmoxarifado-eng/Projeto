@@ -48,7 +48,7 @@ var PLANILHA_ID = 'https://docs.google.com/spreadsheets/d/1tqz_6yUJf6skL0ouoAs_g
  *   sem parâmetro           -> sistema principal
  *   ?pagina=biometria       -> Central de Biometria
  */
-function doGet(e) {
+function AXBIO_servirTela_(e) {
   var pagina = (e && e.parameter && e.parameter.pagina) ? e.parameter.pagina : '';
 
   if (pagina === 'biometria') {
@@ -59,22 +59,6 @@ function doGet(e) {
   }
 
   return _telaPrincipal(e);
-}
-
-/**
- * Recebe chamadas de fora (tela aberta como arquivo local).
- *
- * ATENÇÃO: se o projeto JÁ tiver "function doPost" em outro arquivo, APAGUE
- * esta função daqui e, dentro do doPost que já existe, acrescente:
- *
- *     var r = axbioPost(e); if (r) return r;
- */
-function doPost(e) {
-  var r = axbioPost(e);
-  if (r) return r;
-  return ContentService
-    .createTextOutput(JSON.stringify({ ok: false, dados: {}, erro: 'ação desconhecida' }))
-    .setMimeType(ContentService.MimeType.JSON);
 }
 
 /** Trata só as ações bio_*. Devolve null para o resto. */

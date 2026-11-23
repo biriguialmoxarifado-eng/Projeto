@@ -1,0 +1,40 @@
+name: ALMOXA PRO - Testes automatizados
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: almoxa-checks-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validar:
+    name: Sintaxe, Core e regressões
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Baixar a revisão do PR
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Configurar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Instalar dependências de teste
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Verificar sintaxe, entradas HTTP, Core, API e Campo
+        run: npm test
+
+      - name: Verificar sintaxe dos adaptadores 3D e do service worker
+        run: |
+          node --check 'ALMOXA 3D · adaptador.js'
+          node --check 'ALMOXA_3D/ALMOXA 3D · adaptador.js'
+          node --check service-worker.js
