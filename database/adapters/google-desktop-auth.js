@@ -3,6 +3,7 @@
 const { OAuth2Client } = require('google-auth-library');
 const { randomBytes } = require('node:crypto');
 const { createServer } = require('node:http');
+const { existsSync } = require('node:fs');
 const { mkdir, readFile, rename, rm, writeFile } = require('node:fs/promises');
 const { homedir } = require('node:os');
 const { join } = require('node:path');
@@ -20,6 +21,10 @@ const directory = join(process.env.LOCALAPPDATA || homedir(), '.almoxa-google');
 const clientPath = join(directory, 'client.json');
 const tokenPath = join(directory, 'token.json');
 const operationalTokenPath = join(directory, 'token-operational.json');
+
+function operationalOAuthAvailable() {
+  return existsSync(clientPath) && existsSync(operationalTokenPath);
+}
 
 async function loadClient() {
   let config;
@@ -112,7 +117,9 @@ function desktopGoogleAuth() {
         const { client, clientId } = await loadClient();
         const preferred = process.env.ALMOXA_OPERATIONAL_READ === '1' ? operationalTokenPath : tokenPath;
         const stored = await readFile(preferred, 'utf8').catch(error => {
-          if (preferred === operationalTokenPath && error.code === 'ENOENT') return readFile(tokenPath, 'utf8');
+          if (preferred === operationalTokenPath && error.code === 'ENOENT' && !process.argv.includes('--operacional')) {
+            return readFile(tokenPath, 'utf8');
+          }
           throw error;
         });
         const token = JSON.parse(stored);
@@ -134,4 +141,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { desktopGoogleAuth, callbackResult };
+module.exports = { desktopGoogleAuth, callbackResult, operationalOAuthAvailable };

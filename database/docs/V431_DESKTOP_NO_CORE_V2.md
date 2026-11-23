@@ -39,6 +39,33 @@ manutencao, aprovacoes, retiradas, biometria, ocr, lojinha, inventario.
 
 ---
 
+## Acesso operacional pelo Core V2
+
+Neste computador, o Core V2 pode servir o Desktop em
+`http://127.0.0.1:4320/` e consultar a planilha oficial em modo de leitura.
+O servidor confere a identidade da planilha antes de consultar os dados.
+O login operacional segue a regra de perfil administrativo do Core.
+
+Crie um `.env.operacional` local, ignorado pelo Git:
+
+```dotenv
+HOST=127.0.0.1
+PORT=4320
+ALMOXA_SPREADSHEET_ID=
+# Opcional. Confere também o nome da planilha.
+# ALMOXA_OPERATIONAL_SHEET_TITLE=
+```
+
+Com o cliente OAuth de computador já configurado, autorize Sheets e Drive
+em modo de leitura via `npm run auth:google:operacional` e depois execute
+`npm run start:operacional`. O acesso usa a autorização operacional
+dedicada. O endpoint `/health` confirma a conexão antes do uso.
+
+A leitura operacional cobre catálogo, produtos e suas fotos, estoque,
+usuários, obras, mural e fichas de EPI com fotos e assinaturas, conforme
+os registros e as permissões disponíveis. Continue usando o fluxo antigo
+para as gravações enquanto a migração delas estiver em homologação.
+
 ## Homologação SQLite sem Google
 
 Use um arquivo SQLite exclusivo de teste. Além da credencial local

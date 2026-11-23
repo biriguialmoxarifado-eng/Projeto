@@ -172,6 +172,7 @@ async function main() {
   });
   server.listen(port, host, () => {
     console.log(`ALMOXA PRO V2 disponível na porta ${server.address().port}.`);
+    if (operational) console.log(`Desktop operacional (somente leitura): http://127.0.0.1:${server.address().port}/`);
     // Sem banco não há diagnóstico: o servidor responderia 404 a tudo
     // sem dizer por quê. Avisar aqui evita a caça ao erro.
     if (!operational && !sqlite && !invoiceTestStorage) {
@@ -188,6 +189,19 @@ async function main() {
 }
 
 if (require.main === module) {
+  if (process.argv.includes('--operacional')) {
+    if (!process.env.ALMOXA_SPREADSHEET_ID?.trim()) {
+      console.error('Configure ALMOXA_SPREADSHEET_ID em .env.operacional.');
+      process.exit(1);
+    }
+    const { operationalOAuthAvailable } = require('../database/adapters/google-desktop-auth');
+    if (!operationalOAuthAvailable()) {
+      console.error('Configure o cliente OAuth de computador e execute npm run auth:google:operacional.');
+      process.exit(1);
+    }
+    process.env.ALMOXA_OPERATIONAL_READ = '1';
+    process.env.ALMOXA_GOOGLE_AUTH = 'oauth';
+  }
   main().catch(() => {
     console.error('Falha ao carregar o backend ALMOXA PRO V2.');
     process.exitCode = 1;

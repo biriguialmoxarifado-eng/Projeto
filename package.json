@@ -7,7 +7,9 @@
     "test": "node tests/core.test.js && node tests/session-manager.test.js && node tests/authorization-manager.test.js && node database/tests/database.test.js && node --test database/tests/storage-operations.test.js database/tests/google-sheets-provider.local.test.js tests/sqlite-diagnostics.test.js tests/invoices.test.js tests/operational-reader.test.js",
     "start": "node backend/server.js",
     "start:local": "node --env-file=.env backend/server.js",
+    "start:operacional": "node --env-file=.env.operacional backend/server.js --operacional",
     "auth:google": "node database/adapters/google-desktop-auth.js",
+    "auth:google:operacional": "node database/adapters/google-desktop-auth.js --operational",
     "test:google": "node database/tests/google-sheets-provider.test.js",
     "backup:diagnostics": "node backend/backup-diagnostics.js"
   },
