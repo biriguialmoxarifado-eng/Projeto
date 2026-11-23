@@ -198,8 +198,8 @@ function exerciseDesktop(browser, profile, origin, credential) {
   });
 }
 
-function exerciseOperational(browser, profile, origin, credential, item) {
-  return withBrowser(browser, profile, origin, async ({ text, click, evaluate, login, route }) => {
+function exerciseOperational(browser, profile, origin, credential, item, photoSku) {
+  return withBrowser(browser, profile, origin, async ({ text, click, evaluate, login, route, set }) => {
     await text('#coreLoginStatus', 'Planilha conectada');
     await login('browser-admin', 'invalid');
     await text('#coreLoginStatus', 'Login recusado');
@@ -209,6 +209,16 @@ function exerciseOperational(browser, profile, origin, credential, item) {
     await text('#appMain', item);
     assert.equal(await evaluate(() => document.querySelectorAll('#appMain .prod').length > 0), true);
     assert.equal(await evaluate(() => Boolean(document.querySelector('#appMain [data-mais], #appMain [data-pedir-compra]'))), false);
+    if (photoSku) {
+      await set('#lojaBusca', photoSku);
+      await evaluate(() => document.querySelector('#lojaBusca').dispatchEvent(new Event('input', { bubbles: true })));
+      await until(() => evaluate(sku => {
+        const photo = [...document.querySelectorAll('#appMain [data-loja-foto]')].find(el => el.dataset.lojaFoto === sku);
+        if (!photo) return false;
+        photo.scrollIntoView({ block: 'nearest' });
+        return (photo.querySelector('img')?.naturalWidth ?? 0) > 0;
+      }, photoSku), 'reler foto associada pelo Core');
+    }
     await click('#btnUser');
     await click('#btnSair');
     await click('#modalRoot [data-ok]');

@@ -144,10 +144,12 @@ test('Loja no navegador usa o catálogo somente leitura e distingue login recusa
 }, async t => {
   const password = 'local-browser-synthetic';
   const real = process.env.ALMOXA_TEST_REAL_CATALOG === '1';
+  const verifyDrive = real && process.env.ALMOXA_TEST_REAL_DRIVE === '1';
   const { GoogleSheetsProvider } = require('../database/adapters/google-sheets-provider');
   const sheets = real ? new GoogleSheetsProvider() : null;
   if (real) sheets.validateId(sheets.spreadsheetId, 'ALMOXA_SPREADSHEET_ID');
   const title = real ? 'Base Dado almoxarifado' : 'Origem sintética';
+  let itemRows;
   const provider = {
     spreadsheetId: sheets?.spreadsheetId ?? 'browser-fixture',
     metadata: id => sheets ? sheets.metadata(id) : Promise.resolve({ spreadsheetId: id, properties: { title } }),
@@ -157,7 +159,11 @@ test('Loja no navegador usa o catálogo somente leitura e distingue login recusa
         ['id', 'nome', 'email', 'senha_hash', 'perfil', 'status', 'login'],
         ['browser-admin', 'Operador de ensaio', '', createHash('sha256').update(password).digest('hex'), 'admin', 'ATIVO', 'browser-admin']
       ] };
-      if (sheets) return sheets.request(id, path);
+      if (sheets) {
+        const response = await sheets.request(id, path);
+        if (verifyDrive && tab === 'ALMOXA_ITENS' && decodeURIComponent(path).includes("'!A:Z?")) itemRows = response.values;
+        return response;
+      }
       if (tab === 'ALMOXA_ITENS') return { values: [['sku', 'descricao', 'estoqueAtual'], ['SYN-BROWSER', 'Luva de ensaio', 5]] };
       if (tab === 'ALMOXA_CATEGORIAS') return { values: [['nome', 'visivel']] };
       if (tab === 'ALMOXA_EPI_FICHAS') return { values: [['id', 'matricula', 'colaborador', 'sku', 'item']] };
@@ -186,8 +192,24 @@ test('Loja no navegador usa o catálogo somente leitura e distingue login recusa
     const { dados } = await response.json();
     assert.ok(dados.length);
     if (real) t.diagnostic('Catálogo retornado pela API Google ao Desktop: ' + dados.length + ' itens');
+    let photoSku;
+    if (verifyDrive) {
+      const [headers, ...data] = itemRows ?? [];
+      const idColumn = headers.indexOf('fotoDriveId');
+      const skuColumn = headers.indexOf('sku');
+      const visible = new Set(dados.filter(item => item.temFoto).map(item => String(item.sku)));
+      const candidates = data.filter(row => /^[\w-]{10,200}$/.test(String(row[idColumn] ?? '')) && visible.has(String(row[skuColumn])));
+      for (const candidate of candidates.slice(0, 5)) {
+        const sku = String(candidate[skuColumn]);
+        const image = await send('dispatch', { modulo: 'lojinha', acao: 'foto', payload: { sku } }, token);
+        assert.equal(image.status, 200);
+        if (/^data:image\//.test((await image.json()).dados.foto ?? '')) { photoSku = sku; break; }
+      }
+      assert.ok(photoSku, 'Nenhuma imagem associada foi entregue pelo Core.');
+    }
     const { exerciseOperational } = require('./desktop-browser');
-    await exerciseOperational(process.env.ALMOXA_TEST_BROWSER, join(temp, 'browser'), origin, password, String(dados[0].sku));
+    await exerciseOperational(process.env.ALMOXA_TEST_BROWSER, join(temp, 'browser'), origin, password, String(dados[0].sku), photoSku);
+    if (photoSku) t.diagnostic('Imagem associada do Google Drive renderizada no Desktop.');
   } finally {
     await new Promise(resolve => server.close(resolve));
     await rm(temp, { recursive: true, force: true, maxRetries: 12, retryDelay: 100 });
